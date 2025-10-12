@@ -31,8 +31,6 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
     logging.info(f"Processing file: {filepath}")
     ca = ComicArchive(filepath)
 
-    logging.info(ca.get_supported_tags())
-    logging.info(ca.read_tags('cr'))
     tags = ca.read_tags('cr')
     tagschanged = False
 

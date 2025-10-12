@@ -57,7 +57,6 @@ class ChangeHandler(FileSystemEventHandler):
         self.last_processed = {}  # {filepath: timestamp}
     def _allowed_extension(self, path):
         if not (path.lower().endswith('.cbr') or path.lower().endswith('.cbz')):
-            logging.info(f"Skipping non-.cbr/.cbz file: {path}")
             return False
         else:
             return True

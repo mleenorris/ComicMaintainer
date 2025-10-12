@@ -28,9 +28,6 @@ def parse_chapter_number(filename):
     return None
 
 def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comicfolder=None):
-    if not (filepath.lower().endswith('.cbr') or filepath.lower().endswith('.cbz')):
-        logging.info(f"Skipping non-.cbr/.cbz file: {filepath}")
-        return
     logging.info(f"Processing file: {filepath}")
     ca = ComicArchive(filepath)
 

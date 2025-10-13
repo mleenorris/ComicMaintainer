@@ -75,6 +75,7 @@ docker run -d \
 The service includes a web-based interface for managing your comic files:
 
 ### Features
+- **Optimized for Large Libraries**: Pagination (100 files per page) and caching ensure fast loading even with thousands of files
 - **Process All Files**: One-click button to process all comic files in the watched directory
 - **Process Selected Files**: Process only the files you've selected with checkboxes
 - **Folder Selection**: Click the checkbox next to any folder name to select/deselect all files in that folder
@@ -86,15 +87,23 @@ The service includes a web-based interface for managing your comic files:
 ### Usage
 1. Access the web interface at `http://localhost:5000` (or your configured host/port)
 2. The interface will display all `.cbz` and `.cbr` files in your watched directory, organized by folder
-3. Use the checkboxes to select files for batch operations:
+3. Navigate through pages using the pagination controls at the bottom if you have many files
+4. Use the checkboxes to select files for batch operations:
    - Check individual files one at a time
    - Check the folder checkbox to select/deselect all files in that folder
    - Use "Select All" to select everything
-4. Click "Process All Files" to run the standard processing on all files
-5. Click "Process Selected" to run processing only on your selected files
-6. Click "View/Edit" on any file to see and modify its tags
-7. Select multiple files and click "Update Selected" to batch update common tags
-8. Click "Settings" to configure the filename format for renamed files
+5. Click "Process All Files" to run the standard processing on all files
+6. Click "Process Selected" to run processing only on your selected files
+7. Click "View/Edit" on any file to see and modify its tags
+8. Select multiple files and click "Update Selected" to batch update common tags
+9. Click "Refresh" to update the file list (automatically clears cache)
+10. Click "Settings" to configure the filename format for renamed files
+
+### Performance
+- Files are loaded in pages of 100 to ensure fast initial load times
+- File list is cached for 30 seconds to speed up page navigation
+- Pagination controls allow easy navigation through large libraries
+- Cache is automatically cleared when files are processed or modified
 
 ### Filename Format Configuration
 The filename format can be customized through the web interface Settings modal. The format uses placeholders that are replaced with actual metadata values:

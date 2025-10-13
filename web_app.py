@@ -259,10 +259,28 @@ def index():
 
 @app.route('/api/files')
 def list_files():
-    """API endpoint to list all comic files"""
+    """API endpoint to list all comic files with pagination"""
+    # Get pagination parameters
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 100, type=int)
+    
+    # Limit per_page to reasonable values
+    per_page = min(max(per_page, 10), 500)
+    
     files = get_comic_files()
+    total_files = len(files)
+    
+    # Calculate pagination
+    total_pages = (total_files + per_page - 1) // per_page if total_files > 0 else 1
+    page = max(1, min(page, total_pages))
+    
+    start_idx = (page - 1) * per_page
+    end_idx = start_idx + per_page
+    
+    paginated_files = files[start_idx:end_idx]
+    
     result = []
-    for f in files:
+    for f in paginated_files:
         rel_path = os.path.relpath(f, WATCHED_DIR) if WATCHED_DIR else f
         result.append({
             'path': f,
@@ -271,7 +289,14 @@ def list_files():
             'size': os.path.getsize(f),
             'modified': os.path.getmtime(f)
         })
-    return jsonify(result)
+    
+    return jsonify({
+        'files': result,
+        'page': page,
+        'per_page': per_page,
+        'total_files': total_files,
+        'total_pages': total_pages
+    })
 
 @app.route('/api/file/<path:filepath>/tags')
 def get_tags(filepath):

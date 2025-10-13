@@ -466,6 +466,22 @@
             margin-bottom: 20px;
         }
         
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        
+        .page-info {
+            color: var(--text-muted);
+            font-size: 14px;
+            min-width: 100px;
+            text-align: center;
+        }
+        
         /* Mobile Responsive Styles */
         @media (max-width: 768px) {
             .container {
@@ -653,6 +669,13 @@
                 <p>Loading files...</p>
             </div>
         </div>
+        
+        <!-- Pagination Controls -->
+        <div class="pagination" id="pagination" style="display: none;">
+            <button class="btn btn-small" id="prevBtn" onclick="previousPage()" disabled>← Previous</button>
+            <span class="page-info" id="pageInfo">Page 1 of 1</span>
+            <button class="btn btn-small" id="nextBtn" onclick="nextPage()" disabled>Next →</button>
+        </div>
     </div>
     
     <!-- Tag Editor Modal -->
@@ -757,6 +780,10 @@
         let currentEditFile = null;
         let collapsedDirectories = new Set();
         let allFoldersExpanded = true;
+        let currentPage = 1;
+        let totalPages = 1;
+        let totalFiles = 0;
+        let perPage = 100;
         
         // Theme management
         function initTheme() {
@@ -813,13 +840,48 @@
             loadFiles();
         });
         
-        async function loadFiles() {
+        async function loadFiles(page = 1) {
             try {
-                const response = await fetch('/api/files');
-                files = await response.json();
+                const response = await fetch(`/api/files?page=${page}&per_page=${perPage}`);
+                const data = await response.json();
+                
+                files = data.files;
+                currentPage = data.page;
+                totalPages = data.total_pages;
+                totalFiles = data.total_files;
+                
                 renderFileList();
+                updatePagination();
             } catch (error) {
                 showMessage('Failed to load files: ' + error.message, 'error');
+            }
+        }
+        
+        function updatePagination() {
+            const paginationDiv = document.getElementById('pagination');
+            const pageInfo = document.getElementById('pageInfo');
+            const prevBtn = document.getElementById('prevBtn');
+            const nextBtn = document.getElementById('nextBtn');
+            
+            if (totalPages > 1) {
+                paginationDiv.style.display = 'flex';
+                pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${totalFiles} files total)`;
+                prevBtn.disabled = currentPage <= 1;
+                nextBtn.disabled = currentPage >= totalPages;
+            } else {
+                paginationDiv.style.display = 'none';
+            }
+        }
+        
+        function nextPage() {
+            if (currentPage < totalPages) {
+                loadFiles(currentPage + 1);
+            }
+        }
+        
+        function previousPage() {
+            if (currentPage > 1) {
+                loadFiles(currentPage - 1);
             }
         }
         

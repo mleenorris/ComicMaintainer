@@ -691,13 +691,13 @@
         
         <div class="actions-bar">
             <button class="btn btn-success" onclick="processAllFiles()">
-                🚀 Process All Files
+                🚀 Process All (Rename + Normalize)
             </button>
             <button class="btn btn-success" onclick="processUnmarkedFiles()">
-                ⚠️ Process Unmarked
+                ⚠️ Process Unmarked (Rename + Normalize)
             </button>
             <button class="btn btn-success" onclick="processSelectedFiles()" id="processSelectedBtn" disabled>
-                ⚡ Process Selected
+                ⚡ Process Selected (Rename + Normalize)
             </button>
             <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>
                 ✏️ Update Selected
@@ -715,6 +715,27 @@
                 ⚙️ Settings
             </button>
             <span class="select-info" id="selectInfo">No files selected</span>
+        </div>
+        
+        <div class="actions-bar" style="margin-top: -10px;">
+            <button class="btn" onclick="renameAllFiles()" style="background: #9b59b6; color: white;">
+                📝 Rename All Files
+            </button>
+            <button class="btn" onclick="normalizeAllFiles()" style="background: #16a085; color: white;">
+                🔧 Normalize All Metadata
+            </button>
+            <button class="btn" onclick="renameUnmarkedFiles()" style="background: #9b59b6; color: white;">
+                📝 Rename Unmarked
+            </button>
+            <button class="btn" onclick="normalizeUnmarkedFiles()" style="background: #16a085; color: white;">
+                🔧 Normalize Unmarked Metadata
+            </button>
+            <button class="btn" onclick="renameSelectedFiles()" id="renameSelectedBtn" disabled style="background: #9b59b6; color: white;">
+                📝 Rename Selected
+            </button>
+            <button class="btn" onclick="normalizeSelectedFiles()" id="normalizeSelectedBtn" disabled style="background: #16a085; color: white;">
+                🔧 Normalize Selected Metadata
+            </button>
         </div>
         
         <div class="actions-bar" style="margin-top: -10px;">
@@ -1191,6 +1212,12 @@
                                 <button class="btn btn-success btn-small" onclick="processSingleFile('${escapeJs(file.relative_path)}')">
                                     Process
                                 </button>
+                                <button class="btn btn-small" onclick="renameSingleFile('${escapeJs(file.relative_path)}')" style="background: #9b59b6; color: white;">
+                                    Rename
+                                </button>
+                                <button class="btn btn-small" onclick="normalizeSingleFile('${escapeJs(file.relative_path)}')" style="background: #16a085; color: white;">
+                                    Normalize
+                                </button>
                             </div>
                         </div>
                     `;
@@ -1248,15 +1275,21 @@
             const info = document.getElementById('selectInfo');
             const batchBtn = document.getElementById('batchUpdateBtn');
             const processSelectedBtn = document.getElementById('processSelectedBtn');
+            const renameSelectedBtn = document.getElementById('renameSelectedBtn');
+            const normalizeSelectedBtn = document.getElementById('normalizeSelectedBtn');
             
             if (count === 0) {
                 info.textContent = 'No files selected';
                 batchBtn.disabled = true;
                 processSelectedBtn.disabled = true;
+                renameSelectedBtn.disabled = true;
+                normalizeSelectedBtn.disabled = true;
             } else {
                 info.textContent = `${count} file${count > 1 ? 's' : ''} selected`;
                 batchBtn.disabled = false;
                 processSelectedBtn.disabled = false;
+                renameSelectedBtn.disabled = false;
+                normalizeSelectedBtn.disabled = false;
             }
         }
         
@@ -1488,6 +1521,54 @@
             }
         }
         
+        async function renameAllFiles() {
+            if (!confirm('This will rename all files in the watched directory based on metadata. Continue?')) {
+                return;
+            }
+            
+            showMessage('Renaming all files... This may take a while.', 'info');
+            
+            try {
+                const response = await fetch('/api/rename-all', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                const successCount = result.results.filter(r => r.success).length;
+                showMessage(`Renamed ${successCount} of ${result.results.length} files successfully!`, 'success');
+                
+                // Refresh file list (force refresh to clear cache)
+                await loadFiles(1, true);
+            } catch (error) {
+                showMessage('Failed to rename files: ' + error.message, 'error');
+            }
+        }
+        
+        async function normalizeAllFiles() {
+            if (!confirm('This will normalize metadata for all files in the watched directory. Continue?')) {
+                return;
+            }
+            
+            showMessage('Normalizing metadata for all files... This may take a while.', 'info');
+            
+            try {
+                const response = await fetch('/api/normalize-all', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                const successCount = result.results.filter(r => r.success).length;
+                showMessage(`Normalized metadata for ${successCount} of ${result.results.length} files successfully!`, 'success');
+                
+                // Refresh file list (force refresh to clear cache)
+                await loadFiles(1, true);
+            } catch (error) {
+                showMessage('Failed to normalize metadata: ' + error.message, 'error');
+            }
+        }
+        
         async function processUnmarkedFiles() {
             if (!confirm('This will process all unmarked files in the watched directory. Continue?')) {
                 return;
@@ -1509,6 +1590,54 @@
                 await loadFiles(1, true);
             } catch (error) {
                 showMessage('Failed to process unmarked files: ' + error.message, 'error');
+            }
+        }
+        
+        async function renameUnmarkedFiles() {
+            if (!confirm('This will rename all unmarked files in the watched directory based on metadata. Continue?')) {
+                return;
+            }
+            
+            showMessage('Renaming unmarked files... This may take a while.', 'info');
+            
+            try {
+                const response = await fetch('/api/rename-unmarked', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                const successCount = result.results.filter(r => r.success).length;
+                showMessage(`Renamed ${successCount} of ${result.results.length} unmarked files successfully!`, 'success');
+                
+                // Refresh file list (force refresh to clear cache)
+                await loadFiles(1, true);
+            } catch (error) {
+                showMessage('Failed to rename unmarked files: ' + error.message, 'error');
+            }
+        }
+        
+        async function normalizeUnmarkedFiles() {
+            if (!confirm('This will normalize metadata for all unmarked files in the watched directory. Continue?')) {
+                return;
+            }
+            
+            showMessage('Normalizing metadata for unmarked files... This may take a while.', 'info');
+            
+            try {
+                const response = await fetch('/api/normalize-unmarked', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                const successCount = result.results.filter(r => r.success).length;
+                showMessage(`Normalized metadata for ${successCount} of ${result.results.length} unmarked files successfully!`, 'success');
+                
+                // Refresh file list (force refresh to clear cache)
+                await loadFiles(1, true);
+            } catch (error) {
+                showMessage('Failed to normalize metadata for unmarked files: ' + error.message, 'error');
             }
         }
         
@@ -1547,6 +1676,76 @@
             }
         }
         
+        async function renameSelectedFiles() {
+            if (selectedFiles.size === 0) {
+                showMessage('No files selected', 'error');
+                return;
+            }
+            
+            if (!confirm(`This will rename ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''} based on metadata. Continue?`)) {
+                return;
+            }
+            
+            showMessage('Renaming selected files... This may take a while.', 'info');
+            
+            try {
+                const response = await fetch('/api/rename-selected', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        files: Array.from(selectedFiles)
+                    })
+                });
+                
+                const result = await response.json();
+                
+                const successCount = result.results.filter(r => r.success).length;
+                showMessage(`Renamed ${successCount} of ${result.results.length} files successfully!`, 'success');
+                
+                // Refresh file list (force refresh to clear cache)
+                await loadFiles(1, true);
+            } catch (error) {
+                showMessage('Failed to rename files: ' + error.message, 'error');
+            }
+        }
+        
+        async function normalizeSelectedFiles() {
+            if (selectedFiles.size === 0) {
+                showMessage('No files selected', 'error');
+                return;
+            }
+            
+            if (!confirm(`This will normalize metadata for ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''}. Continue?`)) {
+                return;
+            }
+            
+            showMessage('Normalizing metadata for selected files... This may take a while.', 'info');
+            
+            try {
+                const response = await fetch('/api/normalize-selected', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        files: Array.from(selectedFiles)
+                    })
+                });
+                
+                const result = await response.json();
+                
+                const successCount = result.results.filter(r => r.success).length;
+                showMessage(`Normalized metadata for ${successCount} of ${result.results.length} files successfully!`, 'success');
+                
+                // Refresh file list (force refresh to clear cache)
+                await loadFiles(1, true);
+            } catch (error) {
+                showMessage('Failed to normalize metadata: ' + error.message, 'error');
+            }
+        }
+        
         async function processSingleFile(filepath) {
             if (!confirm(`Process ${filepath}?`)) {
                 return;
@@ -1569,6 +1768,56 @@
                 }
             } catch (error) {
                 showMessage('Failed to process file: ' + error.message, 'error');
+            }
+        }
+        
+        async function renameSingleFile(filepath) {
+            if (!confirm(`Rename ${filepath} based on metadata?`)) {
+                return;
+            }
+            
+            showMessage('Renaming file...', 'info');
+            
+            try {
+                const response = await fetch(`/api/rename-file/${encodeURIComponent(filepath)}`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('File renamed successfully!', 'success');
+                    await loadFiles(currentPage, true);
+                } else {
+                    showMessage(result.error || 'Failed to rename file', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to rename file: ' + error.message, 'error');
+            }
+        }
+        
+        async function normalizeSingleFile(filepath) {
+            if (!confirm(`Normalize metadata for ${filepath}?`)) {
+                return;
+            }
+            
+            showMessage('Normalizing metadata...', 'info');
+            
+            try {
+                const response = await fetch(`/api/normalize-file/${encodeURIComponent(filepath)}`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('Metadata normalized successfully!', 'success');
+                    await loadFiles(currentPage, true);
+                } else {
+                    showMessage(result.error || 'Failed to normalize metadata', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to normalize metadata: ' + error.message, 'error');
             }
         }
         

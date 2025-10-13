@@ -7,6 +7,12 @@ RUN apt-get update && apt-get install -y \
     libqt5gui5 libqt5core5a libqt5widgets5 libqt5xml5 libicu-dev python3-pyqt5 pkg-config git g++ unrar-free make && \
     rm -rf /var/lib/apt/lists/*
 
+# Set ownership of all files and directories to nobody:users
+RUN chown -R nobody:users /watcher.py /process_file.py /comictagger || true
+
+# Switch to user nobody
+USER nobody
+
 # Install Python dependencies
 RUN pip install --upgrade pip
 COPY requirements.txt /requirements.txt
@@ -21,15 +27,7 @@ COPY watcher.py /watcher.py
 COPY process_file.py /process_file.py
 
 # Set default watched directory and script
-ENV WATCHED_DIR=/watched_dir
 ENV PROCESS_SCRIPT=/process_file.py
-
-# Create watched directory
-RUN mkdir -p /watched_dir
-#RUN touch /ComicMaintainer.log
-
-#RUN chown -R nobody:users /watcher.py /process_file.py /watched_dir /ComicMaintainer.log
-#USER nobody
 
 # Run the watcher
 CMD ["python", "/watcher.py"]

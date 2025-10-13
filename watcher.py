@@ -7,7 +7,7 @@ import subprocess
 import os
 import logging
 
-WATCHED_DIR = os.environ.get('WATCHED_DIR', '/watched_dir')
+WATCHED_DIR = os.environ.get('WATCHED_DIR')
 PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
 
 # Set up logging to file and stdout
@@ -92,8 +92,12 @@ class ChangeHandler(FileSystemEventHandler):
 if __name__ == "__main__":
     event_handler = ChangeHandler()
     observer = Observer()
-    observer.schedule(event_handler, WATCHED_DIR, recursive=True)
-    observer.start()
+    if WATCHED_DIR:
+        observer.schedule(event_handler, WATCHED_DIR, recursive=True)
+        observer.start()
+    else:
+        logging.error("WATCHED_DIR environment variable is not set. Exiting.")
+        sys.exit(1)
     logging.info(f"Watching directory: {WATCHED_DIR}")
     try:
         while True:

@@ -7,16 +7,16 @@ RUN apt-get update && apt-get install -y \
     libqt5gui5 libqt5core5a libqt5widgets5 libqt5xml5 libicu-dev python3-pyqt5 pkg-config git g++ unrar-free make && \
     rm -rf /var/lib/apt/lists/*
 
-# Set ownership of all files and directories to nobody:users
-RUN chown -R nobody:users /watcher.py /process_file.py /comictagger || true
-
-# Switch to user nobody
-USER nobody
-
 # Install Python dependencies
 RUN pip install --upgrade pip
 COPY requirements.txt /requirements.txt
 RUN pip install --no-cache-dir -r /requirements.txt
+
+# Set ownership of all files and directories to nobody:users
+#RUN chown -R nobody:users /watcher.py /process_file.py /comictagger || true
+
+# Switch to user nobody
+#USER nobody
 
 # Install ComicTagger
 RUN git clone https://github.com/comictagger/comictagger.git /comictagger && \

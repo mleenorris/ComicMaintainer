@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comic Maintainer - Web Interface</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+        }
+        
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            margin-bottom: 10px;
+        }
+        
+        .header-actions {
+            margin-top: 15px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .actions-bar {
+            background: white;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: #3498db;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2980b9;
+        }
+        
+        .btn-success {
+            background: #27ae60;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #229954;
+        }
+        
+        .btn-warning {
+            background: #f39c12;
+            color: white;
+        }
+        
+        .btn-warning:hover {
+            background: #d68910;
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .file-list {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .file-list-header {
+            background: #ecf0f1;
+            padding: 15px;
+            font-weight: 600;
+            display: grid;
+            grid-template-columns: 40px 1fr 150px 100px;
+            gap: 10px;
+            border-bottom: 2px solid #bdc3c7;
+        }
+        
+        .file-item {
+            padding: 15px;
+            display: grid;
+            grid-template-columns: 40px 1fr 150px 100px;
+            gap: 10px;
+            border-bottom: 1px solid #ecf0f1;
+            align-items: center;
+            transition: background 0.2s;
+        }
+        
+        .file-item:hover {
+            background: #f8f9fa;
+        }
+        
+        .file-item input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+        
+        .file-name {
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        
+        .file-path {
+            font-size: 12px;
+            color: #7f8c8d;
+            margin-top: 3px;
+        }
+        
+        .file-actions {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .btn-small {
+            padding: 5px 12px;
+            font-size: 12px;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            overflow-y: auto;
+        }
+        
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            max-width: 800px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid #ecf0f1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .modal-header h2 {
+            margin: 0;
+        }
+        
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #95a5a6;
+        }
+        
+        .close-btn:hover {
+            color: #7f8c8d;
+        }
+        
+        .modal-body {
+            padding: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+        
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        
+        .modal-footer {
+            padding: 20px;
+            border-top: 1px solid #ecf0f1;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .message {
+            padding: 12px 20px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+        
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .message.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .select-info {
+            margin-left: auto;
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #95a5a6;
+        }
+        
+        .empty-state-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>Comic Maintainer</h1>
+            <p>Manage and process comic files in your watched directory</p>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div id="messageContainer"></div>
+        
+        <div class="actions-bar">
+            <button class="btn btn-success" onclick="processAllFiles()">
+                🚀 Process All Files
+            </button>
+            <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>
+                ✏️ Update Selected
+            </button>
+            <button class="btn btn-primary" onclick="refreshFiles()">
+                🔄 Refresh
+            </button>
+            <span class="select-info" id="selectInfo">No files selected</span>
+        </div>
+        
+        <div class="file-list" id="fileList">
+            <div class="loading">
+                <div class="spinner"></div>
+                <p>Loading files...</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Tag Editor Modal -->
+    <div class="modal" id="tagModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Edit Tags</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="tagForm">
+                    <div class="form-group">
+                        <label for="title">Title</label>
+                        <input type="text" id="title" name="title">
+                    </div>
+                    <div class="form-group">
+                        <label for="series">Series</label>
+                        <input type="text" id="series" name="series">
+                    </div>
+                    <div class="form-group">
+                        <label for="issue">Issue</label>
+                        <input type="text" id="issue" name="issue">
+                    </div>
+                    <div class="form-group">
+                        <label for="volume">Volume</label>
+                        <input type="text" id="volume" name="volume">
+                    </div>
+                    <div class="form-group">
+                        <label for="publisher">Publisher</label>
+                        <input type="text" id="publisher" name="publisher">
+                    </div>
+                    <div class="form-group">
+                        <label for="year">Year</label>
+                        <input type="text" id="year" name="year">
+                    </div>
+                    <div class="form-group">
+                        <label for="month">Month</label>
+                        <input type="text" id="month" name="month">
+                    </div>
+                    <div class="form-group">
+                        <label for="writer">Writer</label>
+                        <input type="text" id="writer" name="writer">
+                    </div>
+                    <div class="form-group">
+                        <label for="summary">Summary</label>
+                        <textarea id="summary" name="summary"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="notes">Notes</label>
+                        <textarea id="notes" name="notes"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveTags()">Save</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Batch Update Modal -->
+    <div class="modal" id="batchModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Batch Update Tags</h2>
+                <button class="close-btn" onclick="closeBatchModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 15px; color: #7f8c8d;">
+                    Only fill in the fields you want to update for all selected files.
+                    Empty fields will be ignored.
+                </p>
+                <form id="batchForm">
+                    <div class="form-group">
+                        <label for="batch_series">Series</label>
+                        <input type="text" id="batch_series" name="series">
+                    </div>
+                    <div class="form-group">
+                        <label for="batch_publisher">Publisher</label>
+                        <input type="text" id="batch_publisher" name="publisher">
+                    </div>
+                    <div class="form-group">
+                        <label for="batch_year">Year</label>
+                        <input type="text" id="batch_year" name="year">
+                    </div>
+                    <div class="form-group">
+                        <label for="batch_writer">Writer</label>
+                        <input type="text" id="batch_writer" name="writer">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeBatchModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveBatchTags()">Update Selected Files</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let files = [];
+        let selectedFiles = new Set();
+        let currentEditFile = null;
+        
+        // Load files on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadFiles();
+        });
+        
+        async function loadFiles() {
+            try {
+                const response = await fetch('/api/files');
+                files = await response.json();
+                renderFileList();
+            } catch (error) {
+                showMessage('Failed to load files: ' + error.message, 'error');
+            }
+        }
+        
+        function renderFileList() {
+            const fileList = document.getElementById('fileList');
+            
+            if (files.length === 0) {
+                fileList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📁</div>
+                        <h2>No comic files found</h2>
+                        <p>Add some .cbz or .cbr files to your watched directory</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = `
+                <div class="file-list-header">
+                    <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)">
+                    <div>File</div>
+                    <div>Size</div>
+                    <div>Actions</div>
+                </div>
+            `;
+            
+            files.forEach(file => {
+                const isSelected = selectedFiles.has(file.relative_path);
+                const fileSize = formatFileSize(file.size);
+                html += `
+                    <div class="file-item">
+                        <input type="checkbox" 
+                               ${isSelected ? 'checked' : ''} 
+                               onchange="toggleFileSelection('${escapeHtml(file.relative_path)}', this.checked)">
+                        <div>
+                            <div class="file-name">${escapeHtml(file.name)}</div>
+                            <div class="file-path">${escapeHtml(file.relative_path)}</div>
+                        </div>
+                        <div>${fileSize}</div>
+                        <div class="file-actions">
+                            <button class="btn btn-primary btn-small" onclick="viewTags('${escapeHtml(file.relative_path)}')">
+                                View/Edit
+                            </button>
+                            <button class="btn btn-success btn-small" onclick="processSingleFile('${escapeHtml(file.relative_path)}')">
+                                Process
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            fileList.innerHTML = html;
+            updateSelectInfo();
+        }
+        
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function toggleSelectAll(checked) {
+            selectedFiles.clear();
+            if (checked) {
+                files.forEach(file => selectedFiles.add(file.relative_path));
+            }
+            renderFileList();
+        }
+        
+        function toggleFileSelection(filepath, checked) {
+            if (checked) {
+                selectedFiles.add(filepath);
+            } else {
+                selectedFiles.delete(filepath);
+            }
+            updateSelectInfo();
+        }
+        
+        function updateSelectInfo() {
+            const count = selectedFiles.size;
+            const info = document.getElementById('selectInfo');
+            const batchBtn = document.getElementById('batchUpdateBtn');
+            
+            if (count === 0) {
+                info.textContent = 'No files selected';
+                batchBtn.disabled = true;
+            } else {
+                info.textContent = `${count} file${count > 1 ? 's' : ''} selected`;
+                batchBtn.disabled = false;
+            }
+        }
+        
+        async function viewTags(filepath) {
+            try {
+                const response = await fetch(`/api/file/${encodeURIComponent(filepath)}/tags`);
+                const tags = await response.json();
+                
+                if (tags.error) {
+                    showMessage(tags.error, 'error');
+                    return;
+                }
+                
+                currentEditFile = filepath;
+                
+                // Populate form
+                Object.keys(tags).forEach(key => {
+                    const input = document.getElementById(key);
+                    if (input) {
+                        input.value = tags[key] || '';
+                    }
+                });
+                
+                document.getElementById('modalTitle').textContent = `Edit Tags - ${filepath}`;
+                document.getElementById('tagModal').classList.add('active');
+            } catch (error) {
+                showMessage('Failed to load tags: ' + error.message, 'error');
+            }
+        }
+        
+        function closeModal() {
+            document.getElementById('tagModal').classList.remove('active');
+            currentEditFile = null;
+        }
+        
+        async function saveTags() {
+            if (!currentEditFile) return;
+            
+            const form = document.getElementById('tagForm');
+            const formData = new FormData(form);
+            const tags = {};
+            
+            for (let [key, value] of formData.entries()) {
+                tags[key] = value;
+            }
+            
+            try {
+                const response = await fetch(`/api/file/${encodeURIComponent(currentEditFile)}/tags`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(tags)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('Tags updated successfully!', 'success');
+                    closeModal();
+                } else {
+                    showMessage(result.error || 'Failed to update tags', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to save tags: ' + error.message, 'error');
+            }
+        }
+        
+        function batchUpdateTags() {
+            if (selectedFiles.size === 0) return;
+            document.getElementById('batchModal').classList.add('active');
+        }
+        
+        function closeBatchModal() {
+            document.getElementById('batchModal').classList.remove('active');
+            document.getElementById('batchForm').reset();
+        }
+        
+        async function saveBatchTags() {
+            const form = document.getElementById('batchForm');
+            const formData = new FormData(form);
+            const tags = {};
+            
+            // Only include non-empty fields
+            for (let [key, value] of formData.entries()) {
+                if (value.trim()) {
+                    tags[key] = value;
+                }
+            }
+            
+            if (Object.keys(tags).length === 0) {
+                showMessage('Please enter at least one tag to update', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/files/tags', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        files: Array.from(selectedFiles),
+                        tags: tags
+                    })
+                });
+                
+                const result = await response.json();
+                
+                const successCount = result.results.filter(r => r.success).length;
+                showMessage(`Updated ${successCount} of ${result.results.length} files successfully!`, 'success');
+                closeBatchModal();
+            } catch (error) {
+                showMessage('Failed to batch update: ' + error.message, 'error');
+            }
+        }
+        
+        async function processAllFiles() {
+            if (!confirm('This will process all files in the watched directory. Continue?')) {
+                return;
+            }
+            
+            showMessage('Processing all files... This may take a while.', 'info');
+            
+            try {
+                const response = await fetch('/api/process-all', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                const successCount = result.results.filter(r => r.success).length;
+                showMessage(`Processed ${successCount} of ${result.results.length} files successfully!`, 'success');
+                
+                // Refresh file list
+                await loadFiles();
+            } catch (error) {
+                showMessage('Failed to process files: ' + error.message, 'error');
+            }
+        }
+        
+        async function processSingleFile(filepath) {
+            if (!confirm(`Process ${filepath}?`)) {
+                return;
+            }
+            
+            showMessage('Processing file...', 'info');
+            
+            try {
+                const response = await fetch(`/api/process-file/${encodeURIComponent(filepath)}`, {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('File processed successfully!', 'success');
+                    await loadFiles();
+                } else {
+                    showMessage(result.error || 'Failed to process file', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to process file: ' + error.message, 'error');
+            }
+        }
+        
+        function refreshFiles() {
+            showMessage('Refreshing file list...', 'info');
+            loadFiles();
+        }
+        
+        function showMessage(message, type = 'info') {
+            const container = document.getElementById('messageContainer');
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${type}`;
+            messageEl.textContent = message;
+            
+            container.appendChild(messageEl);
+            
+            setTimeout(() => {
+                messageEl.remove();
+            }, 5000);
+        }
+    </script>
+</body>
+</html>

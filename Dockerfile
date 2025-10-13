@@ -25,9 +25,19 @@ RUN git clone https://github.com/comictagger/comictagger.git /comictagger && \
 # Copy watcher and process script
 COPY watcher.py /watcher.py
 COPY process_file.py /process_file.py
+COPY web_app.py /web_app.py
+COPY templates /templates
+COPY start.sh /start.sh
+
+# Make start script executable
+RUN chmod +x /start.sh
 
 # Set default watched directory and script
 ENV PROCESS_SCRIPT=/process_file.py
+ENV WEB_PORT=5000
 
-# Run the watcher
-CMD ["python", "/watcher.py"]
+# Expose web interface port
+EXPOSE 5000
+
+# Run the start script
+CMD ["/start.sh"]

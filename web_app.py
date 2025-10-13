@@ -264,6 +264,51 @@ def process_single_file(filepath):
         logging.error(f"Error processing file {full_path}: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/process-selected', methods=['POST'])
+def process_selected_files():
+    """API endpoint to process selected files"""
+    from process_file import process_file
+    
+    data = request.json
+    file_list = data.get('files', [])
+    
+    if not file_list:
+        return jsonify({'error': 'No files specified'}), 400
+    
+    results = []
+    
+    for filepath in file_list:
+        full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+        
+        if not os.path.exists(full_path):
+            results.append({
+                'file': os.path.basename(filepath),
+                'success': False,
+                'error': 'File not found'
+            })
+            continue
+        
+        try:
+            # Mark as web modified to prevent watcher from processing
+            mark_web_modified(full_path)
+            
+            # Process the file
+            process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+            results.append({
+                'file': os.path.basename(filepath),
+                'success': True
+            })
+            logging.info(f"Processed file via web interface: {full_path}")
+        except Exception as e:
+            results.append({
+                'file': os.path.basename(filepath),
+                'success': False,
+                'error': str(e)
+            })
+            logging.error(f"Error processing file {full_path}: {e}")
+    
+    return jsonify({'results': results})
+
 if __name__ == '__main__':
     if not WATCHED_DIR:
         logging.error("WATCHED_DIR environment variable is not set. Exiting.")

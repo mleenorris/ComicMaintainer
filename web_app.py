@@ -378,21 +378,28 @@ def list_files():
     per_page = request.args.get('per_page', 100, type=int)
     refresh = request.args.get('refresh', 'false').lower() == 'true'
     
-    # Limit per_page to reasonable values
-    per_page = min(max(per_page, 10), 500)
-    
     # Get files with optional cache refresh
     files = get_comic_files(use_cache=not refresh)
     total_files = len(files)
     
-    # Calculate pagination
-    total_pages = (total_files + per_page - 1) // per_page if total_files > 0 else 1
-    page = max(1, min(page, total_pages))
-    
-    start_idx = (page - 1) * per_page
-    end_idx = start_idx + per_page
-    
-    paginated_files = files[start_idx:end_idx]
+    # Handle "all files" request (per_page = -1 or 0)
+    if per_page <= 0:
+        # Return all files in a single page
+        paginated_files = files
+        total_pages = 1
+        page = 1
+    else:
+        # Limit per_page to reasonable values
+        per_page = min(max(per_page, 10), 500)
+        
+        # Calculate pagination
+        total_pages = (total_files + per_page - 1) // per_page if total_files > 0 else 1
+        page = max(1, min(page, total_pages))
+        
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        
+        paginated_files = files[start_idx:end_idx]
     
     result = []
     for f in paginated_files:

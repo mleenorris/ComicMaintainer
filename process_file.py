@@ -114,7 +114,20 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
                 newFilePath = os.path.join(os.path.dirname(filepath), newFileName)
                 if os.path.abspath(filepath) != os.path.abspath(newFilePath):
                     if os.path.exists(newFilePath):
-                        logging.info(f"A file with the name {newFileName} already exists. Skipping rename for {os.path.basename(filepath)}.")
+                        duplicate_dir = os.environ.get('DUPLICATE_DIR')
+                        if duplicate_dir:
+                            # Place under DUPLICATE_DIR/original_parent_folder/filename
+                            original_parent = os.path.basename(os.path.dirname(filepath))
+                            target_dir = os.path.join(duplicate_dir, original_parent)
+                            os.makedirs(target_dir, exist_ok=True)
+                            dest_path = os.path.join(target_dir, os.path.basename(filepath))
+                            try:
+                                logging.info(f"Duplicate detected. Moving {filepath} to {dest_path}")
+                                #os.rename(filepath, dest_path)
+                            except Exception as e:
+                                logging.info(f"Error moving duplicate file {os.path.basename(filepath)}: {e}")
+                        else:
+                            logging.info(f"A file with the name {newFileName} already exists. Skipping rename for {os.path.basename(filepath)}. DUPLICATE_DIR not set.")
                     else:
                         logging.info(f"Renaming file to: {newFileName}")
                         try:

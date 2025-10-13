@@ -22,7 +22,7 @@ logging.basicConfig(
 
 
 # Debounce settings
-DEBOUNCE_SECONDS = 15
+DEBOUNCE_SECONDS = 30
 
 class ChangeHandler(FileSystemEventHandler):
     def on_moved(self, event):

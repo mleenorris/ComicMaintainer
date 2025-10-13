@@ -6,6 +6,7 @@ from watchdog.events import FileSystemEventHandler
 import subprocess
 import os
 import logging
+import threading
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
 PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
@@ -90,6 +91,14 @@ class ChangeHandler(FileSystemEventHandler):
                 del self.last_processed[event.src_path]
 
 if __name__ == "__main__":
+    # Start web server in a separate thread
+    from web_server import run_server
+    web_port = int(os.environ.get('WEB_PORT', 5000))
+    web_thread = threading.Thread(target=run_server, kwargs={'host': '0.0.0.0', 'port': web_port}, daemon=True)
+    web_thread.start()
+    logging.info(f"Web server started on port {web_port}")
+    
+    # Start file watcher
     event_handler = ChangeHandler()
     observer = Observer()
     if WATCHED_DIR:

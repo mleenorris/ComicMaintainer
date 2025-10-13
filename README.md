@@ -9,6 +9,7 @@ This service automatically watches a directory for new or changed comic archive 
 - Uses ComicTagger to set comic metadata (title, issue, series, etc.)
 - Renames files based on customizable filename format templates
 - Handles duplicate files: moves them to a duplicate directory, preserving the original folder structure
+- **Processing Status Tracking**: Both the watcher and web interface automatically mark files as processed
 - **Web Interface** for managing comic files:
   - One-click button to process all files in the watched directory
   - Process only selected files with the "Process Selected" button
@@ -17,6 +18,9 @@ This service automatically watches a directory for new or changed comic archive 
   - Batch update tags for multiple selected files
   - Configurable filename format with support for metadata placeholders
   - Smart handling to prevent watcher conflicts with web-modified files
+  - **Filter by processing status**: View all files, only processed files, or only unprocessed files
+  - **Scan for unmarked files**: Quickly identify how many files haven't been processed yet
+  - **Visual status indicators**: Each file shows ✅ (processed) or ⚠️ (unprocessed) icon
 - Logs all actions to `ComicMaintainer.log`
 - Containerized with Docker for easy deployment
 - **Runs as user `nobody` and group `users` for improved container security**
@@ -83,6 +87,9 @@ The service includes a web-based interface for managing your comic files:
 - **Batch Update**: Select multiple files and update common tags (series, publisher, year, writer) for all of them at once
 - **Filename Format Settings**: Configure how files are renamed when processed using customizable templates
 - **Smart Processing**: Files modified through the web interface are marked to prevent the watcher from re-processing them automatically
+- **Processing Status Tracking**: Both the watcher and web interface mark files as processed, with visual indicators (✅ for processed, ⚠️ for unprocessed)
+- **Filter by Processing Status**: Easily filter files to show all, only marked (processed), or only unmarked (unprocessed) files
+- **Scan for Unmarked Files**: Quickly identify how many files have not been processed yet
 
 ### Usage
 1. Access the web interface at `http://localhost:5000` (or your configured host/port)
@@ -97,7 +104,13 @@ The service includes a web-based interface for managing your comic files:
 7. Click "View/Edit" on any file to see and modify its tags
 8. Select multiple files and click "Update Selected" to batch update common tags
 9. Click "Refresh" to update the file list (automatically clears cache)
-10. Click "Settings" to configure the filename format for renamed files
+10. Click "Scan Unmarked" to see a count of processed vs unprocessed files
+11. Use the filter buttons to view:
+    - **All Files**: Show all files in the directory
+    - **Unmarked Only**: Show only files that haven't been processed yet
+    - **Marked Only**: Show only files that have been processed
+12. Click "Settings" to configure the filename format for renamed files
+13. Look for the status icon next to each filename (✅ = processed, ⚠️ = not processed yet)
 
 ### Performance
 - Files are loaded in pages of 100 to ensure fast initial load times

@@ -421,6 +421,15 @@
             resize: vertical;
         }
         
+        .form-group code {
+            background: var(--bg-hover);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        
         .modal-footer {
             padding: 20px;
             border-top: 1px solid var(--border-primary);
@@ -666,6 +675,9 @@
             <button class="btn btn-primary" onclick="refreshFiles()">
                 🔄 Refresh
             </button>
+            <button class="btn" onclick="openSettings()" style="background: #95a5a6; color: white;">
+                ⚙️ Settings
+            </button>
             <button class="btn btn-primary" onclick="toggleAllFolders()" id="toggleAllBtn">
                 📂 Collapse All
             </button>
@@ -776,6 +788,51 @@
             <div class="modal-footer">
                 <button class="btn" onclick="closeBatchModal()">Cancel</button>
                 <button class="btn btn-primary" onclick="saveBatchTags()">Update Selected Files</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Settings Modal -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="close-btn" onclick="closeSettings()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <h3 style="margin-bottom: 10px; color: var(--text-secondary);">Filename Format</h3>
+                <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
+                    Configure how files are renamed when processed. Use placeholders like <code>{series}</code>, <code>{issue}</code>, etc.
+                </p>
+                <div class="form-group">
+                    <label for="filenameFormat">Filename Template</label>
+                    <input type="text" id="filenameFormat" placeholder="{series} - Chapter {issue}.cbz">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Available placeholders:
+                    </small>
+                    <ul style="margin: 10px 0 10px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.6;">
+                        <li><code>{series}</code> - Series name</li>
+                        <li><code>{issue}</code> - Issue number (padded to 4 digits, e.g., 0001)</li>
+                        <li><code>{issue_no_pad}</code> - Issue number (no padding, e.g., 1)</li>
+                        <li><code>{title}</code> - Issue title</li>
+                        <li><code>{volume}</code> - Volume number</li>
+                        <li><code>{year}</code> - Publication year</li>
+                        <li><code>{publisher}</code> - Publisher name</li>
+                    </ul>
+                    <small style="display: block; margin-top: 10px; color: var(--text-muted);">
+                        <strong>Example:</strong> <code>{series} v{volume} #{issue_no_pad} ({year}).cbz</code>
+                    </small>
+                </div>
+                <div style="margin-top: 15px; padding: 10px; background: var(--bg-hover); border-radius: 5px;">
+                    <small style="color: var(--text-muted);">
+                        <strong>Current format:</strong> <span id="currentFormat" style="font-family: monospace;"></span>
+                    </small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeSettings()">Cancel</button>
+                <button class="btn" onclick="resetFilenameFormat()" style="background: #e67e22; color: white;">Reset to Default</button>
+                <button class="btn btn-primary" onclick="saveFilenameFormat()">Save</button>
             </div>
         </div>
     </div>
@@ -1337,6 +1394,65 @@
             setTimeout(() => {
                 messageEl.remove();
             }, 5000);
+        }
+        
+        async function openSettings() {
+            try {
+                const response = await fetch('/api/settings/filename-format');
+                const data = await response.json();
+                
+                document.getElementById('filenameFormat').value = data.format || '';
+                document.getElementById('currentFormat').textContent = data.format || data.default;
+                document.getElementById('settingsModal').classList.add('active');
+            } catch (error) {
+                showMessage('Failed to load settings: ' + error.message, 'error');
+            }
+        }
+        
+        function closeSettings() {
+            document.getElementById('settingsModal').classList.remove('active');
+        }
+        
+        async function saveFilenameFormat() {
+            const format = document.getElementById('filenameFormat').value.trim();
+            
+            if (!format) {
+                showMessage('Filename format cannot be empty', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/settings/filename-format', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ format: format })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('Filename format saved successfully!', 'success');
+                    closeSettings();
+                } else {
+                    showMessage(result.error || 'Failed to save filename format', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to save filename format: ' + error.message, 'error');
+            }
+        }
+        
+        async function resetFilenameFormat() {
+            try {
+                const response = await fetch('/api/settings/filename-format');
+                const data = await response.json();
+                
+                document.getElementById('filenameFormat').value = data.default;
+                showMessage('Reset to default format', 'info');
+            } catch (error) {
+                showMessage('Failed to reset format: ' + error.message, 'error');
+            }
         }
     </script>
 </body>

@@ -7,6 +7,7 @@ from comicapi.comicarchive import ComicArchive
 import glob
 import threading
 import time
+from config import get_filename_format, set_filename_format, DEFAULT_FILENAME_FORMAT
 
 # Set up logging
 logging.basicConfig(
@@ -429,6 +430,31 @@ def process_selected_files():
             logging.error(f"Error processing file {full_path}: {e}")
     
     return jsonify({'results': results})
+
+@app.route('/api/settings/filename-format', methods=['GET'])
+def get_filename_format_api():
+    """API endpoint to get the filename format setting"""
+    return jsonify({
+        'format': get_filename_format(),
+        'default': DEFAULT_FILENAME_FORMAT
+    })
+
+@app.route('/api/settings/filename-format', methods=['POST'])
+def set_filename_format_api():
+    """API endpoint to set the filename format setting"""
+    data = request.json
+    format_string = data.get('format')
+    
+    if not format_string:
+        return jsonify({'error': 'Format string is required'}), 400
+    
+    success = set_filename_format(format_string)
+    
+    if success:
+        logging.info(f"Filename format updated to: {format_string}")
+        return jsonify({'success': True, 'format': format_string})
+    else:
+        return jsonify({'error': 'Failed to save filename format'}), 500
 
 if __name__ == '__main__':
     if not WATCHED_DIR:

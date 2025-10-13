@@ -724,6 +724,9 @@
             <button class="btn" onclick="setFilter('marked')" id="filterMarked">
                 ✅ Marked Only
             </button>
+            <button class="btn" onclick="setFilter('duplicates')" id="filterDuplicates">
+                🔁 Duplicates Only
+            </button>
         </div>
         
         <div class="search-bar">
@@ -907,7 +910,7 @@
         let totalPages = 1;
         let totalFiles = 0;
         let perPage = parseInt(localStorage.getItem('perPage')) || 100;
-        let filterMode = 'all'; // 'all', 'marked', 'unmarked'
+        let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
         
         // Theme management
         function initTheme() {
@@ -1043,6 +1046,8 @@
             document.getElementById('filterUnmarked').style.color = mode === 'unmarked' ? 'white' : '';
             document.getElementById('filterMarked').style.background = mode === 'marked' ? '#27ae60' : '';
             document.getElementById('filterMarked').style.color = mode === 'marked' ? 'white' : '';
+            document.getElementById('filterDuplicates').style.background = mode === 'duplicates' ? '#e74c3c' : '';
+            document.getElementById('filterDuplicates').style.color = mode === 'duplicates' ? 'white' : '';
             
             renderFileList();
         }
@@ -1081,6 +1086,8 @@
                 filteredFiles = filteredFiles.filter(file => file.processed);
             } else if (filterMode === 'unmarked') {
                 filteredFiles = filteredFiles.filter(file => !file.processed);
+            } else if (filterMode === 'duplicates') {
+                filteredFiles = filteredFiles.filter(file => file.duplicate);
             }
             
             // Apply search filter
@@ -1160,6 +1167,8 @@
                     const fileSize = formatFileSize(file.size);
                     const processedBadge = file.processed ? '✅' : '⚠️';
                     const processedTitle = file.processed ? 'Processed' : 'Not processed yet';
+                    const duplicateBadge = file.duplicate ? '🔁' : '';
+                    const duplicateTitle = file.duplicate ? 'Duplicate' : '';
                     html += `
                         <div class="file-item ${dir ? 'indented' : ''}">
                             <input type="checkbox" 
@@ -1167,7 +1176,7 @@
                                    onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
                             <div>
                                 <div class="file-name">
-                                    <span title="${processedTitle}">${processedBadge}</span> ${escapeHtml(file.name)}
+                                    <span title="${processedTitle}">${processedBadge}</span>${duplicateBadge ? ` <span title="${duplicateTitle}">${duplicateBadge}</span>` : ''} ${escapeHtml(file.name)}
                                 </div>
                                 ${!dir ? `<div class="file-path">${escapeHtml(file.relative_path)}</div>` : ''}
                             </div>

@@ -24,6 +24,7 @@ app = Flask(__name__)
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
 WEB_MODIFIED_MARKER = '.web_modified'
 PROCESSED_MARKER = '.processed_files'
+DUPLICATE_MARKER = '.duplicate_files'
 
 # Global lock file to mark files modified by web interface
 web_modified_files = set()
@@ -92,6 +93,42 @@ def is_file_processed(filepath):
             return filename in processed_files
     except Exception as e:
         logging.error(f"Error checking if file is processed: {e}")
+        return False
+
+def mark_file_duplicate(filepath):
+    """Mark a file as a duplicate"""
+    marker_path = os.path.join(os.path.dirname(filepath), DUPLICATE_MARKER)
+    try:
+        filename = os.path.basename(filepath)
+        # Read existing duplicate files
+        duplicate_files = set()
+        if os.path.exists(marker_path):
+            with open(marker_path, 'r') as f:
+                duplicate_files = set(f.read().splitlines())
+        
+        # Add current file
+        duplicate_files.add(filename)
+        
+        # Write back
+        with open(marker_path, 'w') as f:
+            f.write('\n'.join(sorted(duplicate_files)))
+        logging.info(f"Marked {filepath} as duplicate")
+    except Exception as e:
+        logging.error(f"Error marking file as duplicate: {e}")
+
+def is_file_duplicate(filepath):
+    """Check if a file is marked as a duplicate"""
+    marker_path = os.path.join(os.path.dirname(filepath), DUPLICATE_MARKER)
+    if not os.path.exists(marker_path):
+        return False
+    
+    try:
+        with open(marker_path, 'r') as f:
+            duplicate_files = set(f.read().splitlines())
+            filename = os.path.basename(filepath)
+            return filename in duplicate_files
+    except Exception as e:
+        logging.error(f"Error checking if file is duplicate: {e}")
         return False
 
 def cleanup_web_markers():
@@ -359,7 +396,8 @@ def list_files():
             'relative_path': rel_path,
             'size': os.path.getsize(f),
             'modified': os.path.getmtime(f),
-            'processed': is_file_processed(f)
+            'processed': is_file_processed(f),
+            'duplicate': is_file_duplicate(f)
         })
     
     return jsonify({

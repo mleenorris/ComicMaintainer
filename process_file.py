@@ -15,6 +15,29 @@ logging.basicConfig(
     ]
 )
 
+DUPLICATE_MARKER = '.duplicate_files'
+
+def mark_file_duplicate(filepath):
+    """Mark a file as a duplicate"""
+    marker_path = os.path.join(os.path.dirname(filepath), DUPLICATE_MARKER)
+    try:
+        filename = os.path.basename(filepath)
+        # Read existing duplicate files
+        duplicate_files = set()
+        if os.path.exists(marker_path):
+            with open(marker_path, 'r') as f:
+                duplicate_files = set(f.read().splitlines())
+        
+        # Add current file
+        duplicate_files.add(filename)
+        
+        # Write back
+        with open(marker_path, 'w') as f:
+            f.write('\n'.join(sorted(duplicate_files)))
+        logging.info(f"Marked {filepath} as duplicate")
+    except Exception as e:
+        logging.error(f"Error marking file as duplicate: {e}")
+
 def parse_chapter_number(filename):
     match = re.search(r'(?i)ch(?:apter)?[-._\s]*([0-9]+(?:\.[0-9]+)?)', filename)
     if match:
@@ -165,6 +188,9 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
             newFilePath = os.path.join(os.path.dirname(filepath), newFileName)
             if os.path.abspath(filepath) != os.path.abspath(newFilePath):
                 if os.path.exists(newFilePath):
+                    # Mark the file as a duplicate
+                    mark_file_duplicate(filepath)
+                    
                     duplicate_dir = os.environ.get('DUPLICATE_DIR')
                     if duplicate_dir:
                         # Place under DUPLICATE_DIR/original_parent_folder/filename

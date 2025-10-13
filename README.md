@@ -127,6 +127,7 @@ The service includes a web-based interface for managing your comic files:
 - Pagination controls allow easy navigation through large libraries
 - Search and filters are applied server-side before pagination for efficient handling of large libraries
 - Cache is automatically cleared when files are processed or modified
+- **Smart cache invalidation**: When the watcher processes files, it automatically signals the web app to refresh its cache on the next request
 
 ### Filename Format Configuration
 The filename format can be customized through the web interface Settings modal. The format uses placeholders that are replaced with actual metadata values:

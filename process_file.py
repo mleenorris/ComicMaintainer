@@ -16,6 +16,21 @@ logging.basicConfig(
 )
 
 DUPLICATE_MARKER = '.duplicate_files'
+CACHE_UPDATE_MARKER = '.cache_update'
+
+def update_watcher_timestamp():
+    """Update the watcher cache invalidation timestamp"""
+    watched_dir = os.environ.get('WATCHED_DIR')
+    if not watched_dir:
+        return
+    
+    marker_path = os.path.join(watched_dir, CACHE_UPDATE_MARKER)
+    try:
+        import time
+        with open(marker_path, 'w') as f:
+            f.write(str(time.time()))
+    except Exception as e:
+        logging.error(f"Error updating watcher timestamp: {e}")
 
 def mark_file_duplicate(filepath):
     """Mark a file as a duplicate"""
@@ -269,5 +284,8 @@ if __name__ == "__main__":
         with open(marker_path, 'w') as f:
             f.write('\n'.join(sorted(processed_files)))
         logging.info(f"Marked {final_filepath} as processed")
+        
+        # Update watcher timestamp to invalidate web app cache
+        update_watcher_timestamp()
     except Exception as e:
         logging.error(f"Error marking file as processed: {e}")

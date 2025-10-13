@@ -27,6 +27,14 @@ WEB_MODIFIED_MARKER = '.web_modified'
 web_modified_files = set()
 lock = threading.Lock()
 
+# Cache for file list to improve performance on large libraries
+file_list_cache = {
+    'files': None,
+    'timestamp': 0,
+    'cache_duration': 30  # Cache for 30 seconds
+}
+cache_lock = threading.Lock()
+
 def mark_web_modified(filepath):
     """Mark a file as modified by the web interface"""
     with lock:
@@ -63,16 +71,39 @@ def cleanup_web_markers():
 cleanup_thread = threading.Thread(target=cleanup_web_markers, daemon=True)
 cleanup_thread.start()
 
-def get_comic_files():
-    """Get all comic files in the watched directory"""
+def get_comic_files(use_cache=True):
+    """Get all comic files in the watched directory with optional caching"""
     if not WATCHED_DIR:
         return []
     
+    # Check cache if enabled
+    if use_cache:
+        with cache_lock:
+            current_time = time.time()
+            if (file_list_cache['files'] is not None and 
+                current_time - file_list_cache['timestamp'] < file_list_cache['cache_duration']):
+                return file_list_cache['files']
+    
+    # Build file list
     files = []
     for ext in ['*.cbz', '*.cbr', '*.CBZ', '*.CBR']:
         files.extend(glob.glob(os.path.join(WATCHED_DIR, '**', ext), recursive=True))
     
-    return sorted(files)
+    sorted_files = sorted(files)
+    
+    # Update cache
+    if use_cache:
+        with cache_lock:
+            file_list_cache['files'] = sorted_files
+            file_list_cache['timestamp'] = time.time()
+    
+    return sorted_files
+
+def clear_file_cache():
+    """Clear the file list cache"""
+    with cache_lock:
+        file_list_cache['files'] = None
+        file_list_cache['timestamp'] = 0
 
 def get_credits_by_role(credits_list, role_synonyms):
     """Extract credits for a specific role from credits list"""
@@ -263,11 +294,13 @@ def list_files():
     # Get pagination parameters
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 100, type=int)
+    refresh = request.args.get('refresh', 'false').lower() == 'true'
     
     # Limit per_page to reasonable values
     per_page = min(max(per_page, 10), 500)
     
-    files = get_comic_files()
+    # Get files with optional cache refresh
+    files = get_comic_files(use_cache=not refresh)
     total_files = len(files)
     
     # Calculate pagination

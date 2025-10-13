@@ -840,9 +840,10 @@
             loadFiles();
         });
         
-        async function loadFiles(page = 1) {
+        async function loadFiles(page = 1, refresh = false) {
             try {
-                const response = await fetch(`/api/files?page=${page}&per_page=${perPage}`);
+                const url = `/api/files?page=${page}&per_page=${perPage}${refresh ? '&refresh=true' : ''}`;
+                const response = await fetch(url);
                 const data = await response.json();
                 
                 files = data.files;
@@ -1260,8 +1261,8 @@
                 const successCount = result.results.filter(r => r.success).length;
                 showMessage(`Processed ${successCount} of ${result.results.length} files successfully!`, 'success');
                 
-                // Refresh file list
-                await loadFiles();
+                // Refresh file list (force refresh to clear cache)
+                await loadFiles(1, true);
             } catch (error) {
                 showMessage('Failed to process files: ' + error.message, 'error');
             }
@@ -1295,8 +1296,8 @@
                 const successCount = result.results.filter(r => r.success).length;
                 showMessage(`Processed ${successCount} of ${result.results.length} files successfully!`, 'success');
                 
-                // Refresh file list
-                await loadFiles();
+                // Refresh file list (force refresh to clear cache)
+                await loadFiles(1, true);
             } catch (error) {
                 showMessage('Failed to process files: ' + error.message, 'error');
             }
@@ -1318,7 +1319,7 @@
                 
                 if (result.success) {
                     showMessage('File processed successfully!', 'success');
-                    await loadFiles();
+                    await loadFiles(currentPage, true);
                 } else {
                     showMessage(result.error || 'Failed to process file', 'error');
                 }
@@ -1329,7 +1330,7 @@
         
         function refreshFiles() {
             showMessage('Refreshing file list...', 'info');
-            loadFiles();
+            loadFiles(currentPage, true);
         }
         
         function showMessage(message, type = 'info') {

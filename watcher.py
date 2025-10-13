@@ -9,6 +9,7 @@ import logging
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
 PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
+WEB_MODIFIED_MARKER = '.web_modified'
 
 # Set up logging to file and stdout
 logging.basicConfig(
@@ -24,10 +25,35 @@ logging.basicConfig(
 # Debounce settings
 DEBOUNCE_SECONDS = 30
 
+def is_web_modified(filepath):
+    """Check if a file was recently modified by the web interface"""
+    marker_path = os.path.join(os.path.dirname(filepath), WEB_MODIFIED_MARKER)
+    if not os.path.exists(marker_path):
+        return False
+    
+    try:
+        with open(marker_path, 'r') as f:
+            modified_files = f.read().splitlines()
+            filename = os.path.basename(filepath)
+            if filename in modified_files:
+                # Remove the file from the marker
+                modified_files = [f for f in modified_files if f != filename]
+                with open(marker_path, 'w') as wf:
+                    wf.write('\n'.join(modified_files))
+                logging.info(f"Skipping {filepath} - modified by web interface")
+                return True
+    except Exception as e:
+        logging.error(f"Error checking web modified marker: {e}")
+    
+    return False
+
 class ChangeHandler(FileSystemEventHandler):
     def on_moved(self, event):
         # Only process if destination is .cbr or .cbz and debounce allows
         if not event.is_directory and self._should_process(event.dest_path) and self._should_process(event.src_path):
+            if is_web_modified(event.dest_path):
+                self.last_processed[event.dest_path] = time.time()
+                return
             if self._allowed_extension(event.dest_path) and self._is_file_stable(event.dest_path):
                 logging.info(f"File moved/renamed: {event.src_path} -> {event.dest_path}")
                 subprocess.run([sys.executable, PROCESS_SCRIPT, event.dest_path])
@@ -69,6 +95,9 @@ class ChangeHandler(FileSystemEventHandler):
 
     def on_modified(self, event):
         if not event.is_directory and self._should_process(event.src_path) and self._allowed_extension(event.src_path):
+            if is_web_modified(event.src_path):
+                self.last_processed[event.src_path] = time.time()
+                return
             if self._is_file_stable(event.src_path):
                 logging.info(f"File modified: {event.src_path}")
                 subprocess.run([sys.executable, PROCESS_SCRIPT, event.src_path])
@@ -77,6 +106,9 @@ class ChangeHandler(FileSystemEventHandler):
                 logging.info(f"File not stable yet: {event.src_path}")
     def on_created(self, event):
         if not event.is_directory and self._should_process(event.src_path) and self._allowed_extension(event.src_path):
+            if is_web_modified(event.src_path):
+                self.last_processed[event.src_path] = time.time()
+                return
             if self._is_file_stable(event.src_path):
                 logging.info(f"File created: {event.src_path}")
                 subprocess.run([sys.executable, PROCESS_SCRIPT, event.src_path])

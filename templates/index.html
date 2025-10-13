@@ -127,9 +127,16 @@
             display: flex;
             align-items: center;
             gap: 8px;
-            cursor: pointer;
             user-select: none;
             transition: background 0.2s;
+        }
+        
+        .directory-header-clickable {
+            cursor: pointer;
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
         .directory-header:hover {
@@ -540,6 +547,9 @@
             <button class="btn btn-success" onclick="processAllFiles()">
                 🚀 Process All Files
             </button>
+            <button class="btn btn-success" onclick="processSelectedFiles()" id="processSelectedBtn" disabled>
+                ⚡ Process Selected
+            </button>
             <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>
                 ✏️ Update Selected
             </button>
@@ -718,12 +728,21 @@
                 const fileCount = filesByDirectory[dir].length;
                 
                 if (dir) {
+                    const allSelected = filesByDirectory[dir].every(file => selectedFiles.has(file.relative_path));
+                    const someSelected = filesByDirectory[dir].some(file => selectedFiles.has(file.relative_path));
                     html += `
-                        <div class="directory-header" onclick="toggleDirectory('${escapeHtml(dir)}')">
-                            <span class="directory-toggle ${isCollapsed ? 'collapsed' : ''}">▼</span>
-                            <span class="directory-icon">📁</span>
-                            <span class="directory-path">${escapeHtml(dir)}</span>
-                            <span class="directory-file-count">(${fileCount} file${fileCount !== 1 ? 's' : ''})</span>
+                        <div class="directory-header">
+                            <input type="checkbox" 
+                                   ${allSelected ? 'checked' : ''} 
+                                   ${someSelected && !allSelected ? 'style="opacity: 0.5"' : ''}
+                                   onchange="toggleDirectorySelection('${escapeHtml(dir)}', this.checked)"
+                                   onclick="event.stopPropagation()">
+                            <div class="directory-header-clickable" onclick="toggleDirectory('${escapeHtml(dir)}')">
+                                <span class="directory-toggle ${isCollapsed ? 'collapsed' : ''}">▼</span>
+                                <span class="directory-icon">📁</span>
+                                <span class="directory-path">${escapeHtml(dir)}</span>
+                                <span class="directory-file-count">(${fileCount} file${fileCount !== 1 ? 's' : ''})</span>
+                            </div>
                         </div>
                     `;
                 }
@@ -795,13 +814,16 @@
             const count = selectedFiles.size;
             const info = document.getElementById('selectInfo');
             const batchBtn = document.getElementById('batchUpdateBtn');
+            const processSelectedBtn = document.getElementById('processSelectedBtn');
             
             if (count === 0) {
                 info.textContent = 'No files selected';
                 batchBtn.disabled = true;
+                processSelectedBtn.disabled = true;
             } else {
                 info.textContent = `${count} file${count > 1 ? 's' : ''} selected`;
                 batchBtn.disabled = false;
+                processSelectedBtn.disabled = false;
             }
         }
         
@@ -811,6 +833,27 @@
             } else {
                 collapsedDirectories.add(dir);
             }
+            renderFileList();
+        }
+        
+        function toggleDirectorySelection(dir, checked) {
+            // Find all files in this directory
+            const dirFiles = files.filter(file => {
+                const fileDirPath = file.relative_path.includes('/') || file.relative_path.includes('\\') 
+                    ? file.relative_path.substring(0, file.relative_path.lastIndexOf(file.relative_path.includes('/') ? '/' : '\\'))
+                    : '';
+                return fileDirPath === dir;
+            });
+            
+            // Update selection
+            dirFiles.forEach(file => {
+                if (checked) {
+                    selectedFiles.add(file.relative_path);
+                } else {
+                    selectedFiles.delete(file.relative_path);
+                }
+            });
+            
             renderFileList();
         }
         
@@ -938,6 +981,41 @@
             try {
                 const response = await fetch('/api/process-all', {
                     method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                const successCount = result.results.filter(r => r.success).length;
+                showMessage(`Processed ${successCount} of ${result.results.length} files successfully!`, 'success');
+                
+                // Refresh file list
+                await loadFiles();
+            } catch (error) {
+                showMessage('Failed to process files: ' + error.message, 'error');
+            }
+        }
+        
+        async function processSelectedFiles() {
+            if (selectedFiles.size === 0) {
+                showMessage('No files selected', 'error');
+                return;
+            }
+            
+            if (!confirm(`This will process ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''}. Continue?`)) {
+                return;
+            }
+            
+            showMessage('Processing selected files... This may take a while.', 'info');
+            
+            try {
+                const response = await fetch('/api/process-selected', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        files: Array.from(selectedFiles)
+                    })
                 });
                 
                 const result = await response.json();

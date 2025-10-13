@@ -214,7 +214,7 @@
             padding: 15px;
             font-weight: 600;
             display: grid;
-            grid-template-columns: 40px 1fr 150px 180px;
+            grid-template-columns: 40px 1fr 150px 240px;
             gap: 10px;
             border-bottom: 2px solid var(--border-secondary);
         }
@@ -288,7 +288,7 @@
         .file-item {
             padding: 15px;
             display: grid;
-            grid-template-columns: 40px 1fr 150px 180px;
+            grid-template-columns: 40px 1fr 150px 240px;
             gap: 10px;
             border-bottom: 1px solid var(--border-primary);
             align-items: center;
@@ -328,6 +328,7 @@
         .file-actions {
             display: flex;
             gap: 5px;
+            flex-wrap: wrap;
         }
         
         .btn-small {
@@ -528,6 +529,14 @@
                 text-align: center;
                 margin-left: 0;
                 margin-top: 8px;
+            }
+            
+            .file-list-header {
+                grid-template-columns: 40px 1fr 120px 200px;
+            }
+            
+            .file-item {
+                grid-template-columns: 40px 1fr 120px 200px;
             }
         }
         

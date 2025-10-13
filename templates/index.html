@@ -118,6 +118,25 @@
             border-bottom: 2px solid #bdc3c7;
         }
         
+        .directory-header {
+            padding: 12px 15px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+            font-weight: 600;
+            color: #2c3e50;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .directory-icon {
+            font-size: 16px;
+        }
+        
+        .directory-path {
+            font-size: 14px;
+        }
+        
         .file-item {
             padding: 15px;
             display: grid;
@@ -128,8 +147,17 @@
             transition: background 0.2s;
         }
         
+        .file-item.indented {
+            padding-left: 35px;
+            background: #fafafa;
+        }
+        
         .file-item:hover {
             background: #f8f9fa;
+        }
+        
+        .file-item.indented:hover {
+            background: #f0f0f0;
         }
         
         .file-item input[type="checkbox"] {
@@ -475,6 +503,21 @@
                 return;
             }
             
+            // Group files by directory
+            const filesByDirectory = {};
+            files.forEach(file => {
+                const dirPath = file.relative_path.includes('/') || file.relative_path.includes('\\') 
+                    ? file.relative_path.substring(0, file.relative_path.lastIndexOf(file.relative_path.includes('/') ? '/' : '\\'))
+                    : '';
+                if (!filesByDirectory[dirPath]) {
+                    filesByDirectory[dirPath] = [];
+                }
+                filesByDirectory[dirPath].push(file);
+            });
+            
+            // Sort directories
+            const sortedDirs = Object.keys(filesByDirectory).sort();
+            
             let html = `
                 <div class="file-list-header">
                     <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)">
@@ -484,29 +527,41 @@
                 </div>
             `;
             
-            files.forEach(file => {
-                const isSelected = selectedFiles.has(file.relative_path);
-                const fileSize = formatFileSize(file.size);
-                html += `
-                    <div class="file-item">
-                        <input type="checkbox" 
-                               ${isSelected ? 'checked' : ''} 
-                               onchange="toggleFileSelection('${escapeHtml(file.relative_path)}', this.checked)">
-                        <div>
-                            <div class="file-name">${escapeHtml(file.name)}</div>
-                            <div class="file-path">${escapeHtml(file.relative_path)}</div>
+            // Render files grouped by directory
+            sortedDirs.forEach(dir => {
+                if (dir) {
+                    html += `
+                        <div class="directory-header">
+                            <span class="directory-icon">📁</span>
+                            <span class="directory-path">${escapeHtml(dir)}</span>
                         </div>
-                        <div>${fileSize}</div>
-                        <div class="file-actions">
-                            <button class="btn btn-primary btn-small" onclick="viewTags('${escapeHtml(file.relative_path)}')">
-                                View/Edit
-                            </button>
-                            <button class="btn btn-success btn-small" onclick="processSingleFile('${escapeHtml(file.relative_path)}')">
-                                Process
-                            </button>
+                    `;
+                }
+                
+                filesByDirectory[dir].forEach(file => {
+                    const isSelected = selectedFiles.has(file.relative_path);
+                    const fileSize = formatFileSize(file.size);
+                    html += `
+                        <div class="file-item ${dir ? 'indented' : ''}">
+                            <input type="checkbox" 
+                                   ${isSelected ? 'checked' : ''} 
+                                   onchange="toggleFileSelection('${escapeHtml(file.relative_path)}', this.checked)">
+                            <div>
+                                <div class="file-name">${escapeHtml(file.name)}</div>
+                                ${!dir ? `<div class="file-path">${escapeHtml(file.relative_path)}</div>` : ''}
+                            </div>
+                            <div>${fileSize}</div>
+                            <div class="file-actions">
+                                <button class="btn btn-primary btn-small" onclick="viewTags('${escapeHtml(file.relative_path)}')">
+                                    View/Edit
+                                </button>
+                                <button class="btn btn-success btn-small" onclick="processSingleFile('${escapeHtml(file.relative_path)}')">
+                                    Process
+                                </button>
+                            </div>
                         </div>
-                    </div>
-                `;
+                    `;
+                });
             });
             
             fileList.innerHTML = html;

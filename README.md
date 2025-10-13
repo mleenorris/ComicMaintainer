@@ -7,7 +7,7 @@ This service automatically watches a directory for new or changed comic archive 
 - Watches a directory for file changes (create, modify, move/rename, delete)
 - Processes `.cbz` and `.cbr` files only
 - Uses ComicTagger to set comic metadata (title, issue, series, etc.)
-- Renames files to a standard format based on metadata
+- Renames files based on customizable filename format templates
 - Handles duplicate files: moves them to a duplicate directory, preserving the original folder structure
 - **Web Interface** for managing comic files:
   - One-click button to process all files in the watched directory
@@ -15,6 +15,7 @@ This service automatically watches a directory for new or changed comic archive 
   - Folder selection: click folder checkbox to select all files in a folder
   - View and edit tags for individual files
   - Batch update tags for multiple selected files
+  - Configurable filename format with support for metadata placeholders
   - Smart handling to prevent watcher conflicts with web-modified files
 - Logs all actions to `ComicMaintainer.log`
 - Containerized with Docker for easy deployment
@@ -24,7 +25,7 @@ This service automatically watches a directory for new or changed comic archive 
 1. The watcher service monitors a specified directory for new or changed `.cbz`/`.cbr` files.
 2. When a file is detected and stable, it runs `process_file.py` to:
    - Read and update comic metadata using ComicTagger
-   - Rename the file to a standard format (e.g., `Series - Chapter 0001.cbz`)
+   - Rename the file using the configured filename format (e.g., `{series} - Chapter {issue}.cbz` → `Batman - Chapter 0001.cbz`)
    - If a file with the new name already exists, the duplicate is moved to a duplicate directory, preserving the original parent folder
 3. All actions and errors are logged.
 
@@ -79,6 +80,7 @@ The service includes a web-based interface for managing your comic files:
 - **Folder Selection**: Click the checkbox next to any folder name to select/deselect all files in that folder
 - **View/Edit Individual Tags**: Click on any file to view and edit its metadata tags
 - **Batch Update**: Select multiple files and update common tags (series, publisher, year, writer) for all of them at once
+- **Filename Format Settings**: Configure how files are renamed when processed using customizable templates
 - **Smart Processing**: Files modified through the web interface are marked to prevent the watcher from re-processing them automatically
 
 ### Usage
@@ -92,6 +94,27 @@ The service includes a web-based interface for managing your comic files:
 5. Click "Process Selected" to run processing only on your selected files
 6. Click "View/Edit" on any file to see and modify its tags
 7. Select multiple files and click "Update Selected" to batch update common tags
+8. Click "Settings" to configure the filename format for renamed files
+
+### Filename Format Configuration
+The filename format can be customized through the web interface Settings modal. The format uses placeholders that are replaced with actual metadata values:
+
+**Available Placeholders:**
+- `{series}` - Series name
+- `{issue}` - Issue number (padded to 4 digits, e.g., 0001)
+- `{issue_no_pad}` - Issue number (no padding, e.g., 1)
+- `{title}` - Issue title
+- `{volume}` - Volume number
+- `{year}` - Publication year
+- `{publisher}` - Publisher name
+
+**Examples:**
+- `{series} - Chapter {issue}.cbz` → `Batman - Chapter 0005.cbz` (default)
+- `{series} v{volume} #{issue_no_pad}.cbz` → `Batman v1 #5.cbz`
+- `{series} ({year}) - {title}.cbz` → `Batman (2023) - Dark Knight.cbz`
+- `{series} #{issue} - {title}.cbz` → `Batman #0005 - Dark Knight.cbz`
+
+The filename format setting is saved in `config.json` and applies to both web interface processing and watcher service processing.
 
 ## ComicTagger Integration
 - ComicTagger is installed in the container from the **develop branch** and used via its Python API.

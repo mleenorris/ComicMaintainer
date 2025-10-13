@@ -127,7 +127,7 @@ The service includes a web-based interface for managing your comic files:
 - Cache does not expire based on time, providing instant page navigation
 - Pagination controls allow easy navigation through large libraries
 - Search and filters are applied server-side before pagination for efficient handling of large libraries
-- **Smart cache invalidation**: Cache is only invalidated when the watcher processes files, ensuring the cache stays fresh while maximizing performance
+- **Incremental cache updates**: Instead of invalidating the entire cache when files change, individual file changes (add, remove, rename) are applied incrementally, significantly improving performance for large libraries
 
 ### Filename Format Configuration
 The filename format can be customized through the web interface Settings modal. The format uses placeholders that are replaced with actual metadata values:

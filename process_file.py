@@ -17,6 +17,7 @@ logging.basicConfig(
 
 DUPLICATE_MARKER = '.duplicate_files'
 CACHE_UPDATE_MARKER = '.cache_update'
+CACHE_CHANGES_FILE = '.cache_changes'
 
 def update_watcher_timestamp():
     """Update the watcher cache invalidation timestamp"""
@@ -31,6 +32,39 @@ def update_watcher_timestamp():
             f.write(str(time.time()))
     except Exception as e:
         logging.error(f"Error updating watcher timestamp: {e}")
+
+def record_cache_change(change_type, old_path=None, new_path=None):
+    """Record a file change for incremental cache updates
+    
+    Args:
+        change_type: 'add', 'remove', or 'rename'
+        old_path: Original file path (for 'remove' and 'rename')
+        new_path: New file path (for 'add' and 'rename')
+    """
+    watched_dir = os.environ.get('WATCHED_DIR')
+    if not watched_dir:
+        return
+    
+    changes_file = os.path.join(watched_dir, CACHE_CHANGES_FILE)
+    
+    try:
+        import json
+        import time
+        
+        change_entry = {
+            'type': change_type,
+            'old_path': old_path,
+            'new_path': new_path,
+            'timestamp': time.time()
+        }
+        
+        # Append the change to the file
+        with open(changes_file, 'a') as f:
+            f.write(json.dumps(change_entry) + '\n')
+        
+        logging.info(f"Recorded cache change: {change_type} {old_path or ''} -> {new_path or ''}")
+    except Exception as e:
+        logging.error(f"Error recording cache change: {e}")
 
 def mark_file_duplicate(filepath):
     """Mark a file as a duplicate"""
@@ -236,6 +270,8 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
                     try:
                         os.rename(filepath, newFilePath)
                         final_filepath = newFilePath
+                        # Record the rename for incremental cache update
+                        record_cache_change('rename', old_path=filepath, new_path=newFilePath)
                     except Exception as e:
                         logging.info(f"Error renaming file {os.path.basename(filepath)}: {e}")
             else:

@@ -1218,6 +1218,9 @@
                                 <button class="btn btn-small" onclick="normalizeSingleFile('${escapeJs(file.relative_path)}')" style="background: #16a085; color: white;">
                                     Normalize
                                 </button>
+                                <button class="btn btn-danger btn-small" onclick="deleteSingleFile('${escapeJs(file.relative_path)}')">
+                                    Delete
+                                </button>
                             </div>
                         </div>
                     `;
@@ -1818,6 +1821,31 @@
                 }
             } catch (error) {
                 showMessage('Failed to normalize metadata: ' + error.message, 'error');
+            }
+        }
+        
+        async function deleteSingleFile(filepath) {
+            if (!confirm(`Are you sure you want to delete ${filepath}?\n\nThis action cannot be undone!`)) {
+                return;
+            }
+            
+            showMessage('Deleting file...', 'info');
+            
+            try {
+                const response = await fetch(`/api/delete-file/${encodeURIComponent(filepath)}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('File deleted successfully!', 'success');
+                    await loadFiles(currentPage, true);
+                } else {
+                    showMessage(result.error || 'Failed to delete file', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to delete file: ' + error.message, 'error');
             }
         }
         

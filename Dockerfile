@@ -26,6 +26,7 @@ RUN git clone --branch develop https://github.com/comictagger/comictagger.git /c
 COPY watcher.py /watcher.py
 COPY process_file.py /process_file.py
 COPY web_app.py /web_app.py
+COPY config.py /config.py
 COPY templates /templates
 COPY start.sh /start.sh
 

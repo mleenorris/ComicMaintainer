@@ -10,6 +10,7 @@ This service automatically watches a directory for new or changed comic archive 
 - Renames files based on customizable filename format templates
 - Handles duplicate files: moves them to a duplicate directory, preserving the original folder structure
 - **Processing Status Tracking**: Both the watcher and web interface automatically mark files as processed
+- **Duplicate File Tracking**: Files that would have the same name after processing are automatically marked as duplicates
 - **Web Interface** for managing comic files:
   - One-click button to process all files in the watched directory
   - Process only selected files with the "Process Selected" button
@@ -18,9 +19,9 @@ This service automatically watches a directory for new or changed comic archive 
   - Batch update tags for multiple selected files
   - Configurable filename format with support for metadata placeholders
   - Smart handling to prevent watcher conflicts with web-modified files
-  - **Filter by processing status**: View all files, only processed files, or only unprocessed files
+  - **Filter by processing status**: View all files, only processed files, only unprocessed files, or only duplicates
   - **Scan for unmarked files**: Quickly identify how many files haven't been processed yet
-  - **Visual status indicators**: Each file shows ✅ (processed) or ⚠️ (unprocessed) icon
+  - **Visual status indicators**: Each file shows ✅ (processed), ⚠️ (unprocessed), or 🔁 (duplicate) icon
 - Logs all actions to `ComicMaintainer.log`
 - Containerized with Docker for easy deployment
 - **Runs as user `nobody` and group `users` for improved container security**
@@ -30,7 +31,7 @@ This service automatically watches a directory for new or changed comic archive 
 2. When a file is detected and stable, it runs `process_file.py` to:
    - Read and update comic metadata using ComicTagger
    - Rename the file using the configured filename format (e.g., `{series} - Chapter {issue}.cbz` → `Batman - Chapter 0001.cbz`)
-   - If a file with the new name already exists, the duplicate is moved to a duplicate directory, preserving the original parent folder
+   - If a file with the new name already exists, the file is marked as a duplicate and, if `DUPLICATE_DIR` is set, moved to the duplicate directory preserving the original parent folder
 3. All actions and errors are logged.
 
 ## Usage
@@ -88,7 +89,8 @@ The service includes a web-based interface for managing your comic files:
 - **Filename Format Settings**: Configure how files are renamed when processed using customizable templates
 - **Smart Processing**: Files modified through the web interface are marked to prevent the watcher from re-processing them automatically
 - **Processing Status Tracking**: Both the watcher and web interface mark files as processed, with visual indicators (✅ for processed, ⚠️ for unprocessed)
-- **Filter by Processing Status**: Easily filter files to show all, only marked (processed), or only unmarked (unprocessed) files
+- **Duplicate File Tracking**: Files detected as duplicates are automatically marked with a 🔁 icon
+- **Filter by Status**: Easily filter files to show all files, only marked (processed), only unmarked (unprocessed), or only duplicates
 - **Scan for Unmarked Files**: Quickly identify how many files have not been processed yet
 
 ### Usage
@@ -109,8 +111,12 @@ The service includes a web-based interface for managing your comic files:
     - **All Files**: Show all files in the directory
     - **Unmarked Only**: Show only files that haven't been processed yet
     - **Marked Only**: Show only files that have been processed
+    - **Duplicates Only**: Show only files marked as duplicates
 12. Click "Settings" to configure the filename format for renamed files
-13. Look for the status icon next to each filename (✅ = processed, ⚠️ = not processed yet)
+13. Look for the status icon next to each filename:
+    - ✅ = processed
+    - ⚠️ = not processed yet
+    - 🔁 = duplicate file
 
 ### Performance
 - Files are loaded in pages of 100 to ensure fast initial load times

@@ -233,21 +233,29 @@ if __name__ == "__main__":
     for arg in sys.argv[2:]:
         if arg.startswith('--comicfolder='):
             comicfolder = arg.split('=', 1)[1]
-    final_filepath = process_file(sys.argv[1], fixtitle=fixtitle or True, fixseries=fixseries or True, fixfilename=fixfilename or True, comicfolder=comicfolder)
+    original_filepath = sys.argv[1]
+    final_filepath = process_file(original_filepath, fixtitle=fixtitle or True, fixseries=fixseries or True, fixfilename=fixfilename or True, comicfolder=comicfolder)
     
     # Mark as processed using the final filepath (after any rename)
     PROCESSED_MARKER = '.processed_files'
     marker_path = os.path.join(os.path.dirname(final_filepath), PROCESSED_MARKER)
     try:
-        filename = os.path.basename(final_filepath)
+        original_filename = os.path.basename(original_filepath)
+        final_filename = os.path.basename(final_filepath)
+        
         # Read existing processed files
         processed_files = set()
         if os.path.exists(marker_path):
             with open(marker_path, 'r') as f:
                 processed_files = set(f.read().splitlines())
         
+        # If file was renamed, remove the old filename from the marker
+        if original_filename != final_filename and original_filename in processed_files:
+            processed_files.discard(original_filename)
+            logging.info(f"Removed old filename '{original_filename}' from processed marker after rename")
+        
         # Add current file
-        processed_files.add(filename)
+        processed_files.add(final_filename)
         
         # Write back
         with open(marker_path, 'w') as f:

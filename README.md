@@ -81,6 +81,7 @@ The service includes a web-based interface for managing your comic files:
 
 ### Features
 - **Optimized for Large Libraries**: Pagination (100 files per page) and caching ensure fast loading even with thousands of files
+- **Search Functionality**: Find files across all pages by searching file names and paths - pagination automatically adjusts to show only matching results
 - **Process All Files**: One-click button to process all comic files in the watched directory
 - **Process Selected Files**: Process only the files you've selected with checkboxes
 - **Folder Selection**: Click the checkbox next to any folder name to select/deselect all files in that folder
@@ -90,30 +91,32 @@ The service includes a web-based interface for managing your comic files:
 - **Smart Processing**: Files modified through the web interface are marked to prevent the watcher from re-processing them automatically
 - **Processing Status Tracking**: Both the watcher and web interface mark files as processed, with visual indicators (✅ for processed, ⚠️ for unprocessed)
 - **Duplicate File Tracking**: Files detected as duplicates are automatically marked with a 🔁 icon
-- **Filter by Status**: Easily filter files to show all files, only marked (processed), only unmarked (unprocessed), or only duplicates
+- **Filter by Status**: Easily filter files to show all files, only marked (processed), only unmarked (unprocessed), or only duplicates - filters work across all pages
 - **Scan for Unmarked Files**: Quickly identify how many files have not been processed yet
 
 ### Usage
 1. Access the web interface at `http://localhost:5000` (or your configured host/port)
 2. The interface will display all `.cbz` and `.cbr` files in your watched directory, organized by folder
 3. Navigate through pages using the pagination controls at the bottom if you have many files
-4. Use the checkboxes to select files for batch operations:
+4. **Use the search box** to find files across all pages - search works on both file names and paths
+5. Use the checkboxes to select files for batch operations:
    - Check individual files one at a time
    - Check the folder checkbox to select/deselect all files in that folder
    - Use "Select All" to select everything
-5. Click "Process All Files" to run the standard processing on all files
-6. Click "Process Selected" to run processing only on your selected files
-7. Click "View/Edit" on any file to see and modify its tags
-8. Select multiple files and click "Update Selected" to batch update common tags
-9. Click "Refresh" to update the file list (automatically clears cache)
-10. Click "Scan Unmarked" to see a count of processed vs unprocessed files
-11. Use the filter buttons to view:
+6. Click "Process All Files" to run the standard processing on all files
+7. Click "Process Selected" to run processing only on your selected files
+8. Click "View/Edit" on any file to see and modify its tags
+9. Select multiple files and click "Update Selected" to batch update common tags
+10. Click "Refresh" to update the file list (automatically clears cache)
+11. Click "Scan Unmarked" to see a count of processed vs unprocessed files
+12. Use the filter buttons to view:
     - **All Files**: Show all files in the directory
     - **Unmarked Only**: Show only files that haven't been processed yet
     - **Marked Only**: Show only files that have been processed
     - **Duplicates Only**: Show only files marked as duplicates
-12. Click "Settings" to configure the filename format for renamed files
-13. Look for the status icon next to each filename:
+    - Search and filters can be combined and work across all pages
+13. Click "Settings" to configure the filename format for renamed files
+14. Look for the status icon next to each filename:
     - ✅ = processed
     - ⚠️ = not processed yet
     - 🔁 = duplicate file
@@ -122,6 +125,7 @@ The service includes a web-based interface for managing your comic files:
 - Files are loaded in pages of 100 to ensure fast initial load times
 - File list is cached for 30 seconds to speed up page navigation
 - Pagination controls allow easy navigation through large libraries
+- Search and filters are applied server-side before pagination for efficient handling of large libraries
 - Cache is automatically cleared when files are processed or modified
 
 ### Filename Format Configuration

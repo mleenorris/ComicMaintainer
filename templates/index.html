@@ -1001,7 +1001,17 @@
         
         async function loadFiles(page = 1, refresh = false) {
             try {
-                const url = `/api/files?page=${page}&per_page=${perPage}${refresh ? '&refresh=true' : ''}`;
+                let url = `/api/files?page=${page}&per_page=${perPage}`;
+                if (refresh) {
+                    url += '&refresh=true';
+                }
+                if (searchQuery) {
+                    url += `&search=${encodeURIComponent(searchQuery)}`;
+                }
+                if (filterMode !== 'all') {
+                    url += `&filter=${encodeURIComponent(filterMode)}`;
+                }
+                
                 const response = await fetch(url);
                 const data = await response.json();
                 
@@ -1025,7 +1035,12 @@
             
             if (totalPages > 1 || totalFiles > 0) {
                 paginationDiv.style.display = 'flex';
-                pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${totalFiles} files total)`;
+                let pageText = `Page ${currentPage} of ${totalPages} (${totalFiles} file${totalFiles !== 1 ? 's' : ''}`;
+                if (searchQuery || filterMode !== 'all') {
+                    pageText += ' matching';
+                }
+                pageText += ')';
+                pageInfo.textContent = pageText;
                 prevBtn.disabled = currentPage <= 1;
                 nextBtn.disabled = currentPage >= totalPages;
             } else {
@@ -1058,7 +1073,8 @@
         
         function filterFiles() {
             searchQuery = document.getElementById('searchInput').value;
-            renderFileList();
+            // Reload from page 1 with new search query
+            loadFiles(1);
         }
         
         function setFilter(mode) {
@@ -1074,7 +1090,8 @@
             document.getElementById('filterDuplicates').style.background = mode === 'duplicates' ? '#e74c3c' : '';
             document.getElementById('filterDuplicates').style.color = mode === 'duplicates' ? 'white' : '';
             
-            renderFileList();
+            // Reload from page 1 with new filter
+            loadFiles(1);
         }
         
         async function scanUnmarkedFiles() {
@@ -1093,52 +1110,30 @@
             const fileList = document.getElementById('fileList');
             
             if (files.length === 0) {
-                fileList.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📁</div>
-                        <h2>No comic files found</h2>
-                        <p>Add some .cbz or .cbr files to your watched directory</p>
-                    </div>
-                `;
+                // Check if we have search/filter active to show appropriate message
+                if (searchQuery || filterMode !== 'all') {
+                    fileList.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🔍</div>
+                            <h2>No matching files found</h2>
+                            <p>Try a different search term or filter</p>
+                        </div>
+                    `;
+                } else {
+                    fileList.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📁</div>
+                            <h2>No comic files found</h2>
+                            <p>Add some .cbz or .cbr files to your watched directory</p>
+                        </div>
+                    `;
+                }
                 return;
             }
             
-            // Filter files based on search query and processing status
-            let filteredFiles = files;
-            
-            // Apply processing status filter
-            if (filterMode === 'marked') {
-                filteredFiles = filteredFiles.filter(file => file.processed);
-            } else if (filterMode === 'unmarked') {
-                filteredFiles = filteredFiles.filter(file => !file.processed);
-            } else if (filterMode === 'duplicates') {
-                filteredFiles = filteredFiles.filter(file => file.duplicate);
-            }
-            
-            // Apply search filter
-            if (searchQuery) {
-                const query = searchQuery.toLowerCase();
-                filteredFiles = filteredFiles.filter(file => {
-                    return file.name.toLowerCase().includes(query) || 
-                           file.relative_path.toLowerCase().includes(query);
-                });
-            }
-            
-            // Show message if no results found
-            if (filteredFiles.length === 0) {
-                fileList.innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-state-icon">🔍</div>
-                        <h2>No matching files found</h2>
-                        <p>Try a different search term</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            // Group files by directory
+            // Group files by directory (filtering is now done on backend)
             const filesByDirectory = {};
-            filteredFiles.forEach(file => {
+            files.forEach(file => {
                 const dirPath = file.relative_path.includes('/') || file.relative_path.includes('\\') 
                     ? file.relative_path.substring(0, file.relative_path.lastIndexOf(file.relative_path.includes('/') ? '/' : '\\'))
                     : '';

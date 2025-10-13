@@ -378,33 +378,18 @@ def list_files():
     per_page = request.args.get('per_page', 100, type=int)
     refresh = request.args.get('refresh', 'false').lower() == 'true'
     
+    # Get filter parameters
+    search_query = request.args.get('search', '', type=str).strip()
+    filter_mode = request.args.get('filter', 'all', type=str)  # 'all', 'marked', 'unmarked', 'duplicates'
+    
     # Get files with optional cache refresh
     files = get_comic_files(use_cache=not refresh)
-    total_files = len(files)
     
-    # Handle "all files" request (per_page = -1 or 0)
-    if per_page <= 0:
-        # Return all files in a single page
-        paginated_files = files
-        total_pages = 1
-        page = 1
-    else:
-        # Limit per_page to reasonable values
-        per_page = min(max(per_page, 10), 500)
-        
-        # Calculate pagination
-        total_pages = (total_files + per_page - 1) // per_page if total_files > 0 else 1
-        page = max(1, min(page, total_pages))
-        
-        start_idx = (page - 1) * per_page
-        end_idx = start_idx + per_page
-        
-        paginated_files = files[start_idx:end_idx]
-    
-    result = []
-    for f in paginated_files:
+    # Build file list with metadata
+    all_files = []
+    for f in files:
         rel_path = os.path.relpath(f, WATCHED_DIR) if WATCHED_DIR else f
-        result.append({
+        all_files.append({
             'path': f,
             'name': os.path.basename(f),
             'relative_path': rel_path,
@@ -414,11 +399,51 @@ def list_files():
             'duplicate': is_file_duplicate(f)
         })
     
+    # Apply filters
+    filtered_files = all_files
+    
+    # Apply processing status filter
+    if filter_mode == 'marked':
+        filtered_files = [f for f in filtered_files if f['processed']]
+    elif filter_mode == 'unmarked':
+        filtered_files = [f for f in filtered_files if not f['processed']]
+    elif filter_mode == 'duplicates':
+        filtered_files = [f for f in filtered_files if f['duplicate']]
+    
+    # Apply search filter
+    if search_query:
+        query_lower = search_query.lower()
+        filtered_files = [
+            f for f in filtered_files
+            if query_lower in f['name'].lower() or query_lower in f['relative_path'].lower()
+        ]
+    
+    total_filtered = len(filtered_files)
+    
+    # Handle "all files" request (per_page = -1 or 0)
+    if per_page <= 0:
+        # Return all files in a single page
+        paginated_files = filtered_files
+        total_pages = 1
+        page = 1
+    else:
+        # Limit per_page to reasonable values
+        per_page = min(max(per_page, 10), 500)
+        
+        # Calculate pagination
+        total_pages = (total_filtered + per_page - 1) // per_page if total_filtered > 0 else 1
+        page = max(1, min(page, total_pages))
+        
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        
+        paginated_files = filtered_files[start_idx:end_idx]
+    
     return jsonify({
-        'files': result,
+        'files': paginated_files,
         'page': page,
         'per_page': per_page,
-        'total_files': total_files,
+        'total_files': total_filtered,
         'total_pages': total_pages
     })
 

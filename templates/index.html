@@ -870,9 +870,9 @@
                             <input type="checkbox" 
                                    ${allSelected ? 'checked' : ''} 
                                    ${someSelected && !allSelected ? 'style="opacity: 0.5"' : ''}
-                                   onchange="toggleDirectorySelection('${escapeHtml(dir)}', this.checked)"
+                                   onchange="toggleDirectorySelection('${escapeJs(dir)}', this.checked)"
                                    onclick="event.stopPropagation()">
-                            <div class="directory-header-clickable" onclick="toggleDirectory('${escapeHtml(dir)}')">
+                            <div class="directory-header-clickable" onclick="toggleDirectory('${escapeJs(dir)}')">
                                 <span class="directory-toggle ${isCollapsed ? 'collapsed' : ''}">▼</span>
                                 <span class="directory-icon">📁</span>
                                 <span class="directory-path">${escapeHtml(dir)}</span>
@@ -891,17 +891,17 @@
                         <div class="file-item ${dir ? 'indented' : ''}">
                             <input type="checkbox" 
                                    ${isSelected ? 'checked' : ''} 
-                                   onchange="toggleFileSelection('${escapeHtml(file.relative_path)}', this.checked)">
+                                   onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
                             <div>
                                 <div class="file-name">${escapeHtml(file.name)}</div>
                                 ${!dir ? `<div class="file-path">${escapeHtml(file.relative_path)}</div>` : ''}
                             </div>
                             <div>${fileSize}</div>
                             <div class="file-actions">
-                                <button class="btn btn-primary btn-small" onclick="viewTags('${escapeHtml(file.relative_path)}')">
+                                <button class="btn btn-primary btn-small" onclick="viewTags('${escapeJs(file.relative_path)}')">
                                     View/Edit
                                 </button>
-                                <button class="btn btn-success btn-small" onclick="processSingleFile('${escapeHtml(file.relative_path)}')">
+                                <button class="btn btn-success btn-small" onclick="processSingleFile('${escapeJs(file.relative_path)}')">
                                     Process
                                 </button>
                             </div>
@@ -926,6 +926,16 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+        
+        function escapeJs(text) {
+            // Escape single quotes, double quotes, backslashes, and other special characters for JavaScript strings
+            return text.replace(/\\/g, '\\\\')
+                       .replace(/'/g, "\\'")
+                       .replace(/"/g, '\\"')
+                       .replace(/\n/g, '\\n')
+                       .replace(/\r/g, '\\r')
+                       .replace(/\t/g, '\\t');
         }
         
         function toggleSelectAll(checked) {

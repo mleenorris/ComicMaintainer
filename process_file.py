@@ -3,6 +3,7 @@ import os
 import re
 import logging
 from comicapi.comicarchive import ComicArchive
+from config import get_filename_format
 
 # Set up logging to file and stdout (same as watcher.py)
 logging.basicConfig(
@@ -26,6 +27,63 @@ def parse_chapter_number(filename):
         if (not re.search(r'[\(\[]$', before)) and (not re.search(r'^[\)\]]', after)):
             return m.group()
     return None
+
+def format_filename(template, tags, issue_number):
+    """
+    Format filename based on template and available tags
+    
+    Supported placeholders:
+    {series} - Series name
+    {issue} - Issue number (padded to 4 digits)
+    {issue_no_pad} - Issue number (no padding)
+    {title} - Issue title
+    {volume} - Volume number
+    {year} - Publication year
+    {publisher} - Publisher name
+    """
+    # Parse issue number into integer and decimal parts
+    try:
+        issue_float = float(issue_number)
+        integer = int(issue_float)
+        decimal = round((issue_float - integer) * 100)
+        issue_padded = f"{integer:04d}"
+        if decimal:
+            issue_formatted = f"{issue_padded}.{decimal}"
+            issue_no_pad = f"{integer}.{decimal}"
+        else:
+            issue_formatted = issue_padded
+            issue_no_pad = str(integer)
+    except:
+        issue_formatted = str(issue_number)
+        issue_no_pad = str(issue_number)
+    
+    # Build replacement dictionary
+    replacements = {
+        'series': tags.series or '',
+        'issue': issue_formatted,
+        'issue_no_pad': issue_no_pad,
+        'title': tags.title or '',
+        'volume': str(tags.volume) if tags.volume else '',
+        'year': str(tags.year) if tags.year else '',
+        'publisher': tags.publisher or ''
+    }
+    
+    # Replace placeholders
+    result = template
+    for key, value in replacements.items():
+        result = result.replace(f'{{{key}}}', str(value))
+    
+    # Clean up any remaining unreplaced placeholders
+    result = re.sub(r'\{[^}]+\}', '', result)
+    
+    # Clean up extra spaces and ensure proper extension
+    result = re.sub(r'\s+', ' ', result).strip()
+    
+    # Ensure .cbz extension
+    if not result.lower().endswith('.cbz'):
+        result += '.cbz'
+    
+    return result
 
 def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comicfolder=None):
     logging.info(f"Processing file: {filepath}")
@@ -96,21 +154,15 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
 
     # Filename logic
     if fixfilename:
-        if not comicfolder:
-            comicfolder = os.path.dirname(filepath)
-        seriesname = os.path.basename(comicfolder)
-        seriesname = re.sub(r"\(\*\)|\[\*\]", "", seriesname).strip()
         num = issue_number
-        if seriesname and num:
+        if num:
             try:
-                issue_float = float(num)
-                integer = int(issue_float)
-                decimal = round((issue_float - integer) * 100)
-                issueNumberFormatted = f"{integer:04d}"
-                if decimal:
-                    newFileName = f"{seriesname} - Chapter {issueNumberFormatted}.{decimal}.cbz"
-                else:
-                    newFileName = f"{seriesname} - Chapter {issueNumberFormatted}.cbz"
+                # Get filename format template
+                filename_template = get_filename_format()
+                
+                # Format the new filename
+                newFileName = format_filename(filename_template, tags, num)
+                
                 newFilePath = os.path.join(os.path.dirname(filepath), newFileName)
                 if os.path.abspath(filepath) != os.path.abspath(newFilePath):
                     if os.path.exists(newFilePath):
@@ -137,9 +189,9 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
                 else:
                     logging.info(f"Filename already correct for {os.path.basename(filepath)}, skipping rename.")
             except Exception as e:
-                logging.info(f"Could not extract series or issue number for {os.path.basename(filepath)}. Skipping rename... {e}")
+                logging.info(f"Could not format filename for {os.path.basename(filepath)}. Skipping rename... {e}")
         else:
-            logging.info(f"Could not extract series or issue number for {os.path.basename(filepath)}. Skipping rename...")
+            logging.info(f"Could not extract issue number for {os.path.basename(filepath)}. Skipping rename...")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

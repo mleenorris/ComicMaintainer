@@ -5,6 +5,60 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Comic Maintainer - Web Interface</title>
     <style>
+        :root {
+            --bg-primary: #f5f5f5;
+            --bg-secondary: white;
+            --bg-tertiary: #ecf0f1;
+            --bg-header: #2c3e50;
+            --bg-hover: #f8f9fa;
+            --bg-hover-alt: #e9ecef;
+            --bg-indented: #fafafa;
+            --bg-indented-hover: #f0f0f0;
+            
+            --text-primary: #333;
+            --text-secondary: #2c3e50;
+            --text-muted: #7f8c8d;
+            --text-light: #95a5a6;
+            --text-header: white;
+            
+            --border-primary: #ecf0f1;
+            --border-secondary: #bdc3c7;
+            --border-tertiary: #e0e0e0;
+            --border-input: #ddd;
+            
+            --shadow-sm: 0 2px 4px rgba(0,0,0,0.1);
+            --shadow-md: 0 4px 20px rgba(0,0,0,0.3);
+            
+            --modal-overlay: rgba(0,0,0,0.5);
+        }
+        
+        [data-theme="dark"] {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2d2d2d;
+            --bg-tertiary: #3a3a3a;
+            --bg-header: #1f2937;
+            --bg-hover: #3a3a3a;
+            --bg-hover-alt: #404040;
+            --bg-indented: #252525;
+            --bg-indented-hover: #303030;
+            
+            --text-primary: #e5e5e5;
+            --text-secondary: #d1d5db;
+            --text-muted: #9ca3af;
+            --text-light: #6b7280;
+            --text-header: white;
+            
+            --border-primary: #404040;
+            --border-secondary: #4a4a4a;
+            --border-tertiary: #3a3a3a;
+            --border-input: #4a4a4a;
+            
+            --shadow-sm: 0 2px 4px rgba(0,0,0,0.3);
+            --shadow-md: 0 4px 20px rgba(0,0,0,0.5);
+            
+            --modal-overlay: rgba(0,0,0,0.7);
+        }
+        
         * {
             margin: 0;
             padding: 0;
@@ -13,15 +67,16 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f5f5f5;
-            color: #333;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            transition: background-color 0.3s, color 0.3s;
         }
         
         .header {
-            background: #2c3e50;
-            color: white;
+            background: var(--bg-header);
+            color: var(--text-header);
             padding: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: var(--shadow-sm);
         }
         
         .header h1 {
@@ -30,6 +85,27 @@
         
         .header-actions {
             margin-top: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .theme-toggle {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: var(--text-header);
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .theme-toggle:hover {
+            background: rgba(255, 255, 255, 0.2);
         }
         
         .container {
@@ -39,11 +115,11 @@
         }
         
         .actions-bar {
-            background: white;
+            background: var(--bg-secondary);
             padding: 15px;
             margin-bottom: 20px;
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: var(--shadow-sm);
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
@@ -102,28 +178,28 @@
         }
         
         .file-list {
-            background: white;
+            background: var(--bg-secondary);
             border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: var(--shadow-sm);
             overflow: hidden;
         }
         
         .file-list-header {
-            background: #ecf0f1;
+            background: var(--bg-tertiary);
             padding: 15px;
             font-weight: 600;
             display: grid;
             grid-template-columns: 40px 1fr 150px 100px;
             gap: 10px;
-            border-bottom: 2px solid #bdc3c7;
+            border-bottom: 2px solid var(--border-secondary);
         }
         
         .directory-header {
             padding: 12px 15px;
-            background: #f8f9fa;
-            border-bottom: 1px solid #e0e0e0;
+            background: var(--bg-hover);
+            border-bottom: 1px solid var(--border-tertiary);
             font-weight: 600;
-            color: #2c3e50;
+            color: var(--text-secondary);
             display: flex;
             align-items: center;
             gap: 8px;
@@ -140,7 +216,7 @@
         }
         
         .directory-header:hover {
-            background: #e9ecef;
+            background: var(--bg-hover-alt);
         }
         
         .directory-toggle {
@@ -171,7 +247,7 @@
         
         .directory-file-count {
             font-size: 12px;
-            color: #7f8c8d;
+            color: var(--text-muted);
             font-weight: normal;
             flex-shrink: 0;
         }
@@ -189,22 +265,22 @@
             display: grid;
             grid-template-columns: 40px 1fr 150px 100px;
             gap: 10px;
-            border-bottom: 1px solid #ecf0f1;
+            border-bottom: 1px solid var(--border-primary);
             align-items: center;
             transition: background 0.2s;
         }
         
         .file-item.indented {
             padding-left: 35px;
-            background: #fafafa;
+            background: var(--bg-indented);
         }
         
         .file-item:hover {
-            background: #f8f9fa;
+            background: var(--bg-hover);
         }
         
         .file-item.indented:hover {
-            background: #f0f0f0;
+            background: var(--bg-indented-hover);
         }
         
         .file-item input[type="checkbox"] {
@@ -215,12 +291,12 @@
         
         .file-name {
             font-weight: 500;
-            color: #2c3e50;
+            color: var(--text-secondary);
         }
         
         .file-path {
             font-size: 12px;
-            color: #7f8c8d;
+            color: var(--text-muted);
             margin-top: 3px;
         }
         
@@ -241,7 +317,7 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.5);
+            background: var(--modal-overlay);
             z-index: 1000;
             overflow-y: auto;
         }
@@ -254,18 +330,18 @@
         }
         
         .modal-content {
-            background: white;
+            background: var(--bg-secondary);
             border-radius: 8px;
             max-width: 800px;
             width: 100%;
             max-height: 90vh;
             overflow-y: auto;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            box-shadow: var(--shadow-md);
         }
         
         .modal-header {
             padding: 20px;
-            border-bottom: 1px solid #ecf0f1;
+            border-bottom: 1px solid var(--border-primary);
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -273,6 +349,7 @@
         
         .modal-header h2 {
             margin: 0;
+            color: var(--text-primary);
         }
         
         .close-btn {
@@ -280,11 +357,11 @@
             border: none;
             font-size: 24px;
             cursor: pointer;
-            color: #95a5a6;
+            color: var(--text-light);
         }
         
         .close-btn:hover {
-            color: #7f8c8d;
+            color: var(--text-muted);
         }
         
         .modal-body {
@@ -299,17 +376,19 @@
             display: block;
             margin-bottom: 5px;
             font-weight: 500;
-            color: #2c3e50;
+            color: var(--text-secondary);
         }
         
         .form-group input,
         .form-group textarea {
             width: 100%;
             padding: 10px;
-            border: 1px solid #ddd;
+            border: 1px solid var(--border-input);
             border-radius: 5px;
             font-size: 14px;
             font-family: inherit;
+            background: var(--bg-primary);
+            color: var(--text-primary);
         }
         
         .form-group textarea {
@@ -319,7 +398,7 @@
         
         .modal-footer {
             padding: 20px;
-            border-top: 1px solid #ecf0f1;
+            border-top: 1px solid var(--border-primary);
             display: flex;
             justify-content: flex-end;
             gap: 10px;
@@ -328,7 +407,7 @@
         .loading {
             text-align: center;
             padding: 40px;
-            color: #7f8c8d;
+            color: var(--text-muted);
         }
         
         .spinner {
@@ -372,14 +451,14 @@
         
         .select-info {
             margin-left: auto;
-            color: #7f8c8d;
+            color: var(--text-muted);
             font-size: 14px;
         }
         
         .empty-state {
             text-align: center;
             padding: 60px 20px;
-            color: #95a5a6;
+            color: var(--text-light);
         }
         
         .empty-state-icon {
@@ -537,6 +616,12 @@
         <div class="container">
             <h1>Comic Maintainer</h1>
             <p>Manage and process comic files in your watched directory</p>
+            <div class="header-actions">
+                <button class="theme-toggle" onclick="toggleTheme()">
+                    <span id="themeIcon">🌙</span>
+                    <span id="themeText">Dark Mode</span>
+                </button>
+            </div>
         </div>
     </div>
     
@@ -669,8 +754,58 @@
         let currentEditFile = null;
         let collapsedDirectories = new Set();
         
+        // Theme management
+        function initTheme() {
+            // Check if user has a saved preference
+            const savedTheme = localStorage.getItem('theme');
+            
+            if (savedTheme) {
+                // Use saved preference
+                setTheme(savedTheme);
+            } else {
+                // Use system preference
+                const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                setTheme(prefersDark ? 'dark' : 'light');
+            }
+            
+            // Listen for system theme changes
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+                // Only auto-switch if user hasn't set a preference
+                if (!localStorage.getItem('theme')) {
+                    setTheme(e.matches ? 'dark' : 'light');
+                }
+            });
+        }
+        
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            updateThemeButton(theme);
+        }
+        
+        function updateThemeButton(theme) {
+            const icon = document.getElementById('themeIcon');
+            const text = document.getElementById('themeText');
+            
+            if (theme === 'dark') {
+                icon.textContent = '☀️';
+                text.textContent = 'Light Mode';
+            } else {
+                icon.textContent = '🌙';
+                text.textContent = 'Dark Mode';
+            }
+        }
+        
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            
+            setTheme(newTheme);
+            localStorage.setItem('theme', newTheme);
+        }
+        
         // Load files on page load
         document.addEventListener('DOMContentLoaded', function() {
+            initTheme();
             loadFiles();
         });
         

@@ -23,6 +23,7 @@ app = Flask(__name__)
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
 WEB_MODIFIED_MARKER = '.web_modified'
+PROCESSED_MARKER = '.processed_files'
 
 # Global lock file to mark files modified by web interface
 web_modified_files = set()
@@ -56,6 +57,42 @@ def clear_web_modified(filepath):
         abs_path = os.path.abspath(filepath)
         if abs_path in web_modified_files:
             web_modified_files.discard(abs_path)
+
+def mark_file_processed(filepath):
+    """Mark a file as processed"""
+    marker_path = os.path.join(os.path.dirname(filepath), PROCESSED_MARKER)
+    try:
+        filename = os.path.basename(filepath)
+        # Read existing processed files
+        processed_files = set()
+        if os.path.exists(marker_path):
+            with open(marker_path, 'r') as f:
+                processed_files = set(f.read().splitlines())
+        
+        # Add current file
+        processed_files.add(filename)
+        
+        # Write back
+        with open(marker_path, 'w') as f:
+            f.write('\n'.join(sorted(processed_files)))
+        logging.info(f"Marked {filepath} as processed")
+    except Exception as e:
+        logging.error(f"Error marking file as processed: {e}")
+
+def is_file_processed(filepath):
+    """Check if a file has been processed"""
+    marker_path = os.path.join(os.path.dirname(filepath), PROCESSED_MARKER)
+    if not os.path.exists(marker_path):
+        return False
+    
+    try:
+        with open(marker_path, 'r') as f:
+            processed_files = set(f.read().splitlines())
+            filename = os.path.basename(filepath)
+            return filename in processed_files
+    except Exception as e:
+        logging.error(f"Error checking if file is processed: {e}")
+        return False
 
 def cleanup_web_markers():
     """Periodically clean up old web modified markers"""
@@ -321,7 +358,8 @@ def list_files():
             'name': os.path.basename(f),
             'relative_path': rel_path,
             'size': os.path.getsize(f),
-            'modified': os.path.getmtime(f)
+            'modified': os.path.getmtime(f),
+            'processed': is_file_processed(f)
         })
     
     return jsonify({
@@ -407,6 +445,10 @@ def process_all_files():
             
             # Process the file
             process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+            
+            # Mark as processed
+            mark_file_processed(filepath)
+            
             results.append({
                 'file': os.path.basename(filepath),
                 'success': True
@@ -438,6 +480,10 @@ def process_single_file(filepath):
         
         # Process the file
         process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+        
+        # Mark as processed
+        mark_file_processed(full_path)
+        
         logging.info(f"Processed file via web interface: {full_path}")
         return jsonify({'success': True})
     except Exception as e:
@@ -474,6 +520,10 @@ def process_selected_files():
             
             # Process the file
             process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+            
+            # Mark as processed
+            mark_file_processed(full_path)
+            
             results.append({
                 'file': os.path.basename(filepath),
                 'success': True
@@ -513,6 +563,25 @@ def set_filename_format_api():
         return jsonify({'success': True, 'format': format_string})
     else:
         return jsonify({'error': 'Failed to save filename format'}), 500
+
+@app.route('/api/scan-unmarked', methods=['GET'])
+def scan_unmarked_files():
+    """API endpoint to scan for unmarked files"""
+    files = get_comic_files(use_cache=False)
+    unmarked_files = []
+    marked_files = []
+    
+    for filepath in files:
+        if is_file_processed(filepath):
+            marked_files.append(filepath)
+        else:
+            unmarked_files.append(filepath)
+    
+    return jsonify({
+        'unmarked_count': len(unmarked_files),
+        'marked_count': len(marked_files),
+        'total_count': len(files)
+    })
 
 if __name__ == '__main__':
     if not WATCHED_DIR:

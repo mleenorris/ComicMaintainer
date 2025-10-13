@@ -214,7 +214,7 @@
             padding: 15px;
             font-weight: 600;
             display: grid;
-            grid-template-columns: 40px 1fr 150px 100px;
+            grid-template-columns: 40px 1fr 150px 180px;
             gap: 10px;
             border-bottom: 2px solid var(--border-secondary);
         }
@@ -288,7 +288,7 @@
         .file-item {
             padding: 15px;
             display: grid;
-            grid-template-columns: 40px 1fr 150px 100px;
+            grid-template-columns: 40px 1fr 150px 180px;
             gap: 10px;
             border-bottom: 1px solid var(--border-primary);
             align-items: center;
@@ -702,6 +702,9 @@
             <button class="btn btn-primary" onclick="refreshFiles()">
                 🔄 Refresh
             </button>
+            <button class="btn btn-primary" onclick="scanUnmarkedFiles()">
+                🔍 Scan Unmarked
+            </button>
             <button class="btn btn-primary" onclick="toggleAllFolders()" id="toggleAllBtn">
                 📂 Collapse All
             </button>
@@ -709,6 +712,18 @@
                 ⚙️ Settings
             </button>
             <span class="select-info" id="selectInfo">No files selected</span>
+        </div>
+        
+        <div class="actions-bar" style="margin-top: -10px;">
+            <button class="btn" onclick="setFilter('all')" id="filterAll" style="background: #3498db; color: white;">
+                📚 All Files
+            </button>
+            <button class="btn" onclick="setFilter('unmarked')" id="filterUnmarked">
+                ⚠️ Unmarked Only
+            </button>
+            <button class="btn" onclick="setFilter('marked')" id="filterMarked">
+                ✅ Marked Only
+            </button>
         </div>
         
         <div class="search-bar">
@@ -892,6 +907,7 @@
         let totalPages = 1;
         let totalFiles = 0;
         let perPage = parseInt(localStorage.getItem('perPage')) || 100;
+        let filterMode = 'all'; // 'all', 'marked', 'unmarked'
         
         // Theme management
         function initTheme() {
@@ -1017,6 +1033,32 @@
             renderFileList();
         }
         
+        function setFilter(mode) {
+            filterMode = mode;
+            
+            // Update button styles
+            document.getElementById('filterAll').style.background = mode === 'all' ? '#3498db' : '';
+            document.getElementById('filterAll').style.color = mode === 'all' ? 'white' : '';
+            document.getElementById('filterUnmarked').style.background = mode === 'unmarked' ? '#e67e22' : '';
+            document.getElementById('filterUnmarked').style.color = mode === 'unmarked' ? 'white' : '';
+            document.getElementById('filterMarked').style.background = mode === 'marked' ? '#27ae60' : '';
+            document.getElementById('filterMarked').style.color = mode === 'marked' ? 'white' : '';
+            
+            renderFileList();
+        }
+        
+        async function scanUnmarkedFiles() {
+            try {
+                showMessage('Scanning for unmarked files...', 'info');
+                const response = await fetch('/api/scan-unmarked');
+                const data = await response.json();
+                
+                showMessage(`Found ${data.unmarked_count} unmarked file(s) and ${data.marked_count} marked file(s) out of ${data.total_count} total files.`, 'success');
+            } catch (error) {
+                showMessage('Failed to scan files: ' + error.message, 'error');
+            }
+        }
+        
         function renderFileList() {
             const fileList = document.getElementById('fileList');
             
@@ -1031,14 +1073,24 @@
                 return;
             }
             
-            // Filter files based on search query
-            const filteredFiles = searchQuery 
-                ? files.filter(file => {
-                    const query = searchQuery.toLowerCase();
+            // Filter files based on search query and processing status
+            let filteredFiles = files;
+            
+            // Apply processing status filter
+            if (filterMode === 'marked') {
+                filteredFiles = filteredFiles.filter(file => file.processed);
+            } else if (filterMode === 'unmarked') {
+                filteredFiles = filteredFiles.filter(file => !file.processed);
+            }
+            
+            // Apply search filter
+            if (searchQuery) {
+                const query = searchQuery.toLowerCase();
+                filteredFiles = filteredFiles.filter(file => {
                     return file.name.toLowerCase().includes(query) || 
                            file.relative_path.toLowerCase().includes(query);
-                })
-                : files;
+                });
+            }
             
             // Show message if no results found
             if (filteredFiles.length === 0) {
@@ -1106,13 +1158,17 @@
                 filesByDirectory[dir].forEach(file => {
                     const isSelected = selectedFiles.has(file.relative_path);
                     const fileSize = formatFileSize(file.size);
+                    const processedBadge = file.processed ? '✅' : '⚠️';
+                    const processedTitle = file.processed ? 'Processed' : 'Not processed yet';
                     html += `
                         <div class="file-item ${dir ? 'indented' : ''}">
                             <input type="checkbox" 
                                    ${isSelected ? 'checked' : ''} 
                                    onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
                             <div>
-                                <div class="file-name">${escapeHtml(file.name)}</div>
+                                <div class="file-name">
+                                    <span title="${processedTitle}">${processedBadge}</span> ${escapeHtml(file.name)}
+                                </div>
                                 ${!dir ? `<div class="file-path">${escapeHtml(file.relative_path)}</div>` : ''}
                             </div>
                             <div>${fileSize}</div>

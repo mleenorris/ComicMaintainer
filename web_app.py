@@ -25,6 +25,7 @@ WATCHED_DIR = os.environ.get('WATCHED_DIR')
 WEB_MODIFIED_MARKER = '.web_modified'
 PROCESSED_MARKER = '.processed_files'
 DUPLICATE_MARKER = '.duplicate_files'
+CACHE_UPDATE_MARKER = '.cache_update'
 
 # Global lock file to mark files modified by web interface
 web_modified_files = set()
@@ -34,7 +35,8 @@ lock = threading.Lock()
 file_list_cache = {
     'files': None,
     'timestamp': 0,
-    'cache_duration': 30  # Cache for 30 seconds
+    'cache_duration': 30,  # Cache for 30 seconds
+    'watcher_update_time': 0  # Track last watcher update time
 }
 cache_lock = threading.Lock()
 
@@ -153,6 +155,20 @@ def cleanup_web_markers():
 cleanup_thread = threading.Thread(target=cleanup_web_markers, daemon=True)
 cleanup_thread.start()
 
+def get_watcher_update_time():
+    """Get the last time the watcher updated files"""
+    if not WATCHED_DIR:
+        return 0
+    
+    marker_path = os.path.join(WATCHED_DIR, CACHE_UPDATE_MARKER)
+    if os.path.exists(marker_path):
+        try:
+            with open(marker_path, 'r') as f:
+                return float(f.read().strip())
+        except:
+            return 0
+    return 0
+
 def get_comic_files(use_cache=True):
     """Get all comic files in the watched directory with optional caching"""
     if not WATCHED_DIR:
@@ -162,6 +178,15 @@ def get_comic_files(use_cache=True):
     if use_cache:
         with cache_lock:
             current_time = time.time()
+            watcher_update_time = get_watcher_update_time()
+            
+            # Invalidate cache if watcher has processed files since cache was created
+            if watcher_update_time > file_list_cache['watcher_update_time']:
+                logging.info("Cache invalidated: watcher has processed files")
+                file_list_cache['files'] = None
+                file_list_cache['watcher_update_time'] = watcher_update_time
+            
+            # Return cached files if still valid
             if (file_list_cache['files'] is not None and 
                 current_time - file_list_cache['timestamp'] < file_list_cache['cache_duration']):
                 return file_list_cache['files']
@@ -178,6 +203,7 @@ def get_comic_files(use_cache=True):
         with cache_lock:
             file_list_cache['files'] = sorted_files
             file_list_cache['timestamp'] = time.time()
+            file_list_cache['watcher_update_time'] = get_watcher_update_time()
     
     return sorted_files
 

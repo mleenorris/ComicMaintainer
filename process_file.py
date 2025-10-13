@@ -16,6 +16,28 @@ logging.basicConfig(
 )
 
 DUPLICATE_MARKER = '.duplicate_files'
+PROCESSED_MARKER = '.processed_files'
+
+def mark_file_processed(filepath):
+    """Mark a file as processed"""
+    marker_path = os.path.join(os.path.dirname(filepath), PROCESSED_MARKER)
+    try:
+        filename = os.path.basename(filepath)
+        # Read existing processed files
+        processed_files = set()
+        if os.path.exists(marker_path):
+            with open(marker_path, 'r') as f:
+                processed_files = set(f.read().splitlines())
+        
+        # Add current file
+        processed_files.add(filename)
+        
+        # Write back
+        with open(marker_path, 'w') as f:
+            f.write('\n'.join(sorted(processed_files)))
+        logging.info(f"Marked {filepath} as processed")
+    except Exception as e:
+        logging.error(f"Error marking file as processed: {e}")
 
 def mark_file_duplicate(filepath):
     """Mark a file as a duplicate"""
@@ -109,8 +131,15 @@ def format_filename(template, tags, issue_number):
     return result
 
 def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comicfolder=None):
+    """
+    Process a comic file.
+    
+    Returns:
+        str: The final filepath (may be different if file was renamed), or None if file was moved to duplicates
+    """
     logging.info(f"Processing file: {filepath}")
     ca = ComicArchive(filepath)
+    final_filepath = filepath  # Track the final filepath
 
     tags = ca.read_tags('cr')
     tagschanged = False
@@ -201,6 +230,7 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
                         try:
                             logging.info(f"Duplicate detected. Moving {filepath} to {dest_path}")
                             #os.rename(filepath, dest_path)
+                            # If we uncomment the move, set final_filepath = None to indicate file was moved away
                         except Exception as e:
                             logging.info(f"Error moving duplicate file {os.path.basename(filepath)}: {e}")
                     else:
@@ -208,13 +238,21 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
                 else:
                     logging.info(f"Renaming file to: {newFileName}")
                     try:
+                        # Mark the old filename as processed before renaming
+                        mark_file_processed(filepath)
+                        # Perform the rename
                         os.rename(filepath, newFilePath)
+                        # Mark the new filename as processed after renaming
+                        mark_file_processed(newFilePath)
+                        final_filepath = newFilePath  # Update to new filepath after successful rename
                     except Exception as e:
                         logging.info(f"Error renaming file {os.path.basename(filepath)}: {e}")
             else:
                 logging.info(f"Filename already correct for {os.path.basename(filepath)}, skipping rename.")
         except Exception as e:
             logging.info(f"Could not format filename for {os.path.basename(filepath)}. Skipping rename... {e}")
+    
+    return final_filepath
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

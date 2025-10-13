@@ -481,11 +481,17 @@ def process_all_files():
             # Mark as web modified to prevent watcher from processing
             mark_web_modified(filepath)
             
-            # Process the file
-            process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+            # Process the file (returns new path if renamed, otherwise original path)
+            new_path = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             
-            # Mark as processed
-            mark_file_processed(filepath)
+            # Mark both old and new paths as processed (process_file already does this, but for safety)
+            if new_path and new_path != filepath:
+                # File was renamed, mark both
+                mark_file_processed(filepath)
+                mark_file_processed(new_path)
+            else:
+                # File was not renamed, mark original
+                mark_file_processed(filepath)
             
             results.append({
                 'file': os.path.basename(filepath),
@@ -516,11 +522,17 @@ def process_single_file(filepath):
         # Mark as web modified to prevent watcher from processing
         mark_web_modified(full_path)
         
-        # Process the file
-        process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+        # Process the file (returns new path if renamed, otherwise original path)
+        new_path = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
         
-        # Mark as processed
-        mark_file_processed(full_path)
+        # Mark both old and new paths as processed (process_file already does this, but for safety)
+        if new_path and new_path != full_path:
+            # File was renamed, mark both
+            mark_file_processed(full_path)
+            mark_file_processed(new_path)
+        else:
+            # File was not renamed, mark original
+            mark_file_processed(full_path)
         
         logging.info(f"Processed file via web interface: {full_path}")
         return jsonify({'success': True})
@@ -556,11 +568,17 @@ def process_selected_files():
             # Mark as web modified to prevent watcher from processing
             mark_web_modified(full_path)
             
-            # Process the file
-            process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+            # Process the file (returns new path if renamed, otherwise original path)
+            new_path = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
             
-            # Mark as processed
-            mark_file_processed(full_path)
+            # Mark both old and new paths as processed (process_file already does this, but for safety)
+            if new_path and new_path != full_path:
+                # File was renamed, mark both
+                mark_file_processed(full_path)
+                mark_file_processed(new_path)
+            else:
+                # File was not renamed, mark original
+                mark_file_processed(full_path)
             
             results.append({
                 'file': os.path.basename(filepath),
@@ -641,11 +659,17 @@ def process_unmarked_files():
             # Mark as web modified to prevent watcher from processing
             mark_web_modified(filepath)
             
-            # Process the file
-            process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+            # Process the file (returns new path if renamed, otherwise original path)
+            new_path = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             
-            # Mark as processed
-            mark_file_processed(filepath)
+            # Mark both old and new paths as processed (process_file already does this, but for safety)
+            if new_path and new_path != filepath:
+                # File was renamed, mark both
+                mark_file_processed(filepath)
+                mark_file_processed(new_path)
+            else:
+                # File was not renamed, mark original
+                mark_file_processed(filepath)
             
             results.append({
                 'file': os.path.basename(filepath),

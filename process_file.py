@@ -154,44 +154,41 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
 
     # Filename logic
     if fixfilename:
-        num = issue_number
-        if num:
-            try:
-                # Get filename format template
-                filename_template = get_filename_format()
-                
-                # Format the new filename
-                newFileName = format_filename(filename_template, tags, num)
-                
-                newFilePath = os.path.join(os.path.dirname(filepath), newFileName)
-                if os.path.abspath(filepath) != os.path.abspath(newFilePath):
-                    if os.path.exists(newFilePath):
-                        duplicate_dir = os.environ.get('DUPLICATE_DIR')
-                        if duplicate_dir:
-                            # Place under DUPLICATE_DIR/original_parent_folder/filename
-                            original_parent = os.path.basename(os.path.dirname(filepath))
-                            target_dir = os.path.join(duplicate_dir, original_parent)
-                            os.makedirs(target_dir, exist_ok=True)
-                            dest_path = os.path.join(target_dir, os.path.basename(filepath))
-                            try:
-                                logging.info(f"Duplicate detected. Moving {filepath} to {dest_path}")
-                                #os.rename(filepath, dest_path)
-                            except Exception as e:
-                                logging.info(f"Error moving duplicate file {os.path.basename(filepath)}: {e}")
-                        else:
-                            logging.info(f"A file with the name {newFileName} already exists. Skipping rename for {os.path.basename(filepath)}. DUPLICATE_DIR not set.")
-                    else:
-                        logging.info(f"Renaming file to: {newFileName}")
+        try:
+            tags = ca.read_tags('cr')
+            # Get filename format template
+            filename_template = get_filename_format()
+            
+            # Format the new filename
+            newFileName = format_filename(filename_template, tags, num)
+            
+            newFilePath = os.path.join(os.path.dirname(filepath), newFileName)
+            if os.path.abspath(filepath) != os.path.abspath(newFilePath):
+                if os.path.exists(newFilePath):
+                    duplicate_dir = os.environ.get('DUPLICATE_DIR')
+                    if duplicate_dir:
+                        # Place under DUPLICATE_DIR/original_parent_folder/filename
+                        original_parent = os.path.basename(os.path.dirname(filepath))
+                        target_dir = os.path.join(duplicate_dir, original_parent)
+                        os.makedirs(target_dir, exist_ok=True)
+                        dest_path = os.path.join(target_dir, os.path.basename(filepath))
                         try:
-                            os.rename(filepath, newFilePath)
+                            logging.info(f"Duplicate detected. Moving {filepath} to {dest_path}")
+                            #os.rename(filepath, dest_path)
                         except Exception as e:
-                            logging.info(f"Error renaming file {os.path.basename(filepath)}: {e}")
+                            logging.info(f"Error moving duplicate file {os.path.basename(filepath)}: {e}")
+                    else:
+                        logging.info(f"A file with the name {newFileName} already exists. Skipping rename for {os.path.basename(filepath)}. DUPLICATE_DIR not set.")
                 else:
-                    logging.info(f"Filename already correct for {os.path.basename(filepath)}, skipping rename.")
-            except Exception as e:
-                logging.info(f"Could not format filename for {os.path.basename(filepath)}. Skipping rename... {e}")
-        else:
-            logging.info(f"Could not extract issue number for {os.path.basename(filepath)}. Skipping rename...")
+                    logging.info(f"Renaming file to: {newFileName}")
+                    try:
+                        os.rename(filepath, newFilePath)
+                    except Exception as e:
+                        logging.info(f"Error renaming file {os.path.basename(filepath)}: {e}")
+            else:
+                logging.info(f"Filename already correct for {os.path.basename(filepath)}, skipping rename.")
+        except Exception as e:
+            logging.info(f"Could not format filename for {os.path.basename(filepath)}. Skipping rename... {e}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

@@ -509,6 +509,74 @@ def process_all_files():
     
     return jsonify({'results': results})
 
+@app.route('/api/rename-all', methods=['POST'])
+def rename_all_files():
+    """API endpoint to rename all files in the watched directory"""
+    from process_file import process_file
+    
+    files = get_comic_files()
+    results = []
+    
+    for filepath in files:
+        try:
+            # Mark as web modified to prevent watcher from processing
+            mark_web_modified(filepath)
+            
+            # Only rename the file
+            final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+            
+            # Mark as processed using the final filepath
+            mark_file_processed(final_filepath)
+            
+            results.append({
+                'file': os.path.basename(final_filepath),
+                'success': True
+            })
+            logging.info(f"Renamed file via web interface: {filepath} -> {final_filepath}")
+        except Exception as e:
+            results.append({
+                'file': os.path.basename(filepath),
+                'success': False,
+                'error': str(e)
+            })
+            logging.error(f"Error renaming file {filepath}: {e}")
+    
+    return jsonify({'results': results})
+
+@app.route('/api/normalize-all', methods=['POST'])
+def normalize_all_files():
+    """API endpoint to normalize metadata for all files in the watched directory"""
+    from process_file import process_file
+    
+    files = get_comic_files()
+    results = []
+    
+    for filepath in files:
+        try:
+            # Mark as web modified to prevent watcher from processing
+            mark_web_modified(filepath)
+            
+            # Only normalize metadata
+            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+            
+            # Mark as processed using the final filepath
+            mark_file_processed(final_filepath)
+            
+            results.append({
+                'file': os.path.basename(final_filepath),
+                'success': True
+            })
+            logging.info(f"Normalized metadata for file via web interface: {filepath}")
+        except Exception as e:
+            results.append({
+                'file': os.path.basename(filepath),
+                'success': False,
+                'error': str(e)
+            })
+            logging.error(f"Error normalizing metadata for file {filepath}: {e}")
+    
+    return jsonify({'results': results})
+
 @app.route('/api/process-file/<path:filepath>', methods=['POST'])
 def process_single_file(filepath):
     """API endpoint to process a single file"""
@@ -533,6 +601,58 @@ def process_single_file(filepath):
         return jsonify({'success': True})
     except Exception as e:
         logging.error(f"Error processing file {full_path}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/rename-file/<path:filepath>', methods=['POST'])
+def rename_single_file(filepath):
+    """API endpoint to rename a single file based on metadata"""
+    from process_file import process_file
+    
+    full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+    
+    if not os.path.exists(full_path):
+        return jsonify({'error': 'File not found'}), 404
+    
+    try:
+        # Mark as web modified to prevent watcher from processing
+        mark_web_modified(full_path)
+        
+        # Only rename the file
+        final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
+        
+        # Mark as processed using the final filepath
+        mark_file_processed(final_filepath)
+        
+        logging.info(f"Renamed file via web interface: {full_path} -> {final_filepath}")
+        return jsonify({'success': True})
+    except Exception as e:
+        logging.error(f"Error renaming file {full_path}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/normalize-file/<path:filepath>', methods=['POST'])
+def normalize_single_file(filepath):
+    """API endpoint to normalize metadata for a single file"""
+    from process_file import process_file
+    
+    full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+    
+    if not os.path.exists(full_path):
+        return jsonify({'error': 'File not found'}), 404
+    
+    try:
+        # Mark as web modified to prevent watcher from processing
+        mark_web_modified(full_path)
+        
+        # Only normalize metadata
+        final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
+        
+        # Mark as processed using the final filepath
+        mark_file_processed(final_filepath)
+        
+        logging.info(f"Normalized metadata for file via web interface: {full_path}")
+        return jsonify({'success': True})
+    except Exception as e:
+        logging.error(f"Error normalizing metadata for file {full_path}: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/process-selected', methods=['POST'])
@@ -581,6 +701,104 @@ def process_selected_files():
                 'error': str(e)
             })
             logging.error(f"Error processing file {full_path}: {e}")
+    
+    return jsonify({'results': results})
+
+@app.route('/api/rename-selected', methods=['POST'])
+def rename_selected_files():
+    """API endpoint to rename selected files"""
+    from process_file import process_file
+    
+    data = request.json
+    file_list = data.get('files', [])
+    
+    if not file_list:
+        return jsonify({'error': 'No files specified'}), 400
+    
+    results = []
+    
+    for filepath in file_list:
+        full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+        
+        if not os.path.exists(full_path):
+            results.append({
+                'file': os.path.basename(filepath),
+                'success': False,
+                'error': 'File not found'
+            })
+            continue
+        
+        try:
+            # Mark as web modified to prevent watcher from processing
+            mark_web_modified(full_path)
+            
+            # Only rename the file
+            final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
+            
+            # Mark as processed using the final filepath
+            mark_file_processed(final_filepath)
+            
+            results.append({
+                'file': os.path.basename(final_filepath),
+                'success': True
+            })
+            logging.info(f"Renamed file via web interface: {full_path} -> {final_filepath}")
+        except Exception as e:
+            results.append({
+                'file': os.path.basename(filepath),
+                'success': False,
+                'error': str(e)
+            })
+            logging.error(f"Error renaming file {full_path}: {e}")
+    
+    return jsonify({'results': results})
+
+@app.route('/api/normalize-selected', methods=['POST'])
+def normalize_selected_files():
+    """API endpoint to normalize metadata for selected files"""
+    from process_file import process_file
+    
+    data = request.json
+    file_list = data.get('files', [])
+    
+    if not file_list:
+        return jsonify({'error': 'No files specified'}), 400
+    
+    results = []
+    
+    for filepath in file_list:
+        full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+        
+        if not os.path.exists(full_path):
+            results.append({
+                'file': os.path.basename(filepath),
+                'success': False,
+                'error': 'File not found'
+            })
+            continue
+        
+        try:
+            # Mark as web modified to prevent watcher from processing
+            mark_web_modified(full_path)
+            
+            # Only normalize metadata
+            final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
+            
+            # Mark as processed using the final filepath
+            mark_file_processed(final_filepath)
+            
+            results.append({
+                'file': os.path.basename(final_filepath),
+                'success': True
+            })
+            logging.info(f"Normalized metadata for file via web interface: {full_path}")
+        except Exception as e:
+            results.append({
+                'file': os.path.basename(filepath),
+                'success': False,
+                'error': str(e)
+            })
+            logging.error(f"Error normalizing metadata for file {full_path}: {e}")
     
     return jsonify({'results': results})
 
@@ -666,6 +884,88 @@ def process_unmarked_files():
                 'error': str(e)
             })
             logging.error(f"Error processing unmarked file {filepath}: {e}")
+    
+    return jsonify({'results': results})
+
+@app.route('/api/rename-unmarked', methods=['POST'])
+def rename_unmarked_files():
+    """API endpoint to rename only unmarked files"""
+    from process_file import process_file
+    
+    files = get_comic_files(use_cache=False)
+    unmarked_files = []
+    
+    # Filter to only unmarked files
+    for filepath in files:
+        if not is_file_processed(filepath):
+            unmarked_files.append(filepath)
+    
+    results = []
+    
+    for filepath in unmarked_files:
+        try:
+            # Mark as web modified to prevent watcher from processing
+            mark_web_modified(filepath)
+            
+            # Only rename the file
+            final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+            
+            # Mark as processed using the final filepath
+            mark_file_processed(final_filepath)
+            
+            results.append({
+                'file': os.path.basename(final_filepath),
+                'success': True
+            })
+            logging.info(f"Renamed unmarked file via web interface: {filepath} -> {final_filepath}")
+        except Exception as e:
+            results.append({
+                'file': os.path.basename(filepath),
+                'success': False,
+                'error': str(e)
+            })
+            logging.error(f"Error renaming unmarked file {filepath}: {e}")
+    
+    return jsonify({'results': results})
+
+@app.route('/api/normalize-unmarked', methods=['POST'])
+def normalize_unmarked_files():
+    """API endpoint to normalize metadata for only unmarked files"""
+    from process_file import process_file
+    
+    files = get_comic_files(use_cache=False)
+    unmarked_files = []
+    
+    # Filter to only unmarked files
+    for filepath in files:
+        if not is_file_processed(filepath):
+            unmarked_files.append(filepath)
+    
+    results = []
+    
+    for filepath in unmarked_files:
+        try:
+            # Mark as web modified to prevent watcher from processing
+            mark_web_modified(filepath)
+            
+            # Only normalize metadata
+            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+            
+            # Mark as processed using the final filepath
+            mark_file_processed(final_filepath)
+            
+            results.append({
+                'file': os.path.basename(final_filepath),
+                'success': True
+            })
+            logging.info(f"Normalized metadata for unmarked file via web interface: {filepath}")
+        except Exception as e:
+            results.append({
+                'file': os.path.basename(filepath),
+                'success': False,
+                'error': str(e)
+            })
+            logging.error(f"Error normalizing metadata for unmarked file {filepath}: {e}")
     
     return jsonify({'results': results})
 

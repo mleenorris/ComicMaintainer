@@ -35,7 +35,6 @@ lock = threading.Lock()
 file_list_cache = {
     'files': None,
     'timestamp': 0,
-    'cache_duration': 30,  # Cache for 30 seconds
     'watcher_update_time': 0  # Track last watcher update time
 }
 cache_lock = threading.Lock()
@@ -177,7 +176,6 @@ def get_comic_files(use_cache=True):
     # Check cache if enabled
     if use_cache:
         with cache_lock:
-            current_time = time.time()
             watcher_update_time = get_watcher_update_time()
             
             # Invalidate cache if watcher has processed files since cache was created
@@ -186,9 +184,8 @@ def get_comic_files(use_cache=True):
                 file_list_cache['files'] = None
                 file_list_cache['watcher_update_time'] = watcher_update_time
             
-            # Return cached files if still valid
-            if (file_list_cache['files'] is not None and 
-                current_time - file_list_cache['timestamp'] < file_list_cache['cache_duration']):
+            # Return cached files if valid (no time-based expiration)
+            if file_list_cache['files'] is not None:
                 return file_list_cache['files']
     
     # Build file list
@@ -1081,10 +1078,20 @@ def delete_single_file(filepath):
         logging.error(f"Error deleting file {full_path}: {e}")
         return jsonify({'error': str(e)}), 500
 
+def initialize_cache():
+    """Initialize file list cache on startup"""
+    if WATCHED_DIR:
+        logging.info("Initializing file list cache...")
+        get_comic_files(use_cache=True)
+        logging.info("File list cache initialized")
+
 if __name__ == '__main__':
     if not WATCHED_DIR:
         logging.error("WATCHED_DIR environment variable is not set. Exiting.")
         sys.exit(1)
+    
+    # Initialize cache on startup
+    initialize_cache()
     
     port = int(os.environ.get('WEB_PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)

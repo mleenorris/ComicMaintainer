@@ -123,11 +123,11 @@ The service includes a web-based interface for managing your comic files:
 
 ### Performance
 - Files are loaded in pages of 100 to ensure fast initial load times
-- File list is cached for 30 seconds to speed up page navigation
+- File list is cached on service startup and maintained in memory
+- Cache does not expire based on time, providing instant page navigation
 - Pagination controls allow easy navigation through large libraries
 - Search and filters are applied server-side before pagination for efficient handling of large libraries
-- Cache is automatically cleared when files are processed or modified
-- **Smart cache invalidation**: When the watcher processes files, it automatically signals the web app to refresh its cache on the next request
+- **Smart cache invalidation**: Cache is only invalidated when the watcher processes files, ensuring the cache stays fresh while maximizing performance
 
 ### Filename Format Configuration
 The filename format can be customized through the web interface Settings modal. The format uses placeholders that are replaced with actual metadata values:

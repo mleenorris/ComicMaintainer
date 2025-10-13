@@ -160,7 +160,7 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
             filename_template = get_filename_format()
             
             # Format the new filename
-            newFileName = format_filename(filename_template, tags, num)
+            newFileName = format_filename(filename_template, tags, tags.issue or '')
             
             newFilePath = os.path.join(os.path.dirname(filepath), newFileName)
             if os.path.abspath(filepath) != os.path.abspath(newFilePath):

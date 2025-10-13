@@ -693,6 +693,9 @@
             <button class="btn btn-success" onclick="processAllFiles()">
                 🚀 Process All Files
             </button>
+            <button class="btn btn-success" onclick="processUnmarkedFiles()">
+                ⚠️ Process Unmarked
+            </button>
             <button class="btn btn-success" onclick="processSelectedFiles()" id="processSelectedBtn" disabled>
                 ⚡ Process Selected
             </button>
@@ -1473,6 +1476,30 @@
                 await loadFiles(1, true);
             } catch (error) {
                 showMessage('Failed to process files: ' + error.message, 'error');
+            }
+        }
+        
+        async function processUnmarkedFiles() {
+            if (!confirm('This will process all unmarked files in the watched directory. Continue?')) {
+                return;
+            }
+            
+            showMessage('Processing unmarked files... This may take a while.', 'info');
+            
+            try {
+                const response = await fetch('/api/process-unmarked', {
+                    method: 'POST'
+                });
+                
+                const result = await response.json();
+                
+                const successCount = result.results.filter(r => r.success).length;
+                showMessage(`Processed ${successCount} of ${result.results.length} unmarked files successfully!`, 'success');
+                
+                // Refresh file list (force refresh to clear cache)
+                await loadFiles(1, true);
+            } catch (error) {
+                showMessage('Failed to process unmarked files: ' + error.message, 'error');
             }
         }
         

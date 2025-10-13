@@ -59,8 +59,8 @@ def clear_web_modified(filepath):
         if abs_path in web_modified_files:
             web_modified_files.discard(abs_path)
 
-def mark_file_processed(filepath):
-    """Mark a file as processed"""
+def mark_file_processed(filepath, original_filepath=None):
+    """Mark a file as processed, optionally cleaning up old filename if renamed"""
     marker_path = os.path.join(os.path.dirname(filepath), PROCESSED_MARKER)
     try:
         filename = os.path.basename(filepath)
@@ -69,6 +69,13 @@ def mark_file_processed(filepath):
         if os.path.exists(marker_path):
             with open(marker_path, 'r') as f:
                 processed_files = set(f.read().splitlines())
+        
+        # If file was renamed, remove the old filename from the marker
+        if original_filepath and original_filepath != filepath:
+            original_filename = os.path.basename(original_filepath)
+            if original_filename in processed_files:
+                processed_files.discard(original_filename)
+                logging.info(f"Removed old filename '{original_filename}' from processed marker after rename")
         
         # Add current file
         processed_files.add(filename)
@@ -484,8 +491,8 @@ def process_all_files():
             # Process the file and get the final filepath (may be renamed)
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             
-            # Mark as processed using the final filepath
-            mark_file_processed(final_filepath)
+            # Mark as processed using the final filepath, cleanup old filename if renamed
+            mark_file_processed(final_filepath, original_filepath=filepath)
             
             results.append({
                 'file': os.path.basename(final_filepath),
@@ -519,8 +526,8 @@ def process_single_file(filepath):
         # Process the file and get the final filepath (may be renamed)
         final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
         
-        # Mark as processed using the final filepath
-        mark_file_processed(final_filepath)
+        # Mark as processed using the final filepath, cleanup old filename if renamed
+        mark_file_processed(final_filepath, original_filepath=full_path)
         
         logging.info(f"Processed file via web interface: {full_path} -> {final_filepath}")
         return jsonify({'success': True})
@@ -559,8 +566,8 @@ def process_selected_files():
             # Process the file and get the final filepath (may be renamed)
             final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
             
-            # Mark as processed using the final filepath
-            mark_file_processed(final_filepath)
+            # Mark as processed using the final filepath, cleanup old filename if renamed
+            mark_file_processed(final_filepath, original_filepath=full_path)
             
             results.append({
                 'file': os.path.basename(final_filepath),
@@ -644,8 +651,8 @@ def process_unmarked_files():
             # Process the file and get the final filepath (may be renamed)
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             
-            # Mark as processed using the final filepath
-            mark_file_processed(final_filepath)
+            # Mark as processed using the final filepath, cleanup old filename if renamed
+            mark_file_processed(final_filepath, original_filepath=filepath)
             
             results.append({
                 'file': os.path.basename(final_filepath),

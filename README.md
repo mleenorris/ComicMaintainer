@@ -11,6 +11,8 @@ This service automatically watches a directory for new or changed comic archive 
 - Handles duplicate files: moves them to a duplicate directory, preserving the original folder structure
 - **Web Interface** for managing comic files:
   - One-click button to process all files in the watched directory
+  - Process only selected files with the "Process Selected" button
+  - Folder selection: click folder checkbox to select all files in a folder
   - View and edit tags for individual files
   - Batch update tags for multiple selected files
   - Smart handling to prevent watcher conflicts with web-modified files
@@ -73,17 +75,23 @@ The service includes a web-based interface for managing your comic files:
 
 ### Features
 - **Process All Files**: One-click button to process all comic files in the watched directory
+- **Process Selected Files**: Process only the files you've selected with checkboxes
+- **Folder Selection**: Click the checkbox next to any folder name to select/deselect all files in that folder
 - **View/Edit Individual Tags**: Click on any file to view and edit its metadata tags
 - **Batch Update**: Select multiple files and update common tags (series, publisher, year, writer) for all of them at once
 - **Smart Processing**: Files modified through the web interface are marked to prevent the watcher from re-processing them automatically
 
 ### Usage
 1. Access the web interface at `http://localhost:5000` (or your configured host/port)
-2. The interface will display all `.cbz` and `.cbr` files in your watched directory
-3. Use the checkboxes to select files for batch operations
+2. The interface will display all `.cbz` and `.cbr` files in your watched directory, organized by folder
+3. Use the checkboxes to select files for batch operations:
+   - Check individual files one at a time
+   - Check the folder checkbox to select/deselect all files in that folder
+   - Use "Select All" to select everything
 4. Click "Process All Files" to run the standard processing on all files
-5. Click "View/Edit" on any file to see and modify its tags
-6. Select multiple files and click "Update Selected" to batch update common tags
+5. Click "Process Selected" to run processing only on your selected files
+6. Click "View/Edit" on any file to see and modify its tags
+7. Select multiple files and click "Update Selected" to batch update common tags
 
 ## ComicTagger Integration
 - ComicTagger is installed in the container and used via its Python API.

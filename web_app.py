@@ -3,7 +3,7 @@ import sys
 import logging
 import json
 from flask import Flask, render_template, jsonify, request, send_from_directory
-from comicapi.comicarchive import ComicArchive
+from comicapi.comicarchive import ComicArchive, MetaDataStyle
 import glob
 import threading
 import time
@@ -78,55 +78,32 @@ def get_file_tags(filepath):
     """Get tags from a comic file"""
     try:
         ca = ComicArchive(filepath)
-        tags = ca.read_tags('cr')
+        # Use CIX (ComicInfo.xml) format, which is the ComicRack format
+        md = ca.read_metadata(MetaDataStyle.CIX)
         
-        # If no tags exist, return empty dictionary
-        if tags is None:
-            return {
-                'title': '',
-                'series': '',
-                'issue': '',
-                'volume': '',
-                'publisher': '',
-                'year': '',
-                'month': '',
-                'writer': '',
-                'penciller': '',
-                'inker': '',
-                'colorist': '',
-                'letterer': '',
-                'cover_artist': '',
-                'editor': '',
-                'summary': '',
-                'notes': '',
-                'genre': '',
-                'tags': '',
-                'web': '',
-                'page_count': 0,
-            }
-        
-        # Convert tags to dictionary
+        # Convert metadata to dictionary
+        # Use get_primary_credit for role-based credits
         tag_dict = {
-            'title': tags.title or '',
-            'series': tags.series or '',
-            'issue': tags.issue or '',
-            'volume': tags.volume or '',
-            'publisher': tags.publisher or '',
-            'year': tags.year or '',
-            'month': tags.month or '',
-            'writer': tags.writer or '',
-            'penciller': tags.penciller or '',
-            'inker': tags.inker or '',
-            'colorist': tags.colorist or '',
-            'letterer': tags.letterer or '',
-            'cover_artist': tags.cover_artist or '',
-            'editor': tags.editor or '',
-            'summary': tags.summary or '',
-            'notes': tags.notes or '',
-            'genre': tags.genre or '',
-            'tags': tags.tags or '',
-            'web': tags.web or '',
-            'page_count': tags.page_count or 0,
+            'title': md.title or '',
+            'series': md.series or '',
+            'issue': md.issue or '',
+            'volume': md.volume or '',
+            'publisher': md.publisher or '',
+            'year': md.year or '',
+            'month': md.month or '',
+            'writer': md.get_primary_credit('writer') or '',
+            'penciller': md.get_primary_credit('penciller') or '',
+            'inker': md.get_primary_credit('inker') or '',
+            'colorist': md.get_primary_credit('colorist') or '',
+            'letterer': md.get_primary_credit('letterer') or '',
+            'cover_artist': md.get_primary_credit('cover artist') or '',
+            'editor': md.get_primary_credit('editor') or '',
+            'summary': md.comments or '',
+            'notes': md.notes or '',
+            'genre': md.genre or '',
+            'tags': md.tags or '',
+            'web': md.web_link or '',
+            'page_count': md.page_count or 0,
         }
         return tag_dict
     except Exception as e:
@@ -137,18 +114,43 @@ def update_file_tags(filepath, tag_updates):
     """Update tags in a comic file"""
     try:
         ca = ComicArchive(filepath)
-        tags = ca.read_tags('cr')
+        # Use CIX (ComicInfo.xml) format, which is the ComicRack format
+        md = ca.read_metadata(MetaDataStyle.CIX)
         
-        # Update tags
+        # Map of field names to credit roles
+        credit_roles = {
+            'writer': 'writer',
+            'penciller': 'penciller',
+            'inker': 'inker',
+            'colorist': 'colorist',
+            'letterer': 'letterer',
+            'cover_artist': 'cover artist',
+            'editor': 'editor',
+        }
+        
+        # Update metadata
         for key, value in tag_updates.items():
-            if hasattr(tags, key):
-                setattr(tags, key, value)
+            if key in credit_roles:
+                # Handle credits differently
+                role = credit_roles[key]
+                # Clear existing credits of this role and add new one if value is not empty
+                md.credits = [c for c in md.credits if c.get('role', '').lower() != role.lower()]
+                if value and value.strip():
+                    md.add_credit(value.strip(), role)
+            elif key == 'summary':
+                # Map 'summary' to 'comments' field
+                md.comments = value
+            elif key == 'web':
+                # Map 'web' to 'web_link' field
+                md.web_link = value
+            elif hasattr(md, key):
+                setattr(md, key, value)
         
         # Mark as web modified before writing
         mark_web_modified(filepath)
         
-        # Write tags
-        ca.write_tags(tags, 'cr')
+        # Write metadata
+        ca.write_metadata(md, MetaDataStyle.CIX)
         logging.info(f"Updated tags for {filepath}")
         
         return True

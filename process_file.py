@@ -2,7 +2,7 @@ import sys
 import os
 import re
 import logging
-from comicapi.comicarchive import ComicArchive
+from comicapi.comicarchive import ComicArchive, MetaDataStyle
 
 # Set up logging to file and stdout (same as watcher.py)
 logging.basicConfig(
@@ -31,7 +31,8 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
     logging.info(f"Processing file: {filepath}")
     ca = ComicArchive(filepath)
 
-    tags = ca.read_tags('cr')
+    # Use CIX (ComicInfo.xml) format, which is the ComicRack format
+    tags = ca.read_metadata(MetaDataStyle.CIX)
     tagschanged = False
 
     # Title and issue logic
@@ -92,7 +93,7 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
 
     #write tags back to file
     if tagschanged:
-        ca.write_tags(tags, 'cr')
+        ca.write_metadata(tags, MetaDataStyle.CIX)
 
     # Filename logic
     if fixfilename:

@@ -175,6 +175,9 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
     if tagschanged:
         ca.write_tags(tags, 'cr')
 
+    # Track the final filepath (may change if renamed)
+    final_filepath = filepath
+
     # Filename logic
     if fixfilename:
         try:
@@ -209,12 +212,15 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
                     logging.info(f"Renaming file to: {newFileName}")
                     try:
                         os.rename(filepath, newFilePath)
+                        final_filepath = newFilePath
                     except Exception as e:
                         logging.info(f"Error renaming file {os.path.basename(filepath)}: {e}")
             else:
                 logging.info(f"Filename already correct for {os.path.basename(filepath)}, skipping rename.")
         except Exception as e:
             logging.info(f"Could not format filename for {os.path.basename(filepath)}. Skipping rename... {e}")
+    
+    return final_filepath
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -227,4 +233,25 @@ if __name__ == "__main__":
     for arg in sys.argv[2:]:
         if arg.startswith('--comicfolder='):
             comicfolder = arg.split('=', 1)[1]
-    process_file(sys.argv[1], fixtitle=fixtitle or True, fixseries=fixseries or True, fixfilename=fixfilename or True, comicfolder=comicfolder)
+    final_filepath = process_file(sys.argv[1], fixtitle=fixtitle or True, fixseries=fixseries or True, fixfilename=fixfilename or True, comicfolder=comicfolder)
+    
+    # Mark as processed using the final filepath (after any rename)
+    PROCESSED_MARKER = '.processed_files'
+    marker_path = os.path.join(os.path.dirname(final_filepath), PROCESSED_MARKER)
+    try:
+        filename = os.path.basename(final_filepath)
+        # Read existing processed files
+        processed_files = set()
+        if os.path.exists(marker_path):
+            with open(marker_path, 'r') as f:
+                processed_files = set(f.read().splitlines())
+        
+        # Add current file
+        processed_files.add(filename)
+        
+        # Write back
+        with open(marker_path, 'w') as f:
+            f.write('\n'.join(sorted(processed_files)))
+        logging.info(f"Marked {final_filepath} as processed")
+    except Exception as e:
+        logging.error(f"Error marking file as processed: {e}")

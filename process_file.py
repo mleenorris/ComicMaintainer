@@ -66,13 +66,21 @@ def format_filename(template, tags, issue_number):
     """
     # Parse issue number into integer and decimal parts
     try:
-        issue_float = float(issue_number)
+        issue_str = str(issue_number)
+        issue_float = float(issue_str)
         integer = int(issue_float)
-        decimal = round((issue_float - integer) * 100)
         issue_padded = f"{integer:04d}"
-        if decimal:
-            issue_formatted = f"{issue_padded}.{decimal}"
-            issue_no_pad = f"{integer}.{decimal}"
+        
+        # Check if there's a decimal part
+        if '.' in issue_str:
+            # Extract decimal part from string and strip trailing zeros
+            decimal_part = issue_str.split('.')[1].rstrip('0')
+            if decimal_part:
+                issue_formatted = f"{issue_padded}.{decimal_part}"
+                issue_no_pad = f"{integer}.{decimal_part}"
+            else:
+                issue_formatted = issue_padded
+                issue_no_pad = str(integer)
         else:
             issue_formatted = issue_padded
             issue_no_pad = str(integer)

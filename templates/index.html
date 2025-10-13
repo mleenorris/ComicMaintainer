@@ -641,6 +641,9 @@
             <button class="btn btn-primary" onclick="refreshFiles()">
                 🔄 Refresh
             </button>
+            <button class="btn btn-primary" onclick="toggleAllFolders()" id="toggleAllBtn">
+                📂 Collapse All
+            </button>
             <span class="select-info" id="selectInfo">No files selected</span>
         </div>
         
@@ -753,6 +756,7 @@
         let selectedFiles = new Set();
         let currentEditFile = null;
         let collapsedDirectories = new Set();
+        let allFoldersExpanded = true;
         
         // Theme management
         function initTheme() {
@@ -914,6 +918,7 @@
             
             fileList.innerHTML = html;
             updateSelectInfo();
+            updateToggleAllButton();
         }
         
         function formatFileSize(bytes) {
@@ -978,7 +983,67 @@
             } else {
                 collapsedDirectories.add(dir);
             }
+            updateToggleAllButton();
             renderFileList();
+        }
+        
+        function toggleAllFolders() {
+            if (allFoldersExpanded) {
+                collapseAllFolders();
+            } else {
+                expandAllFolders();
+            }
+        }
+        
+        function expandAllFolders() {
+            collapsedDirectories.clear();
+            allFoldersExpanded = true;
+            updateToggleAllButton();
+            renderFileList();
+        }
+        
+        function collapseAllFolders() {
+            // Get all directories from files
+            const allDirs = new Set();
+            files.forEach(file => {
+                const dirPath = file.relative_path.includes('/') || file.relative_path.includes('\\') 
+                    ? file.relative_path.substring(0, file.relative_path.lastIndexOf(file.relative_path.includes('/') ? '/' : '\\'))
+                    : '';
+                if (dirPath) {
+                    allDirs.add(dirPath);
+                }
+            });
+            
+            // Collapse all directories
+            collapsedDirectories = new Set(allDirs);
+            allFoldersExpanded = false;
+            updateToggleAllButton();
+            renderFileList();
+        }
+        
+        function updateToggleAllButton() {
+            const btn = document.getElementById('toggleAllBtn');
+            if (!btn) return;
+            
+            // Count total directories
+            const allDirs = new Set();
+            files.forEach(file => {
+                const dirPath = file.relative_path.includes('/') || file.relative_path.includes('\\') 
+                    ? file.relative_path.substring(0, file.relative_path.lastIndexOf(file.relative_path.includes('/') ? '/' : '\\'))
+                    : '';
+                if (dirPath) {
+                    allDirs.add(dirPath);
+                }
+            });
+            
+            // Update button based on state
+            if (collapsedDirectories.size === allDirs.size && allDirs.size > 0) {
+                btn.textContent = '📂 Expand All';
+                allFoldersExpanded = false;
+            } else {
+                btn.textContent = '📂 Collapse All';
+                allFoldersExpanded = true;
+            }
         }
         
         function toggleDirectorySelection(dir, checked) {

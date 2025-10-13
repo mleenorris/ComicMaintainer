@@ -18,8 +18,8 @@ RUN pip install --no-cache-dir -r /requirements.txt
 # Switch to user nobody
 #USER nobody
 
-# Install ComicTagger
-RUN git clone https://github.com/comictagger/comictagger.git /comictagger && \
+# Install ComicTagger from develop branch
+RUN git clone --branch develop https://github.com/comictagger/comictagger.git /comictagger && \
     pip3 install /comictagger[CBR,ICU,7Z]
 
 # Copy watcher and process script

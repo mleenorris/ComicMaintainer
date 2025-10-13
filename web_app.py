@@ -74,33 +74,80 @@ def get_comic_files():
     
     return sorted(files)
 
+def get_credits_by_role(credits_list, role_synonyms):
+    """Extract credits for a specific role from credits list"""
+    if not credits_list:
+        return ''
+    
+    role_synonyms_lower = [r.lower() for r in role_synonyms]
+    matching_credits = [
+        credit.person for credit in credits_list 
+        if credit.role.lower() in role_synonyms_lower
+    ]
+    return ', '.join(matching_credits) if matching_credits else ''
+
 def get_file_tags(filepath):
     """Get tags from a comic file"""
     try:
         ca = ComicArchive(filepath)
         tags = ca.read_tags('cr')
         
+        # Handle both old and new API structures
+        # New API uses credits list, old API has direct attributes
+        if hasattr(tags, 'credits'):
+            # New API (develop branch)
+            writer = get_credits_by_role(tags.credits, tags.writer_synonyms)
+            penciller = get_credits_by_role(tags.credits, tags.penciller_synonyms)
+            inker = get_credits_by_role(tags.credits, tags.inker_synonyms)
+            colorist = get_credits_by_role(tags.credits, tags.colorist_synonyms)
+            letterer = get_credits_by_role(tags.credits, tags.letterer_synonyms)
+            cover_artist = get_credits_by_role(tags.credits, tags.cover_synonyms)
+            editor = get_credits_by_role(tags.credits, tags.editor_synonyms)
+            
+            # New API uses 'description' instead of 'summary'
+            summary = tags.description or ''
+            
+            # New API uses sets for tags and genres
+            tags_str = ', '.join(sorted(tags.tags)) if tags.tags else ''
+            genre = ', '.join(sorted(tags.genres)) if tags.genres else ''
+            
+            # New API uses web_links list
+            web = ', '.join(str(link) for link in tags.web_links) if tags.web_links else ''
+        else:
+            # Old API (master branch) - direct attributes
+            writer = tags.writer or ''
+            penciller = tags.penciller or ''
+            inker = tags.inker or ''
+            colorist = tags.colorist or ''
+            letterer = tags.letterer or ''
+            cover_artist = tags.cover_artist or ''
+            editor = tags.editor or ''
+            summary = tags.summary or ''
+            tags_str = tags.tags or ''
+            genre = tags.genre or ''
+            web = tags.web or ''
+        
         # Convert tags to dictionary
         tag_dict = {
             'title': tags.title or '',
             'series': tags.series or '',
             'issue': tags.issue or '',
-            'volume': tags.volume or '',
+            'volume': str(tags.volume) if tags.volume else '',
             'publisher': tags.publisher or '',
-            'year': tags.year or '',
-            'month': tags.month or '',
-            'writer': tags.writer or '',
-            'penciller': tags.penciller or '',
-            'inker': tags.inker or '',
-            'colorist': tags.colorist or '',
-            'letterer': tags.letterer or '',
-            'cover_artist': tags.cover_artist or '',
-            'editor': tags.editor or '',
-            'summary': tags.summary or '',
+            'year': str(tags.year) if tags.year else '',
+            'month': str(tags.month) if tags.month else '',
+            'writer': writer,
+            'penciller': penciller,
+            'inker': inker,
+            'colorist': colorist,
+            'letterer': letterer,
+            'cover_artist': cover_artist,
+            'editor': editor,
+            'summary': summary,
             'notes': tags.notes or '',
-            'genre': tags.genre or '',
-            'tags': tags.tags or '',
-            'web': tags.web or '',
+            'genre': genre,
+            'tags': tags_str,
+            'web': web,
             'page_count': tags.page_count or 0,
         }
         return tag_dict
@@ -108,16 +155,90 @@ def get_file_tags(filepath):
         logging.error(f"Error reading tags from {filepath}: {e}")
         return None
 
+def update_credits_by_role(credits_list, role_synonyms, value_str):
+    """Update credits for a specific role in credits list"""
+    if not value_str or not value_str.strip():
+        # Remove all credits with this role
+        role_synonyms_lower = [r.lower() for r in role_synonyms]
+        return [c for c in credits_list if c.role.lower() not in role_synonyms_lower]
+    
+    # Parse comma-separated names
+    names = [name.strip() for name in value_str.split(',') if name.strip()]
+    
+    # Remove existing credits with this role
+    role_synonyms_lower = [r.lower() for r in role_synonyms]
+    filtered_credits = [c for c in credits_list if c.role.lower() not in role_synonyms_lower]
+    
+    # Add new credits with primary role name
+    from comicapi.genericmetadata import Credit
+    primary_role = role_synonyms[0]
+    for i, name in enumerate(names):
+        filtered_credits.append(Credit(person=name, role=primary_role, primary=(i == 0)))
+    
+    return filtered_credits
+
 def update_file_tags(filepath, tag_updates):
     """Update tags in a comic file"""
     try:
         ca = ComicArchive(filepath)
         tags = ca.read_tags('cr')
         
-        # Update tags
-        for key, value in tag_updates.items():
-            if hasattr(tags, key):
-                setattr(tags, key, value)
+        # Handle both old and new API structures
+        if hasattr(tags, 'credits'):
+            # New API (develop branch)
+            for key, value in tag_updates.items():
+                if key == 'writer':
+                    tags.credits = update_credits_by_role(tags.credits, tags.writer_synonyms, value)
+                elif key == 'penciller':
+                    tags.credits = update_credits_by_role(tags.credits, tags.penciller_synonyms, value)
+                elif key == 'inker':
+                    tags.credits = update_credits_by_role(tags.credits, tags.inker_synonyms, value)
+                elif key == 'colorist':
+                    tags.credits = update_credits_by_role(tags.credits, tags.colorist_synonyms, value)
+                elif key == 'letterer':
+                    tags.credits = update_credits_by_role(tags.credits, tags.letterer_synonyms, value)
+                elif key == 'cover_artist':
+                    tags.credits = update_credits_by_role(tags.credits, tags.cover_synonyms, value)
+                elif key == 'editor':
+                    tags.credits = update_credits_by_role(tags.credits, tags.editor_synonyms, value)
+                elif key == 'summary':
+                    # New API uses 'description' instead of 'summary'
+                    tags.description = value
+                elif key == 'genre':
+                    # New API uses set for genres
+                    if value and value.strip():
+                        tags.genres = set(g.strip() for g in value.split(',') if g.strip())
+                    else:
+                        tags.genres = set()
+                elif key == 'tags':
+                    # New API uses set for tags
+                    if value and value.strip():
+                        tags.tags = set(t.strip() for t in value.split(',') if t.strip())
+                    else:
+                        tags.tags = set()
+                elif key == 'web':
+                    # New API uses web_links list
+                    from comicapi._url import parse_url
+                    if value and value.strip():
+                        tags.web_links = [parse_url(url.strip()) for url in value.split(',') if url.strip()]
+                    else:
+                        tags.web_links = []
+                elif key in ('volume', 'year', 'month'):
+                    # Convert string to int for these fields
+                    if value and value.strip():
+                        try:
+                            setattr(tags, key, int(value))
+                        except ValueError:
+                            logging.warning(f"Invalid integer value for {key}: {value}")
+                    else:
+                        setattr(tags, key, None)
+                elif hasattr(tags, key):
+                    setattr(tags, key, value)
+        else:
+            # Old API (master branch) - direct attributes
+            for key, value in tag_updates.items():
+                if hasattr(tags, key):
+                    setattr(tags, key, value)
         
         # Mark as web modified before writing
         mark_web_modified(filepath)

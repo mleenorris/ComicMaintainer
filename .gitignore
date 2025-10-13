@@ -39,5 +39,6 @@ Thumbs.db
 
 # Project specific
 .web_modified
+.processed_files
 ComicMaintainer.log
 config.json

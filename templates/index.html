@@ -127,6 +127,24 @@
             display: flex;
             align-items: center;
             gap: 8px;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s;
+        }
+        
+        .directory-header:hover {
+            background: #e9ecef;
+        }
+        
+        .directory-toggle {
+            font-size: 12px;
+            transition: transform 0.2s;
+            display: inline-block;
+            width: 16px;
+        }
+        
+        .directory-toggle.collapsed {
+            transform: rotate(-90deg);
         }
         
         .directory-icon {
@@ -135,6 +153,21 @@
         
         .directory-path {
             font-size: 14px;
+            flex: 1;
+        }
+        
+        .directory-file-count {
+            font-size: 12px;
+            color: #7f8c8d;
+            font-weight: normal;
+        }
+        
+        .directory-content {
+            display: block;
+        }
+        
+        .directory-content.collapsed {
+            display: none;
         }
         
         .file-item {
@@ -339,6 +372,144 @@
             font-size: 64px;
             margin-bottom: 20px;
         }
+        
+        /* Mobile Responsive Styles */
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            .header {
+                padding: 15px 10px;
+            }
+            
+            .header h1 {
+                font-size: 24px;
+            }
+            
+            .header p {
+                font-size: 14px;
+            }
+            
+            .actions-bar {
+                padding: 10px;
+                gap: 8px;
+            }
+            
+            .btn {
+                padding: 8px 12px;
+                font-size: 13px;
+                flex: 1 1 auto;
+                min-width: 0;
+            }
+            
+            .select-info {
+                flex-basis: 100%;
+                text-align: center;
+                margin-left: 0;
+                margin-top: 5px;
+            }
+            
+            .file-list-header {
+                grid-template-columns: 30px 1fr 80px;
+                padding: 10px;
+                font-size: 13px;
+            }
+            
+            .file-list-header > div:nth-child(4) {
+                display: none;
+            }
+            
+            .file-item {
+                grid-template-columns: 30px 1fr 80px;
+                padding: 10px;
+                gap: 8px;
+            }
+            
+            .file-item.indented {
+                padding-left: 25px;
+            }
+            
+            .file-item > div:nth-child(4) {
+                grid-column: 2 / 4;
+                margin-top: 8px;
+            }
+            
+            .file-actions {
+                flex-direction: column;
+                gap: 5px;
+                width: 100%;
+            }
+            
+            .btn-small {
+                width: 100%;
+                text-align: center;
+            }
+            
+            .file-name {
+                font-size: 14px;
+            }
+            
+            .file-path {
+                font-size: 11px;
+            }
+            
+            .directory-header {
+                padding: 10px;
+                font-size: 13px;
+            }
+            
+            .directory-path {
+                font-size: 13px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            
+            .modal-content {
+                max-width: 95%;
+                margin: 10px;
+            }
+            
+            .modal-header,
+            .modal-body,
+            .modal-footer {
+                padding: 15px;
+            }
+            
+            .modal-footer {
+                flex-direction: column;
+            }
+            
+            .modal-footer .btn {
+                width: 100%;
+            }
+            
+            .form-group input,
+            .form-group textarea {
+                font-size: 16px; /* Prevents zoom on iOS */
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 20px;
+            }
+            
+            .btn {
+                font-size: 12px;
+                padding: 6px 10px;
+            }
+            
+            .file-list-header,
+            .file-item {
+                grid-template-columns: 25px 1fr 70px;
+            }
+            
+            .directory-header {
+                font-size: 12px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -473,6 +644,7 @@
         let files = [];
         let selectedFiles = new Set();
         let currentEditFile = null;
+        let collapsedDirectories = new Set();
         
         // Load files on page load
         document.addEventListener('DOMContentLoaded', function() {
@@ -529,14 +701,21 @@
             
             // Render files grouped by directory
             sortedDirs.forEach(dir => {
+                const isCollapsed = collapsedDirectories.has(dir);
+                const fileCount = filesByDirectory[dir].length;
+                
                 if (dir) {
                     html += `
-                        <div class="directory-header">
+                        <div class="directory-header" onclick="toggleDirectory('${escapeHtml(dir)}')">
+                            <span class="directory-toggle ${isCollapsed ? 'collapsed' : ''}">▼</span>
                             <span class="directory-icon">📁</span>
                             <span class="directory-path">${escapeHtml(dir)}</span>
+                            <span class="directory-file-count">(${fileCount} file${fileCount !== 1 ? 's' : ''})</span>
                         </div>
                     `;
                 }
+                
+                html += `<div class="directory-content ${isCollapsed ? 'collapsed' : ''}" data-dir="${escapeHtml(dir)}">`;
                 
                 filesByDirectory[dir].forEach(file => {
                     const isSelected = selectedFiles.has(file.relative_path);
@@ -562,6 +741,8 @@
                         </div>
                     `;
                 });
+                
+                html += `</div>`;
             });
             
             fileList.innerHTML = html;
@@ -609,6 +790,15 @@
                 info.textContent = `${count} file${count > 1 ? 's' : ''} selected`;
                 batchBtn.disabled = false;
             }
+        }
+        
+        function toggleDirectory(dir) {
+            if (collapsedDirectories.has(dir)) {
+                collapsedDirectories.delete(dir);
+            } else {
+                collapsedDirectories.add(dir);
+            }
+            renderFileList();
         }
         
         async function viewTags(filepath) {

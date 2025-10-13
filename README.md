@@ -129,8 +129,8 @@ The filename format can be customized through the web interface Settings modal. 
 
 **Available Placeholders:**
 - `{series}` - Series name
-- `{issue}` - Issue number (padded to 4 digits, e.g., 0001)
-- `{issue_no_pad}` - Issue number (no padding, e.g., 1)
+- `{issue}` - Issue number (padded to 4 digits, e.g., 0001, or 0071.4 for decimals)
+- `{issue_no_pad}` - Issue number (no padding, e.g., 1, or 71.4 for decimals)
 - `{title}` - Issue title
 - `{volume}` - Volume number
 - `{year}` - Publication year
@@ -138,9 +138,12 @@ The filename format can be customized through the web interface Settings modal. 
 
 **Examples:**
 - `{series} - Chapter {issue}.cbz` → `Batman - Chapter 0005.cbz` (default)
+- `{series} - Chapter {issue}.cbz` → `Manga - Chapter 0071.4.cbz` (decimal chapters)
 - `{series} v{volume} #{issue_no_pad}.cbz` → `Batman v1 #5.cbz`
 - `{series} ({year}) - {title}.cbz` → `Batman (2023) - Dark Knight.cbz`
 - `{series} #{issue} - {title}.cbz` → `Batman #0005 - Dark Knight.cbz`
+
+**Note:** Decimal chapter numbers (e.g., 71.4, 71.11) are preserved without trailing zeros.
 
 The filename format setting is saved in `config.json` and applies to both web interface processing and watcher service processing.
 

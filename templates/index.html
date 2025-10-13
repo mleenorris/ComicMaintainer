@@ -126,6 +126,31 @@
             align-items: center;
         }
         
+        .search-bar {
+            background: var(--bg-secondary);
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: var(--shadow-sm);
+        }
+        
+        .search-bar input {
+            width: 100%;
+            padding: 12px 15px;
+            border: 1px solid var(--border-input);
+            border-radius: 5px;
+            font-size: 14px;
+            font-family: inherit;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            transition: border-color 0.3s;
+        }
+        
+        .search-bar input:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+        
         .btn {
             padding: 10px 20px;
             border: none;
@@ -644,6 +669,10 @@
             <span class="select-info" id="selectInfo">No files selected</span>
         </div>
         
+        <div class="search-bar">
+            <input type="text" id="searchInput" placeholder="🔍 Search files..." oninput="filterFiles()" />
+        </div>
+        
         <div class="file-list" id="fileList">
             <div class="loading">
                 <div class="spinner"></div>
@@ -753,6 +782,7 @@
         let selectedFiles = new Set();
         let currentEditFile = null;
         let collapsedDirectories = new Set();
+        let searchQuery = '';
         
         // Theme management
         function initTheme() {
@@ -819,6 +849,11 @@
             }
         }
         
+        function filterFiles() {
+            searchQuery = document.getElementById('searchInput').value;
+            renderFileList();
+        }
+        
         function renderFileList() {
             const fileList = document.getElementById('fileList');
             
@@ -833,9 +868,30 @@
                 return;
             }
             
+            // Filter files based on search query
+            const filteredFiles = searchQuery 
+                ? files.filter(file => {
+                    const query = searchQuery.toLowerCase();
+                    return file.name.toLowerCase().includes(query) || 
+                           file.relative_path.toLowerCase().includes(query);
+                })
+                : files;
+            
+            // Show message if no results found
+            if (filteredFiles.length === 0) {
+                fileList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🔍</div>
+                        <h2>No matching files found</h2>
+                        <p>Try a different search term</p>
+                    </div>
+                `;
+                return;
+            }
+            
             // Group files by directory
             const filesByDirectory = {};
-            files.forEach(file => {
+            filteredFiles.forEach(file => {
                 const dirPath = file.relative_path.includes('/') || file.relative_path.includes('\\') 
                     ? file.relative_path.substring(0, file.relative_path.lastIndexOf(file.relative_path.includes('/') ? '/' : '\\'))
                     : '';

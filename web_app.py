@@ -481,17 +481,17 @@ def process_all_files():
             # Mark as web modified to prevent watcher from processing
             mark_web_modified(filepath)
             
-            # Process the file
-            process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+            # Process the file and get the final filepath (may be renamed)
+            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             
-            # Mark as processed
-            mark_file_processed(filepath)
+            # Mark as processed using the final filepath
+            mark_file_processed(final_filepath)
             
             results.append({
-                'file': os.path.basename(filepath),
+                'file': os.path.basename(final_filepath),
                 'success': True
             })
-            logging.info(f"Processed file via web interface: {filepath}")
+            logging.info(f"Processed file via web interface: {filepath} -> {final_filepath}")
         except Exception as e:
             results.append({
                 'file': os.path.basename(filepath),
@@ -516,13 +516,13 @@ def process_single_file(filepath):
         # Mark as web modified to prevent watcher from processing
         mark_web_modified(full_path)
         
-        # Process the file
-        process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+        # Process the file and get the final filepath (may be renamed)
+        final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
         
-        # Mark as processed
-        mark_file_processed(full_path)
+        # Mark as processed using the final filepath
+        mark_file_processed(final_filepath)
         
-        logging.info(f"Processed file via web interface: {full_path}")
+        logging.info(f"Processed file via web interface: {full_path} -> {final_filepath}")
         return jsonify({'success': True})
     except Exception as e:
         logging.error(f"Error processing file {full_path}: {e}")
@@ -556,17 +556,17 @@ def process_selected_files():
             # Mark as web modified to prevent watcher from processing
             mark_web_modified(full_path)
             
-            # Process the file
-            process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+            # Process the file and get the final filepath (may be renamed)
+            final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
             
-            # Mark as processed
-            mark_file_processed(full_path)
+            # Mark as processed using the final filepath
+            mark_file_processed(final_filepath)
             
             results.append({
-                'file': os.path.basename(filepath),
+                'file': os.path.basename(final_filepath),
                 'success': True
             })
-            logging.info(f"Processed file via web interface: {full_path}")
+            logging.info(f"Processed file via web interface: {full_path} -> {final_filepath}")
         except Exception as e:
             results.append({
                 'file': os.path.basename(filepath),
@@ -641,17 +641,17 @@ def process_unmarked_files():
             # Mark as web modified to prevent watcher from processing
             mark_web_modified(filepath)
             
-            # Process the file
-            process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+            # Process the file and get the final filepath (may be renamed)
+            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             
-            # Mark as processed
-            mark_file_processed(filepath)
+            # Mark as processed using the final filepath
+            mark_file_processed(final_filepath)
             
             results.append({
-                'file': os.path.basename(filepath),
+                'file': os.path.basename(final_filepath),
                 'success': True
             })
-            logging.info(f"Processed unmarked file via web interface: {filepath}")
+            logging.info(f"Processed unmarked file via web interface: {filepath} -> {final_filepath}")
         except Exception as e:
             results.append({
                 'file': os.path.basename(filepath),

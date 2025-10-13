@@ -80,6 +80,31 @@ def get_file_tags(filepath):
         ca = ComicArchive(filepath)
         tags = ca.read_tags('cr')
         
+        # If no tags exist, return empty dictionary
+        if tags is None:
+            return {
+                'title': '',
+                'series': '',
+                'issue': '',
+                'volume': '',
+                'publisher': '',
+                'year': '',
+                'month': '',
+                'writer': '',
+                'penciller': '',
+                'inker': '',
+                'colorist': '',
+                'letterer': '',
+                'cover_artist': '',
+                'editor': '',
+                'summary': '',
+                'notes': '',
+                'genre': '',
+                'tags': '',
+                'web': '',
+                'page_count': 0,
+            }
+        
         # Convert tags to dictionary
         tag_dict = {
             'title': tags.title or '',

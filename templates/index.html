@@ -638,6 +638,17 @@
             .form-group textarea {
                 font-size: 16px; /* Prevents zoom on iOS */
             }
+            
+            .pagination {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            
+            .pagination > div {
+                margin-left: 0 !important;
+                flex-basis: 100%;
+                justify-content: center;
+            }
         }
         
         @media (max-width: 480px) {
@@ -716,6 +727,16 @@
             <button class="btn btn-small" id="prevBtn" onclick="previousPage()" disabled>← Previous</button>
             <span class="page-info" id="pageInfo">Page 1 of 1</span>
             <button class="btn btn-small" id="nextBtn" onclick="nextPage()" disabled>Next →</button>
+            <div style="display: flex; align-items: center; gap: 8px; margin-left: 15px;">
+                <label for="perPageSelect" style="color: var(--text-secondary); font-size: 14px;">Files per page:</label>
+                <select id="perPageSelect" onchange="changePerPage()" style="padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer;">
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100" selected>100</option>
+                    <option value="200">200</option>
+                    <option value="500">500</option>
+                </select>
+            </div>
         </div>
     </div>
     
@@ -870,7 +891,7 @@
         let currentPage = 1;
         let totalPages = 1;
         let totalFiles = 0;
-        let perPage = 100;
+        let perPage = parseInt(localStorage.getItem('perPage')) || 100;
         
         // Theme management
         function initTheme() {
@@ -924,6 +945,13 @@
         // Load files on page load
         document.addEventListener('DOMContentLoaded', function() {
             initTheme();
+            
+            // Set the per-page selector to the saved value
+            const perPageSelect = document.getElementById('perPageSelect');
+            if (perPageSelect) {
+                perPageSelect.value = perPage;
+            }
+            
             loadFiles();
         });
         
@@ -951,7 +979,7 @@
             const prevBtn = document.getElementById('prevBtn');
             const nextBtn = document.getElementById('nextBtn');
             
-            if (totalPages > 1) {
+            if (totalPages > 1 || totalFiles > 0) {
                 paginationDiv.style.display = 'flex';
                 pageInfo.textContent = `Page ${currentPage} of ${totalPages} (${totalFiles} files total)`;
                 prevBtn.disabled = currentPage <= 1;
@@ -959,6 +987,17 @@
             } else {
                 paginationDiv.style.display = 'none';
             }
+        }
+        
+        function changePerPage() {
+            const perPageSelect = document.getElementById('perPageSelect');
+            perPage = parseInt(perPageSelect.value);
+            
+            // Save to localStorage
+            localStorage.setItem('perPage', perPage);
+            
+            // Reload files from page 1 with new per-page value
+            loadFiles(1);
         }
         
         function nextPage() {

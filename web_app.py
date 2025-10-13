@@ -976,6 +976,60 @@ def normalize_unmarked_files():
     
     return jsonify({'results': results})
 
+@app.route('/api/delete-file/<path:filepath>', methods=['DELETE'])
+def delete_single_file(filepath):
+    """API endpoint to delete a single file"""
+    full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+    
+    if not os.path.exists(full_path):
+        return jsonify({'error': 'File not found'}), 404
+    
+    try:
+        # Delete the file
+        os.remove(full_path)
+        
+        # Clear the file from any tracking markers
+        clear_web_modified(full_path)
+        
+        # Remove from processed marker if it exists
+        marker_path = os.path.join(os.path.dirname(full_path), PROCESSED_MARKER)
+        if os.path.exists(marker_path):
+            try:
+                with open(marker_path, 'r') as f:
+                    processed_files = set(f.read().splitlines())
+                
+                filename = os.path.basename(full_path)
+                if filename in processed_files:
+                    processed_files.discard(filename)
+                    with open(marker_path, 'w') as f:
+                        f.write('\n'.join(sorted(processed_files)))
+            except Exception as e:
+                logging.warning(f"Error updating processed marker after delete: {e}")
+        
+        # Remove from duplicate marker if it exists
+        duplicate_marker_path = os.path.join(os.path.dirname(full_path), DUPLICATE_MARKER)
+        if os.path.exists(duplicate_marker_path):
+            try:
+                with open(duplicate_marker_path, 'r') as f:
+                    duplicate_files = set(f.read().splitlines())
+                
+                filename = os.path.basename(full_path)
+                if filename in duplicate_files:
+                    duplicate_files.discard(filename)
+                    with open(duplicate_marker_path, 'w') as f:
+                        f.write('\n'.join(sorted(duplicate_files)))
+            except Exception as e:
+                logging.warning(f"Error updating duplicate marker after delete: {e}")
+        
+        # Clear file cache to reflect the deletion
+        clear_file_cache()
+        
+        logging.info(f"Deleted file via web interface: {full_path}")
+        return jsonify({'success': True})
+    except Exception as e:
+        logging.error(f"Error deleting file {full_path}: {e}")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     if not WATCHED_DIR:
         logging.error("WATCHED_DIR environment variable is not set. Exiting.")

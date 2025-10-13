@@ -10,6 +10,7 @@ import logging
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
 PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
 WEB_MODIFIED_MARKER = '.web_modified'
+PROCESSED_MARKER = '.processed_files'
 
 # Set up logging to file and stdout
 logging.basicConfig(
@@ -24,6 +25,27 @@ logging.basicConfig(
 
 # Debounce settings
 DEBOUNCE_SECONDS = 30
+
+def mark_file_processed(filepath):
+    """Mark a file as processed by the watcher"""
+    marker_path = os.path.join(os.path.dirname(filepath), PROCESSED_MARKER)
+    try:
+        filename = os.path.basename(filepath)
+        # Read existing processed files
+        processed_files = set()
+        if os.path.exists(marker_path):
+            with open(marker_path, 'r') as f:
+                processed_files = set(f.read().splitlines())
+        
+        # Add current file
+        processed_files.add(filename)
+        
+        # Write back
+        with open(marker_path, 'w') as f:
+            f.write('\n'.join(sorted(processed_files)))
+        logging.info(f"Marked {filepath} as processed")
+    except Exception as e:
+        logging.error(f"Error marking file as processed: {e}")
 
 def is_web_modified(filepath):
     """Check if a file was recently modified by the web interface"""
@@ -56,7 +78,9 @@ class ChangeHandler(FileSystemEventHandler):
                 return
             if self._allowed_extension(event.dest_path) and self._is_file_stable(event.dest_path):
                 logging.info(f"File moved/renamed: {event.src_path} -> {event.dest_path}")
-                subprocess.run([sys.executable, PROCESS_SCRIPT, event.dest_path])
+                result = subprocess.run([sys.executable, PROCESS_SCRIPT, event.dest_path])
+                if result.returncode == 0:
+                    mark_file_processed(event.dest_path)
                 self.last_processed[event.dest_path] = time.time()
             else:
                 logging.info(f"Moved file not stable yet: {event.dest_path}")
@@ -100,7 +124,9 @@ class ChangeHandler(FileSystemEventHandler):
                 return
             if self._is_file_stable(event.src_path):
                 logging.info(f"File modified: {event.src_path}")
-                subprocess.run([sys.executable, PROCESS_SCRIPT, event.src_path])
+                result = subprocess.run([sys.executable, PROCESS_SCRIPT, event.src_path])
+                if result.returncode == 0:
+                    mark_file_processed(event.src_path)
                 self.last_processed[event.src_path] = time.time()
             else:
                 logging.info(f"File not stable yet: {event.src_path}")
@@ -111,7 +137,9 @@ class ChangeHandler(FileSystemEventHandler):
                 return
             if self._is_file_stable(event.src_path):
                 logging.info(f"File created: {event.src_path}")
-                subprocess.run([sys.executable, PROCESS_SCRIPT, event.src_path])
+                result = subprocess.run([sys.executable, PROCESS_SCRIPT, event.src_path])
+                if result.returncode == 0:
+                    mark_file_processed(event.src_path)
                 self.last_processed[event.src_path] = time.time()
             else:
                 logging.info(f"File not stable yet: {event.src_path}")

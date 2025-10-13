@@ -40,3 +40,4 @@ Thumbs.db
 # Project specific
 .web_modified
 ComicMaintainer.log
+config.json

@@ -11,6 +11,8 @@ WATCHED_DIR = os.environ.get('WATCHED_DIR')
 PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
 WEB_MODIFIED_MARKER = '.web_modified'
 PROCESSED_MARKER = '.processed_files'
+CACHE_UPDATE_MARKER = '.cache_update'
+CACHE_CHANGES_FILE = '.cache_changes'
 
 # Set up logging to file and stdout
 logging.basicConfig(
@@ -25,6 +27,42 @@ logging.basicConfig(
 
 # Debounce settings
 DEBOUNCE_SECONDS = 30
+
+def record_cache_change(change_type, old_path=None, new_path=None):
+    """Record a file change for incremental cache updates"""
+    if not WATCHED_DIR:
+        return
+    
+    changes_file = os.path.join(WATCHED_DIR, CACHE_CHANGES_FILE)
+    
+    try:
+        import json
+        
+        change_entry = {
+            'type': change_type,
+            'old_path': old_path,
+            'new_path': new_path,
+            'timestamp': time.time()
+        }
+        
+        with open(changes_file, 'a') as f:
+            f.write(json.dumps(change_entry) + '\n')
+        
+        logging.info(f"Recorded cache change: {change_type} {old_path or ''} -> {new_path or ''}")
+    except Exception as e:
+        logging.error(f"Error recording cache change: {e}")
+
+def update_watcher_timestamp():
+    """Update the watcher cache invalidation timestamp"""
+    if not WATCHED_DIR:
+        return
+    
+    marker_path = os.path.join(WATCHED_DIR, CACHE_UPDATE_MARKER)
+    try:
+        with open(marker_path, 'w') as f:
+            f.write(str(time.time()))
+    except Exception as e:
+        logging.error(f"Error updating watcher timestamp: {e}")
 
 def is_web_modified(filepath):
     """Check if a file was recently modified by the web interface"""
@@ -143,6 +181,7 @@ class ChangeHandler(FileSystemEventHandler):
                 logging.info(f"File created: {event.src_path}")
                 result = subprocess.run([sys.executable, PROCESS_SCRIPT, event.src_path])
                 # Note: process_file.py now marks files as processed itself
+                # process_file.py will record cache changes (add or rename as appropriate)
                 self.last_processed[event.src_path] = time.time()
             else:
                 logging.info(f"File not stable yet: {event.src_path}")
@@ -151,6 +190,11 @@ class ChangeHandler(FileSystemEventHandler):
             logging.info(f"File deleted: {event.src_path}")
             if event.src_path in self.last_processed:
                 del self.last_processed[event.src_path]
+            
+            # Record the deletion for incremental cache update
+            if self._allowed_extension(event.src_path):
+                record_cache_change('remove', old_path=event.src_path)
+                update_watcher_timestamp()
 
 if __name__ == "__main__":
     event_handler = ChangeHandler()

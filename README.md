@@ -86,8 +86,9 @@ The service includes a web-based interface for managing your comic files:
 6. Select multiple files and click "Update Selected" to batch update common tags
 
 ## ComicTagger Integration
-- ComicTagger is installed in the container and used via its Python API.
+- ComicTagger is installed in the container from the **develop branch** and used via its Python API.
 - The service supports both `.cbz` (zip) and `.cbr` (rar) files.
+- **Note**: The code is compatible with both master and develop branch APIs of ComicTagger, automatically detecting which version is in use.
 
 ## Logging
 - All actions and errors are logged to `ComicMaintainer.log` (in the container working directory).

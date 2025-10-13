@@ -48,11 +48,30 @@ def is_web_modified(filepath):
     
     return False
 
+def is_file_processed(filepath):
+    """Check if a file has been processed"""
+    marker_path = os.path.join(os.path.dirname(filepath), PROCESSED_MARKER)
+    if not os.path.exists(marker_path):
+        return False
+    
+    try:
+        with open(marker_path, 'r') as f:
+            processed_files = set(f.read().splitlines())
+            filename = os.path.basename(filepath)
+            return filename in processed_files
+    except Exception as e:
+        logging.error(f"Error checking if file is processed: {e}")
+        return False
+
 class ChangeHandler(FileSystemEventHandler):
     def on_moved(self, event):
         # Only process if destination is .cbr or .cbz and debounce allows
         if not event.is_directory and self._should_process(event.dest_path) and self._should_process(event.src_path):
             if is_web_modified(event.dest_path):
+                self.last_processed[event.dest_path] = time.time()
+                return
+            if is_file_processed(event.dest_path):
+                logging.info(f"Skipping {event.dest_path} - already processed")
                 self.last_processed[event.dest_path] = time.time()
                 return
             if self._allowed_extension(event.dest_path) and self._is_file_stable(event.dest_path):
@@ -100,6 +119,10 @@ class ChangeHandler(FileSystemEventHandler):
             if is_web_modified(event.src_path):
                 self.last_processed[event.src_path] = time.time()
                 return
+            if is_file_processed(event.src_path):
+                logging.info(f"Skipping {event.src_path} - already processed")
+                self.last_processed[event.src_path] = time.time()
+                return
             if self._is_file_stable(event.src_path):
                 logging.info(f"File modified: {event.src_path}")
                 result = subprocess.run([sys.executable, PROCESS_SCRIPT, event.src_path])
@@ -110,6 +133,10 @@ class ChangeHandler(FileSystemEventHandler):
     def on_created(self, event):
         if not event.is_directory and self._should_process(event.src_path) and self._allowed_extension(event.src_path):
             if is_web_modified(event.src_path):
+                self.last_processed[event.src_path] = time.time()
+                return
+            if is_file_processed(event.src_path):
+                logging.info(f"Skipping {event.src_path} - already processed")
                 self.last_processed[event.src_path] = time.time()
                 return
             if self._is_file_stable(event.src_path):

@@ -583,6 +583,47 @@ def scan_unmarked_files():
         'total_count': len(files)
     })
 
+@app.route('/api/process-unmarked', methods=['POST'])
+def process_unmarked_files():
+    """API endpoint to process only unmarked files"""
+    from process_file import process_file
+    
+    files = get_comic_files(use_cache=False)
+    unmarked_files = []
+    
+    # Filter to only unmarked files
+    for filepath in files:
+        if not is_file_processed(filepath):
+            unmarked_files.append(filepath)
+    
+    results = []
+    
+    for filepath in unmarked_files:
+        try:
+            # Mark as web modified to prevent watcher from processing
+            mark_web_modified(filepath)
+            
+            # Process the file
+            process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+            
+            # Mark as processed
+            mark_file_processed(filepath)
+            
+            results.append({
+                'file': os.path.basename(filepath),
+                'success': True
+            })
+            logging.info(f"Processed unmarked file via web interface: {filepath}")
+        except Exception as e:
+            results.append({
+                'file': os.path.basename(filepath),
+                'success': False,
+                'error': str(e)
+            })
+            logging.error(f"Error processing unmarked file {filepath}: {e}")
+    
+    return jsonify({'results': results})
+
 if __name__ == '__main__':
     if not WATCHED_DIR:
         logging.error("WATCHED_DIR environment variable is not set. Exiting.")

@@ -87,33 +87,76 @@
             z-index: 100;
         }
         
-        .header h1 {
-            margin-bottom: 10px;
-        }
-        
-        .header-actions {
-            margin-top: 15px;
+        .header-content {
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            gap: 10px;
         }
         
-        .theme-toggle {
+        .header-left h1 {
+            margin-bottom: 5px;
+        }
+        
+        .header-right {
+            position: relative;
+        }
+        
+        .settings-menu-toggle {
             background: rgba(255, 255, 255, 0.1);
             border: 1px solid rgba(255, 255, 255, 0.2);
             color: var(--text-header);
-            padding: 8px 16px;
+            padding: 10px;
             border-radius: 5px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 20px;
             transition: all 0.3s;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .settings-menu-toggle:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .settings-dropdown-menu {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: calc(100% + 5px);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-secondary);
+            border-radius: 5px;
+            box-shadow: var(--shadow-md);
+            z-index: 1000;
+            min-width: 200px;
+            overflow: hidden;
+        }
+        
+        .settings-dropdown-menu.show {
+            display: block;
+        }
+        
+        .settings-dropdown-item {
+            padding: 12px 15px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+            font-size: 14px;
+            color: var(--text-primary);
+            transition: background 0.2s;
             display: flex;
             align-items: center;
             gap: 8px;
+            font-family: inherit;
         }
         
-        .theme-toggle:hover {
-            background: rgba(255, 255, 255, 0.2);
+        .settings-dropdown-item:hover {
+            background: var(--bg-hover);
         }
         
         .container {
@@ -327,21 +370,16 @@
             cursor: not-allowed;
         }
         
-        .button-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-            width: 100%;
-        }
-        
-        .button-column {
+        .button-group {
             display: flex;
-            flex-direction: column;
-            gap: 10px;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
         }
         
-        .button-column .btn {
-            width: 100%;
+        .button-group .btn {
+            padding: 8px 12px;
+            font-size: 13px;
         }
         
         .file-list {
@@ -358,9 +396,28 @@
             padding: 15px;
             font-weight: 600;
             display: grid;
-            grid-template-columns: 40px 1fr 150px 240px;
+            grid-template-columns: 30px 40px 1fr 150px 240px;
             gap: 10px;
             border-bottom: 2px solid var(--border-secondary);
+            align-items: center;
+        }
+        
+        .toggle-all-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 16px;
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            border-radius: 3px;
+        }
+        
+        .toggle-all-btn:hover {
+            background: var(--bg-hover);
         }
         
         .directory-header {
@@ -432,6 +489,7 @@
         
         .file-item {
             padding: 15px;
+            padding-left: 45px;
             display: grid;
             grid-template-columns: 40px 1fr 150px 240px;
             gap: 10px;
@@ -441,7 +499,7 @@
         }
         
         .file-item.indented {
-            padding-left: 35px;
+            padding-left: 65px;
             background: var(--bg-indented);
         }
         
@@ -761,11 +819,12 @@
             }
             
             .file-list-header {
-                grid-template-columns: 40px 1fr 120px 200px;
+                grid-template-columns: 30px 40px 1fr 120px 200px;
             }
             
             .file-item {
                 grid-template-columns: 40px 1fr 120px 200px;
+                margin-left: 30px;
             }
         }
         
@@ -804,8 +863,12 @@
                 min-width: 0;
             }
             
-            .button-grid {
-                grid-template-columns: 1fr;
+            .button-group {
+                width: 100%;
+            }
+            
+            .button-group .btn {
+                flex: 1 1 auto;
             }
             
             .select-info {
@@ -816,12 +879,13 @@
             }
             
             .file-list-header {
-                grid-template-columns: 30px 1fr 80px;
+                grid-template-columns: 25px 25px 1fr 70px;
                 padding: 10px;
                 font-size: 13px;
             }
             
-            .file-list-header > div:nth-child(4) {
+            .file-list-header > div:nth-child(4),
+            .file-list-header > div:nth-child(5) {
                 display: none;
             }
             
@@ -963,9 +1027,13 @@
                 padding: 6px 10px;
             }
             
-            .file-list-header,
+            .file-list-header {
+                grid-template-columns: 20px 25px 1fr 70px;
+            }
+            
             .file-item {
                 grid-template-columns: 25px 1fr 70px;
+                margin-left: 20px;
             }
             
             .directory-header {
@@ -977,8 +1045,31 @@
 <body>
     <div class="header">
         <div class="container">
-            <h1>Comic Maintainer <span id="appVersion" style="font-size: 0.5em; color: rgba(255, 255, 255, 0.7);"></span></h1>
-            <p>Manage and process comic files in your watched directory</p>
+            <div class="header-content">
+                <div class="header-left">
+                    <h1>Comic Maintainer <span id="appVersion" style="font-size: 0.5em; color: rgba(255, 255, 255, 0.7);"></span></h1>
+                    <p>Manage and process comic files in your watched directory</p>
+                </div>
+                <div class="header-right">
+                    <button class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle">
+                        ⋮
+                    </button>
+                    <div class="settings-dropdown-menu" id="settingsDropdownMenu">
+                        <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
+                            ⚙️ Settings
+                        </button>
+                        <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
+                            🌓 Toggle Theme
+                        </button>
+                        <button class="settings-dropdown-item" onclick="refreshFiles(); closeSettingsMenu();">
+                            🔄 Refresh
+                        </button>
+                        <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
+                            🔍 Scan Unmarked
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     
@@ -987,59 +1078,42 @@
         
         <div class="controls-wrapper">
             <div class="actions-bar">
-                <div class="button-grid">
-                    <div class="button-column">
-                        <button class="btn btn-success" onclick="processAllFiles()">
-                            🚀 Process All (Rename + Normalize)
-                        </button>
-                        <button class="btn btn-success" onclick="processUnmarkedFiles()">
-                            ⚠️ Process Unmarked (Rename + Normalize)
-                        </button>
-                        <button class="btn btn-success" onclick="processSelectedFiles()" id="processSelectedBtn" disabled>
-                            ⚡ Process Selected (Rename + Normalize)
-                        </button>
-                    </div>
-                    <div class="button-column">
-                        <button class="btn btn-rename" onclick="renameAllFiles()">
-                            📝 Rename All Files
-                        </button>
-                        <button class="btn btn-rename" onclick="renameUnmarkedFiles()">
-                            📝 Rename Unmarked
-                        </button>
-                        <button class="btn btn-rename" onclick="renameSelectedFiles()" id="renameSelectedBtn" disabled>
-                            📝 Rename Selected
-                        </button>
-                    </div>
-                    <div class="button-column">
-                        <button class="btn btn-normalize" onclick="normalizeAllFiles()">
-                            🔧 Normalize All Metadata
-                        </button>
-                        <button class="btn btn-normalize" onclick="normalizeUnmarkedFiles()">
-                            🔧 Normalize Unmarked Metadata
-                        </button>
-                        <button class="btn btn-normalize" onclick="normalizeSelectedFiles()" id="normalizeSelectedBtn" disabled>
-                            🔧 Normalize Selected Metadata
-                        </button>
-                    </div>
+                <div class="button-group">
+                    <button class="btn btn-success" onclick="processAllFiles()">
+                        🚀 Process All
+                    </button>
+                    <button class="btn btn-success" onclick="processUnmarkedFiles()">
+                        ⚠️ Process Unmarked
+                    </button>
+                    <button class="btn btn-success" onclick="processSelectedFiles()" id="processSelectedBtn" disabled>
+                        ⚡ Process Selected
+                    </button>
+                    <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>
+                        ✏️ Update Selected
+                    </button>
                 </div>
-            </div>
-            
-            <div class="actions-bar" style="margin-top: -10px;">
-                <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>
-                    ✏️ Update Selected
-                </button>
-                <button class="btn btn-primary" onclick="refreshFiles()">
-                    🔄 Refresh
-                </button>
-                <button class="btn btn-primary" onclick="scanUnmarkedFiles()">
-                    🔍 Scan Unmarked
-                </button>
-                <button class="btn btn-primary" onclick="toggleAllFolders()" id="toggleAllBtn">
-                    📂 Collapse All
-                </button>
-                <button class="btn" onclick="openSettings()" style="background: #95a5a6; color: white;">
-                    ⚙️ Settings
-                </button>
+                <div class="button-group">
+                    <button class="btn btn-rename" onclick="renameAllFiles()">
+                        📝 Rename All
+                    </button>
+                    <button class="btn btn-rename" onclick="renameUnmarkedFiles()">
+                        📝 Rename Unmarked
+                    </button>
+                    <button class="btn btn-rename" onclick="renameSelectedFiles()" id="renameSelectedBtn" disabled>
+                        📝 Rename Selected
+                    </button>
+                </div>
+                <div class="button-group">
+                    <button class="btn btn-normalize" onclick="normalizeAllFiles()">
+                        🔧 Normalize All
+                    </button>
+                    <button class="btn btn-normalize" onclick="normalizeUnmarkedFiles()">
+                        🔧 Normalize Unmarked
+                    </button>
+                    <button class="btn btn-normalize" onclick="normalizeSelectedFiles()" id="normalizeSelectedBtn" disabled>
+                        🔧 Normalize Selected
+                    </button>
+                </div>
                 <span class="select-info" id="selectInfo">No files selected</span>
             </div>
             
@@ -1313,6 +1387,13 @@
             document.documentElement.setAttribute('data-theme', theme);
         }
         
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            setTheme(newTheme);
+            localStorage.setItem('theme', newTheme);
+        }
+        
         // Update theme from settings modal
         function updateThemeFromSettings() {
             const selectedTheme = document.getElementById('themeSelect').value;
@@ -1510,6 +1591,17 @@
             menu.classList.toggle('show');
         }
         
+        function toggleSettingsMenu(event) {
+            event.stopPropagation();
+            const menu = document.getElementById('settingsDropdownMenu');
+            menu.classList.toggle('show');
+        }
+        
+        function closeSettingsMenu() {
+            const menu = document.getElementById('settingsDropdownMenu');
+            menu.classList.remove('show');
+        }
+        
         async function scanUnmarkedFiles() {
             try {
                 showMessage('Scanning for unmarked files...', 'info');
@@ -1564,6 +1656,9 @@
             
             let html = `
                 <div class="file-list-header">
+                    <button class="toggle-all-btn" onclick="toggleAllFolders()" id="toggleAllBtn" title="Expand/Collapse All">
+                        ${allFoldersExpanded ? '▼' : '▶'}
+                    </button>
                     <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)">
                     <div>File</div>
                     <div>Size</div>
@@ -1761,9 +1856,6 @@
         }
         
         function updateToggleAllButton() {
-            const btn = document.getElementById('toggleAllBtn');
-            if (!btn) return;
-            
             // Count total directories
             const allDirs = new Set();
             files.forEach(file => {
@@ -1775,12 +1867,10 @@
                 }
             });
             
-            // Update button based on state
+            // Update state based on collapsed directories
             if (collapsedDirectories.size === allDirs.size && allDirs.size > 0) {
-                btn.textContent = '📂 Expand All';
                 allFoldersExpanded = false;
             } else {
-                btn.textContent = '📂 Collapse All';
                 allFoldersExpanded = true;
             }
         }
@@ -2395,6 +2485,13 @@
                 const filterMenu = document.getElementById('filterDropdownMenu');
                 if (filterMenu) {
                     filterMenu.classList.remove('show');
+                }
+            }
+            // Close settings dropdown when clicking outside
+            if (!event.target.closest('.header-right')) {
+                const settingsMenu = document.getElementById('settingsDropdownMenu');
+                if (settingsMenu) {
+                    settingsMenu.classList.remove('show');
                 }
             }
         });

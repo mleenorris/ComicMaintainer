@@ -50,6 +50,14 @@ metadata_cache = {
 metadata_cache_lock = threading.Lock()
 METADATA_CACHE_TTL = 5  # Cache metadata for 5 seconds
 
+# Cache for enriched file list (files with metadata) to speed up filtering
+enriched_file_cache = {
+    'files': None,  # List of file dicts with metadata
+    'timestamp': 0,
+    'file_list_hash': None  # Hash of raw file list to detect changes
+}
+enriched_file_cache_lock = threading.Lock()
+
 def mark_web_modified(filepath):
     """Mark a file as modified by the web interface"""
     with lock:
@@ -104,6 +112,11 @@ def mark_file_processed(filepath, original_filepath=None):
             cache_key = f"{directory}:{PROCESSED_MARKER}"
             if cache_key in metadata_cache['last_loaded']:
                 del metadata_cache['last_loaded'][cache_key]
+        
+        # Invalidate enriched file cache
+        with enriched_file_cache_lock:
+            enriched_file_cache['files'] = None
+            enriched_file_cache['file_list_hash'] = None
         
         logging.info(f"Marked {filepath} as processed")
     except Exception as e:
@@ -174,6 +187,11 @@ def mark_file_duplicate(filepath):
             cache_key = f"{directory}:{DUPLICATE_MARKER}"
             if cache_key in metadata_cache['last_loaded']:
                 del metadata_cache['last_loaded'][cache_key]
+        
+        # Invalidate enriched file cache
+        with enriched_file_cache_lock:
+            enriched_file_cache['files'] = None
+            enriched_file_cache['file_list_hash'] = None
         
         logging.info(f"Marked {filepath} as duplicate")
     except Exception as e:
@@ -587,6 +605,55 @@ def preload_metadata_for_directories(files):
         get_directory_metadata(directory, PROCESSED_MARKER, metadata_cache['processed'])
         get_directory_metadata(directory, DUPLICATE_MARKER, metadata_cache['duplicate'])
 
+def get_enriched_file_list(files, force_rebuild=False):
+    """Get file list enriched with metadata, using cache when possible
+    
+    Args:
+        files: List of file paths
+        force_rebuild: Force rebuilding the cache even if valid
+        
+    Returns:
+        List of file dictionaries with metadata
+    """
+    with enriched_file_cache_lock:
+        # Create a simple hash of the file list to detect changes
+        file_list_hash = hash(tuple(files))
+        
+        # Check if cache is valid
+        if (not force_rebuild and 
+            enriched_file_cache['files'] is not None and 
+            enriched_file_cache['file_list_hash'] == file_list_hash):
+            
+            logging.debug("Using enriched file cache")
+            return enriched_file_cache['files']
+        
+        # Cache miss or invalidated - rebuild
+        logging.info("Rebuilding enriched file cache")
+        
+        # Preload metadata for all directories (batch operation)
+        preload_metadata_for_directories(files)
+        
+        # Build file list with metadata
+        all_files = []
+        for f in files:
+            rel_path = os.path.relpath(f, WATCHED_DIR) if WATCHED_DIR else f
+            all_files.append({
+                'path': f,
+                'name': os.path.basename(f),
+                'relative_path': rel_path,
+                'size': os.path.getsize(f),
+                'modified': os.path.getmtime(f),
+                'processed': is_file_processed(f),
+                'duplicate': is_file_duplicate(f)
+            })
+        
+        # Update cache
+        enriched_file_cache['files'] = all_files
+        enriched_file_cache['timestamp'] = time.time()
+        enriched_file_cache['file_list_hash'] = file_list_hash
+        
+        return all_files
+
 @app.route('/api/files')
 def list_files():
     """API endpoint to list all comic files with pagination"""
@@ -602,22 +669,8 @@ def list_files():
     # Get files with optional cache refresh
     files = get_comic_files(use_cache=not refresh)
     
-    # Preload metadata for all directories (batch operation)
-    preload_metadata_for_directories(files)
-    
-    # Build file list with metadata
-    all_files = []
-    for f in files:
-        rel_path = os.path.relpath(f, WATCHED_DIR) if WATCHED_DIR else f
-        all_files.append({
-            'path': f,
-            'name': os.path.basename(f),
-            'relative_path': rel_path,
-            'size': os.path.getsize(f),
-            'modified': os.path.getmtime(f),
-            'processed': is_file_processed(f),
-            'duplicate': is_file_duplicate(f)
-        })
+    # Get enriched file list with metadata (cached)
+    all_files = get_enriched_file_list(files, force_rebuild=refresh)
     
     # Apply filters
     filtered_files = all_files
@@ -1332,11 +1385,20 @@ def cache_stats_endpoint():
             file_count = len(file_list_cache['files']) if file_list_cache['files'] else 0
             cache_age = time.time() - file_list_cache['timestamp'] if file_list_cache['timestamp'] else 0
         
+        with enriched_file_cache_lock:
+            enriched_count = len(enriched_file_cache['files']) if enriched_file_cache['files'] else 0
+            enriched_age = time.time() - enriched_file_cache['timestamp'] if enriched_file_cache['timestamp'] else 0
+        
         return jsonify({
             'file_list_cache': {
                 'file_count': file_count,
                 'age_seconds': cache_age,
                 'is_populated': file_list_cache['files'] is not None
+            },
+            'enriched_file_cache': {
+                'file_count': enriched_count,
+                'age_seconds': enriched_age,
+                'is_populated': enriched_file_cache['files'] is not None
             },
             'metadata_cache': {
                 'processed_directories': processed_dirs,

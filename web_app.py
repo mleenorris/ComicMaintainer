@@ -1298,12 +1298,97 @@ def delete_single_file(filepath):
         logging.error(f"Error deleting file {full_path}: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/cache/prewarm', methods=['POST'])
+def prewarm_cache_endpoint():
+    """API endpoint to manually prewarm the metadata cache"""
+    try:
+        prewarm_metadata_cache()
+        return jsonify({
+            'success': True,
+            'message': 'Metadata cache prewarmed successfully'
+        })
+    except Exception as e:
+        logging.error(f"Error prewarming cache via API: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/cache/stats', methods=['GET'])
+def cache_stats_endpoint():
+    """API endpoint to get cache statistics"""
+    try:
+        with metadata_cache_lock:
+            processed_dirs = len(metadata_cache['processed'])
+            duplicate_dirs = len(metadata_cache['duplicate'])
+            cached_entries = len(metadata_cache['last_loaded'])
+        
+        with cache_lock:
+            file_count = len(file_list_cache['files']) if file_list_cache['files'] else 0
+            cache_age = time.time() - file_list_cache['timestamp'] if file_list_cache['timestamp'] else 0
+        
+        return jsonify({
+            'file_list_cache': {
+                'file_count': file_count,
+                'age_seconds': cache_age,
+                'is_populated': file_list_cache['files'] is not None
+            },
+            'metadata_cache': {
+                'processed_directories': processed_dirs,
+                'duplicate_directories': duplicate_dirs,
+                'total_cached_entries': cached_entries,
+                'ttl_seconds': METADATA_CACHE_TTL
+            }
+        })
+    except Exception as e:
+        logging.error(f"Error getting cache stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+def prewarm_metadata_cache():
+    """Prewarm metadata cache by preloading all directory metadata on startup"""
+    if not WATCHED_DIR:
+        return
+    
+    logging.info("Prewarming metadata cache...")
+    start_time = time.time()
+    
+    try:
+        # Get all comic files (this will use the file list cache)
+        files = get_comic_files(use_cache=True)
+        
+        if not files:
+            logging.info("No files found for metadata cache warming")
+            return
+        
+        # Extract unique directories
+        directories = set(os.path.dirname(f) for f in files)
+        
+        logging.info(f"Warming metadata cache for {len(directories)} directories...")
+        
+        # Preload metadata for all directories
+        for directory in directories:
+            # Load processed files metadata
+            get_directory_metadata(directory, PROCESSED_MARKER, metadata_cache['processed'])
+            # Load duplicate files metadata
+            get_directory_metadata(directory, DUPLICATE_MARKER, metadata_cache['duplicate'])
+        
+        elapsed = time.time() - start_time
+        logging.info(f"Metadata cache warmed for {len(directories)} directories in {elapsed:.2f}s")
+        
+    except Exception as e:
+        logging.error(f"Error prewarming metadata cache: {e}")
+
 def initialize_cache():
-    """Initialize file list cache on startup"""
+    """Initialize file list cache and prewarm metadata cache on startup"""
     if WATCHED_DIR:
-        logging.info("Initializing file list cache...")
+        logging.info("Initializing caches on startup...")
+        
+        # First, load the file list cache
+        logging.info("Building file list cache...")
         get_comic_files(use_cache=True)
         logging.info("File list cache initialized")
+        
+        # Then, prewarm the metadata cache
+        prewarm_metadata_cache()
+        
+        logging.info("Cache initialization complete")
 
 if __name__ == '__main__':
     if not WATCHED_DIR:

@@ -372,6 +372,86 @@
             font-size: 12px;
         }
         
+        .file-actions-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .dropdown-toggle {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-secondary);
+            color: var(--text-primary);
+            padding: 5px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.2s;
+        }
+        
+        .dropdown-toggle:hover {
+            background: var(--bg-hover);
+            border-color: var(--border-primary);
+        }
+        
+        .dropdown-toggle::after {
+            content: '▼';
+            font-size: 10px;
+        }
+        
+        .dropdown-menu {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-secondary);
+            border-radius: 4px;
+            box-shadow: var(--shadow-md);
+            z-index: 100;
+            min-width: 150px;
+            margin-top: 2px;
+        }
+        
+        .dropdown-menu.show {
+            display: block;
+        }
+        
+        .dropdown-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+            font-size: 12px;
+            color: var(--text-primary);
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .dropdown-item:hover {
+            background: var(--bg-hover);
+        }
+        
+        .dropdown-item:first-child {
+            border-radius: 4px 4px 0 0;
+        }
+        
+        .dropdown-item:last-child {
+            border-radius: 0 0 4px 4px;
+        }
+        
+        .dropdown-divider {
+            height: 1px;
+            background: var(--border-primary);
+            margin: 4px 0;
+        }
+        
         .modal {
             display: none;
             position: fixed;
@@ -651,6 +731,21 @@
             .btn-small {
                 width: 100%;
                 text-align: center;
+            }
+            
+            .file-actions-dropdown {
+                width: 100%;
+            }
+            
+            .dropdown-toggle {
+                width: 100%;
+                justify-content: center;
+            }
+            
+            .dropdown-menu {
+                left: 0;
+                right: auto;
+                width: 100%;
             }
             
             .file-name {
@@ -1395,18 +1490,26 @@
                                 <button class="btn btn-primary btn-small" onclick="viewTags('${escapeJs(file.relative_path)}')">
                                     View/Edit
                                 </button>
-                                <button class="btn btn-success btn-small" onclick="processSingleFile('${escapeJs(file.relative_path)}')">
-                                    Process
-                                </button>
-                                <button class="btn btn-rename btn-small" onclick="renameSingleFile('${escapeJs(file.relative_path)}')">
-                                    Rename
-                                </button>
-                                <button class="btn btn-normalize btn-small" onclick="normalizeSingleFile('${escapeJs(file.relative_path)}')">
-                                    Normalize
-                                </button>
-                                <button class="btn btn-danger btn-small" onclick="deleteSingleFile('${escapeJs(file.relative_path)}')">
-                                    Delete
-                                </button>
+                                <div class="file-actions-dropdown">
+                                    <button class="dropdown-toggle" onclick="toggleDropdown(event, '${escapeJs(file.relative_path)}')">
+                                        Actions
+                                    </button>
+                                    <div class="dropdown-menu" id="dropdown-${escapeJs(file.relative_path).replace(/[^a-zA-Z0-9]/g, '_')}">
+                                        <button class="dropdown-item" onclick="processSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                            🚀 Process
+                                        </button>
+                                        <button class="dropdown-item" onclick="renameSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                            📝 Rename
+                                        </button>
+                                        <button class="dropdown-item" onclick="normalizeSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                            ✨ Normalize
+                                        </button>
+                                        <div class="dropdown-divider"></div>
+                                        <button class="dropdown-item" onclick="deleteSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                            🗑️ Delete
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     `;
@@ -2111,6 +2214,36 @@
                 showMessage('Failed to reset format: ' + error.message, 'error');
             }
         }
+        
+        function toggleDropdown(event, filepath) {
+            event.stopPropagation();
+            
+            const dropdownId = 'dropdown-' + filepath.replace(/[^a-zA-Z0-9]/g, '_');
+            const dropdown = document.getElementById(dropdownId);
+            
+            // Close all other dropdowns
+            document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
+                if (menu.id !== dropdownId) {
+                    menu.classList.remove('show');
+                }
+            });
+            
+            // Toggle this dropdown
+            dropdown.classList.toggle('show');
+        }
+        
+        function closeAllDropdowns() {
+            document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
+                menu.classList.remove('show');
+            });
+        }
+        
+        // Close dropdowns when clicking outside
+        document.addEventListener('click', function(event) {
+            if (!event.target.closest('.file-actions-dropdown')) {
+                closeAllDropdowns();
+            }
+        });
     </script>
 </body>
 </html>

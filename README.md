@@ -186,6 +186,12 @@ The version is displayed in the web interface header for easy identification of 
 - The service supports both `.cbz` (zip) and `.cbr` (rar) files.
 - **Note**: The code is compatible with both master and develop branch APIs of ComicTagger, automatically detecting which version is in use.
 
+## Production Server
+- The web interface runs on **Gunicorn**, a production-ready WSGI server for Python web applications
+- Configured with 4 worker processes for handling multiple concurrent requests
+- 120-second timeout to accommodate large file processing operations
+- No development server warnings - ready for production deployment
+
 ## Logging
 - All actions and errors are logged to `ComicMaintainer.log` (in the container working directory).
 

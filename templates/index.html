@@ -70,6 +70,10 @@
             background: var(--bg-primary);
             color: var(--text-primary);
             transition: background-color 0.3s, color 0.3s;
+            overflow: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
         
         .header {
@@ -77,6 +81,10 @@
             color: var(--text-header);
             padding: 20px;
             box-shadow: var(--shadow-sm);
+            flex-shrink: 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
         
         .header h1 {
@@ -112,6 +120,22 @@
             max-width: 1400px;
             margin: 0 auto;
             padding: 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .controls-wrapper {
+            flex-shrink: 0;
+        }
+        
+        .content-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-height: 0;
         }
         
         .actions-bar {
@@ -241,7 +265,9 @@
             background: var(--bg-secondary);
             border-radius: 8px;
             box-shadow: var(--shadow-sm);
-            overflow: hidden;
+            overflow-y: auto;
+            flex: 1;
+            min-height: 0;
         }
         
         .file-list-header {
@@ -623,7 +649,11 @@
             align-items: center;
             gap: 15px;
             padding: 20px;
-            margin-top: 20px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            box-shadow: var(--shadow-sm);
+            margin-top: 15px;
+            flex-shrink: 0;
         }
         
         .page-info {
@@ -658,6 +688,11 @@
         
         /* Mobile Responsive Styles */
         @media (max-width: 768px) {
+            body {
+                height: 100vh;
+                height: 100dvh; /* Use dynamic viewport height on mobile */
+            }
+            
             .container {
                 padding: 10px;
             }
@@ -853,104 +888,108 @@
     <div class="container">
         <div id="messageContainer"></div>
         
-        <div class="actions-bar">
-            <div class="button-grid">
-                <div class="button-column">
-                    <button class="btn btn-success" onclick="processAllFiles()">
-                        🚀 Process All (Rename + Normalize)
-                    </button>
-                    <button class="btn btn-success" onclick="processUnmarkedFiles()">
-                        ⚠️ Process Unmarked (Rename + Normalize)
-                    </button>
-                    <button class="btn btn-success" onclick="processSelectedFiles()" id="processSelectedBtn" disabled>
-                        ⚡ Process Selected (Rename + Normalize)
-                    </button>
+        <div class="controls-wrapper">
+            <div class="actions-bar">
+                <div class="button-grid">
+                    <div class="button-column">
+                        <button class="btn btn-success" onclick="processAllFiles()">
+                            🚀 Process All (Rename + Normalize)
+                        </button>
+                        <button class="btn btn-success" onclick="processUnmarkedFiles()">
+                            ⚠️ Process Unmarked (Rename + Normalize)
+                        </button>
+                        <button class="btn btn-success" onclick="processSelectedFiles()" id="processSelectedBtn" disabled>
+                            ⚡ Process Selected (Rename + Normalize)
+                        </button>
+                    </div>
+                    <div class="button-column">
+                        <button class="btn btn-rename" onclick="renameAllFiles()">
+                            📝 Rename All Files
+                        </button>
+                        <button class="btn btn-rename" onclick="renameUnmarkedFiles()">
+                            📝 Rename Unmarked
+                        </button>
+                        <button class="btn btn-rename" onclick="renameSelectedFiles()" id="renameSelectedBtn" disabled>
+                            📝 Rename Selected
+                        </button>
+                    </div>
+                    <div class="button-column">
+                        <button class="btn btn-normalize" onclick="normalizeAllFiles()">
+                            🔧 Normalize All Metadata
+                        </button>
+                        <button class="btn btn-normalize" onclick="normalizeUnmarkedFiles()">
+                            🔧 Normalize Unmarked Metadata
+                        </button>
+                        <button class="btn btn-normalize" onclick="normalizeSelectedFiles()" id="normalizeSelectedBtn" disabled>
+                            🔧 Normalize Selected Metadata
+                        </button>
+                    </div>
                 </div>
-                <div class="button-column">
-                    <button class="btn btn-rename" onclick="renameAllFiles()">
-                        📝 Rename All Files
-                    </button>
-                    <button class="btn btn-rename" onclick="renameUnmarkedFiles()">
-                        📝 Rename Unmarked
-                    </button>
-                    <button class="btn btn-rename" onclick="renameSelectedFiles()" id="renameSelectedBtn" disabled>
-                        📝 Rename Selected
-                    </button>
-                </div>
-                <div class="button-column">
-                    <button class="btn btn-normalize" onclick="normalizeAllFiles()">
-                        🔧 Normalize All Metadata
-                    </button>
-                    <button class="btn btn-normalize" onclick="normalizeUnmarkedFiles()">
-                        🔧 Normalize Unmarked Metadata
-                    </button>
-                    <button class="btn btn-normalize" onclick="normalizeSelectedFiles()" id="normalizeSelectedBtn" disabled>
-                        🔧 Normalize Selected Metadata
-                    </button>
-                </div>
+            </div>
+            
+            <div class="actions-bar" style="margin-top: -10px;">
+                <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>
+                    ✏️ Update Selected
+                </button>
+                <button class="btn btn-primary" onclick="refreshFiles()">
+                    🔄 Refresh
+                </button>
+                <button class="btn btn-primary" onclick="scanUnmarkedFiles()">
+                    🔍 Scan Unmarked
+                </button>
+                <button class="btn btn-primary" onclick="toggleAllFolders()" id="toggleAllBtn">
+                    📂 Collapse All
+                </button>
+                <button class="btn" onclick="openSettings()" style="background: #95a5a6; color: white;">
+                    ⚙️ Settings
+                </button>
+                <span class="select-info" id="selectInfo">No files selected</span>
+            </div>
+            
+            <div class="actions-bar" style="margin-top: -10px;">
+                <button class="btn" onclick="setFilter('all')" id="filterAll" style="background: #3498db; color: white;">
+                    📚 All Files
+                </button>
+                <button class="btn" onclick="setFilter('unmarked')" id="filterUnmarked">
+                    ⚠️ Unmarked Only
+                </button>
+                <button class="btn" onclick="setFilter('marked')" id="filterMarked">
+                    ✅ Marked Only
+                </button>
+                <button class="btn" onclick="setFilter('duplicates')" id="filterDuplicates">
+                    🔁 Duplicates Only
+                </button>
+            </div>
+            
+            <div class="search-bar">
+                <input type="text" id="searchInput" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
             </div>
         </div>
         
-        <div class="actions-bar" style="margin-top: -10px;">
-            <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>
-                ✏️ Update Selected
-            </button>
-            <button class="btn btn-primary" onclick="refreshFiles()">
-                🔄 Refresh
-            </button>
-            <button class="btn btn-primary" onclick="scanUnmarkedFiles()">
-                🔍 Scan Unmarked
-            </button>
-            <button class="btn btn-primary" onclick="toggleAllFolders()" id="toggleAllBtn">
-                📂 Collapse All
-            </button>
-            <button class="btn" onclick="openSettings()" style="background: #95a5a6; color: white;">
-                ⚙️ Settings
-            </button>
-            <span class="select-info" id="selectInfo">No files selected</span>
-        </div>
-        
-        <div class="actions-bar" style="margin-top: -10px;">
-            <button class="btn" onclick="setFilter('all')" id="filterAll" style="background: #3498db; color: white;">
-                📚 All Files
-            </button>
-            <button class="btn" onclick="setFilter('unmarked')" id="filterUnmarked">
-                ⚠️ Unmarked Only
-            </button>
-            <button class="btn" onclick="setFilter('marked')" id="filterMarked">
-                ✅ Marked Only
-            </button>
-            <button class="btn" onclick="setFilter('duplicates')" id="filterDuplicates">
-                🔁 Duplicates Only
-            </button>
-        </div>
-        
-        <div class="search-bar">
-            <input type="text" id="searchInput" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
-        </div>
-        
-        <div class="file-list" id="fileList">
-            <div class="loading">
-                <div class="spinner"></div>
-                <p>Loading files...</p>
+        <div class="content-wrapper">
+            <div class="file-list" id="fileList">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading files...</p>
+                </div>
             </div>
-        </div>
-        
-        <!-- Pagination Controls -->
-        <div class="pagination" id="pagination" style="display: none;">
-            <button class="btn btn-small" id="prevBtn" onclick="previousPage()" disabled>← Previous</button>
-            <span class="page-info" id="pageInfo">Page 1 of 1</span>
-            <button class="btn btn-small" id="nextBtn" onclick="nextPage()" disabled>Next →</button>
-            <div style="display: flex; align-items: center; gap: 8px; margin-left: 15px;">
-                <label for="perPageSelect" style="color: var(--text-secondary); font-size: 14px;">Files per page:</label>
-                <select id="perPageSelect" onchange="changePerPage()" style="padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer;">
-                    <option value="25">25</option>
-                    <option value="50">50</option>
-                    <option value="100" selected>100</option>
-                    <option value="200">200</option>
-                    <option value="500">500</option>
-                    <option value="-1">All</option>
-                </select>
+            
+            <!-- Pagination Controls -->
+            <div class="pagination" id="pagination" style="display: none;">
+                <button class="btn btn-small" id="prevBtn" onclick="previousPage()" disabled>← Previous</button>
+                <span class="page-info" id="pageInfo">Page 1 of 1</span>
+                <button class="btn btn-small" id="nextBtn" onclick="nextPage()" disabled>Next →</button>
+                <div style="display: flex; align-items: center; gap: 8px; margin-left: 15px;">
+                    <label for="perPageSelect" style="color: var(--text-secondary); font-size: 14px;">Files per page:</label>
+                    <select id="perPageSelect" onchange="changePerPage()" style="padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer;">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="200">200</option>
+                        <option value="500">500</option>
+                        <option value="-1">All</option>
+                    </select>
+                </div>
             </div>
         </div>
     </div>

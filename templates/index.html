@@ -100,16 +100,17 @@
             flex-shrink: 0;
             display: flex;
             flex-direction: column;
+            box-shadow: 2px 0 8px rgba(0, 0, 0, 0.05);
         }
         
         .sidebar-header {
-            padding: 20px;
+            padding: 16px 20px;
             border-bottom: 1px solid var(--border-primary);
             font-weight: 600;
-            color: var(--text-secondary);
-            font-size: 12px;
+            color: var(--text-muted);
+            font-size: 11px;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 1px;
         }
         
         .sidebar-nav {
@@ -885,6 +886,15 @@
         
         /* Intermediate Desktop Responsive Styles (Tablets & Small Desktops) */
         @media (max-width: 1024px) and (min-width: 769px) {
+            .sidebar {
+                width: 180px;
+            }
+            
+            .sidebar-item {
+                padding: 10px 15px;
+                font-size: 13px;
+            }
+            
             .btn {
                 padding: 9px 16px;
                 font-size: 13px;

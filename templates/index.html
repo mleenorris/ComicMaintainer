@@ -21,6 +21,9 @@
             --text-light: #95a5a6;
             --text-header: white;
             
+            --accent-primary: #f96854;
+            --accent-hover: #e55845;
+            
             --border-primary: #ecf0f1;
             --border-secondary: #bdc3c7;
             --border-tertiary: #e0e0e0;
@@ -33,14 +36,14 @@
         }
         
         [data-theme="dark"] {
-            --bg-primary: #1a1a1a;
-            --bg-secondary: #2d2d2d;
-            --bg-tertiary: #3a3a3a;
-            --bg-header: #1f2937;
-            --bg-hover: #3a3a3a;
-            --bg-hover-alt: #404040;
-            --bg-indented: #252525;
-            --bg-indented-hover: #303030;
+            --bg-primary: #1f1f1f;
+            --bg-secondary: #181818;
+            --bg-tertiary: #2a2a2a;
+            --bg-header: #0f0f0f;
+            --bg-hover: #2a2a2a;
+            --bg-hover-alt: #333333;
+            --bg-indented: #1a1a1a;
+            --bg-indented-hover: #242424;
             
             --text-primary: #e5e5e5;
             --text-secondary: #d1d5db;
@@ -48,10 +51,13 @@
             --text-light: #6b7280;
             --text-header: white;
             
-            --border-primary: #404040;
-            --border-secondary: #4a4a4a;
+            --accent-primary: #f96854;
+            --accent-hover: #e55845;
+            
+            --border-primary: #2a2a2a;
+            --border-secondary: #333333;
             --border-tertiary: #3a3a3a;
-            --border-input: #4a4a4a;
+            --border-input: #333333;
             
             --shadow-sm: 0 2px 4px rgba(0,0,0,0.3);
             --shadow-md: 0 4px 20px rgba(0,0,0,0.5);
@@ -72,8 +78,81 @@
             transition: background-color 0.3s, color 0.3s;
             overflow: hidden;
             height: 100vh;
+        }
+        
+        .app-wrapper {
+            display: flex;
+            height: 100vh;
+            flex-direction: column;
+        }
+        
+        .main-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .sidebar {
+            width: 220px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-primary);
+            overflow-y: auto;
+            flex-shrink: 0;
             display: flex;
             flex-direction: column;
+        }
+        
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-primary);
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .sidebar-nav {
+            flex: 1;
+            padding: 10px 0;
+        }
+        
+        .sidebar-item {
+            padding: 12px 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text-primary);
+            text-decoration: none;
+            transition: all 0.2s;
+            border-left: 3px solid transparent;
+            font-size: 14px;
+        }
+        
+        .sidebar-item:hover {
+            background: var(--bg-hover);
+            color: var(--accent-primary);
+        }
+        
+        .sidebar-item.active {
+            background: var(--bg-hover);
+            border-left-color: var(--accent-primary);
+            color: var(--accent-primary);
+            font-weight: 500;
+        }
+        
+        .sidebar-item-icon {
+            font-size: 18px;
+            width: 20px;
+            text-align: center;
+        }
+        
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
         
         .header {
@@ -221,7 +300,7 @@
         
         .search-bar input:focus {
             outline: none;
-            border-color: #3498db;
+            border-color: var(--accent-primary);
         }
         
         .filter-dropdown {
@@ -248,7 +327,7 @@
         
         .filter-dropdown-toggle:hover {
             background: var(--bg-hover);
-            border-color: #3498db;
+            border-color: var(--accent-primary);
         }
         
         .filter-dropdown-toggle::after {
@@ -296,7 +375,7 @@
         }
         
         .filter-dropdown-item.active {
-            background: #3498db;
+            background: var(--accent-primary);
             color: white;
             font-weight: 500;
         }
@@ -312,12 +391,12 @@
         }
         
         .btn-primary {
-            background: #3498db;
+            background: var(--accent-primary);
             color: white;
         }
         
         .btn-primary:hover {
-            background: #2980b9;
+            background: var(--accent-hover);
         }
         
         .btn-success {
@@ -729,8 +808,8 @@
         }
         
         .spinner {
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #3498db;
+            border: 3px solid var(--border-primary);
+            border-top: 3px solid var(--accent-primary);
             border-radius: 50%;
             width: 40px;
             height: 40px;
@@ -830,6 +909,10 @@
         
         /* Mobile Responsive Styles */
         @media (max-width: 768px) {
+            .sidebar {
+                display: none;
+            }
+            
             body {
                 height: 100vh;
                 height: 100dvh; /* Use dynamic viewport height on mobile */
@@ -1043,37 +1126,77 @@
     </style>
 </head>
 <body>
-    <div class="header">
-        <div class="container">
-            <div class="header-content">
-                <div class="header-left">
-                    <h1>Comic Maintainer <span id="appVersion" style="font-size: 0.5em; color: rgba(255, 255, 255, 0.7);"></span></h1>
-                    <p>Manage and process comic files in your watched directory</p>
-                </div>
-                <div class="header-right">
-                    <button class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle">
-                        ⋮
-                    </button>
-                    <div class="settings-dropdown-menu" id="settingsDropdownMenu">
-                        <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
-                            ⚙️ Settings
+    <div class="app-wrapper">
+        <div class="header">
+            <div class="container">
+                <div class="header-content">
+                    <div class="header-left">
+                        <h1>Comic Maintainer <span id="appVersion" style="font-size: 0.5em; color: rgba(255, 255, 255, 0.7);"></span></h1>
+                        <p>Manage and process comic files in your watched directory</p>
+                    </div>
+                    <div class="header-right">
+                        <button class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle">
+                            ⋮
                         </button>
-                        <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
-                            🌓 Toggle Theme
-                        </button>
-                        <button class="settings-dropdown-item" onclick="refreshFiles(); closeSettingsMenu();">
-                            🔄 Refresh
-                        </button>
-                        <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
-                            🔍 Scan Unmarked
-                        </button>
+                        <div class="settings-dropdown-menu" id="settingsDropdownMenu">
+                            <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
+                                ⚙️ Settings
+                            </button>
+                            <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
+                                🌓 Toggle Theme
+                            </button>
+                            <button class="settings-dropdown-item" onclick="refreshFiles(); closeSettingsMenu();">
+                                🔄 Refresh
+                            </button>
+                            <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
+                                🔍 Scan Unmarked
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-    
-    <div class="container">
+        
+        <div class="main-layout">
+            <aside class="sidebar">
+                <div class="sidebar-header">Library</div>
+                <nav class="sidebar-nav">
+                    <a href="#" class="sidebar-item active" onclick="return false;">
+                        <span class="sidebar-item-icon">📚</span>
+                        <span>All Files</span>
+                    </a>
+                    <a href="#" class="sidebar-item" onclick="setFilter('unmarked'); return false;">
+                        <span class="sidebar-item-icon">⚠️</span>
+                        <span>Unmarked</span>
+                    </a>
+                    <a href="#" class="sidebar-item" onclick="setFilter('marked'); return false;">
+                        <span class="sidebar-item-icon">✅</span>
+                        <span>Processed</span>
+                    </a>
+                    <a href="#" class="sidebar-item" onclick="setFilter('duplicates'); return false;">
+                        <span class="sidebar-item-icon">🔁</span>
+                        <span>Duplicates</span>
+                    </a>
+                </nav>
+                <div class="sidebar-header">Actions</div>
+                <nav class="sidebar-nav">
+                    <a href="#" class="sidebar-item" onclick="scanUnmarkedFiles(); return false;">
+                        <span class="sidebar-item-icon">🔍</span>
+                        <span>Scan Files</span>
+                    </a>
+                    <a href="#" class="sidebar-item" onclick="refreshFiles(); return false;">
+                        <span class="sidebar-item-icon">🔄</span>
+                        <span>Refresh</span>
+                    </a>
+                    <a href="#" class="sidebar-item" onclick="openSettings(); return false;">
+                        <span class="sidebar-item-icon">⚙️</span>
+                        <span>Settings</span>
+                    </a>
+                </nav>
+            </aside>
+            
+            <div class="main-content">
+                <div class="container">
         <div id="messageContainer"></div>
         
         <div class="controls-wrapper">
@@ -1167,6 +1290,8 @@
                         <option value="-1">All</option>
                     </select>
                 </div>
+            </div>
+        </div>
             </div>
         </div>
     </div>
@@ -1577,6 +1702,24 @@
                     item.classList.remove('active');
                 }
             });
+            
+            // Update active class on sidebar items
+            document.querySelectorAll('.sidebar-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            
+            // Set active on the corresponding sidebar item
+            const sidebarMap = {
+                'all': 0,
+                'unmarked': 1,
+                'marked': 2,
+                'duplicates': 3
+            };
+            
+            const sidebarItems = document.querySelectorAll('.sidebar-nav')[0].querySelectorAll('.sidebar-item');
+            if (sidebarMap[mode] !== undefined && sidebarItems[sidebarMap[mode]]) {
+                sidebarItems[sidebarMap[mode]].classList.add('active');
+            }
             
             // Close the dropdown
             document.getElementById('filterDropdownMenu').classList.remove('show');

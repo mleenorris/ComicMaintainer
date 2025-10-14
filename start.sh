@@ -1,7 +1,10 @@
 #!/bin/bash
 
+# Change to app directory
+cd /app
+
 # Start the watcher in the background
-python /watcher.py &
+python /app/watcher.py &
 WATCHER_PID=$!
 
 # Get the port from environment variable (default: 5000)

@@ -16,13 +16,19 @@ RUN pip install --no-cache-dir -r /requirements.txt
 RUN git clone --branch develop https://github.com/comictagger/comictagger.git /comictagger && \
     pip3 install /comictagger[CBR,ICU,7Z]
 
+# Create app directory for the application
+RUN mkdir -p /app && chmod 755 /app
+
+# Set working directory
+WORKDIR /app
+
 # Copy watcher and process script
-COPY watcher.py /watcher.py
-COPY process_file.py /process_file.py
-COPY web_app.py /web_app.py
-COPY config.py /config.py
-COPY version.py /version.py
-COPY templates /templates
+COPY watcher.py /app/watcher.py
+COPY process_file.py /app/process_file.py
+COPY web_app.py /app/web_app.py
+COPY config.py /app/config.py
+COPY version.py /app/version.py
+COPY templates /app/templates
 COPY start.sh /start.sh
 COPY entrypoint.sh /entrypoint.sh
 
@@ -30,7 +36,7 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /start.sh /entrypoint.sh
 
 # Set default watched directory and script
-ENV PROCESS_SCRIPT=/process_file.py
+ENV PROCESS_SCRIPT=/app/process_file.py
 ENV WEB_PORT=5000
 ENV PUID=99
 ENV PGID=100

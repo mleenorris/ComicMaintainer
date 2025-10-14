@@ -29,5 +29,8 @@ GROUPNAME=$(getent group ${PGID} | cut -d: -f1)
 
 echo "Running as user: ${USERNAME} (${PUID}:${PGID})"
 
+# Ensure the app directory is writable by the specified user
+chown -R ${PUID}:${PGID} /app
+
 # Execute the command as the specified user
 exec gosu ${PUID}:${PGID} "$@"

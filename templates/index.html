@@ -706,6 +706,10 @@
                     <span id="themeIcon">🌙</span>
                     <span id="themeText">Dark Mode</span>
                 </button>
+                <button class="theme-toggle" onclick="toggleWatcher()" id="watcherToggle">
+                    <span id="watcherIcon">👁️</span>
+                    <span id="watcherText">Watcher: Loading...</span>
+                </button>
             </div>
         </div>
     </div>
@@ -1024,6 +1028,69 @@
             localStorage.setItem('theme', newTheme);
         }
         
+        // Load watcher status
+        async function loadWatcherStatus() {
+            try {
+                const response = await fetch('/api/settings/watcher-enabled');
+                const data = await response.json();
+                updateWatcherButton(data.enabled);
+            } catch (error) {
+                console.error('Error loading watcher status:', error);
+                updateWatcherButton(true); // Default to enabled on error
+            }
+        }
+        
+        // Update watcher button display
+        function updateWatcherButton(enabled) {
+            const iconElement = document.getElementById('watcherIcon');
+            const textElement = document.getElementById('watcherText');
+            const buttonElement = document.getElementById('watcherToggle');
+            
+            if (enabled) {
+                iconElement.textContent = '👁️';
+                textElement.textContent = 'Watcher: ON';
+                buttonElement.style.background = 'rgba(46, 204, 113, 0.2)';
+                buttonElement.style.borderColor = 'rgba(46, 204, 113, 0.4)';
+            } else {
+                iconElement.textContent = '👁️‍🗨️';
+                textElement.textContent = 'Watcher: OFF';
+                buttonElement.style.background = 'rgba(231, 76, 60, 0.2)';
+                buttonElement.style.borderColor = 'rgba(231, 76, 60, 0.4)';
+            }
+        }
+        
+        // Toggle watcher on/off
+        async function toggleWatcher() {
+            try {
+                // Get current status first
+                const statusResponse = await fetch('/api/settings/watcher-enabled');
+                const statusData = await statusResponse.json();
+                const currentStatus = statusData.enabled;
+                
+                // Toggle it
+                const newStatus = !currentStatus;
+                const response = await fetch('/api/settings/watcher-enabled', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ enabled: newStatus })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    updateWatcherButton(result.enabled);
+                    const statusText = result.enabled ? 'enabled' : 'disabled';
+                    showMessage(`Watcher ${statusText} successfully!`, 'success');
+                } else {
+                    showMessage(result.error || 'Failed to toggle watcher', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to toggle watcher: ' + error.message, 'error');
+            }
+        }
+        
         // Fetch and display version
         async function loadVersion() {
             try {
@@ -1042,6 +1109,7 @@
         document.addEventListener('DOMContentLoaded', function() {
             initTheme();
             loadVersion();
+            loadWatcherStatus();
             
             // Set the per-page selector to the saved value
             const perPageSelect = document.getElementById('perPageSelect');

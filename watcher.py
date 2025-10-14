@@ -6,6 +6,7 @@ from watchdog.events import FileSystemEventHandler
 import subprocess
 import os
 import logging
+from config import get_watcher_enabled
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
 PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
@@ -105,6 +106,9 @@ class ChangeHandler(FileSystemEventHandler):
     def on_moved(self, event):
         # Only process if destination is .cbr or .cbz and debounce allows
         if not event.is_directory and self._should_process(event.dest_path) and self._should_process(event.src_path):
+            if not get_watcher_enabled():
+                logging.debug(f"Watcher disabled, skipping: {event.dest_path}")
+                return
             if is_web_modified(event.dest_path):
                 self.last_processed[event.dest_path] = time.time()
                 return
@@ -154,6 +158,9 @@ class ChangeHandler(FileSystemEventHandler):
 
     def on_modified(self, event):
         if not event.is_directory and self._should_process(event.src_path) and self._allowed_extension(event.src_path):
+            if not get_watcher_enabled():
+                logging.debug(f"Watcher disabled, skipping: {event.src_path}")
+                return
             if is_web_modified(event.src_path):
                 self.last_processed[event.src_path] = time.time()
                 return
@@ -170,6 +177,9 @@ class ChangeHandler(FileSystemEventHandler):
                 logging.info(f"File not stable yet: {event.src_path}")
     def on_created(self, event):
         if not event.is_directory and self._should_process(event.src_path) and self._allowed_extension(event.src_path):
+            if not get_watcher_enabled():
+                logging.debug(f"Watcher disabled, skipping: {event.src_path}")
+                return
             if is_web_modified(event.src_path):
                 self.last_processed[event.src_path] = time.time()
                 return

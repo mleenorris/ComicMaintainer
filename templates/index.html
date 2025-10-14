@@ -197,6 +197,24 @@
             background: #c0392b;
         }
         
+        .btn-rename {
+            background: #9b59b6;
+            color: white;
+        }
+        
+        .btn-rename:hover {
+            background: #8e44ad;
+        }
+        
+        .btn-normalize {
+            background: #16a085;
+            color: white;
+        }
+        
+        .btn-normalize:hover {
+            background: #138d75;
+        }
+        
         .btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
@@ -727,6 +745,27 @@
             <button class="btn btn-success" onclick="processSelectedFiles()" id="processSelectedBtn" disabled>
                 ⚡ Process Selected (Rename + Normalize)
             </button>
+            <button class="btn btn-rename" onclick="renameAllFiles()">
+                📝 Rename All Files
+            </button>
+            <button class="btn btn-rename" onclick="renameUnmarkedFiles()">
+                📝 Rename Unmarked
+            </button>
+            <button class="btn btn-rename" onclick="renameSelectedFiles()" id="renameSelectedBtn" disabled>
+                📝 Rename Selected
+            </button>
+            <button class="btn btn-normalize" onclick="normalizeAllFiles()">
+                🔧 Normalize All Metadata
+            </button>
+            <button class="btn btn-normalize" onclick="normalizeUnmarkedFiles()">
+                🔧 Normalize Unmarked Metadata
+            </button>
+            <button class="btn btn-normalize" onclick="normalizeSelectedFiles()" id="normalizeSelectedBtn" disabled>
+                🔧 Normalize Selected Metadata
+            </button>
+        </div>
+        
+        <div class="actions-bar" style="margin-top: -10px;">
             <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>
                 ✏️ Update Selected
             </button>
@@ -743,27 +782,6 @@
                 ⚙️ Settings
             </button>
             <span class="select-info" id="selectInfo">No files selected</span>
-        </div>
-        
-        <div class="actions-bar" style="margin-top: -10px;">
-            <button class="btn" onclick="renameAllFiles()" style="background: #9b59b6; color: white;">
-                📝 Rename All Files
-            </button>
-            <button class="btn" onclick="normalizeAllFiles()" style="background: #16a085; color: white;">
-                🔧 Normalize All Metadata
-            </button>
-            <button class="btn" onclick="renameUnmarkedFiles()" style="background: #9b59b6; color: white;">
-                📝 Rename Unmarked
-            </button>
-            <button class="btn" onclick="normalizeUnmarkedFiles()" style="background: #16a085; color: white;">
-                🔧 Normalize Unmarked Metadata
-            </button>
-            <button class="btn" onclick="renameSelectedFiles()" id="renameSelectedBtn" disabled style="background: #9b59b6; color: white;">
-                📝 Rename Selected
-            </button>
-            <button class="btn" onclick="normalizeSelectedFiles()" id="normalizeSelectedBtn" disabled style="background: #16a085; color: white;">
-                🔧 Normalize Selected Metadata
-            </button>
         </div>
         
         <div class="actions-bar" style="margin-top: -10px;">
@@ -1329,10 +1347,10 @@
                                 <button class="btn btn-success btn-small" onclick="processSingleFile('${escapeJs(file.relative_path)}')">
                                     Process
                                 </button>
-                                <button class="btn btn-small" onclick="renameSingleFile('${escapeJs(file.relative_path)}')" style="background: #9b59b6; color: white;">
+                                <button class="btn btn-rename btn-small" onclick="renameSingleFile('${escapeJs(file.relative_path)}')">
                                     Rename
                                 </button>
-                                <button class="btn btn-small" onclick="normalizeSingleFile('${escapeJs(file.relative_path)}')" style="background: #16a085; color: white;">
+                                <button class="btn btn-normalize btn-small" onclick="normalizeSingleFile('${escapeJs(file.relative_path)}')">
                                     Normalize
                                 </button>
                                 <button class="btn btn-danger btn-small" onclick="deleteSingleFile('${escapeJs(file.relative_path)}')">

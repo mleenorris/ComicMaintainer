@@ -962,6 +962,7 @@
         let currentPage = 1;
         let totalPages = 1;
         let totalFiles = 0;
+        let unmarkedCount = 0;
         let perPage = parseInt(localStorage.getItem('perPage')) || 100;
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
         let searchDebounceTimer = null;
@@ -1140,9 +1141,11 @@
                 currentPage = data.page;
                 totalPages = data.total_pages;
                 totalFiles = data.total_files;
+                unmarkedCount = data.unmarked_count || 0;
                 
                 renderFileList();
                 updatePagination();
+                updateButtonVisibility();
             } catch (error) {
                 showMessage('Failed to load files: ' + error.message, 'error');
             }
@@ -1167,6 +1170,25 @@
             } else {
                 paginationDiv.style.display = 'none';
             }
+        }
+        
+        function updateButtonVisibility() {
+            // Get all unmarked-related buttons
+            const processUnmarkedBtn = document.querySelector('button[onclick="processUnmarkedFiles()"]');
+            const renameUnmarkedBtn = document.querySelector('button[onclick="renameUnmarkedFiles()"]');
+            const normalizeUnmarkedBtn = document.querySelector('button[onclick="normalizeUnmarkedFiles()"]');
+            const scanUnmarkedBtn = document.querySelector('button[onclick="scanUnmarkedFiles()"]');
+            const filterUnmarkedBtn = document.getElementById('filterUnmarked');
+            
+            // Show or hide buttons based on whether there are unmarked files
+            const hasUnmarkedFiles = unmarkedCount > 0;
+            const displayStyle = hasUnmarkedFiles ? '' : 'none';
+            
+            if (processUnmarkedBtn) processUnmarkedBtn.style.display = displayStyle;
+            if (renameUnmarkedBtn) renameUnmarkedBtn.style.display = displayStyle;
+            if (normalizeUnmarkedBtn) normalizeUnmarkedBtn.style.display = displayStyle;
+            if (scanUnmarkedBtn) scanUnmarkedBtn.style.display = displayStyle;
+            if (filterUnmarkedBtn) filterUnmarkedBtn.style.display = displayStyle;
         }
         
         function changePerPage() {

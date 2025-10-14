@@ -1,7 +1,7 @@
 
 # ComicTagger Watcher Service
 
-This service automatically watches a directory for new or changed comic archive files (`.cbz`/`.cbr`), tags them using ComicTagger, and manages duplicates. It is designed to run in a Docker container and is fully automated. **For security, the container runs as user `nobody` and group `users`, and all files inside the container are owned by this user/group.**
+This service automatically watches a directory for new or changed comic archive files (`.cbz`/`.cbr`), tags them using ComicTagger, and manages duplicates. It is designed to run in a Docker container and is fully automated. **The container supports custom user and group IDs (PUID/PGID) to ensure proper file permissions when working with host-mounted directories.**
 
 ## Features
 - Watches a directory for file changes (create, modify, move/rename, delete)
@@ -24,7 +24,7 @@ This service automatically watches a directory for new or changed comic archive 
   - **Visual status indicators**: Each file shows ✅ (processed), ⚠️ (unprocessed), or 🔁 (duplicate) icon
 - Logs all actions to `ComicMaintainer.log`
 - Containerized with Docker for easy deployment
-- **Runs as user `nobody` and group `users` for improved container security**
+- **Supports custom user and group IDs (PUID/PGID) for proper file permissions**
 
 ## How It Works
 1. The watcher service monitors a specified directory for new or changed `.cbz`/`.cbr` files.
@@ -41,10 +41,12 @@ This service automatically watches a directory for new or changed comic archive 
 docker build -t iceburn1/comictagger-watcher:latest .
 ```
 
-**Security Note:** The container runs as user `nobody` and group `users`. All files and directories inside the container are owned by this user/group. If you mount host directories, ensure permissions are compatible if you need to access files from the host.
+**Permissions Note:** By default, the container runs as user `nobody` (UID 99) and group `users` (GID 100). You can customize these by setting the `PUID` and `PGID` environment variables to match your host user. This ensures that files created or modified by the container have the correct ownership on your host system.
 
 
 ### Run the container
+
+**Basic usage:**
 ```sh
 docker run -d \
   -v <host_dir_to_watch>:/watched_dir \
@@ -55,10 +57,15 @@ docker run -d \
   iceburn1/comictagger-watcher:latest
 ```
 
+**With custom user/group (recommended for host-mounted directories):**
 ```sh
 docker run -d \
   -v <host_dir_to_watch>:/watched_dir \
+  -v <host_dir_for_duplicates>:/duplicates \
   -e WATCHED_DIR=/watched_dir \
+  -e DUPLICATE_DIR=/duplicates \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
   -p 5000:5000 \
   iceburn1/comictagger-watcher:latest
 ```
@@ -67,14 +74,16 @@ docker run -d \
 - `WATCHED_DIR` **must** be set to the directory to watch (usually `/watched_dir` if using the example above).
 - Optionally, mount a host directory to `/duplicates` to persist duplicates.
 - The `-p 5000:5000` flag exposes the web interface on port 5000.
+- Set `PUID` and `PGID` to match your host user for proper file permissions (use `id -u` and `id -g` on Linux/macOS).
 - Access the web interface at `http://localhost:5000`
-- **Note:** If you mount host directories, files created or modified in the container will be owned by `nobody:users` (UID 99, GID 100). Adjust host permissions if you need to access these files outside the container.
 
 ### Environment Variables
 - `WATCHED_DIR`: **(Required)** Directory to watch for comics. The service will not start if this is not set.
 - `PROCESS_SCRIPT`: Script to run for processing (default: `/process_file.py`)
 - `DUPLICATE_DIR`: Directory where duplicates are moved (required for duplicate handling)
 - `WEB_PORT`: Port for the web interface (default: `5000`)
+- `PUID`: User ID to run the service as (default: `99` for user `nobody`)
+- `PGID`: Group ID to run the service as (default: `100` for group `users`)
 
 ## Web Interface
 The service includes a web-based interface for managing your comic files:

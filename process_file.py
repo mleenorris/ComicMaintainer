@@ -21,11 +21,14 @@ CACHE_CHANGES_FILE = '.cache_changes'
 
 def update_watcher_timestamp():
     """Update the watcher cache invalidation timestamp"""
-    watched_dir = os.environ.get('WATCHED_DIR')
-    if not watched_dir:
+    cache_dir = os.environ.get('CACHE_DIR', '/app/cache')
+    if not cache_dir:
         return
     
-    marker_path = os.path.join(watched_dir, CACHE_UPDATE_MARKER)
+    # Ensure cache directory exists
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    marker_path = os.path.join(cache_dir, CACHE_UPDATE_MARKER)
     try:
         import time
         with open(marker_path, 'w') as f:
@@ -41,11 +44,14 @@ def record_cache_change(change_type, old_path=None, new_path=None):
         old_path: Original file path (for 'remove' and 'rename')
         new_path: New file path (for 'add' and 'rename')
     """
-    watched_dir = os.environ.get('WATCHED_DIR')
-    if not watched_dir:
+    cache_dir = os.environ.get('CACHE_DIR', '/app/cache')
+    if not cache_dir:
         return
     
-    changes_file = os.path.join(watched_dir, CACHE_CHANGES_FILE)
+    # Ensure cache directory exists
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    changes_file = os.path.join(cache_dir, CACHE_CHANGES_FILE)
     
     try:
         import json

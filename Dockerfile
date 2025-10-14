@@ -19,6 +19,9 @@ RUN git clone --branch develop https://github.com/comictagger/comictagger.git /c
 # Create app directory for the application
 RUN mkdir -p /app && chmod 755 /app
 
+# Create cache directory for server-side caching
+RUN mkdir -p /app/cache && chmod 755 /app/cache
+
 # Set working directory
 WORKDIR /app
 
@@ -38,6 +41,7 @@ RUN chmod +x /start.sh /entrypoint.sh
 # Set default watched directory and script
 ENV PROCESS_SCRIPT=/app/process_file.py
 ENV WEB_PORT=5000
+ENV CACHE_DIR=/app/cache
 ENV PUID=99
 ENV PGID=100
 

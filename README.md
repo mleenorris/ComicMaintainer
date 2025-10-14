@@ -79,7 +79,7 @@ docker run -d \
 
 ### Environment Variables
 - `WATCHED_DIR`: **(Required)** Directory to watch for comics. The service will not start if this is not set.
-- `PROCESS_SCRIPT`: Script to run for processing (default: `/process_file.py`)
+- `PROCESS_SCRIPT`: Script to run for processing (default: `/app/process_file.py`)
 - `DUPLICATE_DIR`: Directory where duplicates are moved (required for duplicate handling)
 - `WEB_PORT`: Port for the web interface (default: `5000`)
 - `PUID`: User ID to run the service as (default: `99` for user `nobody`)
@@ -204,7 +204,7 @@ The version is displayed in the web interface header for easy identification of 
 - No development server warnings - ready for production deployment
 
 ## Logging
-- All actions and errors are logged to `ComicMaintainer.log` (in the container working directory).
+- All actions and errors are logged to `ComicMaintainer.log` (located in `/app/ComicMaintainer.log` within the container).
 
 ## GitHub Actions / CI
 - The repository includes a GitHub Actions workflow to automatically build and push the Docker image to Docker Hub on every push or pull request to `master`.

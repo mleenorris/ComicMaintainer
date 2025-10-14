@@ -158,8 +158,14 @@
             box-shadow: var(--shadow-sm);
         }
         
+        .search-bar-wrapper {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
         .search-bar input {
-            width: 100%;
+            flex: 1;
             padding: 12px 15px;
             border: 1px solid var(--border-input);
             border-radius: 5px;
@@ -173,6 +179,83 @@
         .search-bar input:focus {
             outline: none;
             border-color: #3498db;
+        }
+        
+        .filter-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .filter-dropdown-toggle {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-input);
+            color: var(--text-primary);
+            padding: 12px 15px;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+            transition: all 0.3s;
+            font-family: inherit;
+            font-weight: 500;
+        }
+        
+        .filter-dropdown-toggle:hover {
+            background: var(--bg-hover);
+            border-color: #3498db;
+        }
+        
+        .filter-dropdown-toggle::after {
+            content: '▼';
+            font-size: 10px;
+            margin-left: 5px;
+        }
+        
+        .filter-dropdown-menu {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: calc(100% + 5px);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-secondary);
+            border-radius: 5px;
+            box-shadow: var(--shadow-md);
+            z-index: 1000;
+            min-width: 180px;
+            overflow: hidden;
+        }
+        
+        .filter-dropdown-menu.show {
+            display: block;
+        }
+        
+        .filter-dropdown-item {
+            padding: 12px 15px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+            font-size: 14px;
+            color: var(--text-primary);
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: inherit;
+        }
+        
+        .filter-dropdown-item:hover {
+            background: var(--bg-hover);
+        }
+        
+        .filter-dropdown-item.active {
+            background: #3498db;
+            color: white;
+            font-weight: 500;
         }
         
         .btn {
@@ -768,6 +851,30 @@
                 text-align: center;
             }
             
+            .search-bar {
+                padding: 10px;
+            }
+            
+            .search-bar-wrapper {
+                flex-direction: column;
+                gap: 8px;
+            }
+            
+            .filter-dropdown {
+                width: 100%;
+            }
+            
+            .filter-dropdown-toggle {
+                width: 100%;
+                justify-content: center;
+            }
+            
+            .filter-dropdown-menu {
+                left: 0;
+                right: auto;
+                width: 100%;
+            }
+            
             .file-actions-dropdown {
                 width: 100%;
             }
@@ -936,23 +1043,29 @@
                 <span class="select-info" id="selectInfo">No files selected</span>
             </div>
             
-            <div class="actions-bar" style="margin-top: -10px;">
-                <button class="btn" onclick="setFilter('all')" id="filterAll" style="background: #3498db; color: white;">
-                    📚 All Files
-                </button>
-                <button class="btn" onclick="setFilter('unmarked')" id="filterUnmarked">
-                    ⚠️ Unmarked Only
-                </button>
-                <button class="btn" onclick="setFilter('marked')" id="filterMarked">
-                    ✅ Marked Only
-                </button>
-                <button class="btn" onclick="setFilter('duplicates')" id="filterDuplicates">
-                    🔁 Duplicates Only
-                </button>
-            </div>
-            
             <div class="search-bar">
-                <input type="text" id="searchInput" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
+                <div class="search-bar-wrapper">
+                    <input type="text" id="searchInput" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
+                    <div class="filter-dropdown">
+                        <button class="filter-dropdown-toggle" onclick="toggleFilterDropdown(event)" id="filterDropdownToggle">
+                            <span id="filterDropdownLabel">📚 All Files</span>
+                        </button>
+                        <div class="filter-dropdown-menu" id="filterDropdownMenu">
+                            <button class="filter-dropdown-item active" onclick="setFilter('all')" data-filter="all">
+                                📚 All Files
+                            </button>
+                            <button class="filter-dropdown-item" onclick="setFilter('unmarked')" data-filter="unmarked" id="filterUnmarked">
+                                ⚠️ Unmarked Only
+                            </button>
+                            <button class="filter-dropdown-item" onclick="setFilter('marked')" data-filter="marked">
+                                ✅ Marked Only
+                            </button>
+                            <button class="filter-dropdown-item" onclick="setFilter('duplicates')" data-filter="duplicates">
+                                🔁 Duplicates Only
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -1365,18 +1478,36 @@
         function setFilter(mode) {
             filterMode = mode;
             
-            // Update button styles
-            document.getElementById('filterAll').style.background = mode === 'all' ? '#3498db' : '';
-            document.getElementById('filterAll').style.color = mode === 'all' ? 'white' : '';
-            document.getElementById('filterUnmarked').style.background = mode === 'unmarked' ? '#e67e22' : '';
-            document.getElementById('filterUnmarked').style.color = mode === 'unmarked' ? 'white' : '';
-            document.getElementById('filterMarked').style.background = mode === 'marked' ? '#27ae60' : '';
-            document.getElementById('filterMarked').style.color = mode === 'marked' ? 'white' : '';
-            document.getElementById('filterDuplicates').style.background = mode === 'duplicates' ? '#e74c3c' : '';
-            document.getElementById('filterDuplicates').style.color = mode === 'duplicates' ? 'white' : '';
+            // Update dropdown label and active state
+            const filterLabels = {
+                'all': '📚 All Files',
+                'unmarked': '⚠️ Unmarked Only',
+                'marked': '✅ Marked Only',
+                'duplicates': '🔁 Duplicates Only'
+            };
+            
+            document.getElementById('filterDropdownLabel').textContent = filterLabels[mode];
+            
+            // Update active class on dropdown items
+            document.querySelectorAll('.filter-dropdown-item').forEach(item => {
+                if (item.dataset.filter === mode) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+            
+            // Close the dropdown
+            document.getElementById('filterDropdownMenu').classList.remove('show');
             
             // Reload from page 1 with new filter
             loadFiles(1);
+        }
+        
+        function toggleFilterDropdown(event) {
+            event.stopPropagation();
+            const menu = document.getElementById('filterDropdownMenu');
+            menu.classList.toggle('show');
         }
         
         async function scanUnmarkedFiles() {
@@ -2247,12 +2378,24 @@
             document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
                 menu.classList.remove('show');
             });
+            // Also close filter dropdown
+            const filterMenu = document.getElementById('filterDropdownMenu');
+            if (filterMenu) {
+                filterMenu.classList.remove('show');
+            }
         }
         
         // Close dropdowns when clicking outside
         document.addEventListener('click', function(event) {
             if (!event.target.closest('.file-actions-dropdown')) {
                 closeAllDropdowns();
+            }
+            // Close filter dropdown when clicking outside
+            if (!event.target.closest('.filter-dropdown')) {
+                const filterMenu = document.getElementById('filterDropdownMenu');
+                if (filterMenu) {
+                    filterMenu.classList.remove('show');
+                }
             }
         });
     </script>

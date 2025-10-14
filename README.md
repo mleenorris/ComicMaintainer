@@ -157,6 +157,20 @@ The filename format can be customized through the web interface Settings modal. 
 
 The filename format setting is saved in `config.json` and applies to both web interface processing and watcher service processing.
 
+## API Endpoints
+
+The web interface exposes several REST API endpoints:
+
+### Version Information
+- **GET** `/api/version` - Returns the current version of the application
+  ```json
+  {
+    "version": "1.0.0"
+  }
+  ```
+  
+The version is displayed in the web interface header for easy identification of the running instance.
+
 ## ComicTagger Integration
 - ComicTagger is installed in the container from the **develop branch** and used via its Python API.
 - The service supports both `.cbz` (zip) and `.cbr` (rar) files.

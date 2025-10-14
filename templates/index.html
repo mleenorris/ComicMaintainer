@@ -1329,8 +1329,46 @@
         <div class="container">
             <div class="header-content">
                 <div class="header-left">
-                    <h1>Comic Maintainer <span id="appVersion" style="font-size: 0.5em; color: rgba(255, 255, 255, 0.7);"></span></h1>
-                    <p>Manage and process comic files in your watched directory</p>
+                    <svg width="48" height="48" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Brown border/frame -->
+                        <rect x="5" y="5" width="90" height="90" rx="10" fill="#8B5A3C" stroke="#5C3A28" stroke-width="2"/>
+                        <rect x="10" y="10" width="80" height="80" rx="8" fill="#A67C52"/>
+                        
+                        <!-- Teal shelf background -->
+                        <rect x="15" y="15" width="70" height="70" rx="6" fill="#7CB8B8"/>
+                        
+                        <!-- Three comic books -->
+                        <!-- Left book - yellow/green -->
+                        <rect x="20" y="22" width="18" height="30" rx="2" fill="#D4D46E" stroke="#5C3A28" stroke-width="1.5"/>
+                        <rect x="20" y="22" width="18" height="8" fill="#B8B85A"/>
+                        <text x="29" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                        <text x="29" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
+                        
+                        <!-- Middle book - orange/red -->
+                        <rect x="41" y="22" width="18" height="30" rx="2" fill="#E67E5A" stroke="#5C3A28" stroke-width="1.5"/>
+                        <rect x="41" y="22" width="18" height="8" fill="#CC6644"/>
+                        <text x="50" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">O</text>
+                        <text x="50" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
+                        
+                        <!-- Right book - beige -->
+                        <rect x="62" y="22" width="18" height="30" rx="2" fill="#E8D4C4" stroke="#5C3A28" stroke-width="1.5"/>
+                        <rect x="62" y="22" width="18" height="8" fill="#D4BCA8"/>
+                        <text x="71" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                        <text x="71" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                        
+                        <!-- Label "COMIC LIBRARY" -->
+                        <rect x="20" y="54" width="60" height="10" rx="2" fill="#F4C430"/>
+                        <text x="50" y="61.5" font-family="Arial, sans-serif" font-size="6" font-weight="bold" fill="#5C3A28" text-anchor="middle">COMIC LIBRARY</text>
+                        
+                        <!-- Bottom shelf with books -->
+                        <rect x="20" y="68" width="8" height="12" fill="#6A8AB8"/>
+                        <rect x="30" y="68" width="6" height="12" fill="#E67E5A"/>
+                        <rect x="38" y="68" width="8" height="12" fill="#7CB8B8"/>
+                        <rect x="48" y="68" width="6" height="12" fill="#E8D4C4"/>
+                        <rect x="58" y="68" width="6" height="12" fill="#E67E5A"/>
+                        <rect x="66" y="68" width="8" height="12" fill="#7CB8B8"/>
+                        <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
+                    </svg>
                 </div>
                 <div class="header-right">
                     <div class="header-controls">
@@ -1378,6 +1416,9 @@
                             ⋮
                         </button>
                         <div class="settings-dropdown-menu" id="settingsDropdownMenu">
+                            <button class="settings-dropdown-item" onclick="openAboutModal(); closeSettingsMenu();">
+                                ℹ️ About
+                            </button>
                             <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
                                 ⚙️ Settings
                             </button>
@@ -1568,6 +1609,88 @@
             <div class="modal-footer">
                 <button class="btn" onclick="closeBatchModal()">Cancel</button>
                 <button class="btn btn-primary" onclick="saveBatchTags()">Update Selected Files</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- About Modal -->
+    <div class="modal" id="aboutModal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2>About Comic Maintainer</h2>
+                <button class="close-btn" onclick="closeAboutModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Brown border/frame -->
+                        <rect x="5" y="5" width="90" height="90" rx="10" fill="#8B5A3C" stroke="#5C3A28" stroke-width="2"/>
+                        <rect x="10" y="10" width="80" height="80" rx="8" fill="#A67C52"/>
+                        
+                        <!-- Teal shelf background -->
+                        <rect x="15" y="15" width="70" height="70" rx="6" fill="#7CB8B8"/>
+                        
+                        <!-- Three comic books -->
+                        <!-- Left book - yellow/green -->
+                        <rect x="20" y="22" width="18" height="30" rx="2" fill="#D4D46E" stroke="#5C3A28" stroke-width="1.5"/>
+                        <rect x="20" y="22" width="18" height="8" fill="#B8B85A"/>
+                        <text x="29" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                        <text x="29" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
+                        
+                        <!-- Middle book - orange/red -->
+                        <rect x="41" y="22" width="18" height="30" rx="2" fill="#E67E5A" stroke="#5C3A28" stroke-width="1.5"/>
+                        <rect x="41" y="22" width="18" height="8" fill="#CC6644"/>
+                        <text x="50" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">O</text>
+                        <text x="50" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
+                        
+                        <!-- Right book - beige -->
+                        <rect x="62" y="22" width="18" height="30" rx="2" fill="#E8D4C4" stroke="#5C3A28" stroke-width="1.5"/>
+                        <rect x="62" y="22" width="18" height="8" fill="#D4BCA8"/>
+                        <text x="71" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                        <text x="71" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                        
+                        <!-- Label "COMIC LIBRARY" -->
+                        <rect x="20" y="54" width="60" height="10" rx="2" fill="#F4C430"/>
+                        <text x="50" y="61.5" font-family="Arial, sans-serif" font-size="6" font-weight="bold" fill="#5C3A28" text-anchor="middle">COMIC LIBRARY</text>
+                        
+                        <!-- Bottom shelf with books -->
+                        <rect x="20" y="68" width="8" height="12" fill="#6A8AB8"/>
+                        <rect x="30" y="68" width="6" height="12" fill="#E67E5A"/>
+                        <rect x="38" y="68" width="8" height="12" fill="#7CB8B8"/>
+                        <rect x="48" y="68" width="6" height="12" fill="#E8D4C4"/>
+                        <rect x="58" y="68" width="6" height="12" fill="#E67E5A"/>
+                        <rect x="66" y="68" width="8" height="12" fill="#7CB8B8"/>
+                        <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
+                    </svg>
+                </div>
+                
+                <h3 style="margin-bottom: 10px; color: var(--text-secondary); text-align: center;">Comic Maintainer</h3>
+                <p style="text-align: center; color: var(--text-muted); margin-bottom: 20px;">
+                    Version: <strong id="aboutVersion">Loading...</strong>
+                </p>
+                
+                <div style="padding: 15px; background: var(--bg-hover); border-radius: 8px; margin-bottom: 15px;">
+                    <h4 style="margin-bottom: 10px; color: var(--text-secondary);">Description</h4>
+                    <p style="color: var(--text-primary); line-height: 1.6;">
+                        Comic Maintainer is a service that automatically watches a directory for new or changed comic archive files (.cbz/.cbr), 
+                        tags them using ComicTagger, and manages duplicates. It provides a web interface for managing and processing comic files 
+                        in your watched directory.
+                    </p>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div style="padding: 15px; background: var(--bg-hover); border-radius: 8px;">
+                        <h4 style="margin-bottom: 8px; color: var(--text-secondary);">Created</h4>
+                        <p style="color: var(--text-primary);">2024</p>
+                    </div>
+                    <div style="padding: 15px; background: var(--bg-hover); border-radius: 8px;">
+                        <h4 style="margin-bottom: 8px; color: var(--text-secondary);">License</h4>
+                        <p style="color: var(--text-primary);">MIT</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeAboutModal()">Close</button>
             </div>
         </div>
     </div>
@@ -2802,6 +2925,26 @@
         
         function closeLogsModal() {
             document.getElementById('logsModal').classList.remove('active');
+        }
+        
+        async function openAboutModal() {
+            try {
+                // Load version
+                const response = await fetch('/api/version');
+                const data = await response.json();
+                const aboutVersionElement = document.getElementById('aboutVersion');
+                if (aboutVersionElement && data.version) {
+                    aboutVersionElement.textContent = `v${data.version}`;
+                }
+                
+                document.getElementById('aboutModal').classList.add('active');
+            } catch (error) {
+                showMessage('Failed to load version information: ' + error.message, 'error');
+            }
+        }
+        
+        function closeAboutModal() {
+            document.getElementById('aboutModal').classList.remove('active');
         }
         
         async function loadLogs() {

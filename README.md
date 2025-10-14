@@ -112,16 +112,19 @@ The service includes a web-based interface for managing your comic files:
    - **Normalize**: Normalize metadata only
    - **Delete**: Remove the file
 10. Select multiple files and click "Update Selected" to batch update common tags
-11. Click "Refresh" to update the file list (automatically clears cache)
-12. Click "Scan Unmarked" to see a count of processed vs unprocessed files
+11. Use the **three-dot menu (⋮)** in the top-right header to access:
+    - **Settings**: Configure the filename format for renamed files and theme
+    - **Toggle Theme**: Switch between light and dark mode
+    - **Refresh**: Update the file list (automatically clears cache)
+    - **Scan Unmarked**: See a count of processed vs unprocessed files
+12. Use the **expand/collapse button (▼/▶)** at the top of the file list to expand or collapse all folders at once
 13. Use the filter buttons to view:
     - **All Files**: Show all files in the directory
     - **Unmarked Only**: Show only files that haven't been processed yet
     - **Marked Only**: Show only files that have been processed
     - **Duplicates Only**: Show only files marked as duplicates
     - Search and filters can be combined and work across all pages
-14. Click "Settings" to configure the filename format for renamed files
-15. Look for the status icon next to each filename:
+14. Look for the status icon next to each filename:
     - ✅ = processed
     - ⚠️ = not processed yet
     - 🔁 = duplicate file

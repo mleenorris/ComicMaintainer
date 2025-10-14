@@ -872,16 +872,6 @@
         <div class="container">
             <h1>Comic Maintainer <span id="appVersion" style="font-size: 0.5em; color: rgba(255, 255, 255, 0.7);"></span></h1>
             <p>Manage and process comic files in your watched directory</p>
-            <div class="header-actions">
-                <button class="theme-toggle" onclick="toggleTheme()">
-                    <span id="themeIcon">🌙</span>
-                    <span id="themeText">Dark Mode</span>
-                </button>
-                <button class="theme-toggle" onclick="toggleWatcher()" id="watcherToggle">
-                    <span id="watcherIcon">👁️</span>
-                    <span id="watcherText">Watcher: Loading...</span>
-                </button>
-            </div>
         </div>
     </div>
     
@@ -1098,7 +1088,27 @@
                 <button class="close-btn" onclick="closeSettings()">&times;</button>
             </div>
             <div class="modal-body">
-                <h3 style="margin-bottom: 10px; color: var(--text-secondary);">Filename Format</h3>
+                <h3 style="margin-bottom: 10px; color: var(--text-secondary);">Appearance</h3>
+                <div class="form-group">
+                    <label for="themeSelect">Theme</label>
+                    <select id="themeSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);" onchange="updateThemeFromSettings()">
+                        <option value="light">Light Mode</option>
+                        <option value="dark">Dark Mode</option>
+                    </select>
+                </div>
+                
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Watcher</h3>
+                <div class="form-group">
+                    <label for="watcherToggleCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="watcherToggleCheckbox" onchange="updateWatcherFromSettings()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <span>Enable file watcher (automatically process new/modified files)</span>
+                    </label>
+                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                        When enabled, the watcher monitors the directory for changes and automatically processes files.
+                    </small>
+                </div>
+                
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Filename Format</h3>
                 <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
                     Configure how files are renamed when processed. Use placeholders like <code>{series}</code>, <code>{issue}</code>, etc.
                 </p>
@@ -1188,90 +1198,42 @@
         
         function setTheme(theme) {
             document.documentElement.setAttribute('data-theme', theme);
-            updateThemeButton(theme);
         }
         
-        function updateThemeButton(theme) {
-            const icon = document.getElementById('themeIcon');
-            const text = document.getElementById('themeText');
+        // Update theme from settings modal
+        function updateThemeFromSettings() {
+            const selectedTheme = document.getElementById('themeSelect').value;
+            setTheme(selectedTheme);
+            localStorage.setItem('theme', selectedTheme);
+        }
+        
+        // Update watcher from settings modal
+        async function updateWatcherFromSettings() {
+            const enabled = document.getElementById('watcherToggleCheckbox').checked;
             
-            if (theme === 'dark') {
-                icon.textContent = '☀️';
-                text.textContent = 'Light Mode';
-            } else {
-                icon.textContent = '🌙';
-                text.textContent = 'Dark Mode';
-            }
-        }
-        
-        function toggleTheme() {
-            const currentTheme = document.documentElement.getAttribute('data-theme');
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            
-            setTheme(newTheme);
-            localStorage.setItem('theme', newTheme);
-        }
-        
-        // Load watcher status
-        async function loadWatcherStatus() {
             try {
-                const response = await fetch('/api/settings/watcher-enabled');
-                const data = await response.json();
-                updateWatcherButton(data.enabled);
-            } catch (error) {
-                console.error('Error loading watcher status:', error);
-                updateWatcherButton(true); // Default to enabled on error
-            }
-        }
-        
-        // Update watcher button display
-        function updateWatcherButton(enabled) {
-            const iconElement = document.getElementById('watcherIcon');
-            const textElement = document.getElementById('watcherText');
-            const buttonElement = document.getElementById('watcherToggle');
-            
-            if (enabled) {
-                iconElement.textContent = '👁️';
-                textElement.textContent = 'Watcher: ON';
-                buttonElement.style.background = 'rgba(46, 204, 113, 0.2)';
-                buttonElement.style.borderColor = 'rgba(46, 204, 113, 0.4)';
-            } else {
-                iconElement.textContent = '👁️‍🗨️';
-                textElement.textContent = 'Watcher: OFF';
-                buttonElement.style.background = 'rgba(231, 76, 60, 0.2)';
-                buttonElement.style.borderColor = 'rgba(231, 76, 60, 0.4)';
-            }
-        }
-        
-        // Toggle watcher on/off
-        async function toggleWatcher() {
-            try {
-                // Get current status first
-                const statusResponse = await fetch('/api/settings/watcher-enabled');
-                const statusData = await statusResponse.json();
-                const currentStatus = statusData.enabled;
-                
-                // Toggle it
-                const newStatus = !currentStatus;
                 const response = await fetch('/api/settings/watcher-enabled', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ enabled: newStatus })
+                    body: JSON.stringify({ enabled: enabled })
                 });
                 
                 const result = await response.json();
                 
                 if (result.success) {
-                    updateWatcherButton(result.enabled);
                     const statusText = result.enabled ? 'enabled' : 'disabled';
                     showMessage(`Watcher ${statusText} successfully!`, 'success');
                 } else {
-                    showMessage(result.error || 'Failed to toggle watcher', 'error');
+                    showMessage(result.error || 'Failed to update watcher', 'error');
+                    // Revert checkbox on error
+                    document.getElementById('watcherToggleCheckbox').checked = !enabled;
                 }
             } catch (error) {
-                showMessage('Failed to toggle watcher: ' + error.message, 'error');f
+                showMessage('Failed to update watcher: ' + error.message, 'error');
+                // Revert checkbox on error
+                document.getElementById('watcherToggleCheckbox').checked = !enabled;
             }
         }
         
@@ -1293,7 +1255,6 @@
         document.addEventListener('DOMContentLoaded', function() {
             initTheme();
             loadVersion();
-            loadWatcherStatus();
             
             // Set the per-page selector to the saved value
             const perPageSelect = document.getElementById('perPageSelect');
@@ -2197,11 +2158,22 @@
         
         async function openSettings() {
             try {
-                const response = await fetch('/api/settings/filename-format');
-                const data = await response.json();
+                // Load filename format
+                const formatResponse = await fetch('/api/settings/filename-format');
+                const formatData = await formatResponse.json();
                 
-                document.getElementById('filenameFormat').value = data.format || '';
-                document.getElementById('currentFormat').textContent = data.format || data.default;
+                document.getElementById('filenameFormat').value = formatData.format || '';
+                document.getElementById('currentFormat').textContent = formatData.format || formatData.default;
+                
+                // Load current theme
+                const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+                document.getElementById('themeSelect').value = currentTheme;
+                
+                // Load watcher status
+                const watcherResponse = await fetch('/api/settings/watcher-enabled');
+                const watcherData = await watcherResponse.json();
+                document.getElementById('watcherToggleCheckbox').checked = watcherData.enabled;
+                
                 document.getElementById('settingsModal').classList.add('active');
             } catch (error) {
                 showMessage('Failed to load settings: ' + error.message, 'error');

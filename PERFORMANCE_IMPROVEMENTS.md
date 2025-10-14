@@ -95,9 +95,28 @@ Cache is automatically invalidated when:
 - No configuration changes needed
 - Existing marker files work as-is
 
+## Cache Warming
+
+### Automatic Startup Warming
+The application now automatically warms all caches on startup:
+1. **File list cache**: All comic files are scanned and cached
+2. **Metadata cache**: All directory metadata (processed/duplicate status) is preloaded
+
+This ensures the first user request is just as fast as subsequent requests, eliminating the "cold start" penalty.
+
+### Manual Cache Warming
+Cache warming can be triggered manually via API endpoint:
+- **Endpoint**: `POST /api/cache/prewarm`
+- **Use case**: After bulk file operations outside the application
+
+### Cache Statistics
+Monitor cache health via API endpoint:
+- **Endpoint**: `GET /api/cache/stats`
+- **Returns**: File count, cache age, metadata directory counts, and TTL settings
+
 ## Future Improvements
 Potential enhancements for even better performance:
 1. Increase cache TTL for read-heavy workloads
-2. Add cache prewarming on application startup
+2. ~~Add cache prewarming on application startup~~ ✅ **Implemented**
 3. Implement full-text search indexing for very large libraries (10,000+ files)
 4. Add Redis/Memcached support for distributed caching

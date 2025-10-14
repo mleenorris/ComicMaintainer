@@ -7,7 +7,7 @@ from comicapi.comicarchive import ComicArchive
 import glob
 import threading
 import time
-from config import get_filename_format, set_filename_format, DEFAULT_FILENAME_FORMAT
+from config import get_filename_format, set_filename_format, DEFAULT_FILENAME_FORMAT, get_watcher_enabled, set_watcher_enabled
 from version import __version__
 
 # Set up logging
@@ -1096,6 +1096,31 @@ def set_filename_format_api():
         return jsonify({'success': True, 'format': format_string})
     else:
         return jsonify({'error': 'Failed to save filename format'}), 500
+
+@app.route('/api/settings/watcher-enabled', methods=['GET'])
+def get_watcher_enabled_api():
+    """API endpoint to get the watcher enabled setting"""
+    return jsonify({
+        'enabled': get_watcher_enabled()
+    })
+
+@app.route('/api/settings/watcher-enabled', methods=['POST'])
+def set_watcher_enabled_api():
+    """API endpoint to set the watcher enabled setting"""
+    data = request.json
+    enabled = data.get('enabled')
+    
+    if enabled is None:
+        return jsonify({'error': 'Enabled value is required'}), 400
+    
+    success = set_watcher_enabled(enabled)
+    
+    if success:
+        status = "enabled" if enabled else "disabled"
+        logging.info(f"Watcher {status}")
+        return jsonify({'success': True, 'enabled': enabled})
+    else:
+        return jsonify({'error': 'Failed to save watcher enabled setting'}), 500
 
 @app.route('/api/version', methods=['GET'])
 def get_version():

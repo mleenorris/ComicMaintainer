@@ -1345,13 +1345,13 @@
                                     📚 All Files
                                 </button>
                                 <button class="header-dropdown-item" onclick="setHeaderFilter('unmarked')" data-filter="unmarked">
-                                    ⚠️ Unmarked Only
+                                    ⚠️ Unmarked
                                 </button>
                                 <button class="header-dropdown-item" onclick="setHeaderFilter('marked')" data-filter="marked">
-                                    ✅ Marked Only
+                                    ✅ Marked
                                 </button>
                                 <button class="header-dropdown-item" onclick="setHeaderFilter('duplicates')" data-filter="duplicates">
-                                    🔁 Duplicates Only
+                                    🔁 Duplicates
                                 </button>
                             </div>
                         </div>
@@ -1379,6 +1379,9 @@
                         <div class="settings-dropdown-menu" id="settingsDropdownMenu">
                             <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
                                 ⚙️ Settings
+                            </button>
+                            <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
+                                📋 View Logs
                             </button>
                             <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
                                 🌓 Toggle Theme
@@ -1629,6 +1632,37 @@
                 <button class="btn" onclick="closeSettings()">Cancel</button>
                 <button class="btn" onclick="resetFilenameFormat()" style="background: #e67e22; color: white;">Reset to Default</button>
                 <button class="btn btn-primary" onclick="saveFilenameFormat()">Save</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="logsModal">
+        <div class="modal-content" style="max-width: 900px; height: 80vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h2>Application Logs</h2>
+                <button class="close-btn" onclick="closeLogsModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
+                    <label for="logLines" style="color: var(--text-secondary); font-weight: 500;">Lines to display:</label>
+                    <select id="logLines" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                        <option value="100">Last 100 lines</option>
+                        <option value="500" selected>Last 500 lines</option>
+                        <option value="1000">Last 1000 lines</option>
+                        <option value="0">All lines</option>
+                    </select>
+                    <button class="btn" onclick="loadLogs()" style="margin-left: auto;">🔄 Refresh</button>
+                </div>
+                <div id="logsLoadingIndicator" style="display: none; padding: 20px; text-align: center; color: var(--text-muted);">
+                    Loading logs...
+                </div>
+                <pre id="logsContent" style="flex: 1; overflow: auto; background: var(--bg-primary); padding: 15px; border-radius: 5px; border: 1px solid var(--border-secondary); font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word; margin: 0;"></pre>
+                <div style="margin-top: 10px; padding: 10px; background: var(--bg-hover); border-radius: 5px; font-size: 13px; color: var(--text-muted);">
+                    <span id="logStats"></span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeLogsModal()">Close</button>
             </div>
         </div>
     </div>
@@ -2758,6 +2792,42 @@
         
         function closeSettings() {
             document.getElementById('settingsModal').classList.remove('active');
+        }
+        
+        async function openLogsModal() {
+            document.getElementById('logsModal').classList.add('active');
+            await loadLogs();
+        }
+        
+        function closeLogsModal() {
+            document.getElementById('logsModal').classList.remove('active');
+        }
+        
+        async function loadLogs() {
+            const logsContent = document.getElementById('logsContent');
+            const logsLoadingIndicator = document.getElementById('logsLoadingIndicator');
+            const logStats = document.getElementById('logStats');
+            const lines = document.getElementById('logLines').value;
+            
+            try {
+                logsLoadingIndicator.style.display = 'block';
+                logsContent.textContent = '';
+                logStats.textContent = '';
+                
+                const response = await fetch(`/api/logs?lines=${lines}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    logsContent.textContent = 'Error: ' + data.error;
+                } else {
+                    logsContent.textContent = data.logs || 'No logs available';
+                    logStats.textContent = `Showing ${data.returned_lines} of ${data.total_lines} total lines`;
+                }
+            } catch (error) {
+                logsContent.textContent = 'Failed to load logs: ' + error.message;
+            } finally {
+                logsLoadingIndicator.style.display = 'none';
+            }
         }
         
         async function saveFilenameFormat() {

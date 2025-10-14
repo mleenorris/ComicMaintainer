@@ -1186,6 +1186,39 @@ def get_version():
         'version': __version__
     })
 
+@app.route('/api/logs', methods=['GET'])
+def get_logs():
+    """API endpoint to get the log file contents"""
+    log_file = "ComicMaintainer.log"
+    
+    if not os.path.exists(log_file):
+        return jsonify({'error': 'Log file not found'}), 404
+    
+    try:
+        # Get the number of lines to return (default: last 500 lines)
+        lines = request.args.get('lines', default=500, type=int)
+        
+        with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
+            # Read all lines
+            all_lines = f.readlines()
+            
+            # Return the last N lines (or all if lines=0)
+            if lines > 0:
+                log_content = ''.join(all_lines[-lines:])
+                returned_lines = min(lines, len(all_lines))
+            else:
+                log_content = ''.join(all_lines)
+                returned_lines = len(all_lines)
+        
+        return jsonify({
+            'logs': log_content,
+            'total_lines': len(all_lines),
+            'returned_lines': returned_lines
+        })
+    except Exception as e:
+        logging.error(f"Error reading log file: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/scan-unmarked', methods=['GET'])
 def scan_unmarked_files():
     """API endpoint to scan for unmarked files"""

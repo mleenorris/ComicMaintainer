@@ -132,10 +132,13 @@
             margin-bottom: 20px;
             border-radius: 8px;
             box-shadow: var(--shadow-sm);
+            display: flex;
+            gap: 10px;
+            align-items: center;
         }
         
         .search-bar input {
-            width: 100%;
+            flex: 1;
             padding: 12px 15px;
             border: 1px solid var(--border-input);
             border-radius: 5px;
@@ -149,6 +152,88 @@
         .search-bar input:focus {
             outline: none;
             border-color: #3498db;
+        }
+        
+        .filter-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .filter-dropdown-toggle {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-input);
+            color: var(--text-primary);
+            padding: 12px 15px;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+            white-space: nowrap;
+            min-width: 180px;
+        }
+        
+        .filter-dropdown-toggle:hover {
+            background: var(--bg-hover);
+            border-color: var(--border-primary);
+        }
+        
+        .filter-dropdown-toggle::after {
+            content: '▼';
+            font-size: 10px;
+            margin-left: auto;
+        }
+        
+        .filter-dropdown-menu {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-secondary);
+            border-radius: 4px;
+            box-shadow: var(--shadow-md);
+            z-index: 100;
+            min-width: 180px;
+            margin-top: 2px;
+        }
+        
+        .filter-dropdown-menu.show {
+            display: block;
+        }
+        
+        .filter-dropdown-item {
+            padding: 10px 15px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+            font-size: 14px;
+            color: var(--text-primary);
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .filter-dropdown-item:hover {
+            background: var(--bg-hover);
+        }
+        
+        .filter-dropdown-item.active {
+            background: var(--bg-hover);
+            font-weight: 500;
+        }
+        
+        .filter-dropdown-item:first-child {
+            border-radius: 4px 4px 0 0;
+        }
+        
+        .filter-dropdown-item:last-child {
+            border-radius: 0 0 4px 4px;
         }
         
         .btn {
@@ -775,6 +860,30 @@
                 flex-shrink: 0;
             }
             
+            .search-bar {
+                flex-direction: column;
+                padding: 10px;
+            }
+            
+            .search-bar input {
+                width: 100%;
+            }
+            
+            .filter-dropdown {
+                width: 100%;
+            }
+            
+            .filter-dropdown-toggle {
+                width: 100%;
+                justify-content: space-between;
+            }
+            
+            .filter-dropdown-menu {
+                left: 0;
+                right: auto;
+                width: 100%;
+            }
+            
             .modal-content {
                 max-width: 95%;
                 margin: 10px;
@@ -910,23 +1019,27 @@
             <span class="select-info" id="selectInfo">No files selected</span>
         </div>
         
-        <div class="actions-bar" style="margin-top: -10px;">
-            <button class="btn" onclick="setFilter('all')" id="filterAll" style="background: #3498db; color: white;">
-                📚 All Files
-            </button>
-            <button class="btn" onclick="setFilter('unmarked')" id="filterUnmarked">
-                ⚠️ Unmarked Only
-            </button>
-            <button class="btn" onclick="setFilter('marked')" id="filterMarked">
-                ✅ Marked Only
-            </button>
-            <button class="btn" onclick="setFilter('duplicates')" id="filterDuplicates">
-                🔁 Duplicates Only
-            </button>
-        </div>
-        
         <div class="search-bar">
             <input type="text" id="searchInput" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
+            <div class="filter-dropdown">
+                <button class="filter-dropdown-toggle" onclick="toggleFilterDropdown(event)" id="filterDropdownToggle">
+                    <span id="filterDropdownLabel">📚 All Files</span>
+                </button>
+                <div class="filter-dropdown-menu" id="filterDropdownMenu">
+                    <button class="filter-dropdown-item active" onclick="setFilter('all')" id="filterAll">
+                        📚 All Files
+                    </button>
+                    <button class="filter-dropdown-item" onclick="setFilter('unmarked')" id="filterUnmarked">
+                        ⚠️ Unmarked Only
+                    </button>
+                    <button class="filter-dropdown-item" onclick="setFilter('marked')" id="filterMarked">
+                        ✅ Marked Only
+                    </button>
+                    <button class="filter-dropdown-item" onclick="setFilter('duplicates')" id="filterDuplicates">
+                        🔁 Duplicates Only
+                    </button>
+                </div>
+            </div>
         </div>
         
         <div class="file-list" id="fileList">
@@ -1330,6 +1443,7 @@
             if (processUnmarkedBtn) processUnmarkedBtn.style.display = displayStyle;
             if (renameUnmarkedBtn) renameUnmarkedBtn.style.display = displayStyle;
             if (normalizeUnmarkedBtn) normalizeUnmarkedBtn.style.display = displayStyle;
+            // Filter dropdown item should always be visible, so no need to hide it
             if (filterUnmarkedBtn) filterUnmarkedBtn.style.display = displayStyle;
         }
         
@@ -1365,15 +1479,27 @@
         function setFilter(mode) {
             filterMode = mode;
             
-            // Update button styles
-            document.getElementById('filterAll').style.background = mode === 'all' ? '#3498db' : '';
-            document.getElementById('filterAll').style.color = mode === 'all' ? 'white' : '';
-            document.getElementById('filterUnmarked').style.background = mode === 'unmarked' ? '#e67e22' : '';
-            document.getElementById('filterUnmarked').style.color = mode === 'unmarked' ? 'white' : '';
-            document.getElementById('filterMarked').style.background = mode === 'marked' ? '#27ae60' : '';
-            document.getElementById('filterMarked').style.color = mode === 'marked' ? 'white' : '';
-            document.getElementById('filterDuplicates').style.background = mode === 'duplicates' ? '#e74c3c' : '';
-            document.getElementById('filterDuplicates').style.color = mode === 'duplicates' ? 'white' : '';
+            // Update dropdown label and menu items
+            const labels = {
+                'all': '📚 All Files',
+                'unmarked': '⚠️ Unmarked Only',
+                'marked': '✅ Marked Only',
+                'duplicates': '🔁 Duplicates Only'
+            };
+            
+            document.getElementById('filterDropdownLabel').textContent = labels[mode];
+            
+            // Update active state for menu items
+            document.querySelectorAll('.filter-dropdown-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            document.getElementById('filterAll').classList.toggle('active', mode === 'all');
+            document.getElementById('filterUnmarked').classList.toggle('active', mode === 'unmarked');
+            document.getElementById('filterMarked').classList.toggle('active', mode === 'marked');
+            document.getElementById('filterDuplicates').classList.toggle('active', mode === 'duplicates');
+            
+            // Close the dropdown
+            document.getElementById('filterDropdownMenu').classList.remove('show');
             
             // Reload from page 1 with new filter
             loadFiles(1);
@@ -2236,11 +2362,29 @@
             document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
                 menu.classList.remove('show');
             });
+            // Also close filter dropdown
+            document.querySelectorAll('.filter-dropdown-menu.show').forEach(menu => {
+                menu.classList.remove('show');
+            });
+        }
+        
+        function toggleFilterDropdown(event) {
+            event.stopPropagation();
+            
+            const dropdown = document.getElementById('filterDropdownMenu');
+            
+            // Close all other dropdowns (file action dropdowns)
+            document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
+                menu.classList.remove('show');
+            });
+            
+            // Toggle filter dropdown
+            dropdown.classList.toggle('show');
         }
         
         // Close dropdowns when clicking outside
         document.addEventListener('click', function(event) {
-            if (!event.target.closest('.file-actions-dropdown')) {
+            if (!event.target.closest('.file-actions-dropdown') && !event.target.closest('.filter-dropdown')) {
                 closeAllDropdowns();
             }
         });

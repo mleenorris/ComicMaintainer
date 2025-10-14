@@ -220,6 +220,23 @@
             cursor: not-allowed;
         }
         
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            width: 100%;
+        }
+        
+        .button-column {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .button-column .btn {
+            width: 100%;
+        }
+        
         .file-list {
             background: var(--bg-secondary);
             border-radius: 8px;
@@ -589,6 +606,10 @@
                 min-width: 0;
             }
             
+            .button-grid {
+                grid-template-columns: 1fr;
+            }
+            
             .select-info {
                 flex-basis: 100%;
                 text-align: center;
@@ -738,33 +759,41 @@
         <div id="messageContainer"></div>
         
         <div class="actions-bar">
-            <button class="btn btn-success" onclick="processAllFiles()">
-                🚀 Process All (Rename + Normalize)
-            </button>
-            <button class="btn btn-success" onclick="processUnmarkedFiles()">
-                ⚠️ Process Unmarked (Rename + Normalize)
-            </button>
-            <button class="btn btn-success" onclick="processSelectedFiles()" id="processSelectedBtn" disabled>
-                ⚡ Process Selected (Rename + Normalize)
-            </button>
-            <button class="btn btn-rename" onclick="renameAllFiles()">
-                📝 Rename All Files
-            </button>
-            <button class="btn btn-rename" onclick="renameUnmarkedFiles()">
-                📝 Rename Unmarked
-            </button>
-            <button class="btn btn-rename" onclick="renameSelectedFiles()" id="renameSelectedBtn" disabled>
-                📝 Rename Selected
-            </button>
-            <button class="btn btn-normalize" onclick="normalizeAllFiles()">
-                🔧 Normalize All Metadata
-            </button>
-            <button class="btn btn-normalize" onclick="normalizeUnmarkedFiles()">
-                🔧 Normalize Unmarked Metadata
-            </button>
-            <button class="btn btn-normalize" onclick="normalizeSelectedFiles()" id="normalizeSelectedBtn" disabled>
-                🔧 Normalize Selected Metadata
-            </button>
+            <div class="button-grid">
+                <div class="button-column">
+                    <button class="btn btn-success" onclick="processAllFiles()">
+                        🚀 Process All (Rename + Normalize)
+                    </button>
+                    <button class="btn btn-success" onclick="processUnmarkedFiles()">
+                        ⚠️ Process Unmarked (Rename + Normalize)
+                    </button>
+                    <button class="btn btn-success" onclick="processSelectedFiles()" id="processSelectedBtn" disabled>
+                        ⚡ Process Selected (Rename + Normalize)
+                    </button>
+                </div>
+                <div class="button-column">
+                    <button class="btn btn-rename" onclick="renameAllFiles()">
+                        📝 Rename All Files
+                    </button>
+                    <button class="btn btn-rename" onclick="renameUnmarkedFiles()">
+                        📝 Rename Unmarked
+                    </button>
+                    <button class="btn btn-rename" onclick="renameSelectedFiles()" id="renameSelectedBtn" disabled>
+                        📝 Rename Selected
+                    </button>
+                </div>
+                <div class="button-column">
+                    <button class="btn btn-normalize" onclick="normalizeAllFiles()">
+                        🔧 Normalize All Metadata
+                    </button>
+                    <button class="btn btn-normalize" onclick="normalizeUnmarkedFiles()">
+                        🔧 Normalize Unmarked Metadata
+                    </button>
+                    <button class="btn btn-normalize" onclick="normalizeSelectedFiles()" id="normalizeSelectedBtn" disabled>
+                        🔧 Normalize Selected Metadata
+                    </button>
+                </div>
+            </div>
         </div>
         
         <div class="actions-bar" style="margin-top: -10px;">

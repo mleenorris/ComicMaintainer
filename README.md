@@ -199,6 +199,8 @@ The version is displayed in the web interface header for easy identification of 
 - The web interface runs on **Gunicorn**, a production-ready WSGI server for Python web applications
 - Configured with 4 worker processes for handling multiple concurrent requests
 - 120-second timeout to accommodate large file processing operations
+- **Worker coordination**: File-based locking ensures only one worker rebuilds caches at a time, preventing worker blocking
+- **Non-blocking cache rebuilds**: Workers serve stale cache instead of waiting when another worker is rebuilding
 - No development server warnings - ready for production deployment
 
 ## Logging

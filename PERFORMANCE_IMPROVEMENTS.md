@@ -1,7 +1,7 @@
-# Performance Improvements: Search and Filtering
+# Performance Improvements: Search, Filtering, and Caching
 
 ## Summary
-This document describes the performance optimizations implemented to make search and filtering operations significantly faster.
+This document describes the performance optimizations implemented to make search and filtering operations significantly faster, and to prevent worker blocking during cache rebuilds.
 
 ## Problem
 The original implementation had performance issues when searching and filtering files:
@@ -145,10 +145,50 @@ Monitor cache health via API endpoint:
 - **Endpoint**: `GET /api/cache/stats`
 - **Returns**: File count, cache age, metadata directory counts, enriched file cache status, and TTL settings
 
+## Worker Coordination and Non-Blocking Cache Rebuilds
+
+### Problem
+When using Gunicorn with multiple workers (default: 4), all workers would initialize caches on startup and potentially rebuild caches simultaneously when handling requests. This caused:
+1. **Startup delays**: All workers would try to build the cache at the same time
+2. **Worker blocking**: Workers would wait (block) while another worker rebuilt the cache
+3. **Resource contention**: Multiple workers scanning the same files simultaneously
+
+### Solution: File-Based Locking with Non-Blocking Behavior
+**Location**: `web_app.py`
+
+Implemented a file-based locking mechanism that coordinates cache rebuilding across worker processes:
+
+1. **File-based lock** (`.cache_rebuild_lock`): Uses `fcntl.flock()` for cross-process coordination
+2. **Short timeout** (0.1s default): Workers try to acquire lock but don't wait long
+3. **Stale cache fallback**: If lock can't be acquired, return stale cache instead of blocking
+4. **Startup coordination**: Only one worker initializes caches at startup, others skip
+
+**Key changes**:
+- Added `try_acquire_cache_rebuild_lock()` and `release_cache_rebuild_lock()` functions
+- Modified `get_enriched_file_list()` to be non-blocking:
+  - Try to acquire lock with short timeout
+  - If lock unavailable, return stale cache (if available)
+  - If no stale cache, fall through to build without lock (better than blocking)
+- Modified `initialize_cache()` and `prewarm_metadata_cache()` to coordinate at startup
+- Added `.cache_rebuild_lock` to `.gitignore`
+
+**Impact**:
+- ✅ Workers no longer block waiting for cache rebuilds
+- ✅ Only one worker rebuilds cache at a time
+- ✅ Faster startup with multiple workers
+- ✅ Better resource utilization
+- ✅ Stale cache served during rebuilds (eventual consistency)
+
+**Behavior**:
+- **Startup**: First worker to start warms the cache, others skip
+- **Cache invalidation**: First worker to detect invalidation rebuilds, others serve stale cache
+- **Manual refresh**: First worker to handle refresh request rebuilds, others see updated cache after completion
+
 ## Future Improvements
 Potential enhancements for even better performance:
 1. Increase cache TTL for read-heavy workloads
 2. ~~Add cache prewarming on application startup~~ ✅ **Implemented**
 3. ~~Cache enriched file list for faster filter switches~~ ✅ **Implemented**
-4. Implement full-text search indexing for very large libraries (20,000+ files)
-5. Add Redis/Memcached support for distributed caching
+4. ~~Coordinate cache rebuilding across workers~~ ✅ **Implemented**
+5. Implement full-text search indexing for very large libraries (20,000+ files)
+6. Add Redis/Memcached support for distributed caching

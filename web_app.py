@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import json
+import fcntl
 from flask import Flask, render_template, jsonify, request, send_from_directory
 from comicapi.comicarchive import ComicArchive
 import glob
@@ -28,6 +29,7 @@ PROCESSED_MARKER = '.processed_files'
 DUPLICATE_MARKER = '.duplicate_files'
 CACHE_UPDATE_MARKER = '.cache_update'
 CACHE_CHANGES_FILE = '.cache_changes'
+CACHE_REBUILD_LOCK = '.cache_rebuild_lock'
 
 # Global lock file to mark files modified by web interface
 web_modified_files = set()
@@ -57,6 +59,59 @@ enriched_file_cache = {
     'file_list_hash': None  # Hash of raw file list to detect changes
 }
 enriched_file_cache_lock = threading.Lock()
+
+def try_acquire_cache_rebuild_lock(timeout=0.1):
+    """Try to acquire a file-based lock for cache rebuilding across processes
+    
+    Args:
+        timeout: Maximum time to wait for lock in seconds (default: 0.1)
+        
+    Returns:
+        File handle if lock acquired, None if lock could not be acquired
+    """
+    if not WATCHED_DIR:
+        return None
+    
+    lock_file_path = os.path.join(WATCHED_DIR, CACHE_REBUILD_LOCK)
+    
+    try:
+        # Open lock file (create if doesn't exist)
+        lock_fd = open(lock_file_path, 'w')
+        
+        # Try to acquire lock with timeout
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            try:
+                # Try non-blocking lock
+                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                # Lock acquired successfully
+                logging.debug("Cache rebuild lock acquired")
+                return lock_fd
+            except IOError:
+                # Lock is held by another process, wait a bit
+                time.sleep(0.01)
+        
+        # Timeout - could not acquire lock
+        lock_fd.close()
+        logging.debug("Cache rebuild lock timeout - another worker is rebuilding")
+        return None
+    except Exception as e:
+        logging.error(f"Error acquiring cache rebuild lock: {e}")
+        return None
+
+def release_cache_rebuild_lock(lock_fd):
+    """Release the cache rebuild lock
+    
+    Args:
+        lock_fd: File handle returned by try_acquire_cache_rebuild_lock
+    """
+    if lock_fd:
+        try:
+            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
+            lock_fd.close()
+            logging.debug("Cache rebuild lock released")
+        except Exception as e:
+            logging.error(f"Error releasing cache rebuild lock: {e}")
 
 def mark_web_modified(filepath):
     """Mark a file as modified by the web interface"""
@@ -615,17 +670,43 @@ def get_enriched_file_list(files, force_rebuild=False):
     Returns:
         List of file dictionaries with metadata
     """
+    # Create a simple hash of the file list to detect changes
+    file_list_hash = hash(tuple(files))
+    
+    # Check if cache is valid (without holding lock)
     with enriched_file_cache_lock:
-        # Create a simple hash of the file list to detect changes
-        file_list_hash = hash(tuple(files))
-        
-        # Check if cache is valid
         if (not force_rebuild and 
             enriched_file_cache['files'] is not None and 
             enriched_file_cache['file_list_hash'] == file_list_hash):
             
             logging.debug("Using enriched file cache")
             return enriched_file_cache['files']
+        
+        # Check if we have stale cache that can be returned if rebuild fails
+        stale_cache = enriched_file_cache['files']
+    
+    # Try to acquire file-based lock for cache rebuild
+    # Use short timeout to avoid blocking workers
+    lock_fd = try_acquire_cache_rebuild_lock(timeout=0.1)
+    
+    if lock_fd is None:
+        # Another worker is rebuilding the cache
+        # Return stale cache if available, otherwise build without lock
+        if stale_cache is not None:
+            logging.info("Cache rebuild in progress by another worker, returning stale cache")
+            return stale_cache
+        else:
+            logging.info("Cache rebuild in progress by another worker, but no stale cache available")
+            # Fall through to build without lock (better than blocking)
+    
+    try:
+        # Check cache again after acquiring lock (double-check pattern)
+        with enriched_file_cache_lock:
+            if (not force_rebuild and 
+                enriched_file_cache['files'] is not None and 
+                enriched_file_cache['file_list_hash'] == file_list_hash):
+                logging.debug("Cache was rebuilt by another worker while waiting")
+                return enriched_file_cache['files']
         
         # Cache miss or invalidated - rebuild
         logging.info("Rebuilding enriched file cache")
@@ -648,11 +729,16 @@ def get_enriched_file_list(files, force_rebuild=False):
             })
         
         # Update cache
-        enriched_file_cache['files'] = all_files
-        enriched_file_cache['timestamp'] = time.time()
-        enriched_file_cache['file_list_hash'] = file_list_hash
+        with enriched_file_cache_lock:
+            enriched_file_cache['files'] = all_files
+            enriched_file_cache['timestamp'] = time.time()
+            enriched_file_cache['file_list_hash'] = file_list_hash
         
         return all_files
+    finally:
+        # Always release the lock if we acquired it
+        if lock_fd is not None:
+            release_cache_rebuild_lock(lock_fd)
 
 @app.route('/api/files')
 def list_files():
@@ -1478,10 +1564,17 @@ def prewarm_metadata_cache():
     if not WATCHED_DIR:
         return
     
-    logging.info("Prewarming metadata cache...")
-    start_time = time.time()
+    # Try to acquire lock with longer timeout for startup
+    lock_fd = try_acquire_cache_rebuild_lock(timeout=0.5)
+    
+    if lock_fd is None:
+        logging.info("Another worker is already warming the cache, skipping")
+        return
     
     try:
+        logging.info("Prewarming metadata cache...")
+        start_time = time.time()
+        
         # Get all comic files (this will use the file list cache)
         files = get_comic_files(use_cache=True)
         
@@ -1506,10 +1599,22 @@ def prewarm_metadata_cache():
         
     except Exception as e:
         logging.error(f"Error prewarming metadata cache: {e}")
+    finally:
+        release_cache_rebuild_lock(lock_fd)
 
 def initialize_cache():
     """Initialize file list cache and prewarm metadata cache on startup"""
-    if WATCHED_DIR:
+    if not WATCHED_DIR:
+        return
+    
+    # Try to acquire lock to coordinate cache initialization across workers
+    lock_fd = try_acquire_cache_rebuild_lock(timeout=0.5)
+    
+    if lock_fd is None:
+        logging.info("Another worker is already initializing caches, skipping")
+        return
+    
+    try:
         logging.info("Initializing caches on startup...")
         
         # First, load the file list cache
@@ -1517,10 +1622,17 @@ def initialize_cache():
         get_comic_files(use_cache=True)
         logging.info("File list cache initialized")
         
-        # Then, prewarm the metadata cache
+        # Release lock temporarily for metadata cache warming
+        release_cache_rebuild_lock(lock_fd)
+        lock_fd = None
+        
+        # Then, prewarm the metadata cache (will acquire its own lock)
         prewarm_metadata_cache()
         
         logging.info("Cache initialization complete")
+    finally:
+        if lock_fd is not None:
+            release_cache_rebuild_lock(lock_fd)
 
 def init_app():
     """Initialize the application on startup"""

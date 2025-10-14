@@ -42,5 +42,7 @@ Thumbs.db
 .processed_files
 .duplicate_files
 .cache_update
+.cache_changes
+.cache_rebuild_lock
 ComicMaintainer.log
 config.json

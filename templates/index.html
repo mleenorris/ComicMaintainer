@@ -699,7 +699,7 @@
 <body>
     <div class="header">
         <div class="container">
-            <h1>Comic Maintainer</h1>
+            <h1>Comic Maintainer <span id="appVersion" style="font-size: 0.5em; color: rgba(255, 255, 255, 0.7);"></span></h1>
             <p>Manage and process comic files in your watched directory</p>
             <div class="header-actions">
                 <button class="theme-toggle" onclick="toggleTheme()">
@@ -1024,9 +1024,24 @@
             localStorage.setItem('theme', newTheme);
         }
         
+        // Fetch and display version
+        async function loadVersion() {
+            try {
+                const response = await fetch('/api/version');
+                const data = await response.json();
+                const versionElement = document.getElementById('appVersion');
+                if (versionElement && data.version) {
+                    versionElement.textContent = `v${data.version}`;
+                }
+            } catch (error) {
+                console.error('Error loading version:', error);
+            }
+        }
+        
         // Load files on page load
         document.addEventListener('DOMContentLoaded', function() {
             initTheme();
+            loadVersion();
             
             // Set the per-page selector to the saved value
             const perPageSelect = document.getElementById('perPageSelect');

@@ -106,17 +106,22 @@ The service includes a web-based interface for managing your comic files:
 6. Click "Process All Files" to run the standard processing on all files
 7. Click "Process Selected" to run processing only on your selected files
 8. Click "View/Edit" on any file to see and modify its tags
-9. Select multiple files and click "Update Selected" to batch update common tags
-10. Click "Refresh" to update the file list (automatically clears cache)
-11. Click "Scan Unmarked" to see a count of processed vs unprocessed files
-12. Use the filter buttons to view:
+9. Use the "Actions" dropdown menu on any file to:
+   - **Process**: Run full processing (rename + normalize metadata)
+   - **Rename**: Rename the file based on metadata
+   - **Normalize**: Normalize metadata only
+   - **Delete**: Remove the file
+10. Select multiple files and click "Update Selected" to batch update common tags
+11. Click "Refresh" to update the file list (automatically clears cache)
+12. Click "Scan Unmarked" to see a count of processed vs unprocessed files
+13. Use the filter buttons to view:
     - **All Files**: Show all files in the directory
     - **Unmarked Only**: Show only files that haven't been processed yet
     - **Marked Only**: Show only files that have been processed
     - **Duplicates Only**: Show only files marked as duplicates
     - Search and filters can be combined and work across all pages
-13. Click "Settings" to configure the filename format for renamed files
-14. Look for the status icon next to each filename:
+14. Click "Settings" to configure the filename format for renamed files
+15. Look for the status icon next to each filename:
     - ✅ = processed
     - ⚠️ = not processed yet
     - 🔁 = duplicate file

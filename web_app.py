@@ -40,6 +40,15 @@ file_list_cache = {
 }
 cache_lock = threading.Lock()
 
+# Cache for file metadata (processed/duplicate status) to improve filtering performance
+metadata_cache = {
+    'processed': {},  # {directory_path: {filename: bool}}
+    'duplicate': {},  # {directory_path: {filename: bool}}
+    'last_loaded': {}  # {directory_path: timestamp}
+}
+metadata_cache_lock = threading.Lock()
+METADATA_CACHE_TTL = 5  # Cache metadata for 5 seconds
+
 def mark_web_modified(filepath):
     """Mark a file as modified by the web interface"""
     with lock:
@@ -85,24 +94,58 @@ def mark_file_processed(filepath, original_filepath=None):
         # Write back
         with open(marker_path, 'w') as f:
             f.write('\n'.join(sorted(processed_files)))
+        
+        # Invalidate metadata cache for this directory
+        directory = os.path.dirname(filepath)
+        with metadata_cache_lock:
+            if directory in metadata_cache['processed']:
+                del metadata_cache['processed'][directory]
+            cache_key = f"{directory}:{PROCESSED_MARKER}"
+            if cache_key in metadata_cache['last_loaded']:
+                del metadata_cache['last_loaded'][cache_key]
+        
         logging.info(f"Marked {filepath} as processed")
     except Exception as e:
         logging.error(f"Error marking file as processed: {e}")
 
-def is_file_processed(filepath):
-    """Check if a file has been processed"""
-    marker_path = os.path.join(os.path.dirname(filepath), PROCESSED_MARKER)
+def load_marker_file(directory, marker_name):
+    """Load a marker file and return the set of filenames"""
+    marker_path = os.path.join(directory, marker_name)
     if not os.path.exists(marker_path):
-        return False
+        return set()
     
     try:
         with open(marker_path, 'r') as f:
-            processed_files = set(f.read().splitlines())
-            filename = os.path.basename(filepath)
-            return filename in processed_files
+            return set(f.read().splitlines())
     except Exception as e:
-        logging.error(f"Error checking if file is processed: {e}")
-        return False
+        logging.error(f"Error reading marker file {marker_path}: {e}")
+        return set()
+
+def get_directory_metadata(directory, marker_name, cache_dict):
+    """Get metadata for all files in a directory with caching"""
+    with metadata_cache_lock:
+        current_time = time.time()
+        cache_key = f"{directory}:{marker_name}"
+        
+        # Check if cache is valid
+        if cache_key in metadata_cache['last_loaded']:
+            age = current_time - metadata_cache['last_loaded'][cache_key]
+            if age < METADATA_CACHE_TTL and directory in cache_dict:
+                return cache_dict[directory]
+        
+        # Load from disk
+        filenames = load_marker_file(directory, marker_name)
+        cache_dict[directory] = filenames
+        metadata_cache['last_loaded'][cache_key] = current_time
+        
+        return filenames
+
+def is_file_processed(filepath):
+    """Check if a file has been processed"""
+    directory = os.path.dirname(filepath)
+    filename = os.path.basename(filepath)
+    processed_files = get_directory_metadata(directory, PROCESSED_MARKER, metadata_cache['processed'])
+    return filename in processed_files
 
 def mark_file_duplicate(filepath):
     """Mark a file as a duplicate"""
@@ -121,24 +164,26 @@ def mark_file_duplicate(filepath):
         # Write back
         with open(marker_path, 'w') as f:
             f.write('\n'.join(sorted(duplicate_files)))
+        
+        # Invalidate metadata cache for this directory
+        directory = os.path.dirname(filepath)
+        with metadata_cache_lock:
+            if directory in metadata_cache['duplicate']:
+                del metadata_cache['duplicate'][directory]
+            cache_key = f"{directory}:{DUPLICATE_MARKER}"
+            if cache_key in metadata_cache['last_loaded']:
+                del metadata_cache['last_loaded'][cache_key]
+        
         logging.info(f"Marked {filepath} as duplicate")
     except Exception as e:
         logging.error(f"Error marking file as duplicate: {e}")
 
 def is_file_duplicate(filepath):
     """Check if a file is marked as a duplicate"""
-    marker_path = os.path.join(os.path.dirname(filepath), DUPLICATE_MARKER)
-    if not os.path.exists(marker_path):
-        return False
-    
-    try:
-        with open(marker_path, 'r') as f:
-            duplicate_files = set(f.read().splitlines())
-            filename = os.path.basename(filepath)
-            return filename in duplicate_files
-    except Exception as e:
-        logging.error(f"Error checking if file is duplicate: {e}")
-        return False
+    directory = os.path.dirname(filepath)
+    filename = os.path.basename(filepath)
+    duplicate_files = get_directory_metadata(directory, DUPLICATE_MARKER, metadata_cache['duplicate'])
+    return filename in duplicate_files
 
 def cleanup_web_markers():
     """Periodically clean up old web modified markers"""
@@ -532,6 +577,15 @@ def index():
     """Serve the main page"""
     return render_template('index.html')
 
+def preload_metadata_for_directories(files):
+    """Preload metadata for all directories containing the given files"""
+    directories = set(os.path.dirname(f) for f in files)
+    
+    for directory in directories:
+        # This will load and cache metadata for each directory
+        get_directory_metadata(directory, PROCESSED_MARKER, metadata_cache['processed'])
+        get_directory_metadata(directory, DUPLICATE_MARKER, metadata_cache['duplicate'])
+
 @app.route('/api/files')
 def list_files():
     """API endpoint to list all comic files with pagination"""
@@ -546,6 +600,9 @@ def list_files():
     
     # Get files with optional cache refresh
     files = get_comic_files(use_cache=not refresh)
+    
+    # Preload metadata for all directories (batch operation)
+    preload_metadata_for_directories(files)
     
     # Build file list with metadata
     all_files = []

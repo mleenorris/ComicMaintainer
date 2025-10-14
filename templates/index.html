@@ -778,7 +778,7 @@
         </div>
         
         <div class="search-bar">
-            <input type="text" id="searchInput" placeholder="🔍 Search files..." oninput="filterFiles()" />
+            <input type="text" id="searchInput" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
         </div>
         
         <div class="file-list" id="fileList">
@@ -960,6 +960,20 @@
         let totalFiles = 0;
         let perPage = parseInt(localStorage.getItem('perPage')) || 100;
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
+        let searchDebounceTimer = null;
+        
+        // Debounce function for search input
+        function debouncedFilterFiles() {
+            // Clear existing timer
+            if (searchDebounceTimer) {
+                clearTimeout(searchDebounceTimer);
+            }
+            
+            // Set new timer to trigger after 300ms of inactivity
+            searchDebounceTimer = setTimeout(() => {
+                filterFiles();
+            }, 300);
+        }
         
         // Theme management
         function initTheme() {

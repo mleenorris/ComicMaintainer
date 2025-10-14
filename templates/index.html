@@ -79,7 +79,7 @@
         .header {
             background: var(--bg-header);
             color: var(--text-header);
-            padding: 20px;
+            padding: 12px 20px;
             box-shadow: var(--shadow-sm);
             flex-shrink: 0;
             position: sticky;
@@ -94,10 +94,153 @@
         }
         
         .header-left h1 {
-            margin-bottom: 5px;
+            margin-bottom: 2px;
+            font-size: 24px;
+        }
+        
+        .header-left p {
+            font-size: 13px;
+            opacity: 0.9;
         }
         
         .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .header-search {
+            position: relative;
+        }
+        
+        .header-search input {
+            padding: 8px 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-header);
+            font-size: 13px;
+            width: 200px;
+            transition: all 0.3s;
+        }
+        
+        .header-search input::placeholder {
+            color: rgba(255, 255, 255, 0.6);
+        }
+        
+        .header-search input:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        
+        .header-filter-dropdown {
+            position: relative;
+        }
+        
+        .header-filter-toggle {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: var(--text-header);
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+        
+        .header-filter-toggle:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .header-filter-toggle::after {
+            content: '▼';
+            font-size: 9px;
+        }
+        
+        .header-sort-dropdown {
+            position: relative;
+        }
+        
+        .header-sort-toggle {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: var(--text-header);
+            padding: 8px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+        
+        .header-sort-toggle:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        
+        .header-sort-toggle::after {
+            content: '▼';
+            font-size: 9px;
+        }
+        
+        .header-dropdown-menu {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: calc(100% + 5px);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-secondary);
+            border-radius: 5px;
+            box-shadow: var(--shadow-md);
+            z-index: 1000;
+            min-width: 180px;
+            overflow: hidden;
+        }
+        
+        .header-dropdown-menu.show {
+            display: block;
+        }
+        
+        .header-dropdown-item {
+            padding: 10px 15px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+            font-size: 13px;
+            color: var(--text-primary);
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: inherit;
+        }
+        
+        .header-dropdown-item:hover {
+            background: var(--bg-hover);
+        }
+        
+        .header-dropdown-item.active {
+            background: #3498db;
+            color: white;
+            font-weight: 500;
+        }
+        
+        .settings-menu-wrapper {
             position: relative;
         }
         
@@ -124,7 +267,7 @@
         .settings-dropdown-menu {
             display: none;
             position: absolute;
-            right: 0;
+            left: 0;
             top: calc(100% + 5px);
             background: var(--bg-secondary);
             border: 1px solid var(--border-secondary);
@@ -426,19 +569,20 @@
             border-bottom: 1px solid var(--border-tertiary);
             font-weight: 600;
             color: var(--text-secondary);
-            display: flex;
+            display: grid;
+            grid-template-columns: 40px 1fr;
+            gap: 10px;
             align-items: center;
-            gap: 8px;
             user-select: none;
             transition: background 0.2s;
         }
         
         .directory-header-clickable {
             cursor: pointer;
-            flex: 1;
-            display: flex;
-            align-items: center;
+            display: grid;
+            grid-template-columns: 16px 16px 1fr 150px;
             gap: 8px;
+            align-items: center;
         }
         
         .directory-header:hover {
@@ -464,9 +608,7 @@
         
         .directory-path {
             font-size: 14px;
-            flex: 1;
             min-width: 0;
-            max-width: calc(100% - 150px);
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -476,7 +618,11 @@
             font-size: 12px;
             color: var(--text-muted);
             font-weight: normal;
-            flex-shrink: 0;
+            text-align: right;
+        }
+        
+        .directory-checkbox {
+            justify-self: center;
         }
         
         .directory-content {
@@ -806,6 +952,22 @@
         
         /* Intermediate Desktop Responsive Styles (Tablets & Small Desktops) */
         @media (max-width: 1024px) and (min-width: 769px) {
+            .header {
+                padding: 10px 15px;
+            }
+            
+            .header h1 {
+                font-size: 22px;
+            }
+            
+            .header p {
+                font-size: 12px;
+            }
+            
+            .header-search input {
+                width: 180px;
+            }
+            
             .btn {
                 padding: 9px 16px;
                 font-size: 13px;
@@ -826,6 +988,14 @@
                 grid-template-columns: 40px 1fr 120px 200px;
                 margin-left: 30px;
             }
+            
+            .directory-header {
+                grid-template-columns: 40px 1fr;
+            }
+            
+            .directory-header-clickable {
+                grid-template-columns: 16px 16px 1fr 120px;
+            }
         }
         
         /* Mobile Responsive Styles */
@@ -840,42 +1010,138 @@
             }
             
             .header {
-                padding: 15px 10px;
+                padding: 10px;
+            }
+            
+            .header-content {
+                flex-direction: column;
+                gap: 10px;
+                align-items: flex-start;
             }
             
             .header h1 {
-                font-size: 24px;
+                font-size: 20px;
             }
             
             .header p {
-                font-size: 14px;
+                font-size: 12px;
+                display: none;
+            }
+            
+            .header-right {
+                width: 100%;
+                justify-content: space-between;
+            }
+            
+            .header-controls {
+                flex: 1;
+                gap: 6px;
+            }
+            
+            .header-search {
+                flex: 1;
+            }
+            
+            .header-search input {
+                width: 100%;
+                padding: 8px 10px;
+                font-size: 12px;
+            }
+            
+            .header-filter-toggle,
+            .header-sort-toggle {
+                padding: 8px;
+                font-size: 16px;
+                min-width: 36px;
+                justify-content: center;
+            }
+            
+            .header-filter-toggle span,
+            .header-sort-toggle span {
+                display: none;
+            }
+            
+            .header-filter-toggle::before {
+                content: '📚';
+            }
+            
+            .header-sort-toggle::before {
+                content: '🔤';
+            }
+            
+            .header-filter-toggle::after,
+            .header-sort-toggle::after {
+                display: none;
+            }
+            
+            .header-dropdown-menu {
+                right: auto;
+                left: 0;
+                max-height: 300px;
+                overflow-y: auto;
+            }
+            
+            .header-filter-dropdown .header-dropdown-menu,
+            .header-sort-dropdown .header-dropdown-menu {
+                position: fixed;
+                top: auto;
+                left: 10px;
+                right: 10px;
+                width: auto;
+                min-width: auto;
+            }
+            
+            .settings-menu-toggle {
+                width: 36px;
+                height: 36px;
+                padding: 8px;
+                font-size: 18px;
             }
             
             .actions-bar {
                 padding: 10px;
-                gap: 8px;
+                gap: 6px;
+                flex-wrap: nowrap;
+                overflow-x: auto;
             }
             
             .btn {
-                padding: 8px 12px;
-                font-size: 13px;
-                flex: 1 1 auto;
-                min-width: 0;
+                padding: 10px;
+                font-size: 18px;
+                min-width: 40px;
+                width: 40px;
+                height: 40px;
+                flex-shrink: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            
+            .btn span {
+                display: none;
             }
             
             .button-group {
-                width: 100%;
+                display: flex;
+                gap: 6px;
+                flex-wrap: nowrap;
             }
             
             .button-group .btn {
-                flex: 1 1 auto;
+                flex: 0 0 auto;
+            }
+            
+            .button-group:last-of-type {
+                margin-left: 6px;
             }
             
             .select-info {
                 flex-basis: 100%;
                 text-align: center;
                 margin-left: 0;
-                margin-top: 5px;
+                margin-top: 8px;
+                font-size: 13px;
+                order: 10;
             }
             
             .file-list-header {
@@ -965,20 +1231,35 @@
             .directory-header {
                 padding: 10px;
                 font-size: 13px;
+                grid-template-columns: 30px 1fr;
+                gap: 8px;
+            }
+            
+            .directory-header-clickable {
+                grid-template-columns: 12px 14px 1fr 60px;
+                gap: 6px;
+                font-size: 12px;
             }
             
             .directory-path {
-                font-size: 13px;
-                max-width: calc(100% - 100px);
+                font-size: 12px;
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
-                min-width: 0;
-                flex-shrink: 1;
             }
             
             .directory-file-count {
-                flex-shrink: 0;
+                font-size: 11px;
+                text-align: right;
+            }
+            
+            .directory-toggle {
+                font-size: 10px;
+                width: 12px;
+            }
+            
+            .directory-icon {
+                font-size: 14px;
             }
             
             .modal-content {
@@ -1051,22 +1332,64 @@
                     <p>Manage and process comic files in your watched directory</p>
                 </div>
                 <div class="header-right">
-                    <button class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle">
-                        ⋮
-                    </button>
-                    <div class="settings-dropdown-menu" id="settingsDropdownMenu">
-                        <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
-                            ⚙️ Settings
+                    <div class="header-controls">
+                        <div class="header-search">
+                            <input type="text" id="headerSearchInput" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
+                        </div>
+                        <div class="header-filter-dropdown">
+                            <button class="header-filter-toggle" onclick="toggleHeaderFilterDropdown(event)" id="headerFilterToggle">
+                                <span id="headerFilterLabel">📚 All</span>
+                            </button>
+                            <div class="header-dropdown-menu" id="headerFilterMenu">
+                                <button class="header-dropdown-item active" onclick="setHeaderFilter('all')" data-filter="all">
+                                    📚 All Files
+                                </button>
+                                <button class="header-dropdown-item" onclick="setHeaderFilter('unmarked')" data-filter="unmarked">
+                                    ⚠️ Unmarked Only
+                                </button>
+                                <button class="header-dropdown-item" onclick="setHeaderFilter('marked')" data-filter="marked">
+                                    ✅ Marked Only
+                                </button>
+                                <button class="header-dropdown-item" onclick="setHeaderFilter('duplicates')" data-filter="duplicates">
+                                    🔁 Duplicates Only
+                                </button>
+                            </div>
+                        </div>
+                        <div class="header-sort-dropdown">
+                            <button class="header-sort-toggle" onclick="toggleHeaderSortDropdown(event)" id="headerSortToggle">
+                                <span id="headerSortLabel">🔤 Name</span>
+                            </button>
+                            <div class="header-dropdown-menu" id="headerSortMenu">
+                                <button class="header-dropdown-item active" onclick="setSort('name')" data-sort="name">
+                                    🔤 Name
+                                </button>
+                                <button class="header-dropdown-item" onclick="setSort('date')" data-sort="date">
+                                    📅 Date
+                                </button>
+                                <button class="header-dropdown-item" onclick="setSort('size')" data-sort="size">
+                                    💾 Size
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-menu-wrapper">
+                        <button class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle">
+                            ⋮
                         </button>
-                        <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
-                            🌓 Toggle Theme
-                        </button>
-                        <button class="settings-dropdown-item" onclick="refreshFiles(); closeSettingsMenu();">
-                            🔄 Refresh
-                        </button>
-                        <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
-                            🔍 Scan Unmarked
-                        </button>
+                        <div class="settings-dropdown-menu" id="settingsDropdownMenu">
+                            <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
+                                ⚙️ Settings
+                            </button>
+                            <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
+                                🌓 Toggle Theme
+                            </button>
+                            <button class="settings-dropdown-item" onclick="refreshFiles(); closeSettingsMenu();">
+                                🔄 Refresh
+                            </button>
+                            <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
+                                🔍 Scan Unmarked
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1080,67 +1403,45 @@
             <div class="actions-bar">
                 <div class="button-group">
                     <button class="btn btn-success" onclick="processAllFiles()">
-                        🚀 Process All
+                        🚀<span> Process All</span>
                     </button>
                     <button class="btn btn-success" onclick="processUnmarkedFiles()">
-                        ⚠️ Process Unmarked
+                        ⚠️<span> Process Unmarked</span>
                     </button>
                     <button class="btn btn-success" onclick="processSelectedFiles()" id="processSelectedBtn" disabled>
-                        ⚡ Process Selected
-                    </button>
-                    <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>
-                        ✏️ Update Selected
+                        ⚡<span> Process Selected</span>
                     </button>
                 </div>
                 <div class="button-group">
                     <button class="btn btn-rename" onclick="renameAllFiles()">
-                        📝 Rename All
+                        📝<span> Rename All</span>
                     </button>
                     <button class="btn btn-rename" onclick="renameUnmarkedFiles()">
-                        📝 Rename Unmarked
+                        📝<span> Rename Unmarked</span>
                     </button>
                     <button class="btn btn-rename" onclick="renameSelectedFiles()" id="renameSelectedBtn" disabled>
-                        📝 Rename Selected
+                        📝<span> Rename Selected</span>
                     </button>
                 </div>
                 <div class="button-group">
                     <button class="btn btn-normalize" onclick="normalizeAllFiles()">
-                        🔧 Normalize All
+                        🔧<span> Normalize All</span>
                     </button>
                     <button class="btn btn-normalize" onclick="normalizeUnmarkedFiles()">
-                        🔧 Normalize Unmarked
+                        🔧<span> Normalize Unmarked</span>
                     </button>
                     <button class="btn btn-normalize" onclick="normalizeSelectedFiles()" id="normalizeSelectedBtn" disabled>
-                        🔧 Normalize Selected
+                        🔧<span> Normalize Selected</span>
+                    </button>
+                </div>
+                <div class="button-group">
+                    <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>
+                        ✏️<span> Update Selected</span>
                     </button>
                 </div>
                 <span class="select-info" id="selectInfo">No files selected</span>
             </div>
-            
-            <div class="search-bar">
-                <div class="search-bar-wrapper">
-                    <input type="text" id="searchInput" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
-                    <div class="filter-dropdown">
-                        <button class="filter-dropdown-toggle" onclick="toggleFilterDropdown(event)" id="filterDropdownToggle">
-                            <span id="filterDropdownLabel">📚 All Files</span>
-                        </button>
-                        <div class="filter-dropdown-menu" id="filterDropdownMenu">
-                            <button class="filter-dropdown-item active" onclick="setFilter('all')" data-filter="all">
-                                📚 All Files
-                            </button>
-                            <button class="filter-dropdown-item" onclick="setFilter('unmarked')" data-filter="unmarked" id="filterUnmarked">
-                                ⚠️ Unmarked Only
-                            </button>
-                            <button class="filter-dropdown-item" onclick="setFilter('marked')" data-filter="marked">
-                                ✅ Marked Only
-                            </button>
-                            <button class="filter-dropdown-item" onclick="setFilter('duplicates')" data-filter="duplicates">
-                                🔁 Duplicates Only
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
+
         </div>
         
         <div class="content-wrapper">
@@ -1471,6 +1772,9 @@
                 if (filterMode !== 'all') {
                     url += `&filter=${encodeURIComponent(filterMode)}`;
                 }
+                if (sortMode !== 'name') {
+                    url += `&sort=${encodeURIComponent(sortMode)}`;
+                }
                 
                 const response = await fetch(url);
                 const data = await response.json();
@@ -1551,26 +1855,28 @@
         }
         
         function filterFiles() {
-            searchQuery = document.getElementById('searchInput').value;
+            searchQuery = document.getElementById('headerSearchInput').value;
             // Reload from page 1 with new search query
             loadFiles(1);
         }
         
-        function setFilter(mode) {
+        let sortMode = 'name'; // 'name', 'date', 'size'
+        
+        function setHeaderFilter(mode) {
             filterMode = mode;
             
             // Update dropdown label and active state
             const filterLabels = {
-                'all': '📚 All Files',
-                'unmarked': '⚠️ Unmarked Only',
-                'marked': '✅ Marked Only',
-                'duplicates': '🔁 Duplicates Only'
+                'all': '📚 All',
+                'unmarked': '⚠️ Unmarked',
+                'marked': '✅ Marked',
+                'duplicates': '🔁 Duplicates'
             };
             
-            document.getElementById('filterDropdownLabel').textContent = filterLabels[mode];
+            document.getElementById('headerFilterLabel').textContent = filterLabels[mode];
             
             // Update active class on dropdown items
-            document.querySelectorAll('.filter-dropdown-item').forEach(item => {
+            document.querySelectorAll('#headerFilterMenu .header-dropdown-item').forEach(item => {
                 if (item.dataset.filter === mode) {
                     item.classList.add('active');
                 } else {
@@ -1579,16 +1885,64 @@
             });
             
             // Close the dropdown
-            document.getElementById('filterDropdownMenu').classList.remove('show');
+            document.getElementById('headerFilterMenu').classList.remove('show');
             
             // Reload from page 1 with new filter
             loadFiles(1);
         }
         
-        function toggleFilterDropdown(event) {
+        function setSort(mode) {
+            sortMode = mode;
+            
+            // Update dropdown label and active state
+            const sortLabels = {
+                'name': '🔤 Name',
+                'date': '📅 Date',
+                'size': '💾 Size'
+            };
+            
+            document.getElementById('headerSortLabel').textContent = sortLabels[mode];
+            
+            // Update active class on dropdown items
+            document.querySelectorAll('#headerSortMenu .header-dropdown-item').forEach(item => {
+                if (item.dataset.sort === mode) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+            
+            // Close the dropdown
+            document.getElementById('headerSortMenu').classList.remove('show');
+            
+            // Reload from page 1 with new sort order
+            loadFiles(1);
+        }
+        
+        function toggleHeaderFilterDropdown(event) {
             event.stopPropagation();
-            const menu = document.getElementById('filterDropdownMenu');
+            const menu = document.getElementById('headerFilterMenu');
+            const sortMenu = document.getElementById('headerSortMenu');
+            sortMenu.classList.remove('show');
             menu.classList.toggle('show');
+        }
+        
+        function toggleHeaderSortDropdown(event) {
+            event.stopPropagation();
+            const menu = document.getElementById('headerSortMenu');
+            const filterMenu = document.getElementById('headerFilterMenu');
+            filterMenu.classList.remove('show');
+            menu.classList.toggle('show');
+        }
+        
+        function setFilter(mode) {
+            // Redirect to header filter function
+            setHeaderFilter(mode);
+        }
+        
+        function toggleFilterDropdown(event) {
+            // Redirect to header filter toggle
+            toggleHeaderFilterDropdown(event);
         }
         
         function toggleSettingsMenu(event) {
@@ -1677,6 +2031,7 @@
                     html += `
                         <div class="directory-header">
                             <input type="checkbox" 
+                                   class="directory-checkbox"
                                    ${allSelected ? 'checked' : ''} 
                                    ${someSelected && !allSelected ? 'style="opacity: 0.5"' : ''}
                                    onchange="toggleDirectorySelection('${escapeJs(dir)}', this.checked)"
@@ -1685,7 +2040,7 @@
                                 <span class="directory-toggle ${isCollapsed ? 'collapsed' : ''}">▼</span>
                                 <span class="directory-icon">📁</span>
                                 <span class="directory-path">${escapeHtml(dir)}</span>
-                                <span class="directory-file-count">(${fileCount} file${fileCount !== 1 ? 's' : ''})</span>
+                                <span class="directory-file-count">${fileCount} file${fileCount !== 1 ? 's' : ''}</span>
                             </div>
                         </div>
                     `;
@@ -2480,15 +2835,22 @@
             if (!event.target.closest('.file-actions-dropdown')) {
                 closeAllDropdowns();
             }
-            // Close filter dropdown when clicking outside
-            if (!event.target.closest('.filter-dropdown')) {
-                const filterMenu = document.getElementById('filterDropdownMenu');
+            // Close header filter dropdown when clicking outside
+            if (!event.target.closest('.header-filter-dropdown')) {
+                const filterMenu = document.getElementById('headerFilterMenu');
                 if (filterMenu) {
                     filterMenu.classList.remove('show');
                 }
             }
+            // Close header sort dropdown when clicking outside
+            if (!event.target.closest('.header-sort-dropdown')) {
+                const sortMenu = document.getElementById('headerSortMenu');
+                if (sortMenu) {
+                    sortMenu.classList.remove('show');
+                }
+            }
             // Close settings dropdown when clicking outside
-            if (!event.target.closest('.header-right')) {
+            if (!event.target.closest('.settings-menu-wrapper')) {
                 const settingsMenu = document.getElementById('settingsDropdownMenu');
                 if (settingsMenu) {
                     settingsMenu.classList.remove('show');

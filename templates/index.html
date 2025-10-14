@@ -1088,7 +1088,7 @@
                     showMessage(result.error || 'Failed to toggle watcher', 'error');
                 }
             } catch (error) {
-                showMessage('Failed to toggle watcher: ' + error.message, 'error');
+                showMessage('Failed to toggle watcher: ' + error.message, 'error');f
             }
         }
         
@@ -1177,7 +1177,6 @@
             const processUnmarkedBtn = document.querySelector('button[onclick="processUnmarkedFiles()"]');
             const renameUnmarkedBtn = document.querySelector('button[onclick="renameUnmarkedFiles()"]');
             const normalizeUnmarkedBtn = document.querySelector('button[onclick="normalizeUnmarkedFiles()"]');
-            const scanUnmarkedBtn = document.querySelector('button[onclick="scanUnmarkedFiles()"]');
             const filterUnmarkedBtn = document.getElementById('filterUnmarked');
             
             // Show or hide buttons based on whether there are unmarked files
@@ -1187,7 +1186,6 @@
             if (processUnmarkedBtn) processUnmarkedBtn.style.display = displayStyle;
             if (renameUnmarkedBtn) renameUnmarkedBtn.style.display = displayStyle;
             if (normalizeUnmarkedBtn) normalizeUnmarkedBtn.style.display = displayStyle;
-            if (scanUnmarkedBtn) scanUnmarkedBtn.style.display = displayStyle;
             if (filterUnmarkedBtn) filterUnmarkedBtn.style.display = displayStyle;
         }
         

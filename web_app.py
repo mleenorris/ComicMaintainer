@@ -26,6 +26,7 @@ WEB_MODIFIED_MARKER = '.web_modified'
 PROCESSED_MARKER = '.processed_files'
 DUPLICATE_MARKER = '.duplicate_files'
 CACHE_UPDATE_MARKER = '.cache_update'
+CACHE_CHANGES_FILE = '.cache_changes'
 
 # Global lock file to mark files modified by web interface
 web_modified_files = set()
@@ -213,6 +214,127 @@ def get_watcher_update_time():
             return 0
     return 0
 
+def update_watcher_timestamp():
+    """Update the watcher cache invalidation timestamp"""
+    if not WATCHED_DIR:
+        return
+    
+    marker_path = os.path.join(WATCHED_DIR, CACHE_UPDATE_MARKER)
+    try:
+        with open(marker_path, 'w') as f:
+            f.write(str(time.time()))
+    except Exception as e:
+        logging.error(f"Error updating watcher timestamp: {e}")
+
+def record_cache_change(change_type, old_path=None, new_path=None):
+    """Record a file change for incremental cache updates
+    
+    Args:
+        change_type: 'add', 'remove', or 'rename'
+        old_path: Original file path (for 'remove' and 'rename')
+        new_path: New file path (for 'add' and 'rename')
+    """
+    if not WATCHED_DIR:
+        return
+    
+    changes_file = os.path.join(WATCHED_DIR, CACHE_CHANGES_FILE)
+    
+    try:
+        change_entry = {
+            'type': change_type,
+            'old_path': old_path,
+            'new_path': new_path,
+            'timestamp': time.time()
+        }
+        
+        with cache_lock:
+            # Append the change to the file
+            with open(changes_file, 'a') as f:
+                f.write(json.dumps(change_entry) + '\n')
+    except Exception as e:
+        logging.error(f"Error recording cache change: {e}")
+
+def apply_cache_changes():
+    """Apply pending cache changes incrementally instead of invalidating entire cache
+    
+    Returns:
+        True if changes were applied, False if cache needs full rebuild
+    """
+    if not WATCHED_DIR or file_list_cache['files'] is None:
+        return False
+    
+    changes_file = os.path.join(WATCHED_DIR, CACHE_CHANGES_FILE)
+    
+    if not os.path.exists(changes_file):
+        return True  # No changes to apply
+    
+    try:
+        with cache_lock:
+            # Read all pending changes
+            with open(changes_file, 'r') as f:
+                lines = f.readlines()
+            
+            if not lines:
+                return True
+            
+            # Get current cache
+            cached_files = file_list_cache['files']
+            if cached_files is None:
+                return False
+            
+            # Convert to set for faster operations
+            cached_set = set(cached_files)
+            
+            # Apply each change
+            for line in lines:
+                try:
+                    change = json.loads(line.strip())
+                    change_type = change.get('type')
+                    old_path = change.get('old_path')
+                    new_path = change.get('new_path')
+                    
+                    if change_type == 'add' and new_path:
+                        # Add new file if it exists and not already in cache
+                        if os.path.exists(new_path) and new_path not in cached_set:
+                            cached_set.add(new_path)
+                            logging.info(f"Cache: Added {new_path}")
+                    
+                    elif change_type == 'remove' and old_path:
+                        # Remove file from cache
+                        if old_path in cached_set:
+                            cached_set.discard(old_path)
+                            logging.info(f"Cache: Removed {old_path}")
+                    
+                    elif change_type == 'rename' and old_path and new_path:
+                        # Remove old path and add new path
+                        if old_path in cached_set:
+                            cached_set.discard(old_path)
+                        if os.path.exists(new_path):
+                            cached_set.add(new_path)
+                            logging.info(f"Cache: Renamed {old_path} -> {new_path}")
+                
+                except json.JSONDecodeError as e:
+                    logging.warning(f"Invalid cache change entry: {line.strip()}")
+                except Exception as e:
+                    logging.error(f"Error applying cache change: {e}")
+            
+            # Update cache with modified list (sorted)
+            file_list_cache['files'] = sorted(list(cached_set))
+            file_list_cache['timestamp'] = time.time()
+            
+            # Clear the changes file after applying
+            try:
+                os.remove(changes_file)
+            except:
+                pass
+            
+            logging.info(f"Applied {len(lines)} cache changes incrementally")
+            return True
+    
+    except Exception as e:
+        logging.error(f"Error applying cache changes: {e}")
+        return False
+
 def get_comic_files(use_cache=True):
     """Get all comic files in the watched directory with optional caching"""
     if not WATCHED_DIR:
@@ -223,9 +345,19 @@ def get_comic_files(use_cache=True):
         with cache_lock:
             watcher_update_time = get_watcher_update_time()
             
-            # Invalidate cache if watcher has processed files since cache was created
+            # Check if watcher has changes since cache was created
             if watcher_update_time > file_list_cache['watcher_update_time']:
-                logging.info("Cache invalidated: watcher has processed files")
+                # Try to apply incremental changes first
+                if file_list_cache['files'] is not None:
+                    if apply_cache_changes():
+                        # Successfully applied changes incrementally
+                        file_list_cache['watcher_update_time'] = watcher_update_time
+                        return file_list_cache['files']
+                    else:
+                        # Failed to apply changes, need full rebuild
+                        logging.info("Cache: Incremental update failed, rebuilding")
+                
+                # If no cache or incremental update failed, will rebuild below
                 file_list_cache['files'] = None
                 file_list_cache['watcher_update_time'] = watcher_update_time
             
@@ -234,6 +366,7 @@ def get_comic_files(use_cache=True):
                 return file_list_cache['files']
     
     # Build file list
+    logging.info("Cache: Building full file list")
     files = []
     for ext in ['*.cbz', '*.cbr', '*.CBZ', '*.CBR']:
         files.extend(glob.glob(os.path.join(WATCHED_DIR, '**', ext), recursive=True))
@@ -254,6 +387,12 @@ def clear_file_cache():
     with cache_lock:
         file_list_cache['files'] = None
         file_list_cache['timestamp'] = 0
+
+def handle_file_rename_in_cache(original_path, final_path):
+    """Handle file rename in cache - record change if file was actually renamed"""
+    if original_path != final_path:
+        record_cache_change('rename', old_path=original_path, new_path=final_path)
+        update_watcher_timestamp()
 
 def get_credits_by_role(credits_list, role_synonyms):
     """Extract credits for a specific role from credits list"""
@@ -606,6 +745,9 @@ def process_all_files():
             # Mark as processed using the final filepath, cleanup old filename if renamed
             mark_file_processed(final_filepath, original_filepath=filepath)
             
+            # Update cache incrementally if file was renamed
+            handle_file_rename_in_cache(filepath, final_filepath)
+            
             results.append({
                 'file': os.path.basename(final_filepath),
                 'success': True
@@ -639,6 +781,9 @@ def rename_all_files():
             
             # Mark as processed using the final filepath
             mark_file_processed(final_filepath)
+            
+            # Update cache incrementally if file was renamed
+            handle_file_rename_in_cache(filepath, final_filepath)
             
             results.append({
                 'file': os.path.basename(final_filepath),
@@ -709,6 +854,9 @@ def process_single_file(filepath):
         # Mark as processed using the final filepath, cleanup old filename if renamed
         mark_file_processed(final_filepath, original_filepath=full_path)
         
+        # Update cache incrementally if file was renamed
+        handle_file_rename_in_cache(full_path, final_filepath)
+        
         logging.info(f"Processed file via web interface: {full_path} -> {final_filepath}")
         return jsonify({'success': True})
     except Exception as e:
@@ -734,6 +882,9 @@ def rename_single_file(filepath):
         
         # Mark as processed using the final filepath
         mark_file_processed(final_filepath)
+        
+        # Update cache incrementally if file was renamed
+        handle_file_rename_in_cache(full_path, final_filepath)
         
         logging.info(f"Renamed file via web interface: {full_path} -> {final_filepath}")
         return jsonify({'success': True})
@@ -801,6 +952,9 @@ def process_selected_files():
             # Mark as processed using the final filepath, cleanup old filename if renamed
             mark_file_processed(final_filepath, original_filepath=full_path)
             
+            # Update cache incrementally if file was renamed
+            handle_file_rename_in_cache(full_path, final_filepath)
+            
             results.append({
                 'file': os.path.basename(final_filepath),
                 'success': True
@@ -849,6 +1003,9 @@ def rename_selected_files():
             
             # Mark as processed using the final filepath
             mark_file_processed(final_filepath)
+            
+            # Update cache incrementally if file was renamed
+            handle_file_rename_in_cache(full_path, final_filepath)
             
             results.append({
                 'file': os.path.basename(final_filepath),
@@ -984,6 +1141,9 @@ def process_unmarked_files():
             # Mark as processed using the final filepath, cleanup old filename if renamed
             mark_file_processed(final_filepath, original_filepath=filepath)
             
+            # Update cache incrementally if file was renamed
+            handle_file_rename_in_cache(filepath, final_filepath)
+            
             results.append({
                 'file': os.path.basename(final_filepath),
                 'success': True
@@ -1024,6 +1184,9 @@ def rename_unmarked_files():
             
             # Mark as processed using the final filepath
             mark_file_processed(final_filepath)
+            
+            # Update cache incrementally if file was renamed
+            handle_file_rename_in_cache(filepath, final_filepath)
             
             results.append({
                 'file': os.path.basename(final_filepath),
@@ -1126,8 +1289,8 @@ def delete_single_file(filepath):
             except Exception as e:
                 logging.warning(f"Error updating duplicate marker after delete: {e}")
         
-        # Clear file cache to reflect the deletion
-        clear_file_cache()
+        # Update cache incrementally instead of clearing it
+        record_cache_change('remove', old_path=full_path)
         
         logging.info(f"Deleted file via web interface: {full_path}")
         return jsonify({'success': True})

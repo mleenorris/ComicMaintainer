@@ -1522,13 +1522,21 @@ def initialize_cache():
         
         logging.info("Cache initialization complete")
 
-if __name__ == '__main__':
+def init_app():
+    """Initialize the application on startup"""
     if not WATCHED_DIR:
         logging.error("WATCHED_DIR environment variable is not set. Exiting.")
         sys.exit(1)
     
     # Initialize cache on startup
     initialize_cache()
-    
+
+if __name__ == '__main__':
+    # This block is only for development/testing purposes
+    # In production, Gunicorn will import the app directly
+    init_app()
     port = int(os.environ.get('WEB_PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+else:
+    # When imported by Gunicorn, initialize the app
+    init_app()

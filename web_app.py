@@ -672,6 +672,9 @@ def list_files():
     # Get enriched file list with metadata (cached)
     all_files = get_enriched_file_list(files, force_rebuild=refresh)
     
+    # Calculate unmarked count from all files (before filtering)
+    unmarked_count = sum(1 for f in all_files if not f['processed'])
+    
     # Apply filters
     filtered_files = all_files
     
@@ -717,7 +720,8 @@ def list_files():
         'page': page,
         'per_page': per_page,
         'total_files': total_filtered,
-        'total_pages': total_pages
+        'total_pages': total_pages,
+        'unmarked_count': unmarked_count
     })
 
 @app.route('/api/file/<path:filepath>/tags')

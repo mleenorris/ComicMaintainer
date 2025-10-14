@@ -2262,7 +2262,17 @@
             });
             
             fileList.innerHTML = html;
+            
+            // Clean up selectedFiles to remove files that no longer exist
+            const currentFilePaths = new Set(files.map(f => f.relative_path));
+            for (const filepath of selectedFiles) {
+                if (!currentFilePaths.has(filepath)) {
+                    selectedFiles.delete(filepath);
+                }
+            }
+            
             updateSelectInfo();
+            updateSelectAllCheckbox();
             updateToggleAllButton();
         }
         
@@ -2303,6 +2313,7 @@
                 selectedFiles.delete(filepath);
             }
             updateSelectInfo();
+            updateSelectAllCheckbox();
         }
         
         function updateSelectInfo() {
@@ -2325,6 +2336,22 @@
                 processSelectedBtn.disabled = false;
                 renameSelectedBtn.disabled = false;
                 normalizeSelectedBtn.disabled = false;
+            }
+        }
+        
+        function updateSelectAllCheckbox() {
+            const selectAllCheckbox = document.getElementById('selectAll');
+            if (!selectAllCheckbox) return;
+            
+            if (files.length === 0) {
+                selectAllCheckbox.checked = false;
+                selectAllCheckbox.indeterminate = false;
+            } else {
+                const allSelected = files.every(file => selectedFiles.has(file.relative_path));
+                const someSelected = files.some(file => selectedFiles.has(file.relative_path));
+                
+                selectAllCheckbox.checked = allSelected;
+                selectAllCheckbox.indeterminate = someSelected && !allSelected;
             }
         }
         

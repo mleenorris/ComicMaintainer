@@ -8,6 +8,7 @@ import glob
 import threading
 import time
 from config import get_filename_format, set_filename_format, DEFAULT_FILENAME_FORMAT
+from version import __version__
 
 # Set up logging
 logging.basicConfig(
@@ -1095,6 +1096,13 @@ def set_filename_format_api():
         return jsonify({'success': True, 'format': format_string})
     else:
         return jsonify({'error': 'Failed to save filename format'}), 500
+
+@app.route('/api/version', methods=['GET'])
+def get_version():
+    """API endpoint to get the application version"""
+    return jsonify({
+        'version': __version__
+    })
 
 @app.route('/api/scan-unmarked', methods=['GET'])
 def scan_unmarked_files():

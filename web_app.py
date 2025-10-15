@@ -20,6 +20,19 @@ from markers import (
 from job_manager import get_job_manager, JobResult
 
 # Set up logging with rotation
+# Initialize basic logging first to avoid issues with get_log_max_bytes() logging errors
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [WEBPAGE] %(levelname)s %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+# Explicitly set root logger level to INFO (in case it was already configured by imports)
+logging.getLogger().setLevel(logging.INFO)
+
+# Now safely get log max bytes (which may log warnings)
 log_max_bytes = get_log_max_bytes()
 log_handler = RotatingFileHandler(
     "ComicMaintainer.log",
@@ -29,14 +42,8 @@ log_handler = RotatingFileHandler(
 log_handler.setLevel(logging.INFO)
 log_handler.setFormatter(logging.Formatter('%(asctime)s [WEBPAGE] %(levelname)s %(message)s'))
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [WEBPAGE] %(levelname)s %(message)s',
-    handlers=[
-        log_handler,
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+# Add the file handler to the root logger
+logging.getLogger().addHandler(log_handler)
 
 app = Flask(__name__)
 

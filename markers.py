@@ -39,13 +39,58 @@ def _load_marker_set(marker_file: str) -> Set[str]:
         with open(marker_path, 'r') as f:
             data = json.load(f)
             return set(data.get('files', []))
-    except Exception as e:
+    except json.JSONDecodeError as e:
         logging.error(f"Error loading marker file {marker_path}: {e}")
+        
+        # Create backup of corrupted file
+        import time
+        backup_path = f"{marker_path}.corrupt.{int(time.time())}"
+        try:
+            import shutil
+            shutil.copy2(marker_path, backup_path)
+            logging.warning(f"Created backup of corrupted marker file: {backup_path}")
+        except Exception as backup_error:
+            logging.error(f"Failed to create backup of corrupted file: {backup_error}")
+        
+        # Try to recover data by reading the file and extracting valid entries
+        try:
+            with open(marker_path, 'r') as f:
+                content = f.read()
+            
+            # Attempt to extract file paths from the corrupted JSON
+            # Look for patterns like "/path/to/file" in the content
+            import re
+            file_paths = set()
+            # Match quoted strings that look like file paths (starting with /)
+            path_pattern = r'"(/[^"]+)"'
+            matches = re.findall(path_pattern, content)
+            if matches:
+                file_paths = set(matches)
+                logging.info(f"Recovered {len(file_paths)} file paths from corrupted marker file")
+            
+            # Remove the corrupted file and start fresh
+            os.remove(marker_path)
+            logging.warning(f"Removed corrupted marker file: {marker_path}")
+            
+            return file_paths
+        except Exception as recovery_error:
+            logging.error(f"Failed to recover data from corrupted file: {recovery_error}")
+            
+            # Remove the corrupted file to start fresh
+            try:
+                os.remove(marker_path)
+                logging.warning(f"Removed corrupted marker file: {marker_path}")
+            except Exception as remove_error:
+                logging.error(f"Failed to remove corrupted file: {remove_error}")
+            
+            return set()
+    except Exception as e:
+        logging.error(f"Unexpected error loading marker file {marker_path}: {e}")
         return set()
 
 
 def _save_marker_set(marker_file: str, files: Set[str]):
-    """Save a marker set to JSON file"""
+    """Save a marker set to JSON file using atomic write"""
     _ensure_markers_dir()
     marker_path = os.path.join(MARKERS_DIR, marker_file)
     
@@ -54,10 +99,29 @@ def _save_marker_set(marker_file: str, files: Set[str]):
         data = {
             'files': sorted(list(files))
         }
-        with open(marker_path, 'w') as f:
-            json.dump(data, f, indent=2)
+        
+        # Validate JSON before writing
+        json_str = json.dumps(data, indent=2)
+        
+        # Use atomic write: write to temp file, then rename
+        temp_path = f"{marker_path}.tmp"
+        with open(temp_path, 'w') as f:
+            f.write(json_str)
+            f.flush()
+            os.fsync(f.fileno())  # Ensure data is written to disk
+        
+        # Atomic rename - this is atomic on POSIX systems
+        os.replace(temp_path, marker_path)
+        
     except Exception as e:
         logging.error(f"Error saving marker file {marker_path}: {e}")
+        # Clean up temp file if it exists
+        temp_path = f"{marker_path}.tmp"
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except:
+                pass
 
 
 # Processed files marker functions

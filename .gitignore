@@ -46,3 +46,7 @@ Thumbs.db
 .cache_rebuild_lock
 ComicMaintainer.log
 config.json
+
+# Marker file backups and temp files
+*.corrupt.*
+*.tmp

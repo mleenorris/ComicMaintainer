@@ -3,7 +3,7 @@ import sys
 import logging
 import json
 import fcntl
-from flask import Flask, render_template, jsonify, request, send_from_directory
+from flask import Flask, render_template, jsonify, request, send_from_directory, Response, stream_with_context
 from comicapi.comicarchive import ComicArchive
 import glob
 import threading
@@ -738,6 +738,74 @@ def batch_update_tags():
     
     return jsonify({'results': results})
 
+def sse_message(data):
+    """Format a message for Server-Sent Events"""
+    return f"data: {json.dumps(data)}\n\n"
+
+@app.route('/api/process-all-stream', methods=['POST'])
+def process_all_files_stream():
+    """API endpoint to process all files with progress streaming"""
+    from process_file import process_file
+    
+    def generate():
+        files = get_comic_files()
+        total = len(files)
+        
+        yield sse_message({'type': 'start', 'total': total})
+        
+        success_count = 0
+        error_count = 0
+        
+        for index, filepath in enumerate(files):
+            try:
+                # Mark as web modified to prevent watcher from processing
+                mark_file_web_modified(filepath)
+                
+                # Process the file and get the final filepath (may be renamed)
+                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+                
+                # Mark as processed using the final filepath, cleanup old filename if renamed
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+                
+                # Update cache incrementally if file was renamed
+                handle_file_rename_in_cache(filepath, final_filepath)
+                
+                success_count += 1
+                logging.info(f"Processed file via web interface: {filepath} -> {final_filepath}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(final_filepath),
+                    'success': True,
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+            except Exception as e:
+                error_count += 1
+                logging.error(f"Error processing file {filepath}: {e}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e),
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+        
+        yield sse_message({
+            'type': 'complete',
+            'total': total,
+            'successCount': success_count,
+            'errorCount': error_count
+        })
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
 @app.route('/api/process-all', methods=['POST'])
 def process_all_files():
     """API endpoint to process all files in the watched directory"""
@@ -775,6 +843,70 @@ def process_all_files():
     
     return jsonify({'results': results})
 
+@app.route('/api/rename-all-stream', methods=['POST'])
+def rename_all_files_stream():
+    """API endpoint to rename all files with progress streaming"""
+    from process_file import process_file
+    
+    def generate():
+        files = get_comic_files()
+        total = len(files)
+        
+        yield sse_message({'type': 'start', 'total': total})
+        
+        success_count = 0
+        error_count = 0
+        
+        for index, filepath in enumerate(files):
+            try:
+                # Mark as web modified to prevent watcher from processing
+                mark_file_web_modified(filepath)
+                
+                # Only rename the file
+                final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+                
+                # Mark as processed using the final filepath
+                mark_file_processed_wrapper(final_filepath)
+                
+                # Update cache incrementally if file was renamed
+                handle_file_rename_in_cache(filepath, final_filepath)
+                
+                success_count += 1
+                logging.info(f"Renamed file via web interface: {filepath} -> {final_filepath}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(final_filepath),
+                    'success': True,
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+            except Exception as e:
+                error_count += 1
+                logging.error(f"Error renaming file {filepath}: {e}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e),
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+        
+        yield sse_message({
+            'type': 'complete',
+            'total': total,
+            'successCount': success_count,
+            'errorCount': error_count
+        })
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
 @app.route('/api/rename-all', methods=['POST'])
 def rename_all_files():
     """API endpoint to rename all files in the watched directory"""
@@ -811,6 +943,67 @@ def rename_all_files():
             logging.error(f"Error renaming file {filepath}: {e}")
     
     return jsonify({'results': results})
+
+@app.route('/api/normalize-all-stream', methods=['POST'])
+def normalize_all_files_stream():
+    """API endpoint to normalize metadata for all files with progress streaming"""
+    from process_file import process_file
+    
+    def generate():
+        files = get_comic_files()
+        total = len(files)
+        
+        yield sse_message({'type': 'start', 'total': total})
+        
+        success_count = 0
+        error_count = 0
+        
+        for index, filepath in enumerate(files):
+            try:
+                # Mark as web modified to prevent watcher from processing
+                mark_file_web_modified(filepath)
+                
+                # Only normalize metadata
+                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+                
+                # Mark as processed using the final filepath
+                mark_file_processed_wrapper(final_filepath)
+                
+                success_count += 1
+                logging.info(f"Normalized metadata for file via web interface: {filepath}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(final_filepath),
+                    'success': True,
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+            except Exception as e:
+                error_count += 1
+                logging.error(f"Error normalizing metadata for file {filepath}: {e}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e),
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+        
+        yield sse_message({
+            'type': 'complete',
+            'total': total,
+            'successCount': success_count,
+            'errorCount': error_count
+        })
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
 @app.route('/api/normalize-all', methods=['POST'])
 def normalize_all_files():
@@ -930,6 +1123,90 @@ def normalize_single_file(filepath):
         logging.error(f"Error normalizing metadata for file {full_path}: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/process-selected-stream', methods=['POST'])
+def process_selected_files_stream():
+    """API endpoint to process selected files with progress streaming"""
+    from process_file import process_file
+    
+    data = request.json
+    file_list = data.get('files', [])
+    
+    if not file_list:
+        return jsonify({'error': 'No files specified'}), 400
+    
+    def generate():
+        total = len(file_list)
+        yield sse_message({'type': 'start', 'total': total})
+        
+        success_count = 0
+        error_count = 0
+        
+        for index, filepath in enumerate(file_list):
+            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+            
+            if not os.path.exists(full_path):
+                error_count += 1
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': 'File not found',
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+                continue
+            
+            try:
+                # Mark as web modified to prevent watcher from processing
+                mark_file_web_modified(full_path)
+                
+                # Process the file and get the final filepath (may be renamed)
+                final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+                
+                # Mark as processed using the final filepath, cleanup old filename if renamed
+                mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
+                
+                # Update cache incrementally if file was renamed
+                handle_file_rename_in_cache(full_path, final_filepath)
+                
+                success_count += 1
+                logging.info(f"Processed file via web interface: {full_path} -> {final_filepath}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(final_filepath),
+                    'success': True,
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+            except Exception as e:
+                error_count += 1
+                logging.error(f"Error processing file {full_path}: {e}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e),
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+        
+        yield sse_message({
+            'type': 'complete',
+            'total': total,
+            'successCount': success_count,
+            'errorCount': error_count
+        })
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
 @app.route('/api/process-selected', methods=['POST'])
 def process_selected_files():
     """API endpoint to process selected files"""
@@ -982,6 +1259,90 @@ def process_selected_files():
     
     return jsonify({'results': results})
 
+@app.route('/api/rename-selected-stream', methods=['POST'])
+def rename_selected_files_stream():
+    """API endpoint to rename selected files with progress streaming"""
+    from process_file import process_file
+    
+    data = request.json
+    file_list = data.get('files', [])
+    
+    if not file_list:
+        return jsonify({'error': 'No files specified'}), 400
+    
+    def generate():
+        total = len(file_list)
+        yield sse_message({'type': 'start', 'total': total})
+        
+        success_count = 0
+        error_count = 0
+        
+        for index, filepath in enumerate(file_list):
+            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+            
+            if not os.path.exists(full_path):
+                error_count += 1
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': 'File not found',
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+                continue
+            
+            try:
+                # Mark as web modified to prevent watcher from processing
+                mark_file_web_modified(full_path)
+                
+                # Only rename the file
+                final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
+                
+                # Mark as processed using the final filepath
+                mark_file_processed_wrapper(final_filepath)
+                
+                # Update cache incrementally if file was renamed
+                handle_file_rename_in_cache(full_path, final_filepath)
+                
+                success_count += 1
+                logging.info(f"Renamed file via web interface: {full_path} -> {final_filepath}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(final_filepath),
+                    'success': True,
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+            except Exception as e:
+                error_count += 1
+                logging.error(f"Error renaming file {full_path}: {e}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e),
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+        
+        yield sse_message({
+            'type': 'complete',
+            'total': total,
+            'successCount': success_count,
+            'errorCount': error_count
+        })
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
 @app.route('/api/rename-selected', methods=['POST'])
 def rename_selected_files():
     """API endpoint to rename selected files"""
@@ -1033,6 +1394,87 @@ def rename_selected_files():
             logging.error(f"Error renaming file {full_path}: {e}")
     
     return jsonify({'results': results})
+
+@app.route('/api/normalize-selected-stream', methods=['POST'])
+def normalize_selected_files_stream():
+    """API endpoint to normalize metadata for selected files with progress streaming"""
+    from process_file import process_file
+    
+    data = request.json
+    file_list = data.get('files', [])
+    
+    if not file_list:
+        return jsonify({'error': 'No files specified'}), 400
+    
+    def generate():
+        total = len(file_list)
+        yield sse_message({'type': 'start', 'total': total})
+        
+        success_count = 0
+        error_count = 0
+        
+        for index, filepath in enumerate(file_list):
+            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+            
+            if not os.path.exists(full_path):
+                error_count += 1
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': 'File not found',
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+                continue
+            
+            try:
+                # Mark as web modified to prevent watcher from processing
+                mark_file_web_modified(full_path)
+                
+                # Only normalize metadata
+                final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
+                
+                # Mark as processed using the final filepath
+                mark_file_processed_wrapper(final_filepath)
+                
+                success_count += 1
+                logging.info(f"Normalized metadata for file via web interface: {full_path}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(final_filepath),
+                    'success': True,
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+            except Exception as e:
+                error_count += 1
+                logging.error(f"Error normalizing metadata for file {full_path}: {e}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e),
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+        
+        yield sse_message({
+            'type': 'complete',
+            'total': total,
+            'successCount': success_count,
+            'errorCount': error_count
+        })
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
 @app.route('/api/normalize-selected', methods=['POST'])
 def normalize_selected_files():
@@ -1192,6 +1634,76 @@ def scan_unmarked_files():
         'total_count': len(files)
     })
 
+@app.route('/api/process-unmarked-stream', methods=['POST'])
+def process_unmarked_files_stream():
+    """API endpoint to process only unmarked files with progress streaming"""
+    from process_file import process_file
+    
+    def generate():
+        files = get_comic_files(use_cache=False)
+        unmarked_files = []
+        
+        # Filter to only unmarked files
+        for filepath in files:
+            if not is_file_processed(filepath):
+                unmarked_files.append(filepath)
+        
+        total = len(unmarked_files)
+        yield sse_message({'type': 'start', 'total': total})
+        
+        success_count = 0
+        error_count = 0
+        
+        for index, filepath in enumerate(unmarked_files):
+            try:
+                # Mark as web modified to prevent watcher from processing
+                mark_file_web_modified(filepath)
+                
+                # Process the file and get the final filepath (may be renamed)
+                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+                
+                # Mark as processed using the final filepath, cleanup old filename if renamed
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+                
+                # Update cache incrementally if file was renamed
+                handle_file_rename_in_cache(filepath, final_filepath)
+                
+                success_count += 1
+                logging.info(f"Processed unmarked file via web interface: {filepath} -> {final_filepath}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(final_filepath),
+                    'success': True,
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+            except Exception as e:
+                error_count += 1
+                logging.error(f"Error processing unmarked file {filepath}: {e}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e),
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+        
+        yield sse_message({
+            'type': 'complete',
+            'total': total,
+            'successCount': success_count,
+            'errorCount': error_count
+        })
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
 @app.route('/api/process-unmarked', methods=['POST'])
 def process_unmarked_files():
     """API endpoint to process only unmarked files"""
@@ -1236,6 +1748,76 @@ def process_unmarked_files():
     
     return jsonify({'results': results})
 
+@app.route('/api/rename-unmarked-stream', methods=['POST'])
+def rename_unmarked_files_stream():
+    """API endpoint to rename only unmarked files with progress streaming"""
+    from process_file import process_file
+    
+    def generate():
+        files = get_comic_files(use_cache=False)
+        unmarked_files = []
+        
+        # Filter to only unmarked files
+        for filepath in files:
+            if not is_file_processed(filepath):
+                unmarked_files.append(filepath)
+        
+        total = len(unmarked_files)
+        yield sse_message({'type': 'start', 'total': total})
+        
+        success_count = 0
+        error_count = 0
+        
+        for index, filepath in enumerate(unmarked_files):
+            try:
+                # Mark as web modified to prevent watcher from processing
+                mark_file_web_modified(filepath)
+                
+                # Only rename the file
+                final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+                
+                # Mark as processed using the final filepath
+                mark_file_processed_wrapper(final_filepath)
+                
+                # Update cache incrementally if file was renamed
+                handle_file_rename_in_cache(filepath, final_filepath)
+                
+                success_count += 1
+                logging.info(f"Renamed unmarked file via web interface: {filepath} -> {final_filepath}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(final_filepath),
+                    'success': True,
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+            except Exception as e:
+                error_count += 1
+                logging.error(f"Error renaming unmarked file {filepath}: {e}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e),
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+        
+        yield sse_message({
+            'type': 'complete',
+            'total': total,
+            'successCount': success_count,
+            'errorCount': error_count
+        })
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+
 @app.route('/api/rename-unmarked', methods=['POST'])
 def rename_unmarked_files():
     """API endpoint to rename only unmarked files"""
@@ -1279,6 +1861,73 @@ def rename_unmarked_files():
             logging.error(f"Error renaming unmarked file {filepath}: {e}")
     
     return jsonify({'results': results})
+
+@app.route('/api/normalize-unmarked-stream', methods=['POST'])
+def normalize_unmarked_files_stream():
+    """API endpoint to normalize metadata for only unmarked files with progress streaming"""
+    from process_file import process_file
+    
+    def generate():
+        files = get_comic_files(use_cache=False)
+        unmarked_files = []
+        
+        # Filter to only unmarked files
+        for filepath in files:
+            if not is_file_processed(filepath):
+                unmarked_files.append(filepath)
+        
+        total = len(unmarked_files)
+        yield sse_message({'type': 'start', 'total': total})
+        
+        success_count = 0
+        error_count = 0
+        
+        for index, filepath in enumerate(unmarked_files):
+            try:
+                # Mark as web modified to prevent watcher from processing
+                mark_file_web_modified(filepath)
+                
+                # Only normalize metadata
+                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+                
+                # Mark as processed using the final filepath
+                mark_file_processed_wrapper(final_filepath)
+                
+                success_count += 1
+                logging.info(f"Normalized metadata for unmarked file via web interface: {filepath}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(final_filepath),
+                    'success': True,
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+            except Exception as e:
+                error_count += 1
+                logging.error(f"Error normalizing metadata for unmarked file {filepath}: {e}")
+                
+                yield sse_message({
+                    'type': 'progress',
+                    'current': index + 1,
+                    'total': total,
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e),
+                    'successCount': success_count,
+                    'errorCount': error_count
+                })
+        
+        yield sse_message({
+            'type': 'complete',
+            'total': total,
+            'successCount': success_count,
+            'errorCount': error_count
+        })
+    
+    return Response(stream_with_context(generate()), mimetype='text/event-stream')
 
 @app.route('/api/normalize-unmarked', methods=['POST'])
 def normalize_unmarked_files():

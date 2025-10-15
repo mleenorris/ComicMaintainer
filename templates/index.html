@@ -918,6 +918,81 @@
             border: 1px solid #bee5eb;
         }
         
+        .progress-container {
+            position: fixed;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 90%;
+            max-width: 600px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
+            border-radius: 8px;
+            box-shadow: var(--shadow-md);
+            padding: 20px;
+            z-index: 1001;
+            display: none;
+        }
+        
+        .progress-container.active {
+            display: block;
+        }
+        
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .progress-title {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 16px;
+        }
+        
+        .progress-stats {
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+        
+        .progress-bar-wrapper {
+            background: var(--bg-tertiary);
+            border-radius: 10px;
+            height: 24px;
+            overflow: hidden;
+            margin-bottom: 10px;
+            border: 1px solid var(--border-primary);
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db, #2980b9);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 12px;
+            min-width: 0;
+        }
+        
+        .progress-details {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 8px;
+        }
+        
+        .progress-current-file {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 5px;
+            font-size: 12px;
+            color: var(--text-light);
+        }
+        
         .select-info {
             margin-left: auto;
             color: var(--text-muted);
@@ -1447,6 +1522,21 @@
     
     <div class="container">
         <div id="messageContainer"></div>
+        
+        <!-- Progress Bar -->
+        <div id="progressContainer" class="progress-container">
+            <div class="progress-header">
+                <span class="progress-title" id="progressTitle">Processing Files...</span>
+                <span class="progress-stats" id="progressStats">0 / 0</span>
+            </div>
+            <div class="progress-bar-wrapper">
+                <div class="progress-bar" id="progressBar" style="width: 0%">
+                    <span id="progressPercent">0%</span>
+                </div>
+            </div>
+            <div class="progress-details" id="progressDetails">Starting...</div>
+            <div class="progress-current-file" id="progressCurrentFile"></div>
+        </div>
         
         <div class="controls-wrapper">
             <div class="actions-bar">
@@ -2560,22 +2650,11 @@
                 return;
             }
             
-            showMessage('Processing all files... This may take a while.', 'info');
-            
             try {
-                const response = await fetch('/api/process-all', {
-                    method: 'POST'
-                });
-                
-                const result = await response.json();
-                
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Processed ${successCount} of ${result.results.length} files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
+                await performBatchOperationWithProgress('/api/process-all-stream', 'Processing All Files');
                 await loadFiles(1, true);
             } catch (error) {
-                showMessage('Failed to process files: ' + error.message, 'error');
+                // Error already handled by performBatchOperationWithProgress
             }
         }
         
@@ -2584,22 +2663,11 @@
                 return;
             }
             
-            showMessage('Renaming all files... This may take a while.', 'info');
-            
             try {
-                const response = await fetch('/api/rename-all', {
-                    method: 'POST'
-                });
-                
-                const result = await response.json();
-                
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Renamed ${successCount} of ${result.results.length} files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
+                await performBatchOperationWithProgress('/api/rename-all-stream', 'Renaming All Files');
                 await loadFiles(1, true);
             } catch (error) {
-                showMessage('Failed to rename files: ' + error.message, 'error');
+                // Error already handled by performBatchOperationWithProgress
             }
         }
         
@@ -2608,22 +2676,11 @@
                 return;
             }
             
-            showMessage('Normalizing metadata for all files... This may take a while.', 'info');
-            
             try {
-                const response = await fetch('/api/normalize-all', {
-                    method: 'POST'
-                });
-                
-                const result = await response.json();
-                
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Normalized metadata for ${successCount} of ${result.results.length} files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
+                await performBatchOperationWithProgress('/api/normalize-all-stream', 'Normalizing All Files');
                 await loadFiles(1, true);
             } catch (error) {
-                showMessage('Failed to normalize metadata: ' + error.message, 'error');
+                // Error already handled by performBatchOperationWithProgress
             }
         }
         
@@ -2632,22 +2689,11 @@
                 return;
             }
             
-            showMessage('Processing unmarked files... This may take a while.', 'info');
-            
             try {
-                const response = await fetch('/api/process-unmarked', {
-                    method: 'POST'
-                });
-                
-                const result = await response.json();
-                
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Processed ${successCount} of ${result.results.length} unmarked files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
+                await performBatchOperationWithProgress('/api/process-unmarked-stream', 'Processing Unmarked Files');
                 await loadFiles(1, true);
             } catch (error) {
-                showMessage('Failed to process unmarked files: ' + error.message, 'error');
+                // Error already handled by performBatchOperationWithProgress
             }
         }
         
@@ -2656,22 +2702,11 @@
                 return;
             }
             
-            showMessage('Renaming unmarked files... This may take a while.', 'info');
-            
             try {
-                const response = await fetch('/api/rename-unmarked', {
-                    method: 'POST'
-                });
-                
-                const result = await response.json();
-                
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Renamed ${successCount} of ${result.results.length} unmarked files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
+                await performBatchOperationWithProgress('/api/rename-unmarked-stream', 'Renaming Unmarked Files');
                 await loadFiles(1, true);
             } catch (error) {
-                showMessage('Failed to rename unmarked files: ' + error.message, 'error');
+                // Error already handled by performBatchOperationWithProgress
             }
         }
         
@@ -2680,22 +2715,11 @@
                 return;
             }
             
-            showMessage('Normalizing metadata for unmarked files... This may take a while.', 'info');
-            
             try {
-                const response = await fetch('/api/normalize-unmarked', {
-                    method: 'POST'
-                });
-                
-                const result = await response.json();
-                
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Normalized metadata for ${successCount} of ${result.results.length} unmarked files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
+                await performBatchOperationWithProgress('/api/normalize-unmarked-stream', 'Normalizing Unmarked Files');
                 await loadFiles(1, true);
             } catch (error) {
-                showMessage('Failed to normalize metadata for unmarked files: ' + error.message, 'error');
+                // Error already handled by performBatchOperationWithProgress
             }
         }
         
@@ -2709,28 +2733,15 @@
                 return;
             }
             
-            showMessage('Processing selected files... This may take a while.', 'info');
-            
             try {
-                const response = await fetch('/api/process-selected', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        files: Array.from(selectedFiles)
-                    })
-                });
-                
-                const result = await response.json();
-                
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Processed ${successCount} of ${result.results.length} files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
+                await performBatchOperationWithProgress(
+                    '/api/process-selected-stream', 
+                    'Processing Selected Files',
+                    { files: Array.from(selectedFiles) }
+                );
                 await loadFiles(1, true);
             } catch (error) {
-                showMessage('Failed to process files: ' + error.message, 'error');
+                // Error already handled by performBatchOperationWithProgress
             }
         }
         
@@ -2744,28 +2755,15 @@
                 return;
             }
             
-            showMessage('Renaming selected files... This may take a while.', 'info');
-            
             try {
-                const response = await fetch('/api/rename-selected', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        files: Array.from(selectedFiles)
-                    })
-                });
-                
-                const result = await response.json();
-                
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Renamed ${successCount} of ${result.results.length} files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
+                await performBatchOperationWithProgress(
+                    '/api/rename-selected-stream', 
+                    'Renaming Selected Files',
+                    { files: Array.from(selectedFiles) }
+                );
                 await loadFiles(1, true);
             } catch (error) {
-                showMessage('Failed to rename files: ' + error.message, 'error');
+                // Error already handled by performBatchOperationWithProgress
             }
         }
         
@@ -2779,28 +2777,15 @@
                 return;
             }
             
-            showMessage('Normalizing metadata for selected files... This may take a while.', 'info');
-            
             try {
-                const response = await fetch('/api/normalize-selected', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        files: Array.from(selectedFiles)
-                    })
-                });
-                
-                const result = await response.json();
-                
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Normalized metadata for ${successCount} of ${result.results.length} files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
+                await performBatchOperationWithProgress(
+                    '/api/normalize-selected-stream', 
+                    'Normalizing Selected Files',
+                    { files: Array.from(selectedFiles) }
+                );
                 await loadFiles(1, true);
             } catch (error) {
-                showMessage('Failed to normalize metadata: ' + error.message, 'error');
+                // Error already handled by performBatchOperationWithProgress
             }
         }
         
@@ -2920,6 +2905,80 @@
             setTimeout(() => {
                 messageEl.remove();
             }, 5000);
+        }
+        
+        function showProgress(title) {
+            const container = document.getElementById('progressContainer');
+            const titleEl = document.getElementById('progressTitle');
+            titleEl.textContent = title;
+            container.classList.add('active');
+            updateProgress(0, 0, 'Starting...', '');
+        }
+        
+        function hideProgress() {
+            const container = document.getElementById('progressContainer');
+            container.classList.remove('active');
+        }
+        
+        function updateProgress(current, total, details, currentFile) {
+            const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+            
+            document.getElementById('progressStats').textContent = `${current} / ${total}`;
+            document.getElementById('progressBar').style.width = `${percent}%`;
+            document.getElementById('progressPercent').textContent = `${percent}%`;
+            document.getElementById('progressDetails').textContent = details;
+            document.getElementById('progressCurrentFile').textContent = currentFile ? `Current: ${currentFile}` : '';
+        }
+        
+        async function performBatchOperationWithProgress(url, title, body = null) {
+            showProgress(title);
+            
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: body ? { 'Content-Type': 'application/json' } : {},
+                    body: body ? JSON.stringify(body) : null
+                });
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                let successCount = 0;
+                let errorCount = 0;
+                let totalFiles = 0;
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const text = decoder.decode(value);
+                    const lines = text.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.substring(6));
+                            
+                            if (data.type === 'start') {
+                                totalFiles = data.total;
+                                updateProgress(0, totalFiles, 'Starting...', '');
+                            } else if (data.type === 'progress') {
+                                successCount = data.successCount;
+                                errorCount = data.errorCount;
+                                const details = `Success: ${successCount}, Errors: ${errorCount}`;
+                                updateProgress(data.current, data.total, details, data.file);
+                            } else if (data.type === 'complete') {
+                                hideProgress();
+                                const message = `Completed: ${data.successCount} successful, ${data.errorCount} failed out of ${data.total} files`;
+                                showMessage(message, data.errorCount > 0 ? 'info' : 'success');
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                hideProgress();
+                showMessage('Failed to complete operation: ' + error.message, 'error');
+                throw error;
+            }
         }
         
         async function openSettings() {

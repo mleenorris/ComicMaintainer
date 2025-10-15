@@ -220,7 +220,7 @@ class JobManager:
             time.sleep(300)  # Run every 5 minutes
             
             try:
-                cutoff_time = time.time() - 3600  # 1 hour
+                cutoff_time = time.time() - 86400  # 24 hours
                 deleted = job_store.cleanup_old_jobs(cutoff_time)
                 
                 if deleted > 0:

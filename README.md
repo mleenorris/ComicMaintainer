@@ -246,6 +246,48 @@ Files are processed and updated when:
 - **Non-blocking cache rebuilds**: Workers serve stale cache instead of waiting when another worker is rebuilding
 - No development server warnings - ready for production deployment
 
+## Data Persistence
+
+The application stores all persistent data in `CACHE_DIR` (default: `/app/cache`). **To preserve your data across container restarts, mount this directory as a volume.**
+
+### What is Persisted
+
+When you mount `CACHE_DIR`, the following data is preserved:
+
+1. **Marker Files** - Track which files have been processed, duplicates, and web modifications
+   - Located in `CACHE_DIR/markers/`
+   - `processed_files.json`, `duplicate_files.json`, `web_modified_files.json`
+
+2. **Configuration Settings** - Saved via the web interface Settings menu
+   - Located at `CACHE_DIR/config.json`
+   - Includes: filename format template, watcher state, log rotation settings
+
+3. **Cache Files** - Performance optimization data
+   - File list cache, cache update markers
+
+### Example with Persistence
+
+```sh
+docker run -d \
+  -v /host/comics:/watched_dir \
+  -v /host/config:/config \
+  -e WATCHED_DIR=/watched_dir \
+  -e CACHE_DIR=/config \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -p 5000:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+**Important**: The `/host/config` directory on your host will contain all marker files, configuration, and cache. Make sure it's backed up if you want to preserve your processing history and settings.
+
+### Migrating from Previous Versions
+
+If upgrading from a version where `config.json` was stored in `/app`:
+- Your old configuration will not be automatically migrated
+- The application will use default settings on first run
+- To preserve settings: manually copy `/app/config.json` from the old container to `$CACHE_DIR/config.json` in the new setup
+
 ## Logging
 - All actions and errors are logged to `ComicMaintainer.log` (located in `/app/ComicMaintainer.log` within the container).
 - **Log Rotation**: Log files are automatically rotated when they reach a configurable size limit (default: 5MB)

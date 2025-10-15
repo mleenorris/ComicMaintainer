@@ -24,6 +24,7 @@ from marker_store import add_marker, remove_marker, has_marker, get_markers, cle
 # Marker storage configuration (for legacy JSON migration)
 CONFIG_DIR = '/Config'
 MARKERS_DIR = os.path.join(CONFIG_DIR, 'markers')
+MARKER_UPDATE_TIMESTAMP = '.marker_update'
 
 # Legacy marker file names (for migration)
 PROCESSED_MARKER_FILE = 'processed_files.json'
@@ -119,6 +120,20 @@ def _migrate_json_markers(marker_file: str, marker_type: str):
             _migrated.add(marker_type)
 
 
+def _update_marker_timestamp():
+    """Update the marker invalidation timestamp to trigger cache refresh"""
+    # Ensure config directory exists
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    
+    marker_path = os.path.join(CONFIG_DIR, MARKER_UPDATE_TIMESTAMP)
+    try:
+        import time
+        with open(marker_path, 'w') as f:
+            f.write(str(time.time()))
+    except Exception as e:
+        logging.error(f"Error updating marker timestamp: {e}")
+
+
 # Processed files marker functions
 def is_file_processed(filepath: str) -> bool:
     """Check if a file has been processed"""
@@ -142,6 +157,9 @@ def mark_file_processed(filepath: str, original_filepath: Optional[str] = None):
     # Add current file
     add_marker(abs_path, MARKER_TYPE_PROCESSED)
     logging.info(f"Marked {filepath} as processed")
+    
+    # Invalidate enriched cache by updating marker timestamp
+    _update_marker_timestamp()
 
 
 def unmark_file_processed(filepath: str):
@@ -165,6 +183,9 @@ def mark_file_duplicate(filepath: str):
     abs_path = os.path.abspath(filepath)
     add_marker(abs_path, MARKER_TYPE_DUPLICATE)
     logging.info(f"Marked {filepath} as duplicate")
+    
+    # Invalidate enriched cache by updating marker timestamp
+    _update_marker_timestamp()
 
 
 def unmark_file_duplicate(filepath: str):

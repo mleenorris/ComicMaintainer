@@ -61,6 +61,7 @@ WATCHED_DIR = os.environ.get('WATCHED_DIR')
 CACHE_UPDATE_MARKER = '.cache_update'
 CACHE_CHANGES_FILE = '.cache_changes'
 CACHE_REBUILD_LOCK = '.cache_rebuild_lock'
+MARKER_UPDATE_TIMESTAMP = '.marker_update'
 
 # Cache for file list to improve performance on large libraries
 file_list_cache = {
@@ -76,7 +77,8 @@ enriched_file_cache = {
     'timestamp': 0,
     'file_list_hash': None,  # Hash of raw file list to detect changes
     'rebuild_in_progress': False,  # Track if async rebuild is running
-    'rebuild_thread': None  # Reference to rebuild thread
+    'rebuild_thread': None,  # Reference to rebuild thread
+    'marker_update_time': 0  # Track last marker update time
 }
 enriched_file_cache_lock = threading.Lock()
 
@@ -168,6 +170,20 @@ def get_watcher_update_time():
     os.makedirs(CONFIG_DIR, exist_ok=True)
     
     marker_path = os.path.join(CONFIG_DIR, CACHE_UPDATE_MARKER)
+    if os.path.exists(marker_path):
+        try:
+            with open(marker_path, 'r') as f:
+                return float(f.read().strip())
+        except:
+            return 0
+    return 0
+
+def get_marker_update_time():
+    """Get the last time markers were updated (processed/duplicate status changed)"""
+    # Ensure config directory exists
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    
+    marker_path = os.path.join(CONFIG_DIR, MARKER_UPDATE_TIMESTAMP)
     if os.path.exists(marker_path):
         try:
             with open(marker_path, 'r') as f:
@@ -597,6 +613,7 @@ def rebuild_enriched_cache_async(files, file_list_hash):
             enriched_file_cache['files'] = all_files
             enriched_file_cache['timestamp'] = time.time()
             enriched_file_cache['file_list_hash'] = file_list_hash
+            enriched_file_cache['marker_update_time'] = get_marker_update_time()
             enriched_file_cache['rebuild_in_progress'] = False
             enriched_file_cache['rebuild_thread'] = None
         
@@ -624,14 +641,27 @@ def get_enriched_file_list(files, force_rebuild=False):
     # Create a simple hash of the file list to detect changes
     file_list_hash = hash(tuple(files))
     
+    # Check marker update time to detect if markers changed
+    marker_update_time = get_marker_update_time()
+    
     # Check if cache is valid (without holding lock)
     with enriched_file_cache_lock:
-        if (not force_rebuild and 
-            enriched_file_cache['files'] is not None and 
-            enriched_file_cache['file_list_hash'] == file_list_hash):
-            
+        # Cache is invalid if:
+        # 1. Force rebuild requested, OR
+        # 2. Cache is empty, OR
+        # 3. File list changed (hash mismatch), OR
+        # 4. Markers were updated since cache was built
+        cache_invalid = (force_rebuild or 
+                        enriched_file_cache['files'] is None or 
+                        enriched_file_cache['file_list_hash'] != file_list_hash or
+                        marker_update_time > enriched_file_cache['marker_update_time'])
+        
+        if not cache_invalid:
             logging.debug("Using enriched file cache")
             return enriched_file_cache['files']
+        
+        if marker_update_time > enriched_file_cache['marker_update_time']:
+            logging.info(f"Marker update detected, invalidating enriched cache")
         
         # Check if we have stale cache that can be returned
         stale_cache = enriched_file_cache['files']
@@ -729,6 +759,7 @@ def get_enriched_file_list(files, force_rebuild=False):
             enriched_file_cache['files'] = all_files
             enriched_file_cache['timestamp'] = time.time()
             enriched_file_cache['file_list_hash'] = file_list_hash
+            enriched_file_cache['marker_update_time'] = get_marker_update_time()
             enriched_file_cache['rebuild_in_progress'] = False
             enriched_file_cache['rebuild_thread'] = None
         

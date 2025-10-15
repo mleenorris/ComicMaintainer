@@ -24,6 +24,7 @@ logging.basicConfig(
 
 CACHE_UPDATE_MARKER = '.cache_update'
 CACHE_CHANGES_FILE = '.cache_changes'
+MARKER_UPDATE_TIMESTAMP = '.marker_update'
 
 def update_watcher_timestamp():
     """Update the watcher cache invalidation timestamp"""
@@ -37,6 +38,20 @@ def update_watcher_timestamp():
             f.write(str(time.time()))
     except Exception as e:
         logging.error(f"Error updating watcher timestamp: {e}")
+
+def update_marker_timestamp():
+    """Update the marker invalidation timestamp to trigger cache refresh"""
+    # Ensure config directory exists
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    
+    marker_path = os.path.join(CONFIG_DIR, MARKER_UPDATE_TIMESTAMP)
+    try:
+        import time
+        with open(marker_path, 'w') as f:
+            f.write(str(time.time()))
+        logging.info("Updated marker timestamp to invalidate enriched cache")
+    except Exception as e:
+        logging.error(f"Error updating marker timestamp: {e}")
 
 def record_cache_change(change_type, old_path=None, new_path=None):
     """Record a file change for incremental cache updates
@@ -354,6 +369,9 @@ if __name__ == "__main__":
     
     # Mark as processed using the final filepath (after any rename)
     mark_file_processed(final_filepath, original_filepath=original_filepath)
+    
+    # Update marker timestamp to invalidate enriched file cache
+    update_marker_timestamp()
     
     # Update watcher timestamp to invalidate web app cache
     update_watcher_timestamp()

@@ -204,44 +204,25 @@ Monitor cache health via API endpoint:
 - **Endpoint**: `GET /api/cache/stats`
 - **Returns**: File count, cache age, enriched file cache status, and marker counts
 
-## Worker Coordination and Non-Blocking Cache Rebuilds
+## Cache Coordination (Historical - Now Using Single Worker)
 
-### Problem
-When using Gunicorn with multiple workers (default: 4), all workers would initialize caches on startup and potentially rebuild caches simultaneously when handling requests. This caused:
-1. **Startup delays**: All workers would try to build the cache at the same time
-2. **Worker blocking**: Workers would wait (block) while another worker rebuilt the cache
+### Historical Context
+Previously, when using Gunicorn with multiple workers (4), cache coordination was needed to prevent:
+1. **Startup delays**: All workers trying to build the cache at the same time
+2. **Worker blocking**: Workers waiting while another worker rebuilt the cache
 3. **Resource contention**: Multiple workers scanning the same files simultaneously
 
-### Solution: File-Based Locking with Non-Blocking Behavior
-**Location**: `web_app.py`
+### Previous Solution: File-Based Locking
+A file-based locking mechanism was implemented to coordinate cache rebuilding across worker processes.
 
-Implemented a file-based locking mechanism that coordinates cache rebuilding across worker processes:
+### Current Configuration (As of Job Manager Fix)
+**The application now uses a single Gunicorn worker** (see `start.sh`) to ensure job state consistency. This configuration:
+- ✅ Eliminates cache coordination complexity (single process)
+- ✅ Prevents "Job not found" errors (in-memory job storage)
+- ✅ Maintains concurrency via ThreadPoolExecutor (4 threads)
+- ✅ Simplifies architecture and reduces overhead
 
-1. **File-based lock** (`.cache_rebuild_lock`): Uses `fcntl.flock()` for cross-process coordination
-2. **Short timeout** (0.1s default): Workers try to acquire lock but don't wait long
-3. **Stale cache fallback**: If lock can't be acquired, return stale cache instead of blocking
-4. **Startup coordination**: Only one worker initializes caches at startup, others skip
-
-**Key changes**:
-- Added `try_acquire_cache_rebuild_lock()` and `release_cache_rebuild_lock()` functions
-- Modified `get_enriched_file_list()` to be non-blocking:
-  - Try to acquire lock with short timeout
-  - If lock unavailable, return stale cache (if available)
-  - If no stale cache, fall through to build without lock (better than blocking)
-- Modified `initialize_cache()` and `prewarm_metadata_cache()` to coordinate at startup
-- Added `.cache_rebuild_lock` to `.gitignore`
-
-**Impact**:
-- ✅ Workers no longer block waiting for cache rebuilds
-- ✅ Only one worker rebuilds cache at a time
-- ✅ Faster startup with multiple workers
-- ✅ Better resource utilization
-- ✅ Stale cache served during rebuilds (eventual consistency)
-
-**Behavior**:
-- **Startup**: First worker to start warms the cache, others skip
-- **Cache invalidation**: First worker to detect invalidation rebuilds, others serve stale cache
-- **Manual refresh**: First worker to handle refresh request rebuilds, others see updated cache after completion
+**Note**: The file-based locking code remains in place for potential future multi-worker configurations, but is not actively needed with the current single-worker setup.
 
 ## Future Improvements
 Potential enhancements for even better performance:

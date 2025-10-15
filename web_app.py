@@ -17,6 +17,7 @@ from markers import (
     is_file_web_modified, mark_file_web_modified, clear_file_web_modified,
     cleanup_web_modified_markers
 )
+from job_manager import get_job_manager, JobResult
 
 # Set up logging with rotation
 log_max_bytes = get_log_max_bytes()
@@ -1335,6 +1336,147 @@ def normalize_selected_files():
         yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
+
+
+@app.route('/api/jobs/process-all', methods=['POST'])
+def async_process_all_files():
+    """API endpoint to start async processing of all files"""
+    from process_file import process_file
+    
+    files = get_comic_files()
+    
+    if not files:
+        return jsonify({'error': 'No files to process'}), 400
+    
+    # Create job
+    job_manager = get_job_manager()
+    job_id = job_manager.create_job(files)
+    
+    # Define processing function
+    def process_item(filepath):
+        try:
+            mark_file_web_modified(filepath)
+            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+            mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+            handle_file_rename_in_cache(filepath, final_filepath)
+            logging.info(f"Processed file via async job: {filepath} -> {final_filepath}")
+            return JobResult(
+                item=os.path.basename(filepath),
+                success=True,
+                details={'original': filepath, 'final': final_filepath}
+            )
+        except Exception as e:
+            logging.error(f"Error processing file {filepath}: {e}")
+            return JobResult(
+                item=os.path.basename(filepath),
+                success=False,
+                error=str(e)
+            )
+    
+    # Start job
+    job_manager.start_job(job_id, process_item, files)
+    
+    return jsonify({
+        'job_id': job_id,
+        'total_items': len(files)
+    })
+
+
+@app.route('/api/jobs/process-selected', methods=['POST'])
+def async_process_selected_files():
+    """API endpoint to start async processing of selected files"""
+    from process_file import process_file
+    
+    data = request.json
+    file_list = data.get('files', [])
+    
+    if not file_list:
+        return jsonify({'error': 'No files specified'}), 400
+    
+    # Build full paths
+    full_paths = []
+    for filepath in file_list:
+        full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+        if os.path.exists(full_path):
+            full_paths.append(full_path)
+    
+    if not full_paths:
+        return jsonify({'error': 'No valid files to process'}), 400
+    
+    # Create job
+    job_manager = get_job_manager()
+    job_id = job_manager.create_job(full_paths)
+    
+    # Define processing function
+    def process_item(filepath):
+        try:
+            mark_file_web_modified(filepath)
+            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+            mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+            handle_file_rename_in_cache(filepath, final_filepath)
+            logging.info(f"Processed file via async job: {filepath} -> {final_filepath}")
+            return JobResult(
+                item=os.path.basename(filepath),
+                success=True,
+                details={'original': filepath, 'final': final_filepath}
+            )
+        except Exception as e:
+            logging.error(f"Error processing file {filepath}: {e}")
+            return JobResult(
+                item=os.path.basename(filepath),
+                success=False,
+                error=str(e)
+            )
+    
+    # Start job
+    job_manager.start_job(job_id, process_item, full_paths)
+    
+    return jsonify({
+        'job_id': job_id,
+        'total_items': len(full_paths)
+    })
+
+
+@app.route('/api/jobs/<job_id>', methods=['GET'])
+def get_job_status(job_id):
+    """API endpoint to get job status"""
+    job_manager = get_job_manager()
+    status = job_manager.get_job_status(job_id)
+    
+    if status is None:
+        return jsonify({'error': 'Job not found'}), 404
+    
+    return jsonify(status)
+
+
+@app.route('/api/jobs', methods=['GET'])
+def list_jobs():
+    """API endpoint to list all jobs"""
+    job_manager = get_job_manager()
+    jobs = job_manager.list_jobs()
+    return jsonify({'jobs': jobs})
+
+
+@app.route('/api/jobs/<job_id>', methods=['DELETE'])
+def delete_job(job_id):
+    """API endpoint to delete a job"""
+    job_manager = get_job_manager()
+    
+    if job_manager.delete_job(job_id):
+        return jsonify({'success': True})
+    else:
+        return jsonify({'error': 'Job not found'}), 404
+
+
+@app.route('/api/jobs/<job_id>/cancel', methods=['POST'])
+def cancel_job(job_id):
+    """API endpoint to cancel a job"""
+    job_manager = get_job_manager()
+    
+    if job_manager.cancel_job(job_id):
+        return jsonify({'success': True})
+    else:
+        return jsonify({'error': 'Job not found or already completed'}), 400
 
 
 @app.route('/api/settings/filename-format', methods=['GET'])

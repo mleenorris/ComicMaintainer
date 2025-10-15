@@ -94,8 +94,9 @@ The service includes a web-based interface for managing your comic files:
 ### Features
 - **Optimized for Large Libraries**: Pagination (100 files per page) and caching ensure fast loading even with thousands of files
 - **Search Functionality**: Find files across all pages by searching file names and paths - pagination automatically adjusts to show only matching results
-- **Process All Files**: One-click button to process all comic files in the watched directory
-- **Process Selected Files**: Process only the files you've selected with checkboxes
+- **Asynchronous Processing** (New!): Files are processed concurrently in the background for faster completion
+- **Process All Files**: One-click button to process all comic files in the watched directory asynchronously
+- **Process Selected Files**: Process only the files you've selected with checkboxes, with concurrent execution
 - **Folder Selection**: Click the checkbox next to any folder name to select/deselect all files in that folder
 - **View/Edit Individual Tags**: Use the Actions dropdown menu on any file to view and edit its metadata tags
 - **Batch Update**: Select multiple files and update common tags (series, publisher, year, writer) for all of them at once
@@ -183,6 +184,35 @@ The filename format setting is saved in `config.json` and applies to both web in
 ## API Endpoints
 
 The web interface exposes several REST API endpoints:
+
+### Asynchronous Processing (New!)
+The service now supports asynchronous file processing, allowing multiple files to be processed concurrently in the background:
+
+- **POST** `/api/jobs/process-all` - Start async processing of all files
+  - Returns: `{"job_id": "...", "total_items": 123}`
+  - Files are processed concurrently using a thread pool (default: 4 workers)
+  
+- **POST** `/api/jobs/process-selected` - Start async processing of selected files
+  - Body: `{"files": ["path/to/file1.cbz", "path/to/file2.cbz"]}`
+  - Returns: `{"job_id": "...", "total_items": 2}`
+  
+- **GET** `/api/jobs/<job_id>` - Get status and results of a job
+  - Returns: Job status including progress, results, and any errors
+  
+- **GET** `/api/jobs` - List all jobs
+  - Returns: `{"jobs": [...]}`
+  
+- **DELETE** `/api/jobs/<job_id>` - Delete a job from history
+  
+- **POST** `/api/jobs/<job_id>/cancel` - Cancel a running job
+
+**Benefits of Async Processing:**
+- ✅ **Concurrent execution**: Multiple files processed simultaneously
+- ✅ **Non-blocking**: Web interface remains responsive during processing
+- ✅ **Progress tracking**: Real-time status updates via polling
+- ✅ **Scalable**: Handles large libraries efficiently
+
+**Note:** The original streaming endpoints (`/api/process-all?stream=true`, etc.) remain available for backward compatibility, but the async endpoints are now used by default in the web interface.
 
 ### Version Information
 - **GET** `/api/version` - Returns the current version of the application

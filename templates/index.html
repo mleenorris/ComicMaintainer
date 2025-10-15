@@ -1912,9 +1912,86 @@
         let totalPages = 1;
         let totalFiles = 0;
         let unmarkedCount = 0;
-        let perPage = parseInt(localStorage.getItem('perPage')) || 100;
+        let perPage = 100; // Default value, will be loaded from server
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
         let searchDebounceTimer = null;
+        
+        // API helper functions for server-side preferences
+        async function getPreferences() {
+            try {
+                const response = await fetch('/api/preferences');
+                if (!response.ok) {
+                    console.error('Failed to get preferences:', response.status);
+                    return {};
+                }
+                return await response.json();
+            } catch (error) {
+                console.error('Error getting preferences:', error);
+                return {};
+            }
+        }
+        
+        async function setPreferences(prefs) {
+            try {
+                const response = await fetch('/api/preferences', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(prefs)
+                });
+                if (!response.ok) {
+                    console.error('Failed to set preferences:', response.status);
+                }
+            } catch (error) {
+                console.error('Error setting preferences:', error);
+            }
+        }
+        
+        async function getActiveJobFromServer() {
+            try {
+                const response = await fetch('/api/active-job');
+                if (!response.ok) {
+                    console.error('Failed to get active job:', response.status);
+                    return null;
+                }
+                const data = await response.json();
+                return data.job_id ? data : null;
+            } catch (error) {
+                console.error('Error getting active job:', error);
+                return null;
+            }
+        }
+        
+        async function setActiveJobOnServer(jobId, jobTitle) {
+            try {
+                const response = await fetch('/api/active-job', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ job_id: jobId, job_title: jobTitle })
+                });
+                if (!response.ok) {
+                    console.error('Failed to set active job:', response.status);
+                }
+            } catch (error) {
+                console.error('Error setting active job:', error);
+            }
+        }
+        
+        async function clearActiveJobOnServer() {
+            try {
+                const response = await fetch('/api/active-job', {
+                    method: 'DELETE'
+                });
+                if (!response.ok) {
+                    console.error('Failed to clear active job:', response.status);
+                }
+            } catch (error) {
+                console.error('Error clearing active job:', error);
+            }
+        }
         
         // Debounce function for search input
         function debouncedFilterFiles() {
@@ -1930,9 +2007,10 @@
         }
         
         // Theme management
-        function initTheme() {
-            // Check if user has a saved preference
-            const savedTheme = localStorage.getItem('theme');
+        async function initTheme() {
+            // Get saved preference from server
+            const prefs = await getPreferences();
+            const savedTheme = prefs.theme;
             
             if (savedTheme) {
                 // Use saved preference
@@ -1944,9 +2022,10 @@
             }
             
             // Listen for system theme changes
-            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', async (e) => {
                 // Only auto-switch if user hasn't set a preference
-                if (!localStorage.getItem('theme')) {
+                const prefs = await getPreferences();
+                if (!prefs.theme) {
                     setTheme(e.matches ? 'dark' : 'light');
                 }
             });
@@ -1956,18 +2035,18 @@
             document.documentElement.setAttribute('data-theme', theme);
         }
         
-        function toggleTheme() {
+        async function toggleTheme() {
             const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
             const newTheme = currentTheme === 'light' ? 'dark' : 'light';
             setTheme(newTheme);
-            localStorage.setItem('theme', newTheme);
+            await setPreferences({ theme: newTheme });
         }
         
         // Update theme from settings modal
-        function updateThemeFromSettings() {
+        async function updateThemeFromSettings() {
             const selectedTheme = document.getElementById('themeSelect').value;
             setTheme(selectedTheme);
-            localStorage.setItem('theme', selectedTheme);
+            await setPreferences({ theme: selectedTheme });
         }
         
         // Update watcher from settings modal
@@ -2016,6 +2095,10 @@
         
         // Load files on page load
         document.addEventListener('DOMContentLoaded', async function() {
+            // Load preferences from server
+            const prefs = await getPreferences();
+            perPage = prefs.perPage || 100;
+            
             initTheme();
             loadVersion();
             
@@ -2032,9 +2115,10 @@
         });
         
         // Warn user before leaving page if there's an active batch job
+        // Note: We can't use async in beforeunload, so we track the active job in a variable
+        let hasActiveJob = false;
         window.addEventListener('beforeunload', function(event) {
-            const activeJobId = localStorage.getItem('activeJobId');
-            if (activeJobId) {
+            if (hasActiveJob) {
                 // Show warning to prevent accidental navigation during batch processing
                 const message = 'A batch processing job is still running. If you leave, you can resume it when you return, but progress tracking will be interrupted.';
                 event.preventDefault();
@@ -2114,12 +2198,12 @@
             if (filterUnmarkedBtn) filterUnmarkedBtn.style.display = displayStyle;
         }
         
-        function changePerPage() {
+        async function changePerPage() {
             const perPageSelect = document.getElementById('perPageSelect');
             perPage = parseInt(perPageSelect.value);
             
-            // Save to localStorage
-            localStorage.setItem('perPage', perPage);
+            // Save to server
+            await setPreferences({ perPage: perPage });
             
             // Reload files from page 1 with new per-page value
             loadFiles(1);
@@ -2859,9 +2943,9 @@
             
             console.log(`[JOB ${jobId}] Starting to poll job status: ${title}`);
             
-            // Store active job ID in localStorage
-            localStorage.setItem('activeJobId', jobId);
-            localStorage.setItem('activeJobTitle', title);
+            // Store active job ID on server
+            await setActiveJobOnServer(jobId, title);
+            hasActiveJob = true;
             
             try {
                 while (true) {
@@ -2919,25 +3003,25 @@
                         showMessage(`Processed ${successCount} of ${total} files successfully!`, 'success');
                         // Refresh file list (force refresh to clear cache)
                         await loadFiles(1, true);
-                        // Clear active job from localStorage
-                        localStorage.removeItem('activeJobId');
-                        localStorage.removeItem('activeJobTitle');
+                        // Clear active job from server
+                        await clearActiveJobOnServer();
+                        hasActiveJob = false;
                         break;
                     } else if (status.status === 'failed') {
                         console.error(`[JOB ${jobId}] Job failed: ${status.error}`);
                         closeProgressModal();
                         showMessage(`Job failed: ${status.error}`, 'error');
-                        // Clear active job from localStorage
-                        localStorage.removeItem('activeJobId');
-                        localStorage.removeItem('activeJobTitle');
+                        // Clear active job from server
+                        await clearActiveJobOnServer();
+                        hasActiveJob = false;
                         break;
                     } else if (status.status === 'cancelled') {
                         console.log(`[JOB ${jobId}] Job was cancelled`);
                         closeProgressModal();
                         showMessage('Job was cancelled', 'warning');
-                        // Clear active job from localStorage
-                        localStorage.removeItem('activeJobId');
-                        localStorage.removeItem('activeJobTitle');
+                        // Clear active job from server
+                        await clearActiveJobOnServer();
+                        hasActiveJob = false;
                         break;
                     }
                     
@@ -2948,32 +3032,34 @@
                 console.error(`[JOB ${jobId}] Error during polling: ${error.message}`);
                 showMessage('Error checking job status: ' + error.message, 'error');
                 closeProgressModal();
-                // Clear active job from localStorage on error
-                localStorage.removeItem('activeJobId');
-                localStorage.removeItem('activeJobTitle');
+                // Clear active job from server on error
+                await clearActiveJobOnServer();
+                hasActiveJob = false;
             }
         }
         
         async function checkAndResumeActiveJob() {
-            const activeJobId = localStorage.getItem('activeJobId');
-            const activeJobTitle = localStorage.getItem('activeJobTitle');
+            // Get active job from server
+            const activeJob = await getActiveJobFromServer();
             
-            if (!activeJobId) {
-                console.log('[JOB RESUME] No active job found in localStorage');
+            if (!activeJob || !activeJob.job_id) {
+                console.log('[JOB RESUME] No active job found on server');
                 return; // No active job
             }
             
-            console.log(`[JOB RESUME] Found active job ${activeJobId} in localStorage, checking status...`);
+            const activeJobId = activeJob.job_id;
+            const activeJobTitle = activeJob.job_title;
+            
+            console.log(`[JOB RESUME] Found active job ${activeJobId} on server, checking status...`);
             
             try {
                 // Check if job still exists and is active
                 const response = await fetch(`/api/jobs/${activeJobId}`);
                 
                 if (!response.ok) {
-                    // Job not found (may have been cleaned up), clear from localStorage
+                    // Job not found (may have been cleaned up), clear from server
                     console.warn(`[JOB RESUME] Job ${activeJobId} not found on server (HTTP ${response.status})`);
-                    localStorage.removeItem('activeJobId');
-                    localStorage.removeItem('activeJobTitle');
+                    await clearActiveJobOnServer();
                     showMessage('Previous batch processing job is no longer available', 'warning');
                     return;
                 }
@@ -2984,6 +3070,7 @@
                 // Resume if job is still processing or queued
                 if (status.status === 'processing' || status.status === 'queued') {
                     console.log(`[JOB RESUME] Resuming job ${activeJobId}`);
+                    hasActiveJob = true;
                     showProgressModal(activeJobTitle || 'Resuming Job...');
                     showMessage('Resuming active job...', 'info');
                     await pollJobStatus(activeJobId, activeJobTitle || 'Processing...');
@@ -3006,9 +3093,8 @@
                     const total = status.total_items || 0;
                     showMessage(`Batch processing completed: ${successCount} of ${total} files processed successfully${errorCount > 0 ? `, ${errorCount} failed` : ''}`, successCount > 0 ? 'success' : 'warning');
                     
-                    // Clear from localStorage
-                    localStorage.removeItem('activeJobId');
-                    localStorage.removeItem('activeJobTitle');
+                    // Clear from server
+                    await clearActiveJobOnServer();
                     
                     // Refresh file list to show updated status
                     await loadFiles(1, true);
@@ -3016,20 +3102,17 @@
                     // Job failed while we were away
                     console.error(`[JOB RESUME] Job ${activeJobId} already failed: ${status.error}`);
                     showMessage(`Batch processing failed: ${status.error || 'Unknown error'}`, 'error');
-                    localStorage.removeItem('activeJobId');
-                    localStorage.removeItem('activeJobTitle');
+                    await clearActiveJobOnServer();
                 } else if (status.status === 'cancelled') {
                     // Job was cancelled
                     console.log(`[JOB RESUME] Job ${activeJobId} was cancelled`);
                     showMessage('Batch processing was cancelled', 'warning');
-                    localStorage.removeItem('activeJobId');
-                    localStorage.removeItem('activeJobTitle');
+                    await clearActiveJobOnServer();
                 }
             } catch (error) {
                 console.error(`[JOB RESUME] Error checking active job ${activeJobId}:`, error);
-                // Clear stale job data
-                localStorage.removeItem('activeJobId');
-                localStorage.removeItem('activeJobTitle');
+                // Clear stale job data from server
+                await clearActiveJobOnServer();
                 showMessage('Could not resume previous batch processing job', 'warning');
             }
         }

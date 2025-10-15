@@ -22,6 +22,8 @@ This service automatically watches a directory for new or changed comic archive 
   - **Filter by processing status**: View all files, only processed files, only unprocessed files, or only duplicates
   - **Scan for unmarked files**: Quickly identify how many files haven't been processed yet
   - **Visual status indicators**: Each file shows ✅ (processed), ⚠️ (unprocessed), or 🔁 (duplicate) icon
+  - **Server-side preferences**: Theme and pagination settings persist across browsers and devices
+  - **Job resumption**: Batch processing jobs automatically resume after page refresh or browser restart
 - Logs all actions to `ComicMaintainer.log`
 - Containerized with Docker for easy deployment
 - **Supports custom user and group IDs (PUID/PGID) for proper file permissions**
@@ -80,6 +82,8 @@ docker run -d \
 - **Required**: Mount a host directory to `/Config` to persist:
   - Marker files (processed files, duplicates, web-modified files)
   - Configuration settings (filename format, watcher enabled, log rotation)
+  - User preferences (theme, pagination settings) stored in SQLite
+  - Active job tracking for batch processing resumption
   - Log files (stored in `/Config/Log/`)
   - File list cache for improved performance
 - The `-p 5000:5000` flag exposes the web interface on port 5000.

@@ -51,6 +51,9 @@ config.json
 jobs.db
 jobs.db-wal
 jobs.db-shm
+preferences.db
+preferences.db-wal
+preferences.db-shm
 
 # Marker file backups and temp files
 *.corrupt.*

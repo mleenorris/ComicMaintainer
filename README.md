@@ -44,6 +44,24 @@ docker build -t iceburn1/comictagger-watcher:latest .
 
 **Permissions Note:** By default, the container runs as user `nobody` (UID 99) and group `users` (GID 100). You can customize these by setting the `PUID` and `PGID` environment variables to match your host user. This ensures that files created or modified by the container have the correct ownership on your host system.
 
+### Using Docker Compose (Recommended for Redis Backend)
+
+For easy setup with Redis backend, use Docker Compose:
+
+1. Copy `docker-compose.example.yml` to `docker-compose.yml`
+2. Edit the volume paths to match your system
+3. Run:
+
+```sh
+docker-compose up -d
+```
+
+This will automatically:
+- Start a Redis container with persistent storage
+- Start the ComicMaintainer service configured to use Redis
+- Set up networking between services
+- Enable multi-worker support (modify `start.sh` in the image to increase workers)
+
 
 ### Run the container
 
@@ -312,6 +330,8 @@ docker run -d \
 - ✅ Horizontal scaling for high-traffic deployments
 - ✅ Job state persists across container restarts (Redis must be persistent)
 - ✅ Load balancing across multiple workers
+
+See [REDIS_SETUP.md](REDIS_SETUP.md) for detailed Redis backend setup guide.
 
 ## Data Persistence
 

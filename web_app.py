@@ -1364,11 +1364,6 @@ def prewarm_cache_endpoint():
 def cache_stats_endpoint():
     """API endpoint to get cache statistics"""
     try:
-        with metadata_cache_lock:
-            processed_dirs = len(metadata_cache['processed'])
-            duplicate_dirs = len(metadata_cache['duplicate'])
-            cached_entries = len(metadata_cache['last_loaded'])
-        
         with cache_lock:
             file_count = len(file_list_cache['files']) if file_list_cache['files'] else 0
             cache_age = time.time() - file_list_cache['timestamp'] if file_list_cache['timestamp'] else 0
@@ -1376,6 +1371,12 @@ def cache_stats_endpoint():
         with enriched_file_cache_lock:
             enriched_count = len(enriched_file_cache['files']) if enriched_file_cache['files'] else 0
             enriched_age = time.time() - enriched_file_cache['timestamp'] if enriched_file_cache['timestamp'] else 0
+        
+        # Get marker counts from centralized storage
+        from markers import _load_marker_set, PROCESSED_MARKER_FILE, DUPLICATE_MARKER_FILE, WEB_MODIFIED_MARKER_FILE
+        processed_count = len(_load_marker_set(PROCESSED_MARKER_FILE))
+        duplicate_count = len(_load_marker_set(DUPLICATE_MARKER_FILE))
+        web_modified_count = len(_load_marker_set(WEB_MODIFIED_MARKER_FILE))
         
         return jsonify({
             'file_list_cache': {
@@ -1388,11 +1389,11 @@ def cache_stats_endpoint():
                 'age_seconds': enriched_age,
                 'is_populated': enriched_file_cache['files'] is not None
             },
-            'metadata_cache': {
-                'processed_directories': processed_dirs,
-                'duplicate_directories': duplicate_dirs,
-                'total_cached_entries': cached_entries,
-                'ttl_seconds': METADATA_CACHE_TTL
+            'markers': {
+                'processed_files': processed_count,
+                'duplicate_files': duplicate_count,
+                'web_modified_files': web_modified_count,
+                'storage_location': 'CACHE_DIR/markers/'
             }
         })
     except Exception as e:
@@ -1400,47 +1401,12 @@ def cache_stats_endpoint():
         return jsonify({'error': str(e)}), 500
 
 def prewarm_metadata_cache():
-    """Prewarm metadata cache by preloading all directory metadata on startup"""
-    if not WATCHED_DIR:
-        return
-    
-    # Try to acquire lock with longer timeout for startup
-    lock_fd = try_acquire_cache_rebuild_lock(timeout=0.5)
-    
-    if lock_fd is None:
-        logging.info("Another worker is already warming the cache, skipping")
-        return
-    
-    try:
-        logging.info("Prewarming metadata cache...")
-        start_time = time.time()
-        
-        # Get all comic files (this will use the file list cache)
-        files = get_comic_files(use_cache=True)
-        
-        if not files:
-            logging.info("No files found for metadata cache warming")
-            return
-        
-        # Extract unique directories
-        directories = set(os.path.dirname(f) for f in files)
-        
-        logging.info(f"Warming metadata cache for {len(directories)} directories...")
-        
-        # Preload metadata for all directories
-        for directory in directories:
-            # Load processed files metadata
-            get_directory_metadata(directory, PROCESSED_MARKER, metadata_cache['processed'])
-            # Load duplicate files metadata
-            get_directory_metadata(directory, DUPLICATE_MARKER, metadata_cache['duplicate'])
-        
-        elapsed = time.time() - start_time
-        logging.info(f"Metadata cache warmed for {len(directories)} directories in {elapsed:.2f}s")
-        
-    except Exception as e:
-        logging.error(f"Error prewarming metadata cache: {e}")
-    finally:
-        release_cache_rebuild_lock(lock_fd)
+    """Prewarm metadata cache by ensuring marker files are loaded"""
+    # Note: With centralized markers in CACHE_DIR/markers/, markers are already
+    # loaded efficiently when first accessed. This function is kept for 
+    # backward compatibility but no longer needs to scan directories.
+    # The markers.py module handles loading on first access.
+    logging.info("Metadata markers are stored centrally and loaded on-demand")
 
 def initialize_cache():
     """Initialize file list cache and prewarm metadata cache on startup"""

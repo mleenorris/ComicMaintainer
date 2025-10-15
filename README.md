@@ -37,6 +37,8 @@ This service automatically watches a directory for new or changed comic archive 
 
 ## Usage
 
+> **📝 Migrating from an older version?** See [MIGRATION_POSTGRESQL.md](MIGRATION_POSTGRESQL.md) for the migration guide.
+
 ### Docker Compose (Recommended)
 
 The easiest way to run ComicMaintainer is using Docker Compose, which automatically sets up PostgreSQL and the application:

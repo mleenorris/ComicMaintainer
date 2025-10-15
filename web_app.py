@@ -1472,6 +1472,11 @@ def async_process_all_files():
     job_manager = get_job_manager(max_workers=get_max_workers())
     job_id = job_manager.create_job(files)
     
+    # Set active job on server IMMEDIATELY when job is created
+    # This ensures the job is tracked even if the page refreshes before polling starts
+    set_active_job(job_id, 'Processing Files...')
+    logging.info(f"[API] Set active job {job_id} on server")
+    
     # Define processing function
     def process_item(filepath):
         try:
@@ -1533,6 +1538,11 @@ def async_process_selected_files():
     # Create job
     job_manager = get_job_manager(max_workers=get_max_workers())
     job_id = job_manager.create_job(full_paths)
+    
+    # Set active job on server IMMEDIATELY when job is created
+    # This ensures the job is tracked even if the page refreshes before polling starts
+    set_active_job(job_id, 'Processing Selected Files...')
+    logging.info(f"[API] Set active job {job_id} on server")
     
     # Define processing function
     def process_item(filepath):

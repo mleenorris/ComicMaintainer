@@ -300,6 +300,9 @@ class JobManager:
 
 
 # Global job manager instance
+# NOTE: This is a per-process singleton. When using WSGI servers like Gunicorn,
+# each worker process will have its own JobManager instance. To avoid "job not found"
+# errors, the application should run with a single worker process (see start.sh).
 _job_manager: Optional[JobManager] = None
 _job_manager_lock = threading.Lock()
 
@@ -307,6 +310,9 @@ _job_manager_lock = threading.Lock()
 def get_job_manager(max_workers: int = 4) -> JobManager:
     """
     Get the global job manager instance (singleton).
+    
+    NOTE: This is a per-process singleton. With multi-process WSGI servers,
+    each process has its own instance, which can cause job routing issues.
     
     Args:
         max_workers: Maximum number of concurrent workers (only used on first call)

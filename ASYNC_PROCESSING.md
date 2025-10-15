@@ -30,6 +30,7 @@ The application now supports asynchronous file processing, allowing multiple fil
    - Uses async endpoints by default for "Process All" and "Process Selected" buttons
    - Polls job status every 500ms for progress updates
    - Displays real-time progress in modal
+   - **Automatically resumes active jobs on page load** - if you close the browser and return, the job will continue from where it left off
    - Maintains backward compatibility with streaming endpoints
 
 ## Key Features
@@ -50,16 +51,33 @@ The application now supports asynchronous file processing, allowing multiple fil
 - Success/failure tracking with error messages
 
 ### Job Management
-- Jobs persist in SQLite database (survive restarts and page refreshes)
+- Jobs persist in SQLite database (survive server restarts and page reloads)
 - Can query job status at any time
 - Can cancel running jobs
 - Automatic cleanup of old completed jobs (after 24 hours)
+- **Active jobs automatically resume when you reload the page** - stored in browser localStorage
 
-### Job Resumption
-- Active jobs are tracked in browser localStorage
-- Page refresh warning prevents accidental interruption
-- Jobs automatically resume after page reload
-- Progress tracking continues from where it left off
+## Job Resumption on Page Load
+
+When you start a batch processing job, the job ID is stored in the browser's localStorage. If you close the browser tab or refresh the page while a job is running, the application will automatically:
+
+1. Check localStorage for any active job ID
+2. Query the server for the job's current status
+3. Resume displaying progress if the job is still running
+4. Show completion/failure messages if the job finished while you were away
+5. Clean up localStorage once the job is complete
+
+This means you can:
+- Close your browser and come back later - the job continues on the server
+- Refresh the page without losing progress
+- Open multiple tabs - they'll all show the same job progress
+
+**Example behavior:**
+- Start "Process All Files" (100 files)
+- Close the browser after 30 seconds
+- Wait 1 minute
+- Reopen the page
+- Progress modal will automatically appear showing current status (e.g., "Processing... 75/100")
 
 ## Usage
 
@@ -257,9 +275,10 @@ python3 /tmp/test_integration.py
 - Fatal errors mark job as failed
 
 ### Persistence and Storage
-- Job state stored in SQLite database (`/app/cache/jobs.db`)
+- Job state stored in SQLite database (`/Config/jobs.db`)
 - Jobs survive server restarts
-- Old completed jobs automatically cleaned up after 1 hour
+- **Active jobs automatically resume when you reload the browser page** - job ID stored in localStorage
+- Old completed jobs automatically cleaned up after 24 hours
 - Can manually delete jobs via API
 - Thread-safe database access with WAL mode for concurrent operations
 - Multiple Gunicorn workers share job state via database

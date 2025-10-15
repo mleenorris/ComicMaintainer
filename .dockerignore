@@ -1,0 +1,63 @@
+# Git files
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+README*
+LICENSE*
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+*.code-workspace
+
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs
+*.log
+ComicMaintainer.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Project runtime files (these are generated at runtime, not needed in image)
+.web_modified
+.processed_files
+.duplicate_files
+.cache_update
+.cache_changes
+.cache_rebuild_lock
+config.json
+
+# Marker file backups and temp files
+*.corrupt.*
+*.tmp

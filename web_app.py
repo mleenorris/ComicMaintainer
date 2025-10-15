@@ -791,13 +791,18 @@ def list_files():
         
         paginated_files = filtered_files[start_idx:end_idx]
     
+    # Check if cache rebuild is in progress
+    with enriched_file_cache_lock:
+        cache_rebuilding = enriched_file_cache['rebuild_in_progress']
+    
     return jsonify({
         'files': paginated_files,
         'page': page,
         'per_page': per_page,
         'total_files': total_filtered,
         'total_pages': total_pages,
-        'unmarked_count': unmarked_count
+        'unmarked_count': unmarked_count,
+        'cache_rebuilding': cache_rebuilding
     })
 
 @app.route('/api/file/<path:filepath>/tags')

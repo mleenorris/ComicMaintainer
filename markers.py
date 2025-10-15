@@ -1,26 +1,17 @@
 """
 Centralized marker management for tracking file processing status.
-Markers are now stored server-side in /Config instead of in the watched directory.
+Markers are now stored server-side in SQLite database in /Config/markers instead of JSON files.
 
 Key Features:
-- Thread-safe operations with proper locking
-- Atomic file writes to prevent corruption
-- Automatic recovery from corrupted JSON files
-- Backup creation for corrupted files (saved as .corrupt.<timestamp>)
-- Regex-based recovery of file paths from corrupted JSON
+- Thread-safe operations with SQLite database
+- ACID compliance prevents data corruption
+- WAL mode enables concurrent reads and writes
+- More efficient storage and retrieval
+- Better scalability for large file collections
 
-Error Handling:
-When a JSON file is corrupted:
-1. A backup is created with timestamp (e.g., processed_files.json.corrupt.1234567890)
-2. File paths are extracted using regex pattern matching
-3. The corrupted file is removed
-4. Recovered data is returned (if any)
-5. New valid JSON file can be created on next save
-
-This ensures the service can recover gracefully from JSON corruption caused by:
-- Disk write failures
-- Process interruptions
-- System crashes
+Migration from JSON:
+If JSON marker files exist, they will be automatically imported on first use.
+Original JSON files are preserved as backups.
 """
 
 import os
@@ -28,235 +19,191 @@ import json
 import logging
 import threading
 from typing import Set, Optional
+from marker_store import add_marker, remove_marker, has_marker, get_markers, cleanup_markers
 
-# Marker storage configuration
+# Marker storage configuration (for legacy JSON migration)
 CONFIG_DIR = '/Config'
 MARKERS_DIR = os.path.join(CONFIG_DIR, 'markers')
 
-# Marker file names in the cache directory
+# Legacy marker file names (for migration)
 PROCESSED_MARKER_FILE = 'processed_files.json'
 DUPLICATE_MARKER_FILE = 'duplicate_files.json'
 WEB_MODIFIED_MARKER_FILE = 'web_modified_files.json'
 
-# Thread locks for concurrent access
+# Marker type constants
+MARKER_TYPE_PROCESSED = 'processed'
+MARKER_TYPE_DUPLICATE = 'duplicate'
+MARKER_TYPE_WEB_MODIFIED = 'web_modified'
+
+# Thread locks for concurrent access (used during migration)
 _processed_lock = threading.Lock()
 _duplicate_lock = threading.Lock()
 _web_modified_lock = threading.Lock()
+_migration_lock = threading.Lock()
+_migrated = set()  # Track which marker types have been migrated
 
 
-def _ensure_markers_dir():
-    """Ensure the markers directory exists"""
-    os.makedirs(MARKERS_DIR, exist_ok=True)
-
-
-def _load_marker_set(marker_file: str) -> Set[str]:
-    """Load a marker set from JSON file"""
-    marker_path = os.path.join(MARKERS_DIR, marker_file)
-    if not os.path.exists(marker_path):
-        return set()
-    
-    try:
-        with open(marker_path, 'r') as f:
-            data = json.load(f)
-            return set(data.get('files', []))
-    except json.JSONDecodeError as e:
-        logging.error(f"Error loading marker file {marker_path}: {e}")
+def _migrate_json_markers(marker_file: str, marker_type: str):
+    """
+    Migrate markers from legacy JSON file to SQLite database.
+    This is called once per marker type on first access.
+    """
+    with _migration_lock:
+        # Check if already migrated
+        if marker_type in _migrated:
+            return
         
-        # Create backup of corrupted file
-        import time
-        backup_path = f"{marker_path}.corrupt.{int(time.time())}"
-        try:
-            import shutil
-            shutil.copy2(marker_path, backup_path)
-            logging.warning(f"Created backup of corrupted marker file: {backup_path}")
-        except Exception as backup_error:
-            logging.error(f"Failed to create backup of corrupted file: {backup_error}")
+        marker_path = os.path.join(MARKERS_DIR, marker_file)
+        if not os.path.exists(marker_path):
+            _migrated.add(marker_type)
+            return
         
-        # Try to recover data by reading the file and extracting valid entries
         try:
             with open(marker_path, 'r') as f:
-                content = f.read()
+                data = json.load(f)
+                files = set(data.get('files', []))
             
-            # Attempt to extract file paths from the corrupted JSON
-            # Look for patterns like "/path/to/file" in the content
-            import re
-            file_paths = set()
-            # Match quoted strings that look like file paths (starting with /)
-            path_pattern = r'"(/[^"]+)"'
-            matches = re.findall(path_pattern, content)
-            if matches:
-                file_paths = set(matches)
-                logging.info(f"Recovered {len(file_paths)} file paths from corrupted marker file")
+            # Import into SQLite
+            import_count = 0
+            for filepath in files:
+                if add_marker(filepath, marker_type):
+                    import_count += 1
             
-            # Remove the corrupted file and start fresh
-            os.remove(marker_path)
-            logging.warning(f"Removed corrupted marker file: {marker_path}")
+            logging.info(f"Migrated {import_count} markers of type '{marker_type}' from JSON to SQLite")
             
-            return file_paths
-        except Exception as recovery_error:
-            logging.error(f"Failed to recover data from corrupted file: {recovery_error}")
+            # Rename JSON file as backup
+            import time
+            backup_path = f"{marker_path}.migrated.{int(time.time())}"
+            os.rename(marker_path, backup_path)
+            logging.info(f"Backed up JSON marker file to {backup_path}")
             
-            # Remove the corrupted file to start fresh
+            _migrated.add(marker_type)
+            
+        except json.JSONDecodeError as e:
+            logging.error(f"Error migrating marker file {marker_path}: {e}")
+            
+            # Try to recover data by reading the file and extracting valid entries
             try:
-                os.remove(marker_path)
-                logging.warning(f"Removed corrupted marker file: {marker_path}")
-            except Exception as remove_error:
-                logging.error(f"Failed to remove corrupted file: {remove_error}")
+                with open(marker_path, 'r') as f:
+                    content = f.read()
+                
+                # Attempt to extract file paths from the corrupted JSON
+                import re
+                file_paths = set()
+                path_pattern = r'"(/[^"]+)"'
+                matches = re.findall(path_pattern, content)
+                if matches:
+                    file_paths = set(matches)
+                    
+                    # Import recovered paths
+                    import_count = 0
+                    for filepath in file_paths:
+                        if add_marker(filepath, marker_type):
+                            import_count += 1
+                    
+                    logging.info(f"Recovered and migrated {import_count} markers from corrupted JSON")
+                
+                # Rename corrupted file as backup
+                import time
+                backup_path = f"{marker_path}.corrupt.{int(time.time())}"
+                os.rename(marker_path, backup_path)
+                logging.warning(f"Backed up corrupted marker file to {backup_path}")
+                
+            except Exception as recovery_error:
+                logging.error(f"Failed to recover data from corrupted file: {recovery_error}")
             
-            return set()
-    except Exception as e:
-        logging.error(f"Unexpected error loading marker file {marker_path}: {e}")
-        return set()
-
-
-def _save_marker_set(marker_file: str, files: Set[str]):
-    """Save a marker set to JSON file using atomic write"""
-    _ensure_markers_dir()
-    marker_path = os.path.join(MARKERS_DIR, marker_file)
-    
-    try:
-        # Convert to absolute paths and save
-        data = {
-            'files': sorted(list(files))
-        }
-        
-        # Validate JSON before writing
-        json_str = json.dumps(data, indent=2)
-        
-        # Use atomic write: write to temp file, then rename
-        temp_path = f"{marker_path}.tmp"
-        with open(temp_path, 'w') as f:
-            f.write(json_str)
-            f.flush()
-            os.fsync(f.fileno())  # Ensure data is written to disk
-        
-        # Atomic rename - this is atomic on POSIX systems
-        os.replace(temp_path, marker_path)
-        
-    except Exception as e:
-        logging.error(f"Error saving marker file {marker_path}: {e}")
-        # Clean up temp file if it exists
-        temp_path = f"{marker_path}.tmp"
-        if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except:
-                pass
+            _migrated.add(marker_type)
+            
+        except Exception as e:
+            logging.error(f"Unexpected error migrating marker file {marker_path}: {e}")
+            _migrated.add(marker_type)
 
 
 # Processed files marker functions
 def is_file_processed(filepath: str) -> bool:
     """Check if a file has been processed"""
+    _migrate_json_markers(PROCESSED_MARKER_FILE, MARKER_TYPE_PROCESSED)
     abs_path = os.path.abspath(filepath)
-    with _processed_lock:
-        processed_files = _load_marker_set(PROCESSED_MARKER_FILE)
-        return abs_path in processed_files
+    return has_marker(abs_path, MARKER_TYPE_PROCESSED)
 
 
 def mark_file_processed(filepath: str, original_filepath: Optional[str] = None):
     """Mark a file as processed, optionally cleaning up old filename if renamed"""
+    _migrate_json_markers(PROCESSED_MARKER_FILE, MARKER_TYPE_PROCESSED)
     abs_path = os.path.abspath(filepath)
     
-    with _processed_lock:
-        processed_files = _load_marker_set(PROCESSED_MARKER_FILE)
-        
-        # If file was renamed, remove the old path
-        if original_filepath and original_filepath != filepath:
-            old_abs_path = os.path.abspath(original_filepath)
-            if old_abs_path in processed_files:
-                processed_files.discard(old_abs_path)
-                logging.info(f"Removed old path '{original_filepath}' from processed marker after rename")
-        
-        # Add current file
-        processed_files.add(abs_path)
-        _save_marker_set(PROCESSED_MARKER_FILE, processed_files)
-        
-        logging.info(f"Marked {filepath} as processed")
+    # If file was renamed, remove the old path
+    if original_filepath and original_filepath != filepath:
+        old_abs_path = os.path.abspath(original_filepath)
+        if has_marker(old_abs_path, MARKER_TYPE_PROCESSED):
+            remove_marker(old_abs_path, MARKER_TYPE_PROCESSED)
+            logging.info(f"Removed old path '{original_filepath}' from processed marker after rename")
+    
+    # Add current file
+    add_marker(abs_path, MARKER_TYPE_PROCESSED)
+    logging.info(f"Marked {filepath} as processed")
 
 
 def unmark_file_processed(filepath: str):
     """Remove a file from the processed marker (e.g., when deleted)"""
+    _migrate_json_markers(PROCESSED_MARKER_FILE, MARKER_TYPE_PROCESSED)
     abs_path = os.path.abspath(filepath)
-    
-    with _processed_lock:
-        processed_files = _load_marker_set(PROCESSED_MARKER_FILE)
-        if abs_path in processed_files:
-            processed_files.discard(abs_path)
-            _save_marker_set(PROCESSED_MARKER_FILE, processed_files)
+    remove_marker(abs_path, MARKER_TYPE_PROCESSED)
 
 
 # Duplicate files marker functions
 def is_file_duplicate(filepath: str) -> bool:
     """Check if a file is marked as a duplicate"""
+    _migrate_json_markers(DUPLICATE_MARKER_FILE, MARKER_TYPE_DUPLICATE)
     abs_path = os.path.abspath(filepath)
-    with _duplicate_lock:
-        duplicate_files = _load_marker_set(DUPLICATE_MARKER_FILE)
-        return abs_path in duplicate_files
+    return has_marker(abs_path, MARKER_TYPE_DUPLICATE)
 
 
 def mark_file_duplicate(filepath: str):
     """Mark a file as a duplicate"""
+    _migrate_json_markers(DUPLICATE_MARKER_FILE, MARKER_TYPE_DUPLICATE)
     abs_path = os.path.abspath(filepath)
-    
-    with _duplicate_lock:
-        duplicate_files = _load_marker_set(DUPLICATE_MARKER_FILE)
-        duplicate_files.add(abs_path)
-        _save_marker_set(DUPLICATE_MARKER_FILE, duplicate_files)
-        
-        logging.info(f"Marked {filepath} as duplicate")
+    add_marker(abs_path, MARKER_TYPE_DUPLICATE)
+    logging.info(f"Marked {filepath} as duplicate")
 
 
 def unmark_file_duplicate(filepath: str):
     """Remove a file from the duplicate marker"""
+    _migrate_json_markers(DUPLICATE_MARKER_FILE, MARKER_TYPE_DUPLICATE)
     abs_path = os.path.abspath(filepath)
-    
-    with _duplicate_lock:
-        duplicate_files = _load_marker_set(DUPLICATE_MARKER_FILE)
-        if abs_path in duplicate_files:
-            duplicate_files.discard(abs_path)
-            _save_marker_set(DUPLICATE_MARKER_FILE, duplicate_files)
+    remove_marker(abs_path, MARKER_TYPE_DUPLICATE)
 
 
 # Web modified files marker functions
 def is_file_web_modified(filepath: str) -> bool:
     """Check if a file was recently modified by the web interface"""
+    _migrate_json_markers(WEB_MODIFIED_MARKER_FILE, MARKER_TYPE_WEB_MODIFIED)
     abs_path = os.path.abspath(filepath)
-    with _web_modified_lock:
-        web_modified_files = _load_marker_set(WEB_MODIFIED_MARKER_FILE)
-        return abs_path in web_modified_files
+    return has_marker(abs_path, MARKER_TYPE_WEB_MODIFIED)
 
 
 def mark_file_web_modified(filepath: str):
     """Mark a file as modified by the web interface"""
+    _migrate_json_markers(WEB_MODIFIED_MARKER_FILE, MARKER_TYPE_WEB_MODIFIED)
     abs_path = os.path.abspath(filepath)
-    
-    with _web_modified_lock:
-        web_modified_files = _load_marker_set(WEB_MODIFIED_MARKER_FILE)
-        web_modified_files.add(abs_path)
-        _save_marker_set(WEB_MODIFIED_MARKER_FILE, web_modified_files)
+    add_marker(abs_path, MARKER_TYPE_WEB_MODIFIED)
 
 
 def clear_file_web_modified(filepath: str):
     """Clear the web modified marker for a file (consumed by watcher)"""
+    _migrate_json_markers(WEB_MODIFIED_MARKER_FILE, MARKER_TYPE_WEB_MODIFIED)
     abs_path = os.path.abspath(filepath)
-    
-    with _web_modified_lock:
-        web_modified_files = _load_marker_set(WEB_MODIFIED_MARKER_FILE)
-        if abs_path in web_modified_files:
-            web_modified_files.discard(abs_path)
-            _save_marker_set(WEB_MODIFIED_MARKER_FILE, web_modified_files)
-            logging.info(f"Cleared web modified marker for {filepath}")
-            return True
+    if has_marker(abs_path, MARKER_TYPE_WEB_MODIFIED):
+        remove_marker(abs_path, MARKER_TYPE_WEB_MODIFIED)
+        logging.info(f"Cleared web modified marker for {filepath}")
+        return True
     return False
 
 
 def cleanup_web_modified_markers(max_files: int = 100):
     """Clean up old web modified markers, keeping only the most recent ones"""
-    with _web_modified_lock:
-        web_modified_files = _load_marker_set(WEB_MODIFIED_MARKER_FILE)
-        if len(web_modified_files) > max_files:
-            # Keep the last max_files entries
-            files_list = sorted(list(web_modified_files))
-            to_keep = set(files_list[-max_files:])
-            _save_marker_set(WEB_MODIFIED_MARKER_FILE, to_keep)
-            logging.info(f"Cleaned up web modified markers, keeping {len(to_keep)} of {len(web_modified_files)}")
+    _migrate_json_markers(WEB_MODIFIED_MARKER_FILE, MARKER_TYPE_WEB_MODIFIED)
+    total_markers = len(get_markers(MARKER_TYPE_WEB_MODIFIED))
+    if total_markers > max_files:
+        deleted = cleanup_markers(MARKER_TYPE_WEB_MODIFIED, max_files)
+        logging.info(f"Cleaned up web modified markers, removed {deleted} old markers, keeping {max_files}")

@@ -2015,6 +2015,9 @@
             }
             
             loadFiles();
+            
+            // Check for active job and resume polling
+            checkAndResumeActiveJob();
         });
         
         async function loadFiles(page = 1, refresh = false) {
@@ -2823,6 +2826,10 @@
             const pollInterval = 500; // Poll every 500ms
             let lastProcessed = 0;
             
+            // Store active job ID in localStorage
+            localStorage.setItem('activeJobId', jobId);
+            localStorage.setItem('activeJobTitle', title);
+            
             try {
                 while (true) {
                     const response = await fetch(`/api/jobs/${jobId}`);
@@ -2877,14 +2884,23 @@
                         showMessage(`Processed ${successCount} of ${total} files successfully!`, 'success');
                         // Refresh file list (force refresh to clear cache)
                         await loadFiles(1, true);
+                        // Clear active job from localStorage
+                        localStorage.removeItem('activeJobId');
+                        localStorage.removeItem('activeJobTitle');
                         break;
                     } else if (status.status === 'failed') {
                         closeProgressModal();
                         showMessage(`Job failed: ${status.error}`, 'error');
+                        // Clear active job from localStorage
+                        localStorage.removeItem('activeJobId');
+                        localStorage.removeItem('activeJobTitle');
                         break;
                     } else if (status.status === 'cancelled') {
                         closeProgressModal();
                         showMessage('Job was cancelled', 'warning');
+                        // Clear active job from localStorage
+                        localStorage.removeItem('activeJobId');
+                        localStorage.removeItem('activeJobTitle');
                         break;
                     }
                     
@@ -2894,6 +2910,48 @@
             } catch (error) {
                 showMessage('Error checking job status: ' + error.message, 'error');
                 closeProgressModal();
+                // Clear active job from localStorage on error
+                localStorage.removeItem('activeJobId');
+                localStorage.removeItem('activeJobTitle');
+            }
+        }
+        
+        async function checkAndResumeActiveJob() {
+            const activeJobId = localStorage.getItem('activeJobId');
+            const activeJobTitle = localStorage.getItem('activeJobTitle');
+            
+            if (!activeJobId) {
+                return; // No active job
+            }
+            
+            try {
+                // Check if job still exists and is active
+                const response = await fetch(`/api/jobs/${activeJobId}`);
+                
+                if (!response.ok) {
+                    // Job not found, clear from localStorage
+                    localStorage.removeItem('activeJobId');
+                    localStorage.removeItem('activeJobTitle');
+                    return;
+                }
+                
+                const status = await response.json();
+                
+                // Only resume if job is still processing or queued
+                if (status.status === 'processing' || status.status === 'queued') {
+                    showProgressModal(activeJobTitle || 'Resuming Job...');
+                    showMessage('Resuming active job...', 'info');
+                    await pollJobStatus(activeJobId, activeJobTitle || 'Processing...');
+                } else {
+                    // Job is complete/failed/cancelled, clear from localStorage
+                    localStorage.removeItem('activeJobId');
+                    localStorage.removeItem('activeJobTitle');
+                }
+            } catch (error) {
+                console.error('Error checking active job:', error);
+                // Clear stale job data
+                localStorage.removeItem('activeJobId');
+                localStorage.removeItem('activeJobTitle');
             }
         }
         

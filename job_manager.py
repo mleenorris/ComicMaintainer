@@ -78,9 +78,10 @@ class JobManager:
         created_at = time.time()
         
         if job_store.create_job(job_id, len(items), created_at):
-            logging.info(f"Created job {job_id} with {len(items)} items")
+            logging.info(f"[JOB {job_id}] Created new job with {len(items)} items (queued)")
             return job_id
         else:
+            logging.error(f"[JOB {job_id}] Failed to create job in database")
             raise RuntimeError(f"Failed to create job {job_id}")
     
     def start_job(self, job_id: str, process_func: Callable[[str], JobResult], items: List[str]):
@@ -94,11 +95,11 @@ class JobManager:
         """
         job = job_store.get_job(job_id)
         if not job:
-            logging.error(f"Job {job_id} not found")
+            logging.error(f"[JOB {job_id}] Cannot start job - not found in database")
             return
         
         if job['status'] != JobStatus.QUEUED.value:
-            logging.warning(f"Job {job_id} already started")
+            logging.warning(f"[JOB {job_id}] Cannot start job - already {job['status']} (not queued)")
             return
         
         started_at = time.time()
@@ -106,7 +107,7 @@ class JobManager:
         
         # Submit job to thread pool
         self.executor.submit(self._process_job, job_id, process_func, items)
-        logging.info(f"Started job {job_id}")
+        logging.info(f"[JOB {job_id}] Job submitted to worker pool for async processing")
     
     def _process_job(self, job_id: str, process_func: Callable[[str], JobResult], items: List[str]):
         """
@@ -118,8 +119,15 @@ class JobManager:
             items: List of items to process
         """
         try:
+            logging.info(f"[JOB {job_id}] Starting processing of {len(items)} items with {self.max_workers} workers")
+            
             # Submit all items for processing
             futures = {self.executor.submit(process_func, item): item for item in items}
+            
+            # Track progress
+            completed_count = 0
+            success_count = 0
+            error_count = 0
             
             # Process results as they complete
             for future in as_completed(futures):
@@ -134,17 +142,30 @@ class JobManager:
                         result.error, 
                         result.details
                     )
+                    completed_count += 1
+                    
+                    if result.success:
+                        success_count += 1
+                    else:
+                        error_count += 1
+                    
+                    # Log progress every 10 items or on last item
+                    if completed_count % 10 == 0 or completed_count == len(items):
+                        logging.info(f"[JOB {job_id}] Progress: {completed_count}/{len(items)} items processed "
+                                   f"({success_count} success, {error_count} errors)")
                 except Exception as e:
-                    logging.error(f"Error processing item {item} in job {job_id}: {e}")
+                    logging.error(f"[JOB {job_id}] Error processing item {item}: {e}")
                     job_store.add_job_result(job_id, item, False, str(e))
+                    completed_count += 1
+                    error_count += 1
             
             # Mark job as completed
             completed_at = time.time()
             job_store.update_job_status(job_id, JobStatus.COMPLETED.value, completed_at=completed_at)
-            logging.info(f"Completed job {job_id}")
+            logging.info(f"[JOB {job_id}] Completed: {success_count} succeeded, {error_count} failed out of {len(items)} items")
         
         except Exception as e:
-            logging.error(f"Fatal error processing job {job_id}: {e}")
+            logging.error(f"[JOB {job_id}] Fatal error during processing: {e}")
             completed_at = time.time()
             job_store.update_job_status(
                 job_id, 
@@ -163,7 +184,12 @@ class JobManager:
         Returns:
             Job status dictionary or None if not found
         """
-        return job_store.get_job(job_id)
+        status = job_store.get_job(job_id)
+        if status:
+            logging.debug(f"[JOB {job_id}] Status check: {status['status']} - {status['processed_items']}/{status['total_items']} items")
+        else:
+            logging.warning(f"[JOB {job_id}] Status check failed - job not found")
+        return status
     
     def cancel_job(self, job_id: str) -> bool:
         """
@@ -177,14 +203,16 @@ class JobManager:
         """
         job = job_store.get_job(job_id)
         if not job:
+            logging.warning(f"[JOB {job_id}] Cannot cancel job - not found")
             return False
         
         if job['status'] in (JobStatus.COMPLETED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value):
+            logging.info(f"[JOB {job_id}] Cannot cancel job - already {job['status']}")
             return False
         
         completed_at = time.time()
         job_store.update_job_status(job_id, JobStatus.CANCELLED.value, completed_at=completed_at)
-        logging.info(f"Cancelled job {job_id}")
+        logging.info(f"[JOB {job_id}] Job cancelled (was {job['status']})")
         return True
     
     def delete_job(self, job_id: str) -> bool:
@@ -198,8 +226,9 @@ class JobManager:
             True if deleted, False if not found
         """
         if job_store.delete_job(job_id):
-            logging.info(f"Deleted job {job_id}")
+            logging.info(f"[JOB {job_id}] Job deleted from history")
             return True
+        logging.warning(f"[JOB {job_id}] Cannot delete job - not found")
         return False
     
     def list_jobs(self) -> List[Dict[str, Any]]:
@@ -224,10 +253,12 @@ class JobManager:
                 deleted = job_store.cleanup_old_jobs(cutoff_time)
                 
                 if deleted > 0:
-                    logging.info(f"Cleaned up {deleted} old jobs")
+                    logging.info(f"[JOB CLEANUP] Removed {deleted} old completed jobs (>24 hours)")
+                else:
+                    logging.debug(f"[JOB CLEANUP] No old jobs to clean up")
             
             except Exception as e:
-                logging.error(f"Error cleaning up old jobs: {e}")
+                logging.error(f"[JOB CLEANUP] Error during cleanup: {e}")
     
     def shutdown(self):
         """Shutdown the job manager and wait for all jobs to complete."""

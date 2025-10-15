@@ -32,5 +32,11 @@ echo "Running as user: ${USERNAME} (${PUID}:${PGID})"
 # Ensure the app directory is writable by the specified user
 chown -R ${PUID}:${PGID} /app
 
+# Ensure CACHE_DIR is writable if it's set and exists (e.g., mounted volume)
+if [ -n "${CACHE_DIR}" ] && [ -d "${CACHE_DIR}" ]; then
+    echo "Setting permissions for CACHE_DIR: ${CACHE_DIR}"
+    chown -R ${PUID}:${PGID} ${CACHE_DIR}
+fi
+
 # Execute the command as the specified user
 exec gosu ${PUID}:${PGID} "$@"

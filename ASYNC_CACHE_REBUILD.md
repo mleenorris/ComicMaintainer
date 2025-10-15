@@ -90,6 +90,7 @@ Response includes:
 3. **Multi-worker Gunicorn**: Workers coordinate via file system locks
 4. **Thread Safety**: All cache updates protected by threading locks
 5. **Error Handling**: Failed rebuilds reset state and log errors
+6. **Race Condition Fix**: When one worker triggers async rebuild and another tries synchronous build, it now polls the cache for up to 10 seconds instead of returning empty list immediately
 
 ## Performance Impact
 

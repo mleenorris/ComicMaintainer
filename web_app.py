@@ -683,14 +683,22 @@ def get_enriched_file_list(files, force_rebuild=False):
     
     try:
         if lock_fd is None:
-            # Another worker is building, wait briefly for async rebuild to complete
-            logging.info("Waiting briefly for async cache rebuild to complete")
-            time.sleep(0.5)
-            with enriched_file_cache_lock:
-                if enriched_file_cache['files'] is not None:
-                    return enriched_file_cache['files']
-            # Still no cache, return empty list
-            logging.warning("Cache still empty after waiting, returning empty list")
+            # Another worker is building, wait for async rebuild to complete
+            # Poll the cache every 0.5 seconds for up to 10 seconds
+            logging.info("Waiting for async cache rebuild to complete")
+            max_wait_time = 10  # seconds
+            poll_interval = 0.5  # seconds
+            wait_start = time.time()
+            
+            while time.time() - wait_start < max_wait_time:
+                time.sleep(poll_interval)
+                with enriched_file_cache_lock:
+                    if enriched_file_cache['files'] is not None:
+                        logging.info(f"Async cache rebuild completed after {time.time() - wait_start:.1f}s")
+                        return enriched_file_cache['files']
+            
+            # Still no cache after max wait time, return empty list
+            logging.warning(f"Cache still empty after waiting {max_wait_time}s, returning empty list")
             return []
         
         # We have the lock - check if cache was built while waiting

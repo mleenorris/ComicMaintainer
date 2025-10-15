@@ -29,20 +29,34 @@ Moved marker files from the watched directory to centralized server-side storage
 1. **Centralized location**: All markers now stored in `CACHE_DIR/markers/` directory
 2. **JSON format**: Markers stored as JSON files with absolute file paths
 3. **Thread-safe**: Proper locking for concurrent access
+4. **Atomic writes**: Files are written atomically to prevent corruption
+5. **Corruption recovery**: Automatic backup and recovery from corrupted JSON files
 
 **Key changes**:
 - Created new `markers.py` module for centralized marker management
 - Markers stored as JSON files in `CACHE_DIR/markers/` instead of scattered `.processed_files`, `.duplicate_files`, and `.web_modified` files throughout the watched directory
 - All modules updated to use centralized marker functions
 - Clean watched directory - no more hidden marker files
+- Implemented atomic file writes using temp files and atomic rename
+- Added automatic corruption detection and recovery with backup creation
+
+**Corruption Handling**:
+- When a corrupted JSON file is detected:
+  - A timestamped backup is created (e.g., `processed_files.json.corrupt.1234567890`)
+  - File paths are extracted using regex pattern matching
+  - The corrupted file is removed
+  - Service continues with recovered data or starts fresh
+- Prevents data loss and service interruption from disk failures or crashes
 
 **Benefits**:
 - Cleaner watched directory (no marker files mixed with comics)
 - Better separation of concerns (application data vs. user data)
 - Easier to backup and migrate marker data
 - Simpler permissions management
+- Resilient to JSON corruption from system crashes or disk failures
+- Automatic recovery without manual intervention
 
-**Impact**: Cleaner file structure and easier maintenance
+**Impact**: Cleaner file structure, easier maintenance, and improved reliability
 
 ### 3. Enriched File List Caching
 **Location**: `web_app.py`

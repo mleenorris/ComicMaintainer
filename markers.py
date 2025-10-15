@@ -1,6 +1,26 @@
 """
 Centralized marker management for tracking file processing status.
 Markers are now stored server-side in CACHE_DIR instead of in the watched directory.
+
+Key Features:
+- Thread-safe operations with proper locking
+- Atomic file writes to prevent corruption
+- Automatic recovery from corrupted JSON files
+- Backup creation for corrupted files (saved as .corrupt.<timestamp>)
+- Regex-based recovery of file paths from corrupted JSON
+
+Error Handling:
+When a JSON file is corrupted:
+1. A backup is created with timestamp (e.g., processed_files.json.corrupt.1234567890)
+2. File paths are extracted using regex pattern matching
+3. The corrupted file is removed
+4. Recovered data is returned (if any)
+5. New valid JSON file can be created on next save
+
+This ensures the service can recover gracefully from JSON corruption caused by:
+- Disk write failures
+- Process interruptions
+- System crashes
 """
 
 import os

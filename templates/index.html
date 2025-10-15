@@ -2244,8 +2244,17 @@
                 }
                 pageText += ')';
                 pageInfo.textContent = pageText;
-                prevBtn.disabled = currentPage <= 1;
-                nextBtn.disabled = currentPage >= totalPages;
+                
+                // Hide Previous and Next buttons when "All" option is selected
+                if (perPage === -1) {
+                    prevBtn.style.display = 'none';
+                    nextBtn.style.display = 'none';
+                } else {
+                    prevBtn.style.display = '';
+                    nextBtn.style.display = '';
+                    prevBtn.disabled = currentPage <= 1;
+                    nextBtn.disabled = currentPage >= totalPages;
+                }
             } else {
                 paginationDiv.style.display = 'none';
             }

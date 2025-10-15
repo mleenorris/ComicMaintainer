@@ -9,7 +9,7 @@ from comicapi.comicarchive import ComicArchive
 import glob
 import threading
 import time
-from config import get_filename_format, set_filename_format, DEFAULT_FILENAME_FORMAT, get_watcher_enabled, set_watcher_enabled, get_log_max_bytes, set_log_max_bytes
+from config import get_filename_format, set_filename_format, DEFAULT_FILENAME_FORMAT, get_watcher_enabled, set_watcher_enabled, get_log_max_bytes, set_log_max_bytes, get_max_workers
 from version import __version__
 from markers import (
     is_file_processed, mark_file_processed, unmark_file_processed,
@@ -1349,7 +1349,7 @@ def async_process_all_files():
         return jsonify({'error': 'No files to process'}), 400
     
     # Create job
-    job_manager = get_job_manager()
+    job_manager = get_job_manager(max_workers=get_max_workers())
     job_id = job_manager.create_job(files)
     
     # Define processing function
@@ -1404,7 +1404,7 @@ def async_process_selected_files():
         return jsonify({'error': 'No valid files to process'}), 400
     
     # Create job
-    job_manager = get_job_manager()
+    job_manager = get_job_manager(max_workers=get_max_workers())
     job_id = job_manager.create_job(full_paths)
     
     # Define processing function
@@ -1440,7 +1440,7 @@ def async_process_selected_files():
 @app.route('/api/jobs/<job_id>', methods=['GET'])
 def get_job_status(job_id):
     """API endpoint to get job status"""
-    job_manager = get_job_manager()
+    job_manager = get_job_manager(max_workers=get_max_workers())
     status = job_manager.get_job_status(job_id)
     
     if status is None:
@@ -1452,7 +1452,7 @@ def get_job_status(job_id):
 @app.route('/api/jobs', methods=['GET'])
 def list_jobs():
     """API endpoint to list all jobs"""
-    job_manager = get_job_manager()
+    job_manager = get_job_manager(max_workers=get_max_workers())
     jobs = job_manager.list_jobs()
     return jsonify({'jobs': jobs})
 
@@ -1460,7 +1460,7 @@ def list_jobs():
 @app.route('/api/jobs/<job_id>', methods=['DELETE'])
 def delete_job(job_id):
     """API endpoint to delete a job"""
-    job_manager = get_job_manager()
+    job_manager = get_job_manager(max_workers=get_max_workers())
     
     if job_manager.delete_job(job_id):
         return jsonify({'success': True})
@@ -1471,7 +1471,7 @@ def delete_job(job_id):
 @app.route('/api/jobs/<job_id>/cancel', methods=['POST'])
 def cancel_job(job_id):
     """API endpoint to cancel a job"""
-    job_manager = get_job_manager()
+    job_manager = get_job_manager(max_workers=get_max_workers())
     
     if job_manager.cancel_job(job_id):
         return jsonify({'success': True})

@@ -16,7 +16,7 @@ GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
 
 # Start the web app with Gunicorn (production WSGI server)
 # Job state stored in SQLite database for cross-process sharing
-# Concurrency is provided by both multiple workers and ThreadPoolExecutor (default: 4 threads per worker)
+# Concurrency is provided by both multiple workers and ThreadPoolExecutor (default: 4 threads per worker, configurable via MAX_WORKERS)
 # Timeout increased to 600 seconds (10 minutes) to handle batch processing of large libraries
 gunicorn --workers ${GUNICORN_WORKERS} --bind 0.0.0.0:${WEB_PORT} --timeout 600 web_app:app &
 WEB_PID=$!

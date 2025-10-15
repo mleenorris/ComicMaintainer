@@ -179,11 +179,18 @@ export GUNICORN_WORKERS=4  # Default is 2
 
 ### Adjusting Thread Pool Size
 
-To change the number of concurrent threads per worker, modify `job_manager.py`:
+The number of concurrent workers can be configured using the `MAX_WORKERS` environment variable:
 
-```python
-def get_job_manager(max_workers: int = 4) -> JobManager:
+```bash
+docker run -d \
+  -v <host_dir_to_watch>:/watched_dir \
+  -e WATCHED_DIR=/watched_dir \
+  -e MAX_WORKERS=8 \
+  -p 5000:5000 \
+  iceburn1/comictagger-watcher:latest
 ```
+
+**Default:** 4 workers
 
 **Recommendations:**
 - For CPU-bound systems: 2-4 threads

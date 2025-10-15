@@ -1622,6 +1622,186 @@ def cancel_job(job_id):
         return jsonify({'error': 'Job not found or already completed'}), 400
 
 
+@app.route('/api/jobs/process-unmarked', methods=['POST'])
+def async_process_unmarked_files():
+    """API endpoint to start async processing of unmarked files"""
+    from process_file import process_file
+    
+    logging.info("[API] Request to process unmarked files (async)")
+    
+    # Get all files and filter to unmarked only
+    files = get_comic_files(use_cache=False)
+    unmarked_files = []
+    
+    for filepath in files:
+        if not is_file_processed(filepath):
+            unmarked_files.append(filepath)
+    
+    if not unmarked_files:
+        logging.warning("[API] No unmarked files found to process")
+        return jsonify({'error': 'No unmarked files to process'}), 400
+    
+    logging.info(f"[API] Found {len(unmarked_files)} unmarked files to process")
+    
+    # Create job
+    job_manager = get_job_manager(max_workers=get_max_workers())
+    job_id = job_manager.create_job(unmarked_files)
+    
+    # Set active job on server IMMEDIATELY when job is created
+    # This ensures the job is tracked even if the page refreshes before polling starts
+    set_active_job(job_id, 'Processing Unmarked Files...')
+    logging.info(f"[API] Set active job {job_id} on server")
+    
+    # Define processing function
+    def process_item(filepath):
+        try:
+            mark_file_web_modified(filepath)
+            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+            mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+            handle_file_rename_in_cache(filepath, final_filepath)
+            logging.info(f"[BATCH] Processed unmarked file: {filepath} -> {final_filepath}")
+            return JobResult(
+                item=os.path.basename(filepath),
+                success=True,
+                details={'original': filepath, 'final': final_filepath}
+            )
+        except Exception as e:
+            logging.error(f"[BATCH] Error processing unmarked file {filepath}: {e}")
+            return JobResult(
+                item=os.path.basename(filepath),
+                success=False,
+                error=str(e)
+            )
+    
+    # Start job
+    job_manager.start_job(job_id, process_item, unmarked_files)
+    
+    logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
+    return jsonify({
+        'job_id': job_id,
+        'total_items': len(unmarked_files)
+    })
+
+
+@app.route('/api/jobs/rename-unmarked', methods=['POST'])
+def async_rename_unmarked_files():
+    """API endpoint to start async renaming of unmarked files"""
+    from process_file import process_file
+    
+    logging.info("[API] Request to rename unmarked files (async)")
+    
+    # Get all files and filter to unmarked only
+    files = get_comic_files(use_cache=False)
+    unmarked_files = []
+    
+    for filepath in files:
+        if not is_file_processed(filepath):
+            unmarked_files.append(filepath)
+    
+    if not unmarked_files:
+        logging.warning("[API] No unmarked files found to rename")
+        return jsonify({'error': 'No unmarked files to rename'}), 400
+    
+    logging.info(f"[API] Found {len(unmarked_files)} unmarked files to rename")
+    
+    # Create job
+    job_manager = get_job_manager(max_workers=get_max_workers())
+    job_id = job_manager.create_job(unmarked_files)
+    
+    # Set active job on server IMMEDIATELY when job is created
+    set_active_job(job_id, 'Renaming Unmarked Files...')
+    logging.info(f"[API] Set active job {job_id} on server")
+    
+    # Define processing function
+    def process_item(filepath):
+        try:
+            mark_file_web_modified(filepath)
+            final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+            mark_file_processed_wrapper(final_filepath)
+            handle_file_rename_in_cache(filepath, final_filepath)
+            logging.info(f"[BATCH] Renamed unmarked file: {filepath} -> {final_filepath}")
+            return JobResult(
+                item=os.path.basename(filepath),
+                success=True,
+                details={'original': filepath, 'final': final_filepath}
+            )
+        except Exception as e:
+            logging.error(f"[BATCH] Error renaming unmarked file {filepath}: {e}")
+            return JobResult(
+                item=os.path.basename(filepath),
+                success=False,
+                error=str(e)
+            )
+    
+    # Start job
+    job_manager.start_job(job_id, process_item, unmarked_files)
+    
+    logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
+    return jsonify({
+        'job_id': job_id,
+        'total_items': len(unmarked_files)
+    })
+
+
+@app.route('/api/jobs/normalize-unmarked', methods=['POST'])
+def async_normalize_unmarked_files():
+    """API endpoint to start async normalizing of unmarked files"""
+    from process_file import process_file
+    
+    logging.info("[API] Request to normalize unmarked files (async)")
+    
+    # Get all files and filter to unmarked only
+    files = get_comic_files(use_cache=False)
+    unmarked_files = []
+    
+    for filepath in files:
+        if not is_file_processed(filepath):
+            unmarked_files.append(filepath)
+    
+    if not unmarked_files:
+        logging.warning("[API] No unmarked files found to normalize")
+        return jsonify({'error': 'No unmarked files to normalize'}), 400
+    
+    logging.info(f"[API] Found {len(unmarked_files)} unmarked files to normalize")
+    
+    # Create job
+    job_manager = get_job_manager(max_workers=get_max_workers())
+    job_id = job_manager.create_job(unmarked_files)
+    
+    # Set active job on server IMMEDIATELY when job is created
+    set_active_job(job_id, 'Normalizing Unmarked Files...')
+    logging.info(f"[API] Set active job {job_id} on server")
+    
+    # Define processing function
+    def process_item(filepath):
+        try:
+            mark_file_web_modified(filepath)
+            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+            mark_file_processed_wrapper(final_filepath)
+            logging.info(f"[BATCH] Normalized unmarked file: {filepath}")
+            return JobResult(
+                item=os.path.basename(filepath),
+                success=True,
+                details={'original': filepath, 'final': final_filepath}
+            )
+        except Exception as e:
+            logging.error(f"[BATCH] Error normalizing unmarked file {filepath}: {e}")
+            return JobResult(
+                item=os.path.basename(filepath),
+                success=False,
+                error=str(e)
+            )
+    
+    # Start job
+    job_manager.start_job(job_id, process_item, unmarked_files)
+    
+    logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
+    return jsonify({
+        'job_id': job_id,
+        'total_items': len(unmarked_files)
+    })
+
+
 @app.route('/api/settings/filename-format', methods=['GET'])
 def get_filename_format_api():
     """API endpoint to get the filename format setting"""

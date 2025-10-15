@@ -506,7 +506,7 @@ def update_file_tags(filepath, tag_updates):
                     setattr(tags, key, value)
         
         # Mark as web modified before writing
-        mark_web_modified(filepath)
+        mark_file_web_modified(filepath)
         
         # Write tags
         ca.write_tags(tags, 'cr')
@@ -749,7 +749,7 @@ def process_all_files():
     for filepath in files:
         try:
             # Mark as web modified to prevent watcher from processing
-            mark_web_modified(filepath)
+            mark_file_web_modified(filepath)
             
             # Process the file and get the final filepath (may be renamed)
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
@@ -786,7 +786,7 @@ def rename_all_files():
     for filepath in files:
         try:
             # Mark as web modified to prevent watcher from processing
-            mark_web_modified(filepath)
+            mark_file_web_modified(filepath)
             
             # Only rename the file
             final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
@@ -823,7 +823,7 @@ def normalize_all_files():
     for filepath in files:
         try:
             # Mark as web modified to prevent watcher from processing
-            mark_web_modified(filepath)
+            mark_file_web_modified(filepath)
             
             # Only normalize metadata
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
@@ -858,7 +858,7 @@ def process_single_file(filepath):
     
     try:
         # Mark as web modified to prevent watcher from processing
-        mark_web_modified(full_path)
+        mark_file_web_modified(full_path)
         
         # Process the file and get the final filepath (may be renamed)
         final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
@@ -887,7 +887,7 @@ def rename_single_file(filepath):
     
     try:
         # Mark as web modified to prevent watcher from processing
-        mark_web_modified(full_path)
+        mark_file_web_modified(full_path)
         
         # Only rename the file
         final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
@@ -916,7 +916,7 @@ def normalize_single_file(filepath):
     
     try:
         # Mark as web modified to prevent watcher from processing
-        mark_web_modified(full_path)
+        mark_file_web_modified(full_path)
         
         # Only normalize metadata
         final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
@@ -956,7 +956,7 @@ def process_selected_files():
         
         try:
             # Mark as web modified to prevent watcher from processing
-            mark_web_modified(full_path)
+            mark_file_web_modified(full_path)
             
             # Process the file and get the final filepath (may be renamed)
             final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
@@ -1008,7 +1008,7 @@ def rename_selected_files():
         
         try:
             # Mark as web modified to prevent watcher from processing
-            mark_web_modified(full_path)
+            mark_file_web_modified(full_path)
             
             # Only rename the file
             final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
@@ -1060,7 +1060,7 @@ def normalize_selected_files():
         
         try:
             # Mark as web modified to prevent watcher from processing
-            mark_web_modified(full_path)
+            mark_file_web_modified(full_path)
             
             # Only normalize metadata
             final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
@@ -1210,7 +1210,7 @@ def process_unmarked_files():
     for filepath in unmarked_files:
         try:
             # Mark as web modified to prevent watcher from processing
-            mark_web_modified(filepath)
+            mark_file_web_modified(filepath)
             
             # Process the file and get the final filepath (may be renamed)
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
@@ -1254,7 +1254,7 @@ def rename_unmarked_files():
     for filepath in unmarked_files:
         try:
             # Mark as web modified to prevent watcher from processing
-            mark_web_modified(filepath)
+            mark_file_web_modified(filepath)
             
             # Only rename the file
             final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
@@ -1298,7 +1298,7 @@ def normalize_unmarked_files():
     for filepath in unmarked_files:
         try:
             # Mark as web modified to prevent watcher from processing
-            mark_web_modified(filepath)
+            mark_file_web_modified(filepath)
             
             # Only normalize metadata
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)

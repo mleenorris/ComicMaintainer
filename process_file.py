@@ -4,6 +4,7 @@ import re
 import logging
 from comicapi.comicarchive import ComicArchive
 from config import get_filename_format
+from markers import mark_file_duplicate, mark_file_processed
 
 # Set up logging to file and stdout (same as watcher.py)
 logging.basicConfig(
@@ -15,7 +16,6 @@ logging.basicConfig(
     ]
 )
 
-DUPLICATE_MARKER = '.duplicate_files'
 CACHE_UPDATE_MARKER = '.cache_update'
 CACHE_CHANGES_FILE = '.cache_changes'
 
@@ -72,26 +72,7 @@ def record_cache_change(change_type, old_path=None, new_path=None):
     except Exception as e:
         logging.error(f"Error recording cache change: {e}")
 
-def mark_file_duplicate(filepath):
-    """Mark a file as a duplicate"""
-    marker_path = os.path.join(os.path.dirname(filepath), DUPLICATE_MARKER)
-    try:
-        filename = os.path.basename(filepath)
-        # Read existing duplicate files
-        duplicate_files = set()
-        if os.path.exists(marker_path):
-            with open(marker_path, 'r') as f:
-                duplicate_files = set(f.read().splitlines())
-        
-        # Add current file
-        duplicate_files.add(filename)
-        
-        # Write back
-        with open(marker_path, 'w') as f:
-            f.write('\n'.join(sorted(duplicate_files)))
-        logging.info(f"Marked {filepath} as duplicate")
-    except Exception as e:
-        logging.error(f"Error marking file as duplicate: {e}")
+# mark_file_duplicate is now imported from markers module
 
 def parse_chapter_number(filename):
     match = re.search(r'(?i)ch(?:apter)?[-._\s]*([0-9]+(?:\.[0-9]+)?)', filename)
@@ -302,32 +283,7 @@ if __name__ == "__main__":
     final_filepath = process_file(original_filepath, fixtitle=fixtitle or True, fixseries=fixseries or True, fixfilename=fixfilename or True, comicfolder=comicfolder)
     
     # Mark as processed using the final filepath (after any rename)
-    PROCESSED_MARKER = '.processed_files'
-    marker_path = os.path.join(os.path.dirname(final_filepath), PROCESSED_MARKER)
-    try:
-        original_filename = os.path.basename(original_filepath)
-        final_filename = os.path.basename(final_filepath)
-        
-        # Read existing processed files
-        processed_files = set()
-        if os.path.exists(marker_path):
-            with open(marker_path, 'r') as f:
-                processed_files = set(f.read().splitlines())
-        
-        # If file was renamed, remove the old filename from the marker
-        if original_filename != final_filename and original_filename in processed_files:
-            processed_files.discard(original_filename)
-            logging.info(f"Removed old filename '{original_filename}' from processed marker after rename")
-        
-        # Add current file
-        processed_files.add(final_filename)
-        
-        # Write back
-        with open(marker_path, 'w') as f:
-            f.write('\n'.join(sorted(processed_files)))
-        logging.info(f"Marked {final_filepath} as processed")
-        
-        # Update watcher timestamp to invalidate web app cache
-        update_watcher_timestamp()
-    except Exception as e:
-        logging.error(f"Error marking file as processed: {e}")
+    mark_file_processed(final_filepath, original_filepath=original_filepath)
+    
+    # Update watcher timestamp to invalidate web app cache
+    update_watcher_timestamp()

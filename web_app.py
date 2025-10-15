@@ -74,7 +74,9 @@ cache_lock = threading.Lock()
 enriched_file_cache = {
     'files': None,  # List of file dicts with metadata
     'timestamp': 0,
-    'file_list_hash': None  # Hash of raw file list to detect changes
+    'file_list_hash': None,  # Hash of raw file list to detect changes
+    'rebuild_in_progress': False,  # Track if async rebuild is running
+    'rebuild_thread': None  # Reference to rebuild thread
 }
 enriched_file_cache_lock = threading.Lock()
 
@@ -543,56 +545,35 @@ def preload_metadata_for_directories(files):
     # since markers are now stored centrally, not per-directory
     pass
 
-def get_enriched_file_list(files, force_rebuild=False):
-    """Get file list enriched with metadata, using cache when possible
+def rebuild_enriched_cache_async(files, file_list_hash):
+    """Background thread function to rebuild enriched cache asynchronously
     
     Args:
         files: List of file paths
-        force_rebuild: Force rebuilding the cache even if valid
-        
-    Returns:
-        List of file dictionaries with metadata
+        file_list_hash: Hash of the file list to detect if it changed
     """
-    # Create a simple hash of the file list to detect changes
-    file_list_hash = hash(tuple(files))
-    
-    # Check if cache is valid (without holding lock)
-    with enriched_file_cache_lock:
-        if (not force_rebuild and 
-            enriched_file_cache['files'] is not None and 
-            enriched_file_cache['file_list_hash'] == file_list_hash):
-            
-            logging.debug("Using enriched file cache")
-            return enriched_file_cache['files']
-        
-        # Check if we have stale cache that can be returned if rebuild fails
-        stale_cache = enriched_file_cache['files']
-    
-    # Try to acquire file-based lock for cache rebuild
-    # Use short timeout to avoid blocking workers
-    lock_fd = try_acquire_cache_rebuild_lock(timeout=0.1)
-    
-    if lock_fd is None:
-        # Another worker is rebuilding the cache
-        # Return stale cache if available, otherwise build without lock
-        if stale_cache is not None:
-            logging.info("Cache rebuild in progress by another worker, returning stale cache")
-            return stale_cache
-        else:
-            logging.info("Cache rebuild in progress by another worker, but no stale cache available")
-            # Fall through to build without lock (better than blocking)
-    
+    lock_fd = None
     try:
-        # Check cache again after acquiring lock (double-check pattern)
-        with enriched_file_cache_lock:
-            if (not force_rebuild and 
-                enriched_file_cache['files'] is not None and 
-                enriched_file_cache['file_list_hash'] == file_list_hash):
-                logging.debug("Cache was rebuilt by another worker while waiting")
-                return enriched_file_cache['files']
+        # Try to acquire file-based lock for cache rebuild
+        lock_fd = try_acquire_cache_rebuild_lock(timeout=0.5)
         
-        # Cache miss or invalidated - rebuild
-        logging.info("Rebuilding enriched file cache")
+        if lock_fd is None:
+            logging.info("Async cache rebuild: Another worker is already rebuilding, aborting")
+            with enriched_file_cache_lock:
+                enriched_file_cache['rebuild_in_progress'] = False
+                enriched_file_cache['rebuild_thread'] = None
+            return
+        
+        # Check if cache was already rebuilt by another thread
+        with enriched_file_cache_lock:
+            if (enriched_file_cache['files'] is not None and 
+                enriched_file_cache['file_list_hash'] == file_list_hash):
+                logging.info("Async cache rebuild: Cache already updated, aborting")
+                enriched_file_cache['rebuild_in_progress'] = False
+                enriched_file_cache['rebuild_thread'] = None
+                return
+        
+        logging.info("Async cache rebuild: Starting background rebuild")
         
         # Preload metadata for all directories (batch operation)
         preload_metadata_for_directories(files)
@@ -616,6 +597,132 @@ def get_enriched_file_list(files, force_rebuild=False):
             enriched_file_cache['files'] = all_files
             enriched_file_cache['timestamp'] = time.time()
             enriched_file_cache['file_list_hash'] = file_list_hash
+            enriched_file_cache['rebuild_in_progress'] = False
+            enriched_file_cache['rebuild_thread'] = None
+        
+        logging.info(f"Async cache rebuild: Complete ({len(all_files)} files)")
+    except Exception as e:
+        logging.error(f"Async cache rebuild: Error - {e}")
+        with enriched_file_cache_lock:
+            enriched_file_cache['rebuild_in_progress'] = False
+            enriched_file_cache['rebuild_thread'] = None
+    finally:
+        # Always release the lock if we acquired it
+        if lock_fd is not None:
+            release_cache_rebuild_lock(lock_fd)
+
+def get_enriched_file_list(files, force_rebuild=False):
+    """Get file list enriched with metadata, using cache when possible
+    
+    Args:
+        files: List of file paths
+        force_rebuild: Force rebuilding the cache even if valid
+        
+    Returns:
+        List of file dictionaries with metadata
+    """
+    # Create a simple hash of the file list to detect changes
+    file_list_hash = hash(tuple(files))
+    
+    # Check if cache is valid (without holding lock)
+    with enriched_file_cache_lock:
+        if (not force_rebuild and 
+            enriched_file_cache['files'] is not None and 
+            enriched_file_cache['file_list_hash'] == file_list_hash):
+            
+            logging.debug("Using enriched file cache")
+            return enriched_file_cache['files']
+        
+        # Check if we have stale cache that can be returned
+        stale_cache = enriched_file_cache['files']
+        rebuild_in_progress = enriched_file_cache['rebuild_in_progress']
+    
+    # If rebuild is already in progress, return stale cache if available
+    if rebuild_in_progress:
+        if stale_cache is not None:
+            logging.info("Async cache rebuild in progress, returning stale cache")
+            return stale_cache
+        else:
+            logging.info("Async cache rebuild in progress, but no stale cache available")
+            # Fall through to trigger rebuild if no stale cache
+    
+    # If force_rebuild or no rebuild in progress, trigger async rebuild
+    with enriched_file_cache_lock:
+        # Double-check if cache was updated while we were checking
+        if (not force_rebuild and 
+            enriched_file_cache['files'] is not None and 
+            enriched_file_cache['file_list_hash'] == file_list_hash):
+            logging.debug("Cache was updated by another thread")
+            return enriched_file_cache['files']
+        
+        # Check if we should start async rebuild
+        if not enriched_file_cache['rebuild_in_progress']:
+            logging.info("Triggering async cache rebuild")
+            enriched_file_cache['rebuild_in_progress'] = True
+            
+            # Start background rebuild thread
+            rebuild_thread = threading.Thread(
+                target=rebuild_enriched_cache_async,
+                args=(files, file_list_hash),
+                daemon=True
+            )
+            enriched_file_cache['rebuild_thread'] = rebuild_thread
+            rebuild_thread.start()
+        
+        # Return stale cache if available, otherwise return empty list
+        if stale_cache is not None:
+            logging.info("Returning stale cache while async rebuild runs")
+            return stale_cache
+        else:
+            # No stale cache - need to build synchronously for first request
+            logging.info("No stale cache available, building synchronously for first request")
+    
+    # First-time cache build - do it synchronously
+    # This only happens on the very first request when cache is empty
+    lock_fd = try_acquire_cache_rebuild_lock(timeout=0.5)
+    
+    try:
+        if lock_fd is None:
+            # Another worker is building, wait briefly for async rebuild to complete
+            logging.info("Waiting briefly for async cache rebuild to complete")
+            time.sleep(0.5)
+            with enriched_file_cache_lock:
+                if enriched_file_cache['files'] is not None:
+                    return enriched_file_cache['files']
+            # Still no cache, return empty list
+            logging.warning("Cache still empty after waiting, returning empty list")
+            return []
+        
+        # We have the lock - check if cache was built while waiting
+        with enriched_file_cache_lock:
+            if enriched_file_cache['files'] is not None:
+                logging.debug("Cache was built while waiting for lock")
+                return enriched_file_cache['files']
+        
+        # Build cache synchronously
+        logging.info("Building initial cache synchronously")
+        preload_metadata_for_directories(files)
+        
+        all_files = []
+        for f in files:
+            rel_path = os.path.relpath(f, WATCHED_DIR) if WATCHED_DIR else f
+            all_files.append({
+                'path': f,
+                'name': os.path.basename(f),
+                'relative_path': rel_path,
+                'size': os.path.getsize(f),
+                'modified': os.path.getmtime(f),
+                'processed': is_file_processed(f),
+                'duplicate': is_file_duplicate(f)
+            })
+        
+        # Update cache
+        with enriched_file_cache_lock:
+            enriched_file_cache['files'] = all_files
+            enriched_file_cache['timestamp'] = time.time()
+            enriched_file_cache['file_list_hash'] = file_list_hash
+            enriched_file_cache['rebuild_in_progress'] = False
+            enriched_file_cache['rebuild_thread'] = None
         
         return all_files
     finally:
@@ -2010,6 +2117,7 @@ def cache_stats_endpoint():
         with enriched_file_cache_lock:
             enriched_count = len(enriched_file_cache['files']) if enriched_file_cache['files'] else 0
             enriched_age = time.time() - enriched_file_cache['timestamp'] if enriched_file_cache['timestamp'] else 0
+            rebuild_in_progress = enriched_file_cache['rebuild_in_progress']
         
         # Get marker counts from centralized storage
         from markers import _load_marker_set, PROCESSED_MARKER_FILE, DUPLICATE_MARKER_FILE, WEB_MODIFIED_MARKER_FILE
@@ -2026,7 +2134,8 @@ def cache_stats_endpoint():
             'enriched_file_cache': {
                 'file_count': enriched_count,
                 'age_seconds': enriched_age,
-                'is_populated': enriched_file_cache['files'] is not None
+                'is_populated': enriched_file_cache['files'] is not None,
+                'rebuild_in_progress': rebuild_in_progress
             },
             'markers': {
                 'processed_files': processed_count,

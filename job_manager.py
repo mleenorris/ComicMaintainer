@@ -1,6 +1,7 @@
 """
 Job manager for asynchronous file processing.
 Handles background processing jobs with status tracking and concurrent execution.
+Uses PostgreSQL for persistent, shared job state across multiple workers.
 """
 import threading
 import uuid
@@ -9,16 +10,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Callable, Any, Optional
 from dataclasses import dataclass, field
-from enum import Enum
-
-
-class JobStatus(Enum):
-    """Job execution status"""
-    QUEUED = "queued"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+from job_db import get_job_database, JobStatus
 
 
 @dataclass
@@ -30,24 +22,11 @@ class JobResult:
     details: Dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
-class Job:
-    """Background processing job"""
-    job_id: str
-    status: JobStatus
-    total_items: int
-    processed_items: int = 0
-    results: List[JobResult] = field(default_factory=list)
-    error: Optional[str] = None
-    created_at: float = field(default_factory=time.time)
-    started_at: Optional[float] = None
-    completed_at: Optional[float] = None
-
-
 class JobManager:
     """
     Manages background jobs with concurrent execution.
     Uses thread pool for I/O-bound file processing operations.
+    Uses PostgreSQL for persistent job state storage.
     """
     
     def __init__(self, max_workers: int = 4):
@@ -58,8 +37,7 @@ class JobManager:
             max_workers: Maximum number of concurrent workers
         """
         self.max_workers = max_workers
-        self.jobs: Dict[str, Job] = {}
-        self.lock = threading.Lock()
+        self.db = get_job_database()
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self._cleanup_thread = threading.Thread(target=self._cleanup_old_jobs, daemon=True)
         self._cleanup_thread.start()
@@ -75,14 +53,9 @@ class JobManager:
             Job ID
         """
         job_id = str(uuid.uuid4())
-        job = Job(
-            job_id=job_id,
-            status=JobStatus.QUEUED,
-            total_items=len(items)
-        )
+        created_at = time.time()
         
-        with self.lock:
-            self.jobs[job_id] = job
+        self.db.create_job(job_id, len(items), created_at)
         
         logging.info(f"Created job {job_id} with {len(items)} items")
         return job_id
@@ -96,18 +69,17 @@ class JobManager:
             process_func: Function to process each item (must accept item and return JobResult)
             items: List of items to process
         """
-        with self.lock:
-            if job_id not in self.jobs:
-                logging.error(f"Job {job_id} not found")
-                return
-            
-            job = self.jobs[job_id]
-            if job.status != JobStatus.QUEUED:
-                logging.warning(f"Job {job_id} already started")
-                return
-            
-            job.status = JobStatus.PROCESSING
-            job.started_at = time.time()
+        job = self.db.get_job(job_id)
+        if not job:
+            logging.error(f"Job {job_id} not found")
+            return
+        
+        if job['status'] != JobStatus.QUEUED.value:
+            logging.warning(f"Job {job_id} already started")
+            return
+        
+        started_at = time.time()
+        self.db.update_job_status(job_id, JobStatus.PROCESSING, started_at=started_at)
         
         # Submit job to thread pool
         self.executor.submit(self._process_job, job_id, process_func, items)
@@ -133,38 +105,36 @@ class JobManager:
                 try:
                     result = future.result()
                     
-                    with self.lock:
-                        if job_id in self.jobs:
-                            job = self.jobs[job_id]
-                            job.results.append(result)
-                            job.processed_items = len(job.results)
+                    # Store result in database
+                    result_dict = {
+                        'item': result.item,
+                        'success': result.success,
+                        'error': result.error,
+                        'details': result.details
+                    }
+                    self.db.add_job_result(job_id, result_dict)
+                    
                 except Exception as e:
                     logging.error(f"Error processing item {item} in job {job_id}: {e}")
-                    result = JobResult(item=item, success=False, error=str(e))
-                    
-                    with self.lock:
-                        if job_id in self.jobs:
-                            job = self.jobs[job_id]
-                            job.results.append(result)
-                            job.processed_items = len(job.results)
+                    result_dict = {
+                        'item': item,
+                        'success': False,
+                        'error': str(e),
+                        'details': {}
+                    }
+                    self.db.add_job_result(job_id, result_dict)
             
             # Mark job as completed
-            with self.lock:
-                if job_id in self.jobs:
-                    job = self.jobs[job_id]
-                    job.status = JobStatus.COMPLETED
-                    job.completed_at = time.time()
+            completed_at = time.time()
+            self.db.update_job_status(job_id, JobStatus.COMPLETED, completed_at=completed_at)
             
             logging.info(f"Completed job {job_id}")
         
         except Exception as e:
             logging.error(f"Fatal error processing job {job_id}: {e}")
-            with self.lock:
-                if job_id in self.jobs:
-                    job = self.jobs[job_id]
-                    job.status = JobStatus.FAILED
-                    job.error = str(e)
-                    job.completed_at = time.time()
+            completed_at = time.time()
+            self.db.update_job_status(job_id, JobStatus.FAILED, 
+                                     completed_at=completed_at, error=str(e))
     
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -176,31 +146,22 @@ class JobManager:
         Returns:
             Job status dictionary or None if not found
         """
-        with self.lock:
-            if job_id not in self.jobs:
-                return None
-            
-            job = self.jobs[job_id]
-            return {
-                'job_id': job.job_id,
-                'status': job.status.value,
-                'total_items': job.total_items,
-                'processed_items': job.processed_items,
-                'progress': job.processed_items / job.total_items if job.total_items > 0 else 0,
-                'results': [
-                    {
-                        'item': r.item,
-                        'success': r.success,
-                        'error': r.error,
-                        'details': r.details
-                    }
-                    for r in job.results
-                ],
-                'error': job.error,
-                'created_at': job.created_at,
-                'started_at': job.started_at,
-                'completed_at': job.completed_at
-            }
+        job = self.db.get_job(job_id)
+        if not job:
+            return None
+        
+        return {
+            'job_id': job['job_id'],
+            'status': job['status'],
+            'total_items': job['total_items'],
+            'processed_items': job['processed_items'],
+            'progress': job['processed_items'] / job['total_items'] if job['total_items'] > 0 else 0,
+            'results': job['results'],
+            'error': job['error'],
+            'created_at': job['created_at'],
+            'started_at': job['started_at'],
+            'completed_at': job['completed_at']
+        }
     
     def cancel_job(self, job_id: str) -> bool:
         """
@@ -212,16 +173,15 @@ class JobManager:
         Returns:
             True if cancelled, False if not found or already completed
         """
-        with self.lock:
-            if job_id not in self.jobs:
-                return False
-            
-            job = self.jobs[job_id]
-            if job.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
-                return False
-            
-            job.status = JobStatus.CANCELLED
-            job.completed_at = time.time()
+        job = self.db.get_job(job_id)
+        if not job:
+            return False
+        
+        if job['status'] in [JobStatus.COMPLETED.value, JobStatus.FAILED.value, JobStatus.CANCELLED.value]:
+            return False
+        
+        completed_at = time.time()
+        self.db.update_job_status(job_id, JobStatus.CANCELLED, completed_at=completed_at)
         
         logging.info(f"Cancelled job {job_id}")
         return True
@@ -236,11 +196,9 @@ class JobManager:
         Returns:
             True if deleted, False if not found
         """
-        with self.lock:
-            if job_id in self.jobs:
-                del self.jobs[job_id]
-                logging.info(f"Deleted job {job_id}")
-                return True
+        if self.db.delete_job(job_id):
+            logging.info(f"Deleted job {job_id}")
+            return True
         return False
     
     def list_jobs(self) -> List[Dict[str, Any]]:
@@ -250,19 +208,7 @@ class JobManager:
         Returns:
             List of job status dictionaries
         """
-        with self.lock:
-            return [
-                {
-                    'job_id': job.job_id,
-                    'status': job.status.value,
-                    'total_items': job.total_items,
-                    'processed_items': job.processed_items,
-                    'created_at': job.created_at,
-                    'started_at': job.started_at,
-                    'completed_at': job.completed_at
-                }
-                for job in self.jobs.values()
-            ]
+        return self.db.list_jobs()
     
     def _cleanup_old_jobs(self):
         """
@@ -274,21 +220,10 @@ class JobManager:
             
             try:
                 cutoff_time = time.time() - 3600  # 1 hour
+                deleted = self.db.cleanup_old_jobs(cutoff_time)
                 
-                with self.lock:
-                    jobs_to_delete = [
-                        job_id
-                        for job_id, job in self.jobs.items()
-                        if job.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED)
-                        and job.completed_at is not None
-                        and job.completed_at < cutoff_time
-                    ]
-                    
-                    for job_id in jobs_to_delete:
-                        del self.jobs[job_id]
-                
-                if jobs_to_delete:
-                    logging.info(f"Cleaned up {len(jobs_to_delete)} old jobs")
+                if deleted > 0:
+                    logging.info(f"Cleaned up {deleted} old jobs")
             
             except Exception as e:
                 logging.error(f"Error cleaning up old jobs: {e}")
@@ -300,19 +235,18 @@ class JobManager:
 
 
 # Global job manager instance
-# NOTE: This is a per-process singleton. When using WSGI servers like Gunicorn,
-# each worker process will have its own JobManager instance. To avoid "job not found"
-# errors, the application should run with a single worker process (see start.sh).
+# NOTE: With PostgreSQL backend, job state is shared across all worker processes.
+# Multiple Gunicorn workers can now be used safely.
 _job_manager: Optional[JobManager] = None
 _job_manager_lock = threading.Lock()
 
 
 def get_job_manager(max_workers: int = 4) -> JobManager:
     """
-    Get the global job manager instance (singleton).
+    Get the global job manager instance (singleton per process).
     
-    NOTE: This is a per-process singleton. With multi-process WSGI servers,
-    each process has its own instance, which can cause job routing issues.
+    With PostgreSQL backend, job state is shared across all workers,
+    so multiple Gunicorn workers can be used safely.
     
     Args:
         max_workers: Maximum number of concurrent workers (only used on first call)

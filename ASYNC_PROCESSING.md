@@ -151,15 +151,17 @@ These can still be used if needed, but the async endpoints are recommended for b
 ## Deployment Architecture
 
 The application uses:
-- **1 Gunicorn worker process** - Ensures job state consistency since jobs are stored in-memory
+- **PostgreSQL database** - Provides persistent, shared job state across all workers
+- **Multiple Gunicorn worker processes** (default: 2, configurable) - Scales to handle more concurrent requests
 - **4 ThreadPoolExecutor threads per worker** (configurable) - Provides concurrent file processing
 
-This architecture avoids the "Job not found" issue that would occur with multiple Gunicorn workers, where:
-- Worker A creates a job and stores it in its memory
-- Worker B receives the status poll but doesn't have the job in its memory
-- Result: "Job not found" error despite successful processing
+With the PostgreSQL backend, job state is shared across all worker processes, eliminating the "Job not found" issues that occurred with the previous in-memory storage. All workers can now safely create, update, and query jobs from the shared database.
 
-The single-worker configuration ensures all requests for a job are handled by the same process, while ThreadPoolExecutor provides efficient concurrent processing of files.
+Benefits of PostgreSQL backend:
+- **Persistent storage**: Jobs survive server restarts
+- **Scalability**: Multiple Gunicorn workers can be used safely
+- **Consistency**: All workers see the same job state
+- **Reliability**: No data loss during deployments or crashes
 
 ## Configuration
 
@@ -218,18 +220,19 @@ python3 /tmp/test_integration.py
 - Job continues processing remaining files
 - Fatal errors mark job as failed
 
-### Memory Management
+### Job Persistence
+- Job state stored in PostgreSQL database
+- Jobs persist across server restarts and deployments
 - Old completed jobs automatically cleaned up after 1 hour
 - Can manually delete jobs via API
-- Job results stored in memory (not persisted to disk)
-- Single Gunicorn worker ensures job state consistency across requests
+- Job results stored in database with full history
 
 ## Future Enhancements
 
 Potential improvements for future versions:
-- [ ] Persistent job storage (survive server restarts)
 - [ ] Job priority levels
 - [ ] Configurable worker pools per job type
 - [ ] WebSocket support for push notifications
 - [ ] Job scheduling and queuing
 - [ ] Resource throttling and rate limiting
+- [ ] Job retention policies (configurable cleanup periods)

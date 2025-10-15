@@ -37,30 +37,39 @@ This service automatically watches a directory for new or changed comic archive 
 
 ## Usage
 
-### Build the Docker image
+### Docker Compose (Recommended)
+
+The easiest way to run ComicMaintainer is using Docker Compose, which automatically sets up PostgreSQL and the application:
+
+1. Create a `.env` file with your configuration:
+```env
+WATCHED_DIR=/path/to/comics
+DUPLICATE_DIR=/path/to/duplicates
+CACHE_DIR=/path/to/config
+PUID=1000
+PGID=1000
+POSTGRES_PASSWORD=your_secure_password
+```
+
+2. Start the services:
+```sh
+docker-compose up -d
+```
+
+3. Access the web interface at `http://localhost:5000`
+
+### Docker Standalone (Advanced)
+
+If you prefer to run the application without Docker Compose, you need to provide a PostgreSQL database.
+
+**Build the Docker image:**
 ```sh
 docker build -t iceburn1/comictagger-watcher:latest .
 ```
 
 **Permissions Note:** By default, the container runs as user `nobody` (UID 99) and group `users` (GID 100). You can customize these by setting the `PUID` and `PGID` environment variables to match your host user. This ensures that files created or modified by the container have the correct ownership on your host system.
 
-
-### Run the container
-
-**Basic usage:**
-```sh
-docker run -d \
-  -v <host_dir_to_watch>:/watched_dir \
-  -v <host_dir_for_duplicates>:/duplicates \
-  -v <host_dir_for_config>:/config \
-  -e WATCHED_DIR=/watched_dir \
-  -e DUPLICATE_DIR=/duplicates \
-  -e CACHE_DIR=/config \
-  -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
-```
-
-**With custom user/group (recommended for host-mounted directories):**
+**Run with external PostgreSQL:**
 ```sh
 docker run -d \
   -v <host_dir_to_watch>:/watched_dir \
@@ -71,6 +80,7 @@ docker run -d \
   -e CACHE_DIR=/config \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
+  -e DATABASE_URL=postgresql://user:password@host:5432/database \
   -p 5000:5000 \
   iceburn1/comictagger-watcher:latest
 ```
@@ -78,6 +88,7 @@ docker run -d \
 - Replace `<host_dir_to_watch>` with the path to your comics folder.
 - Replace `<host_dir_for_config>` with the path to store persistent configuration and cache data.
 - `WATCHED_DIR` **must** be set to the directory to watch (usually `/watched_dir` if using the example above).
+- `DATABASE_URL` **must** be set to a valid PostgreSQL connection string.
 - Optionally, mount a host directory to `/duplicates` to persist duplicates.
 - **Recommended**: Mount a host directory to `/config` (or your chosen path) and set `CACHE_DIR` to persist:
   - Marker files (processed files, duplicates, web-modified files)
@@ -89,6 +100,7 @@ docker run -d \
 
 ### Environment Variables
 - `WATCHED_DIR`: **(Required)** Directory to watch for comics. The service will not start if this is not set.
+- `DATABASE_URL`: **(Required)** PostgreSQL connection string (format: `postgresql://user:password@host:5432/database`)
 - `PROCESS_SCRIPT`: Script to run for processing (default: `/app/process_file.py`)
 - `DUPLICATE_DIR`: Directory where duplicates are moved (required for duplicate handling)
 - `WEB_PORT`: Port for the web interface (default: `5000`)
@@ -98,6 +110,8 @@ docker run -d \
   - File list cache for performance optimization
 - `PUID`: User ID to run the service as (default: `99` for user `nobody`)
 - `PGID`: Group ID to run the service as (default: `100` for group `users`)
+- `GUNICORN_WORKERS`: Number of Gunicorn worker processes (default: `2`). With PostgreSQL backend, multiple workers are fully supported.
+- `POSTGRES_PASSWORD`: PostgreSQL password (used in docker-compose.yml)
 - `LOG_MAX_BYTES`: Maximum log file size in bytes before rotation (default: `5242880` = 5MB). Can also be configured via the Settings UI.
 
 ## Web Interface
@@ -270,8 +284,10 @@ Files are processed and updated when:
 
 ## Production Server
 - The web interface runs on **Gunicorn**, a production-ready WSGI server for Python web applications
-- Configured with 1 worker process to ensure job state consistency (jobs stored in-memory)
-- Concurrent file processing provided by ThreadPoolExecutor (4 threads) within the worker
+- Job state stored in **PostgreSQL** for persistence and scalability
+- Configured with 2 worker processes by default (configurable via `GUNICORN_WORKERS` environment variable)
+- Multiple workers are fully supported thanks to PostgreSQL shared job state
+- Concurrent file processing provided by ThreadPoolExecutor (4 threads per worker)
 - 600-second timeout (10 minutes) to accommodate batch processing operations on large libraries
 - **Cache coordination**: File-based locking prevents cache rebuild conflicts
 - **Non-blocking cache rebuilds**: Serves stale cache instead of waiting when cache is being rebuilt

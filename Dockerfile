@@ -31,6 +31,7 @@ COPY process_file.py /app/process_file.py
 COPY web_app.py /app/web_app.py
 COPY config.py /app/config.py
 COPY job_manager.py /app/job_manager.py
+COPY job_db.py /app/job_db.py
 COPY markers.py /app/markers.py
 COPY version.py /app/version.py
 COPY templates /app/templates

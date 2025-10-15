@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: comicmaintainer
+      POSTGRES_USER: comicmaintainer
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U comicmaintainer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      WATCHED_DIR: ${WATCHED_DIR}
+      DUPLICATE_DIR: ${DUPLICATE_DIR}
+      WEB_PORT: ${WEB_PORT:-5000}
+      CACHE_DIR: ${CACHE_DIR:-/app/cache}
+      PUID: ${PUID:-99}
+      PGID: ${PGID:-100}
+      DATABASE_URL: postgresql://comicmaintainer:${POSTGRES_PASSWORD:-changeme}@db:5432/comicmaintainer
+    volumes:
+      - ${WATCHED_DIR}:/watched_dir
+      - ${DUPLICATE_DIR}:/duplicate_dir
+      - ${CACHE_DIR:-./cache}:/app/cache
+    ports:
+      - "${WEB_PORT:-5000}:5000"
+
+volumes:
+  postgres_data:

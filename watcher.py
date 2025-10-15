@@ -9,6 +9,7 @@ import logging
 from config import get_watcher_enabled
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
+CACHE_DIR = os.environ.get('CACHE_DIR', '/app/cache')
 PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
 WEB_MODIFIED_MARKER = '.web_modified'
 PROCESSED_MARKER = '.processed_files'
@@ -31,10 +32,13 @@ DEBOUNCE_SECONDS = 30
 
 def record_cache_change(change_type, old_path=None, new_path=None):
     """Record a file change for incremental cache updates"""
-    if not WATCHED_DIR:
+    if not CACHE_DIR:
         return
     
-    changes_file = os.path.join(WATCHED_DIR, CACHE_CHANGES_FILE)
+    # Ensure cache directory exists
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    
+    changes_file = os.path.join(CACHE_DIR, CACHE_CHANGES_FILE)
     
     try:
         import json
@@ -55,10 +59,13 @@ def record_cache_change(change_type, old_path=None, new_path=None):
 
 def update_watcher_timestamp():
     """Update the watcher cache invalidation timestamp"""
-    if not WATCHED_DIR:
+    if not CACHE_DIR:
         return
     
-    marker_path = os.path.join(WATCHED_DIR, CACHE_UPDATE_MARKER)
+    # Ensure cache directory exists
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    
+    marker_path = os.path.join(CACHE_DIR, CACHE_UPDATE_MARKER)
     try:
         with open(marker_path, 'w') as f:
             f.write(str(time.time()))

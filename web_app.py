@@ -24,6 +24,7 @@ logging.basicConfig(
 app = Flask(__name__)
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
+CACHE_DIR = os.environ.get('CACHE_DIR', '/app/cache')
 WEB_MODIFIED_MARKER = '.web_modified'
 PROCESSED_MARKER = '.processed_files'
 DUPLICATE_MARKER = '.duplicate_files'
@@ -69,10 +70,13 @@ def try_acquire_cache_rebuild_lock(timeout=0.1):
     Returns:
         File handle if lock acquired, None if lock could not be acquired
     """
-    if not WATCHED_DIR:
+    if not CACHE_DIR:
         return None
     
-    lock_file_path = os.path.join(WATCHED_DIR, CACHE_REBUILD_LOCK)
+    # Ensure cache directory exists
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    
+    lock_file_path = os.path.join(CACHE_DIR, CACHE_REBUILD_LOCK)
     
     try:
         # Open lock file (create if doesn't exist)
@@ -276,10 +280,13 @@ cleanup_thread.start()
 
 def get_watcher_update_time():
     """Get the last time the watcher updated files"""
-    if not WATCHED_DIR:
+    if not CACHE_DIR:
         return 0
     
-    marker_path = os.path.join(WATCHED_DIR, CACHE_UPDATE_MARKER)
+    # Ensure cache directory exists
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    
+    marker_path = os.path.join(CACHE_DIR, CACHE_UPDATE_MARKER)
     if os.path.exists(marker_path):
         try:
             with open(marker_path, 'r') as f:
@@ -290,10 +297,13 @@ def get_watcher_update_time():
 
 def update_watcher_timestamp():
     """Update the watcher cache invalidation timestamp"""
-    if not WATCHED_DIR:
+    if not CACHE_DIR:
         return
     
-    marker_path = os.path.join(WATCHED_DIR, CACHE_UPDATE_MARKER)
+    # Ensure cache directory exists
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    
+    marker_path = os.path.join(CACHE_DIR, CACHE_UPDATE_MARKER)
     try:
         with open(marker_path, 'w') as f:
             f.write(str(time.time()))
@@ -308,10 +318,13 @@ def record_cache_change(change_type, old_path=None, new_path=None):
         old_path: Original file path (for 'remove' and 'rename')
         new_path: New file path (for 'add' and 'rename')
     """
-    if not WATCHED_DIR:
+    if not CACHE_DIR:
         return
     
-    changes_file = os.path.join(WATCHED_DIR, CACHE_CHANGES_FILE)
+    # Ensure cache directory exists
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    
+    changes_file = os.path.join(CACHE_DIR, CACHE_CHANGES_FILE)
     
     try:
         change_entry = {
@@ -334,10 +347,10 @@ def apply_cache_changes():
     Returns:
         True if changes were applied, False if cache needs full rebuild
     """
-    if not WATCHED_DIR or file_list_cache['files'] is None:
+    if not CACHE_DIR or file_list_cache['files'] is None:
         return False
     
-    changes_file = os.path.join(WATCHED_DIR, CACHE_CHANGES_FILE)
+    changes_file = os.path.join(CACHE_DIR, CACHE_CHANGES_FILE)
     
     if not os.path.exists(changes_file):
         return True  # No changes to apply

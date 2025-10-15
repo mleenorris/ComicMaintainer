@@ -277,9 +277,10 @@ Files are processed and updated when:
 
 ## Production Server
 - The web interface runs on **Gunicorn**, a production-ready WSGI server for Python web applications
-- Configured with 1 worker process to ensure job state consistency (jobs stored in-memory)
-- Concurrent file processing provided by ThreadPoolExecutor (4 threads) within the worker
-- 600-second timeout (10 minutes) to accommodate batch processing operations on large libraries
+- Configured with 2 worker processes by default (configurable via `GUNICORN_WORKERS`)
+- Job state stored in SQLite database for cross-process sharing
+- Concurrent file processing provided by ThreadPoolExecutor (4 threads) within each worker
+- 1800-second timeout (30 minutes) to accommodate batch processing operations and cache rebuilding for very large libraries
 - **Cache coordination**: File-based locking prevents cache rebuild conflicts
 - **Non-blocking cache rebuilds**: Serves stale cache instead of waiting when cache is being rebuilt
 - No development server warnings - ready for production deployment

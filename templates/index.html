@@ -2814,22 +2814,52 @@
                 return;
             }
             
-            showMessage('Processing unmarked files... This may take a while.', 'info');
+            showProgressModal('Processing Unmarked Files...');
+            
+            let successCount = 0;
+            let errorCount = 0;
+            let totalFiles = 0;
             
             try {
-                const response = await fetch('/api/process-unmarked', {
+                const response = await fetch('/api/process-unmarked?stream=true', {
                     method: 'POST'
                 });
                 
-                const result = await response.json();
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
                 
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Processed ${successCount} of ${result.results.length} unmarked files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
-                await loadFiles(1, true);
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.substring(6));
+                            
+                            if (data.done) {
+                                totalFiles = data.results.length;
+                                completeProgress();
+                                showMessage(`Processed ${successCount} of ${totalFiles} unmarked files successfully!`, 'success');
+                                // Refresh file list (force refresh to clear cache)
+                                await loadFiles(1, true);
+                            } else {
+                                if (data.success) {
+                                    successCount++;
+                                } else {
+                                    errorCount++;
+                                }
+                                updateProgress(data.current, data.total, successCount, errorCount);
+                                addProgressDetail(data.file, data.success, data.error);
+                            }
+                        }
+                    }
+                }
             } catch (error) {
                 showMessage('Failed to process unmarked files: ' + error.message, 'error');
+                closeProgressModal();
             }
         }
         
@@ -2838,22 +2868,52 @@
                 return;
             }
             
-            showMessage('Renaming unmarked files... This may take a while.', 'info');
+            showProgressModal('Renaming Unmarked Files...');
+            
+            let successCount = 0;
+            let errorCount = 0;
+            let totalFiles = 0;
             
             try {
-                const response = await fetch('/api/rename-unmarked', {
+                const response = await fetch('/api/rename-unmarked?stream=true', {
                     method: 'POST'
                 });
                 
-                const result = await response.json();
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
                 
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Renamed ${successCount} of ${result.results.length} unmarked files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
-                await loadFiles(1, true);
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.substring(6));
+                            
+                            if (data.done) {
+                                totalFiles = data.results.length;
+                                completeProgress();
+                                showMessage(`Renamed ${successCount} of ${totalFiles} unmarked files successfully!`, 'success');
+                                // Refresh file list (force refresh to clear cache)
+                                await loadFiles(1, true);
+                            } else {
+                                if (data.success) {
+                                    successCount++;
+                                } else {
+                                    errorCount++;
+                                }
+                                updateProgress(data.current, data.total, successCount, errorCount);
+                                addProgressDetail(data.file, data.success, data.error);
+                            }
+                        }
+                    }
+                }
             } catch (error) {
                 showMessage('Failed to rename unmarked files: ' + error.message, 'error');
+                closeProgressModal();
             }
         }
         
@@ -2862,22 +2922,52 @@
                 return;
             }
             
-            showMessage('Normalizing metadata for unmarked files... This may take a while.', 'info');
+            showProgressModal('Normalizing Unmarked Files...');
+            
+            let successCount = 0;
+            let errorCount = 0;
+            let totalFiles = 0;
             
             try {
-                const response = await fetch('/api/normalize-unmarked', {
+                const response = await fetch('/api/normalize-unmarked?stream=true', {
                     method: 'POST'
                 });
                 
-                const result = await response.json();
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
                 
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Normalized metadata for ${successCount} of ${result.results.length} unmarked files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
-                await loadFiles(1, true);
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.substring(6));
+                            
+                            if (data.done) {
+                                totalFiles = data.results.length;
+                                completeProgress();
+                                showMessage(`Normalized metadata for ${successCount} of ${totalFiles} unmarked files successfully!`, 'success');
+                                // Refresh file list (force refresh to clear cache)
+                                await loadFiles(1, true);
+                            } else {
+                                if (data.success) {
+                                    successCount++;
+                                } else {
+                                    errorCount++;
+                                }
+                                updateProgress(data.current, data.total, successCount, errorCount);
+                                addProgressDetail(data.file, data.success, data.error);
+                            }
+                        }
+                    }
+                }
             } catch (error) {
                 showMessage('Failed to normalize metadata for unmarked files: ' + error.message, 'error');
+                closeProgressModal();
             }
         }
         

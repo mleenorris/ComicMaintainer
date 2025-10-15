@@ -14,7 +14,7 @@ from version import __version__
 from markers import (
     is_file_processed, mark_file_processed, unmark_file_processed,
     is_file_duplicate, mark_file_duplicate, unmark_file_duplicate,
-    is_file_web_modified, mark_file_web_modified, clear_file_web_modified,
+    is_file_web_modified, mark_file_web_modified, mark_files_web_modified_batch, clear_file_web_modified,
     cleanup_web_modified_markers
 )
 
@@ -1482,9 +1482,10 @@ def scan_unmarked_files():
 
 @app.route('/api/process-unmarked', methods=['POST'])
 def process_unmarked_files():
-    """API endpoint to process only unmarked files"""
+    """API endpoint to process only unmarked files with streaming progress"""
     from process_file import process_file
     
+    stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files(use_cache=False)
     unmarked_files = []
     
@@ -1493,42 +1494,88 @@ def process_unmarked_files():
         if not is_file_processed(filepath):
             unmarked_files.append(filepath)
     
-    results = []
+    if not stream:
+        # Non-streaming mode (backward compatible) - batch mark all files at once
+        mark_files_web_modified_batch(unmarked_files)
+        
+        results = []
+        for filepath in unmarked_files:
+            try:
+                # Process the file and get the final filepath (may be renamed)
+                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+                
+                # Mark as processed using the final filepath, cleanup old filename if renamed
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+                
+                # Update cache incrementally if file was renamed
+                handle_file_rename_in_cache(filepath, final_filepath)
+                
+                results.append({
+                    'file': os.path.basename(final_filepath),
+                    'success': True
+                })
+                logging.info(f"Processed unmarked file via web interface: {filepath} -> {final_filepath}")
+            except Exception as e:
+                results.append({
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e)
+                })
+                logging.error(f"Error processing unmarked file {filepath}: {e}")
+        
+        return jsonify({'results': results})
     
-    for filepath in unmarked_files:
-        try:
-            # Mark as web modified to prevent watcher from processing
-            mark_file_web_modified(filepath)
+    # Streaming mode - send progress updates
+    def generate():
+        import json
+        
+        # Batch mark all files as web modified upfront to avoid timeout
+        mark_files_web_modified_batch(unmarked_files)
+        
+        results = []
+        for i, filepath in enumerate(unmarked_files):
+            result = {'file': os.path.basename(filepath)}
             
-            # Process the file and get the final filepath (may be renamed)
-            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+            try:
+                # Process the file and get the final filepath (may be renamed)
+                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+                
+                # Mark as processed using the final filepath, cleanup old filename if renamed
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+                
+                # Update cache incrementally if file was renamed
+                handle_file_rename_in_cache(filepath, final_filepath)
+                
+                result['success'] = True
+                logging.info(f"Processed unmarked file via web interface: {filepath} -> {final_filepath}")
+            except Exception as e:
+                result['success'] = False
+                result['error'] = str(e)
+                logging.error(f"Error processing unmarked file {filepath}: {e}")
             
-            # Mark as processed using the final filepath, cleanup old filename if renamed
-            mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+            results.append(result)
             
-            # Update cache incrementally if file was renamed
-            handle_file_rename_in_cache(filepath, final_filepath)
-            
-            results.append({
-                'file': os.path.basename(final_filepath),
-                'success': True
-            })
-            logging.info(f"Processed unmarked file via web interface: {filepath} -> {final_filepath}")
-        except Exception as e:
-            results.append({
-                'file': os.path.basename(filepath),
-                'success': False,
-                'error': str(e)
-            })
-            logging.error(f"Error processing unmarked file {filepath}: {e}")
+            # Send progress update
+            progress = {
+                'current': i + 1,
+                'total': len(unmarked_files),
+                'file': result['file'],
+                'success': result['success'],
+                'error': result.get('error')
+            }
+            yield f"data: {json.dumps(progress)}\n\n"
+        
+        # Send final results
+        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
     
-    return jsonify({'results': results})
+    return app.response_class(generate(), mimetype='text/event-stream')
 
 @app.route('/api/rename-unmarked', methods=['POST'])
 def rename_unmarked_files():
-    """API endpoint to rename only unmarked files"""
+    """API endpoint to rename only unmarked files with streaming progress"""
     from process_file import process_file
     
+    stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files(use_cache=False)
     unmarked_files = []
     
@@ -1537,42 +1584,88 @@ def rename_unmarked_files():
         if not is_file_processed(filepath):
             unmarked_files.append(filepath)
     
-    results = []
+    if not stream:
+        # Non-streaming mode (backward compatible) - batch mark all files at once
+        mark_files_web_modified_batch(unmarked_files)
+        
+        results = []
+        for filepath in unmarked_files:
+            try:
+                # Only rename the file
+                final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+                
+                # Mark as processed using the final filepath
+                mark_file_processed_wrapper(final_filepath)
+                
+                # Update cache incrementally if file was renamed
+                handle_file_rename_in_cache(filepath, final_filepath)
+                
+                results.append({
+                    'file': os.path.basename(final_filepath),
+                    'success': True
+                })
+                logging.info(f"Renamed unmarked file via web interface: {filepath} -> {final_filepath}")
+            except Exception as e:
+                results.append({
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e)
+                })
+                logging.error(f"Error renaming unmarked file {filepath}: {e}")
+        
+        return jsonify({'results': results})
     
-    for filepath in unmarked_files:
-        try:
-            # Mark as web modified to prevent watcher from processing
-            mark_file_web_modified(filepath)
+    # Streaming mode - send progress updates
+    def generate():
+        import json
+        
+        # Batch mark all files as web modified upfront to avoid timeout
+        mark_files_web_modified_batch(unmarked_files)
+        
+        results = []
+        for i, filepath in enumerate(unmarked_files):
+            result = {'file': os.path.basename(filepath)}
             
-            # Only rename the file
-            final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+            try:
+                # Only rename the file
+                final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+                
+                # Mark as processed using the final filepath
+                mark_file_processed_wrapper(final_filepath)
+                
+                # Update cache incrementally if file was renamed
+                handle_file_rename_in_cache(filepath, final_filepath)
+                
+                result['success'] = True
+                logging.info(f"Renamed unmarked file via web interface: {filepath} -> {final_filepath}")
+            except Exception as e:
+                result['success'] = False
+                result['error'] = str(e)
+                logging.error(f"Error renaming unmarked file {filepath}: {e}")
             
-            # Mark as processed using the final filepath
-            mark_file_processed_wrapper(final_filepath)
+            results.append(result)
             
-            # Update cache incrementally if file was renamed
-            handle_file_rename_in_cache(filepath, final_filepath)
-            
-            results.append({
-                'file': os.path.basename(final_filepath),
-                'success': True
-            })
-            logging.info(f"Renamed unmarked file via web interface: {filepath} -> {final_filepath}")
-        except Exception as e:
-            results.append({
-                'file': os.path.basename(filepath),
-                'success': False,
-                'error': str(e)
-            })
-            logging.error(f"Error renaming unmarked file {filepath}: {e}")
+            # Send progress update
+            progress = {
+                'current': i + 1,
+                'total': len(unmarked_files),
+                'file': result['file'],
+                'success': result['success'],
+                'error': result.get('error')
+            }
+            yield f"data: {json.dumps(progress)}\n\n"
+        
+        # Send final results
+        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
     
-    return jsonify({'results': results})
+    return app.response_class(generate(), mimetype='text/event-stream')
 
 @app.route('/api/normalize-unmarked', methods=['POST'])
 def normalize_unmarked_files():
-    """API endpoint to normalize metadata for only unmarked files"""
+    """API endpoint to normalize metadata for only unmarked files with streaming progress"""
     from process_file import process_file
     
+    stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files(use_cache=False)
     unmarked_files = []
     
@@ -1581,33 +1674,75 @@ def normalize_unmarked_files():
         if not is_file_processed(filepath):
             unmarked_files.append(filepath)
     
-    results = []
+    if not stream:
+        # Non-streaming mode (backward compatible) - batch mark all files at once
+        mark_files_web_modified_batch(unmarked_files)
+        
+        results = []
+        for filepath in unmarked_files:
+            try:
+                # Only normalize metadata
+                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+                
+                # Mark as processed using the final filepath
+                mark_file_processed_wrapper(final_filepath)
+                
+                results.append({
+                    'file': os.path.basename(final_filepath),
+                    'success': True
+                })
+                logging.info(f"Normalized metadata for unmarked file via web interface: {filepath}")
+            except Exception as e:
+                results.append({
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e)
+                })
+                logging.error(f"Error normalizing metadata for unmarked file {filepath}: {e}")
+        
+        return jsonify({'results': results})
     
-    for filepath in unmarked_files:
-        try:
-            # Mark as web modified to prevent watcher from processing
-            mark_file_web_modified(filepath)
+    # Streaming mode - send progress updates
+    def generate():
+        import json
+        
+        # Batch mark all files as web modified upfront to avoid timeout
+        mark_files_web_modified_batch(unmarked_files)
+        
+        results = []
+        for i, filepath in enumerate(unmarked_files):
+            result = {'file': os.path.basename(filepath)}
             
-            # Only normalize metadata
-            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+            try:
+                # Only normalize metadata
+                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+                
+                # Mark as processed using the final filepath
+                mark_file_processed_wrapper(final_filepath)
+                
+                result['success'] = True
+                logging.info(f"Normalized metadata for unmarked file via web interface: {filepath}")
+            except Exception as e:
+                result['success'] = False
+                result['error'] = str(e)
+                logging.error(f"Error normalizing metadata for unmarked file {filepath}: {e}")
             
-            # Mark as processed using the final filepath
-            mark_file_processed_wrapper(final_filepath)
+            results.append(result)
             
-            results.append({
-                'file': os.path.basename(final_filepath),
-                'success': True
-            })
-            logging.info(f"Normalized metadata for unmarked file via web interface: {filepath}")
-        except Exception as e:
-            results.append({
-                'file': os.path.basename(filepath),
-                'success': False,
-                'error': str(e)
-            })
-            logging.error(f"Error normalizing metadata for unmarked file {filepath}: {e}")
+            # Send progress update
+            progress = {
+                'current': i + 1,
+                'total': len(unmarked_files),
+                'file': result['file'],
+                'success': result['success'],
+                'error': result.get('error')
+            }
+            yield f"data: {json.dumps(progress)}\n\n"
+        
+        # Send final results
+        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
     
-    return jsonify({'results': results})
+    return app.response_class(generate(), mimetype='text/event-stream')
 
 @app.route('/api/delete-file/<path:filepath>', methods=['DELETE'])
 def delete_single_file(filepath):

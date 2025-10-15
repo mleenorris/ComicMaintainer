@@ -236,6 +236,18 @@ def mark_file_web_modified(filepath: str):
         _save_marker_set(WEB_MODIFIED_MARKER_FILE, web_modified_files)
 
 
+def mark_files_web_modified_batch(filepaths: list):
+    """Mark multiple files as modified by the web interface in a single write operation"""
+    abs_paths = [os.path.abspath(fp) for fp in filepaths]
+    
+    with _web_modified_lock:
+        web_modified_files = _load_marker_set(WEB_MODIFIED_MARKER_FILE)
+        web_modified_files.update(abs_paths)
+        _save_marker_set(WEB_MODIFIED_MARKER_FILE, web_modified_files)
+    
+    logging.info(f"Batch marked {len(abs_paths)} files as web modified")
+
+
 def clear_file_web_modified(filepath: str):
     """Clear the web modified marker for a file (consumed by watcher)"""
     abs_path = os.path.abspath(filepath)

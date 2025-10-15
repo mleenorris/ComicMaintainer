@@ -152,8 +152,79 @@ def format_filename(template, tags, issue_number):
     
     return result
 
+def is_file_already_normalized(filepath, fixtitle=True, fixseries=True, fixfilename=True, comicfolder=None):
+    """
+    Check if a file is already normalized (metadata and filename match expected format).
+    Returns True if the file doesn't need any changes.
+    """
+    try:
+        ca = ComicArchive(filepath)
+        tags = ca.read_tags('cr')
+        
+        # Check title normalization if requested
+        if fixtitle:
+            issue_number = None
+            try:
+                if tags.issue:
+                    issue_number = tags.issue
+            except:
+                pass
+            
+            if not issue_number:
+                issue_number = parse_chapter_number(os.path.basename(filepath))
+            
+            if issue_number:
+                expected_title = f"Chapter {issue_number}"
+                if tags.title != expected_title:
+                    return False
+            else:
+                # Can't determine issue number, so can't verify title
+                return False
+        
+        # Check series normalization if requested
+        if fixseries:
+            if not comicfolder:
+                comicfolder = os.path.dirname(filepath)
+            seriesname = os.path.basename(comicfolder)
+            seriesname = seriesname.replace('_', ':')
+            seriesnamecompare = seriesname.replace("'", "\u0027")
+            seriesnamecompare = re.sub(r"\(\*\)|\[\*\]", "", seriesnamecompare)
+            
+            series_name_tag = tags.series
+            if series_name_tag:
+                tags_series_compare = re.sub(r"\(\*\)|\[\*\]", "", series_name_tag)
+                if tags_series_compare.strip() != seriesnamecompare.strip():
+                    return False
+            else:
+                # No series tag, needs to be set
+                return False
+        
+        # Check filename normalization if requested
+        if fixfilename:
+            if not tags.issue:
+                # Can't format filename without issue number
+                return False
+                
+            filename_template = get_filename_format()
+            expected_filename = format_filename(filename_template, tags, tags.issue or '')
+            current_filename = os.path.basename(filepath)
+            
+            if current_filename != expected_filename:
+                return False
+        
+        return True
+    except Exception as e:
+        logging.error(f"Error checking if file is normalized: {e}")
+        return False
+
 def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comicfolder=None):
     logging.info(f"Processing file: {filepath}")
+    
+    # Check if file is already normalized
+    if is_file_already_normalized(filepath, fixtitle=fixtitle, fixseries=fixseries, fixfilename=fixfilename, comicfolder=comicfolder):
+        logging.info(f"File {os.path.basename(filepath)} is already normalized. Skipping processing.")
+        return filepath
+    
     ca = ComicArchive(filepath)
 
     tags = ca.read_tags('cr')

@@ -2942,6 +2942,8 @@
         async function pollJobStatus(jobId, title) {
             const pollInterval = 500; // Poll every 500ms
             let lastProcessed = 0;
+            let consecutiveErrors = 0;
+            const maxConsecutiveErrors = 5; // Give up after 5 consecutive errors
             
             console.log(`[JOB ${jobId}] Starting to poll job status: ${title}`);
             
@@ -2949,23 +2951,60 @@
             await setActiveJobOnServer(jobId, title);
             hasActiveJob = true;
             
-            try {
-                while (true) {
+            while (true) {
+                try {
                     const response = await fetch(`/api/jobs/${jobId}`);
                     
                     if (!response.ok) {
-                        const errorData = await response.json().catch(() => ({}));
-                        const errorMessage = errorData.error || `Failed to get job status (HTTP ${response.status})`;
-                        console.error(`[JOB ${jobId}] Status check failed: ${errorMessage}`);
-                        throw new Error(errorMessage);
+                        // Handle different HTTP status codes differently
+                        if (response.status === 404) {
+                            // Job not found - it was likely cleaned up or deleted
+                            console.warn(`[JOB ${jobId}] Job not found (404) - may have been cleaned up`);
+                            closeProgressModal();
+                            showMessage('Job no longer exists on server', 'warning');
+                            await clearActiveJobOnServer();
+                            hasActiveJob = false;
+                            break;
+                        } else if (response.status >= 500) {
+                            // Server error - retry with backoff
+                            consecutiveErrors++;
+                            console.warn(`[JOB ${jobId}] Server error (${response.status}), retry ${consecutiveErrors}/${maxConsecutiveErrors}`);
+                            
+                            if (consecutiveErrors >= maxConsecutiveErrors) {
+                                throw new Error(`Server error after ${maxConsecutiveErrors} retries (HTTP ${response.status})`);
+                            }
+                            
+                            // Exponential backoff: wait longer after each error
+                            const backoffDelay = pollInterval * Math.pow(2, consecutiveErrors - 1);
+                            await new Promise(resolve => setTimeout(resolve, backoffDelay));
+                            continue;
+                        } else {
+                            // Other client errors - these are probably permanent
+                            const errorData = await response.json().catch(() => ({}));
+                            const errorMessage = errorData.error || `Failed to get job status (HTTP ${response.status})`;
+                            console.error(`[JOB ${jobId}] Status check failed: ${errorMessage}`);
+                            throw new Error(errorMessage);
+                        }
                     }
                     
                     const status = await response.json();
                     
                     // Validate status object
                     if (!status || typeof status.processed_items === 'undefined' || typeof status.total_items === 'undefined') {
-                        throw new Error('Invalid job status response');
+                        // Invalid response - retry
+                        consecutiveErrors++;
+                        console.warn(`[JOB ${jobId}] Invalid job status response, retry ${consecutiveErrors}/${maxConsecutiveErrors}`);
+                        
+                        if (consecutiveErrors >= maxConsecutiveErrors) {
+                            throw new Error('Invalid job status response after multiple retries');
+                        }
+                        
+                        await new Promise(resolve => setTimeout(resolve, pollInterval));
+                        continue;
                     }
+                    
+                    // Reset error counter on successful fetch
+                    consecutiveErrors = 0;
                     
                     // Update progress
                     const processed = status.processed_items;
@@ -3029,14 +3068,27 @@
                     
                     // Wait before next poll
                     await new Promise(resolve => setTimeout(resolve, pollInterval));
+                    
+                } catch (error) {
+                    // Network error or other exception
+                    consecutiveErrors++;
+                    console.warn(`[JOB ${jobId}] Error during polling: ${error.message}, retry ${consecutiveErrors}/${maxConsecutiveErrors}`);
+                    
+                    if (consecutiveErrors >= maxConsecutiveErrors) {
+                        // Too many errors - give up
+                        console.error(`[JOB ${jobId}] Giving up after ${maxConsecutiveErrors} consecutive errors`);
+                        showMessage('Lost connection to server. Job may still be running. Refresh to check status.', 'error');
+                        closeProgressModal();
+                        // DON'T clear active job from server - it might still be running
+                        // The user can refresh to check if it's still active
+                        hasActiveJob = false;
+                        break;
+                    }
+                    
+                    // Exponential backoff: wait longer after each error
+                    const backoffDelay = pollInterval * Math.pow(2, consecutiveErrors - 1);
+                    await new Promise(resolve => setTimeout(resolve, backoffDelay));
                 }
-            } catch (error) {
-                console.error(`[JOB ${jobId}] Error during polling: ${error.message}`);
-                showMessage('Error checking job status: ' + error.message, 'error');
-                closeProgressModal();
-                // Clear active job from server on error
-                await clearActiveJobOnServer();
-                hasActiveJob = false;
             }
         }
         
@@ -3059,11 +3111,24 @@
                 const response = await fetch(`/api/jobs/${activeJobId}`);
                 
                 if (!response.ok) {
-                    // Job not found (may have been cleaned up), clear from server
-                    console.warn(`[JOB RESUME] Job ${activeJobId} not found on server (HTTP ${response.status})`);
-                    await clearActiveJobOnServer();
-                    showMessage('Previous batch processing job is no longer available', 'warning');
-                    return;
+                    if (response.status === 404) {
+                        // Job not found (was cleaned up or deleted)
+                        console.warn(`[JOB RESUME] Job ${activeJobId} not found (404) - was cleaned up`);
+                        await clearActiveJobOnServer();
+                        showMessage('Previous batch processing job is no longer available', 'warning');
+                        return;
+                    } else if (response.status >= 500) {
+                        // Server error - don't clear the job, user can refresh to try again
+                        console.error(`[JOB RESUME] Server error (${response.status}) checking job ${activeJobId}`);
+                        showMessage('Server error checking job status. Please refresh to try again.', 'error');
+                        return;
+                    } else {
+                        // Other client errors
+                        console.warn(`[JOB RESUME] Error ${response.status} checking job ${activeJobId}`);
+                        await clearActiveJobOnServer();
+                        showMessage('Previous batch processing job is no longer available', 'warning');
+                        return;
+                    }
                 }
                 
                 const status = await response.json();
@@ -3112,10 +3177,11 @@
                     await clearActiveJobOnServer();
                 }
             } catch (error) {
+                // Network error or other exception
                 console.error(`[JOB RESUME] Error checking active job ${activeJobId}:`, error);
-                // Clear stale job data from server
-                await clearActiveJobOnServer();
-                showMessage('Could not resume previous batch processing job', 'warning');
+                // Don't clear the job on network errors - it might still be running
+                // User can refresh to try again
+                showMessage('Could not check job status. Please refresh to try again.', 'warning');
             }
         }
         

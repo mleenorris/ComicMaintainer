@@ -80,7 +80,7 @@ docker run -d \
 - `WATCHED_DIR` **must** be set to the directory to watch (usually `/watched_dir` if using the example above).
 - Optionally, mount a host directory to `/duplicates` to persist duplicates.
 - **Required**: Mount a host directory to `/Config` to persist:
-  - Marker files (processed files, duplicates, web-modified files)
+  - Marker database (processed files, duplicates, web-modified files stored in SQLite)
   - Configuration settings (filename format, watcher enabled, log rotation)
   - User preferences (theme, pagination settings) stored in SQLite
   - Active job tracking for batch processing resumption
@@ -292,9 +292,10 @@ The application stores all persistent data in `/Config`. **To preserve your data
 
 When you mount `/Config`, the following data is preserved:
 
-1. **Marker Files** - Track which files have been processed, duplicates, and web modifications
-   - Located in `/Config/markers/`
-   - `processed_files.json`, `duplicate_files.json`, `web_modified_files.json`
+1. **Marker Database** - Track which files have been processed, duplicates, and web modifications
+   - Located in `/Config/markers/markers.db` (SQLite database)
+   - Automatically migrates from legacy JSON files on first startup
+   - More efficient and reliable than JSON files
 
 2. **Configuration Settings** - Saved via the web interface Settings menu
    - Located at `/Config/config.json`
@@ -320,10 +321,17 @@ docker run -d \
   iceburn1/comictagger-watcher:latest
 ```
 
-**Important**: The `/host/config` directory on your host will contain all marker files, configuration, logs, and cache. Make sure it's backed up if you want to preserve your processing history and settings.
+**Important**: The `/host/config` directory on your host will contain the marker database, configuration, logs, and cache. Make sure it's backed up if you want to preserve your processing history and settings.
 
 ### Migrating from Previous Versions
 
+**Marker Storage Migration (JSON to SQLite):**
+- Marker data has been migrated from JSON files to a SQLite database for better performance and reliability
+- On first startup, existing JSON marker files will be automatically imported into the database
+- Original JSON files are preserved as backups (e.g., `processed_files.json.migrated.TIMESTAMP`)
+- No action required - migration happens automatically
+
+**Previous Versions:**
 If upgrading from a version where configuration and logs were stored in `/app` or used the `CACHE_DIR` environment variable:
 - Your old configuration will not be automatically migrated
 - The application will use default settings on first run

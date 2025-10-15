@@ -2194,7 +2194,16 @@
             // Poll every 2 seconds to check if rebuild is complete
             cacheRebuildPollTimer = setInterval(async () => {
                 try {
-                    const response = await fetch(`/api/files?page=${currentPage}&per_page=${perPage}`);
+                    // Build URL with current page and filters for consistent polling
+                    let url = `/api/files?page=${currentPage}&per_page=${perPage}`;
+                    if (searchQuery) {
+                        url += `&search=${encodeURIComponent(searchQuery)}`;
+                    }
+                    if (filterMode !== 'all') {
+                        url += `&filter=${encodeURIComponent(filterMode)}`;
+                    }
+                    
+                    const response = await fetch(url);
                     if (!response.ok) return;
                     
                     const data = await response.json();

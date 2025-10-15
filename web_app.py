@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+from logging.handlers import RotatingFileHandler
 import json
 import fcntl
 from flask import Flask, render_template, jsonify, request, send_from_directory
@@ -8,7 +9,7 @@ from comicapi.comicarchive import ComicArchive
 import glob
 import threading
 import time
-from config import get_filename_format, set_filename_format, DEFAULT_FILENAME_FORMAT, get_watcher_enabled, set_watcher_enabled
+from config import get_filename_format, set_filename_format, DEFAULT_FILENAME_FORMAT, get_watcher_enabled, set_watcher_enabled, get_log_max_bytes, set_log_max_bytes
 from version import __version__
 from markers import (
     is_file_processed, mark_file_processed, unmark_file_processed,
@@ -17,12 +18,21 @@ from markers import (
     cleanup_web_modified_markers
 )
 
-# Set up logging
+# Set up logging with rotation
+log_max_bytes = get_log_max_bytes()
+log_handler = RotatingFileHandler(
+    "ComicMaintainer.log",
+    maxBytes=log_max_bytes,
+    backupCount=3
+)
+log_handler.setLevel(logging.INFO)
+log_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s %(message)s',
     handlers=[
-        logging.FileHandler("ComicMaintainer.log"),
+        log_handler,
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -1376,6 +1386,40 @@ def set_watcher_enabled_api():
         return jsonify({'success': True, 'enabled': enabled})
     else:
         return jsonify({'error': 'Failed to save watcher enabled setting'}), 500
+
+@app.route('/api/settings/log-max-bytes', methods=['GET'])
+def get_log_max_bytes_api():
+    """API endpoint to get the log max bytes setting"""
+    return jsonify({
+        'maxBytes': get_log_max_bytes(),
+        'maxMB': get_log_max_bytes() / (1024 * 1024)
+    })
+
+@app.route('/api/settings/log-max-bytes', methods=['POST'])
+def set_log_max_bytes_api():
+    """API endpoint to set the log max bytes setting"""
+    data = request.json
+    max_mb = data.get('maxMB')
+    
+    if max_mb is None:
+        return jsonify({'error': 'maxMB value is required'}), 400
+    
+    try:
+        max_mb = float(max_mb)
+        if max_mb <= 0:
+            return jsonify({'error': 'maxMB must be greater than 0'}), 400
+        
+        max_bytes = int(max_mb * 1024 * 1024)
+        success = set_log_max_bytes(max_bytes)
+        
+        if success:
+            logging.info(f"Log max size updated to {max_mb}MB ({max_bytes} bytes)")
+            # Note: The actual log handler rotation limit will be applied on next restart
+            return jsonify({'success': True, 'maxBytes': max_bytes, 'maxMB': max_mb})
+        else:
+            return jsonify({'error': 'Failed to save log max bytes setting'}), 500
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid maxMB value'}), 400
 
 @app.route('/api/version', methods=['GET'])
 def get_version():

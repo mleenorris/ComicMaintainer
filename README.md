@@ -86,6 +86,7 @@ docker run -d \
 - `CACHE_DIR`: Directory for server-side caching files (default: `/app/cache`)
 - `PUID`: User ID to run the service as (default: `99` for user `nobody`)
 - `PGID`: Group ID to run the service as (default: `100` for group `users`)
+- `LOG_MAX_BYTES`: Maximum log file size in bytes before rotation (default: `5242880` = 5MB). Can also be configured via the Settings UI.
 
 ## Web Interface
 The service includes a web-based interface for managing your comic files:
@@ -124,7 +125,8 @@ The service includes a web-based interface for managing your comic files:
    - **Delete**: Remove the file
 10. Select multiple files and click "Update Selected" to batch update common tags
 11. Use the **three-dot menu (⋮)** in the top-right header to access:
-    - **Settings**: Configure the filename format for renamed files and theme
+    - **Settings**: Configure the filename format for renamed files, theme, watcher, and log rotation
+    - **View Logs**: View application logs directly in the browser
     - **Toggle Theme**: Switch between light and dark mode
     - **Refresh**: Update the file list (automatically clears cache)
     - **Scan Unmarked**: See a count of processed vs unprocessed files
@@ -234,6 +236,12 @@ Files are processed and updated when:
 
 ## Logging
 - All actions and errors are logged to `ComicMaintainer.log` (located in `/app/ComicMaintainer.log` within the container).
+- **Log Rotation**: Log files are automatically rotated when they reach a configurable size limit (default: 5MB)
+  - Up to 3 backup files are kept (`ComicMaintainer.log.1`, `.2`, `.3`)
+  - The rotation limit can be configured:
+    - Via the **Settings** menu in the web interface (changes take effect on restart)
+    - Via the `LOG_MAX_BYTES` environment variable (in bytes, e.g., `LOG_MAX_BYTES=10485760` for 10MB)
+  - View logs directly in the web interface via the "View Logs" option in the settings menu
 
 ## GitHub Actions / CI
 - The repository includes a GitHub Actions workflow to automatically build and push the Docker image to Docker Hub on every push or pull request to `master`.

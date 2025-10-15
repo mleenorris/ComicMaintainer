@@ -2694,22 +2694,52 @@
                 return;
             }
             
-            showMessage('Renaming all files... This may take a while.', 'info');
+            showProgressModal('Renaming All Files...');
+            
+            let successCount = 0;
+            let errorCount = 0;
+            let totalFiles = 0;
             
             try {
-                const response = await fetch('/api/rename-all', {
+                const response = await fetch('/api/rename-all?stream=true', {
                     method: 'POST'
                 });
                 
-                const result = await response.json();
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
                 
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Renamed ${successCount} of ${result.results.length} files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
-                await loadFiles(1, true);
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.substring(6));
+                            
+                            if (data.done) {
+                                totalFiles = data.results.length;
+                                completeProgress();
+                                showMessage(`Renamed ${successCount} of ${totalFiles} files successfully!`, 'success');
+                                // Refresh file list (force refresh to clear cache)
+                                await loadFiles(1, true);
+                            } else {
+                                if (data.success) {
+                                    successCount++;
+                                } else {
+                                    errorCount++;
+                                }
+                                updateProgress(data.current, data.total, successCount, errorCount);
+                                addProgressDetail(data.file, data.success, data.error);
+                            }
+                        }
+                    }
+                }
             } catch (error) {
                 showMessage('Failed to rename files: ' + error.message, 'error');
+                closeProgressModal();
             }
         }
         
@@ -2718,22 +2748,52 @@
                 return;
             }
             
-            showMessage('Normalizing metadata for all files... This may take a while.', 'info');
+            showProgressModal('Normalizing Metadata...');
+            
+            let successCount = 0;
+            let errorCount = 0;
+            let totalFiles = 0;
             
             try {
-                const response = await fetch('/api/normalize-all', {
+                const response = await fetch('/api/normalize-all?stream=true', {
                     method: 'POST'
                 });
                 
-                const result = await response.json();
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
                 
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Normalized metadata for ${successCount} of ${result.results.length} files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
-                await loadFiles(1, true);
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.substring(6));
+                            
+                            if (data.done) {
+                                totalFiles = data.results.length;
+                                completeProgress();
+                                showMessage(`Normalized metadata for ${successCount} of ${totalFiles} files successfully!`, 'success');
+                                // Refresh file list (force refresh to clear cache)
+                                await loadFiles(1, true);
+                            } else {
+                                if (data.success) {
+                                    successCount++;
+                                } else {
+                                    errorCount++;
+                                }
+                                updateProgress(data.current, data.total, successCount, errorCount);
+                                addProgressDetail(data.file, data.success, data.error);
+                            }
+                        }
+                    }
+                }
             } catch (error) {
                 showMessage('Failed to normalize metadata: ' + error.message, 'error');
+                closeProgressModal();
             }
         }
         
@@ -2883,28 +2943,57 @@
                 return;
             }
             
-            showMessage('Renaming selected files... This may take a while.', 'info');
+            showProgressModal('Renaming Selected Files...');
+            
+            const files = Array.from(selectedFiles);
+            let successCount = 0;
+            let errorCount = 0;
             
             try {
-                const response = await fetch('/api/rename-selected', {
+                const response = await fetch('/api/rename-selected?stream=true', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        files: Array.from(selectedFiles)
+                        files: files
                     })
                 });
                 
-                const result = await response.json();
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
                 
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Renamed ${successCount} of ${result.results.length} files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
-                await loadFiles(1, true);
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.substring(6));
+                            
+                            if (data.done) {
+                                completeProgress();
+                                showMessage(`Renamed ${successCount} of ${files.length} files successfully!`, 'success');
+                                // Refresh file list (force refresh to clear cache)
+                                await loadFiles(1, true);
+                            } else {
+                                if (data.success) {
+                                    successCount++;
+                                } else {
+                                    errorCount++;
+                                }
+                                updateProgress(data.current, data.total, successCount, errorCount);
+                                addProgressDetail(data.file, data.success, data.error);
+                            }
+                        }
+                    }
+                }
             } catch (error) {
                 showMessage('Failed to rename files: ' + error.message, 'error');
+                closeProgressModal();
             }
         }
         
@@ -2918,28 +3007,57 @@
                 return;
             }
             
-            showMessage('Normalizing metadata for selected files... This may take a while.', 'info');
+            showProgressModal('Normalizing Metadata for Selected Files...');
+            
+            const files = Array.from(selectedFiles);
+            let successCount = 0;
+            let errorCount = 0;
             
             try {
-                const response = await fetch('/api/normalize-selected', {
+                const response = await fetch('/api/normalize-selected?stream=true', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        files: Array.from(selectedFiles)
+                        files: files
                     })
                 });
                 
-                const result = await response.json();
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
                 
-                const successCount = result.results.filter(r => r.success).length;
-                showMessage(`Normalized metadata for ${successCount} of ${result.results.length} files successfully!`, 'success');
-                
-                // Refresh file list (force refresh to clear cache)
-                await loadFiles(1, true);
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value);
+                    const lines = chunk.split('\n');
+                    
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const data = JSON.parse(line.substring(6));
+                            
+                            if (data.done) {
+                                completeProgress();
+                                showMessage(`Normalized metadata for ${successCount} of ${files.length} files successfully!`, 'success');
+                                // Refresh file list (force refresh to clear cache)
+                                await loadFiles(1, true);
+                            } else {
+                                if (data.success) {
+                                    successCount++;
+                                } else {
+                                    errorCount++;
+                                }
+                                updateProgress(data.current, data.total, successCount, errorCount);
+                                addProgressDetail(data.file, data.success, data.error);
+                            }
+                        }
+                    }
+                }
             } catch (error) {
                 showMessage('Failed to normalize metadata: ' + error.message, 'error');
+                closeProgressModal();
             }
         }
         

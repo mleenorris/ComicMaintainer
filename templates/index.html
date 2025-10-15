@@ -2787,10 +2787,17 @@
                     const response = await fetch(`/api/jobs/${jobId}`);
                     
                     if (!response.ok) {
-                        throw new Error('Failed to get job status');
+                        const errorData = await response.json().catch(() => ({}));
+                        const errorMessage = errorData.error || `Failed to get job status (HTTP ${response.status})`;
+                        throw new Error(errorMessage);
                     }
                     
                     const status = await response.json();
+                    
+                    // Validate status object
+                    if (!status || typeof status.processed_items === 'undefined' || typeof status.total_items === 'undefined') {
+                        throw new Error('Invalid job status response');
+                    }
                     
                     // Update progress
                     const processed = status.processed_items;
@@ -2800,21 +2807,25 @@
                     let successCount = 0;
                     let errorCount = 0;
                     
-                    for (const result of status.results) {
-                        if (result.success) {
-                            successCount++;
-                        } else {
-                            errorCount++;
+                    if (status.results && Array.isArray(status.results)) {
+                        for (const result of status.results) {
+                            if (result.success) {
+                                successCount++;
+                            } else {
+                                errorCount++;
+                            }
                         }
                     }
                     
                     updateProgress(processed, total, successCount, errorCount);
                     
                     // Add details for newly processed items
-                    if (processed > lastProcessed) {
-                        for (let i = lastProcessed; i < processed; i++) {
+                    if (processed > lastProcessed && status.results && Array.isArray(status.results)) {
+                        for (let i = lastProcessed; i < Math.min(processed, status.results.length); i++) {
                             const result = status.results[i];
-                            addProgressDetail(result.item, result.success, result.error);
+                            if (result) {
+                                addProgressDetail(result.item, result.success, result.error);
+                            }
                         }
                         lastProcessed = processed;
                     }

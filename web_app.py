@@ -18,6 +18,10 @@ from markers import (
     cleanup_web_modified_markers
 )
 from job_manager import get_job_manager, JobResult
+from preferences_store import (
+    get_preference, set_preference, get_all_preferences,
+    get_active_job, set_active_job, clear_active_job
+)
 
 CONFIG_DIR = '/Config'
 LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
@@ -1908,6 +1912,78 @@ def delete_single_file(filepath):
         return jsonify({'success': True})
     except Exception as e:
         logging.error(f"Error deleting file {full_path}: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/preferences', methods=['GET'])
+def get_preferences_endpoint():
+    """API endpoint to get all user preferences"""
+    try:
+        preferences = get_all_preferences()
+        # Add defaults for common preferences if not set
+        if 'theme' not in preferences:
+            preferences['theme'] = None  # Will use system preference
+        if 'perPage' not in preferences:
+            preferences['perPage'] = 100
+        return jsonify(preferences)
+    except Exception as e:
+        logging.error(f"Error getting preferences: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/preferences', methods=['POST'])
+def set_preferences_endpoint():
+    """API endpoint to set user preferences"""
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Update each preference
+        for key, value in data.items():
+            set_preference(key, value)
+        
+        return jsonify({'success': True, 'message': 'Preferences updated'})
+    except Exception as e:
+        logging.error(f"Error setting preferences: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/active-job', methods=['GET'])
+def get_active_job_endpoint():
+    """API endpoint to get the currently active job"""
+    try:
+        active_job = get_active_job()
+        if active_job:
+            return jsonify(active_job)
+        else:
+            return jsonify({'job_id': None, 'job_title': None})
+    except Exception as e:
+        logging.error(f"Error getting active job: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/active-job', methods=['POST'])
+def set_active_job_endpoint():
+    """API endpoint to set the currently active job"""
+    try:
+        data = request.json
+        if not data or 'job_id' not in data:
+            return jsonify({'error': 'job_id is required'}), 400
+        
+        job_id = data['job_id']
+        job_title = data.get('job_title', 'Processing...')
+        
+        set_active_job(job_id, job_title)
+        return jsonify({'success': True, 'message': 'Active job set'})
+    except Exception as e:
+        logging.error(f"Error setting active job: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/active-job', methods=['DELETE'])
+def clear_active_job_endpoint():
+    """API endpoint to clear the currently active job"""
+    try:
+        clear_active_job()
+        return jsonify({'success': True, 'message': 'Active job cleared'})
+    except Exception as e:
+        logging.error(f"Error clearing active job: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/cache/prewarm', methods=['POST'])

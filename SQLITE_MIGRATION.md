@@ -82,8 +82,8 @@ CREATE TABLE job_results (
   - Recommended: 2-4 for most deployments
   - Can increase for high-traffic installations
 
-- **`CACHE_DIR`** (default: `/app/cache`) - Directory for persistent data
-  - Job database stored as `{CACHE_DIR}/jobs.db`
+- **`/Config`** - Directory for persistent data (hardcoded, no env var needed)
+  - Job database stored as `/Config/jobs.db`
   - Should be mounted to host for persistence
 
 ### Example Docker Run
@@ -91,9 +91,8 @@ CREATE TABLE job_results (
 ```bash
 docker run -d \
   -v /path/to/comics:/watched_dir \
-  -v /path/to/cache:/config \
+  -v /path/to/cache:/Config \
   -e WATCHED_DIR=/watched_dir \
-  -e CACHE_DIR=/config \
   -e GUNICORN_WORKERS=4 \
   -p 5000:5000 \
   iceburn1/comictagger-watcher:latest
@@ -153,14 +152,14 @@ All changes have been thoroughly tested:
 If you see database lock errors:
 - Check disk I/O performance
 - Reduce number of workers
-- Ensure CACHE_DIR is on a fast filesystem
+- Ensure `/Config` is on a fast filesystem
 
 ### Jobs not appearing
 
 If jobs aren't showing up:
-- Verify all workers are using the same CACHE_DIR
+- Verify all workers can access `/Config`
 - Check database file permissions
-- Look for errors in ComicMaintainer.log
+- Look for errors in `/Config/Log/ComicMaintainer.log`
 
 ### Performance issues
 

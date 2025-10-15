@@ -26,7 +26,7 @@ The original implementation had performance issues when searching and filtering 
 **Location**: `markers.py`, `web_app.py`, `watcher.py`, `process_file.py`
 
 Moved marker files from the watched directory to centralized server-side storage:
-1. **Centralized location**: All markers now stored in `CACHE_DIR/markers/` directory
+1. **Centralized location**: All markers now stored in `/Config/markers/` directory
 2. **JSON format**: Markers stored as JSON files with absolute file paths
 3. **Thread-safe**: Proper locking for concurrent access
 4. **Atomic writes**: Files are written atomically to prevent corruption
@@ -34,7 +34,7 @@ Moved marker files from the watched directory to centralized server-side storage
 
 **Key changes**:
 - Created new `markers.py` module for centralized marker management
-- Markers stored as JSON files in `CACHE_DIR/markers/` instead of scattered `.processed_files`, `.duplicate_files`, and `.web_modified` files throughout the watched directory
+- Markers stored as JSON files in `/Config/markers/` instead of scattered `.processed_files`, `.duplicate_files`, and `.web_modified` files throughout the watched directory
 - All modules updated to use centralized marker functions
 - Clean watched directory - no more hidden marker files
 - Implemented atomic file writes using temp files and atomic rename
@@ -150,18 +150,20 @@ Cache is automatically invalidated when:
 ## Configuration Persistence
 **Location**: `config.py`, `README.md`
 
-Starting from this version, `config.json` is now stored in `CACHE_DIR` instead of the application directory (`/app`). This change ensures all persistent application data is stored in one location that can be easily mounted as a volume for persistence across container restarts.
+Starting from this version, all persistent data is now stored in `/Config` directory. This change ensures all persistent application data is stored in one location that can be easily mounted as a volume for persistence across container restarts.
 
-**What is persisted in `CACHE_DIR`:**
-1. **Marker files** (`CACHE_DIR/markers/`):
+**What is persisted in `/Config`:**
+1. **Marker files** (`/Config/markers/`):
    - `processed_files.json` - tracks files that have been processed
    - `duplicate_files.json` - tracks files marked as duplicates
    - `web_modified_files.json` - tracks files modified via web interface
-2. **Configuration** (`CACHE_DIR/config.json`):
+2. **Configuration** (`/Config/config.json`):
    - Filename format template
    - Watcher enabled/disabled state
    - Log rotation settings
-3. **Cache files**:
+3. **Log files** (`/Config/Log/`):
+   - `ComicMaintainer.log` - application logs with automatic rotation
+4. **Cache files**:
    - File list cache for improved performance
    - Cache update markers
 
@@ -170,18 +172,19 @@ Starting from this version, `config.json` is now stored in `CACHE_DIR` instead o
 - Configuration survives container restarts
 - Easier backup and migration
 - Consistent data location across all components
+- No environment variable needed (hardcoded path)
 
 **Migration**:
-- If you had a `config.json` in `/app` from a previous version, it will not be automatically migrated
-- The application will use default settings and create a new `config.json` in `CACHE_DIR` on first save
-- To preserve old settings, manually copy the old `/app/config.json` to `$CACHE_DIR/config.json`
+- If you had a `config.json` in `/app` or used `CACHE_DIR` from a previous version, it will not be automatically migrated
+- The application will use default settings and create a new `config.json` in `/Config` on first save
+- To preserve old settings, manually copy the old configuration files to `/Config`
+- **Note**: The `CACHE_DIR` environment variable has been removed
 
 **Docker Usage**:
-Mount `CACHE_DIR` as a volume to persist all data:
+Mount `/Config` as a volume to persist all data:
 ```sh
 docker run -d \
-  -v <host_dir_for_config>:/config \
-  -e CACHE_DIR=/config \
+  -v <host_dir_for_config>:/Config \
   ...
 ```
 

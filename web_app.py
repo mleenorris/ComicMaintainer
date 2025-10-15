@@ -19,6 +19,12 @@ from markers import (
 )
 from job_manager import get_job_manager, JobResult
 
+CONFIG_DIR = '/Config'
+LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
+
+# Ensure log directory exists
+os.makedirs(LOG_DIR, exist_ok=True)
+
 # Set up logging with rotation
 # Initialize basic logging first to avoid issues with get_log_max_bytes() logging errors
 logging.basicConfig(
@@ -35,7 +41,7 @@ logging.getLogger().setLevel(logging.INFO)
 # Now safely get log max bytes (which may log warnings)
 log_max_bytes = get_log_max_bytes()
 log_handler = RotatingFileHandler(
-    "ComicMaintainer.log",
+    os.path.join(LOG_DIR, "ComicMaintainer.log"),
     maxBytes=log_max_bytes,
     backupCount=3
 )
@@ -48,7 +54,6 @@ logging.getLogger().addHandler(log_handler)
 app = Flask(__name__)
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
-CACHE_DIR = os.environ.get('CACHE_DIR', '/app/cache')
 CACHE_UPDATE_MARKER = '.cache_update'
 CACHE_CHANGES_FILE = '.cache_changes'
 CACHE_REBUILD_LOCK = '.cache_rebuild_lock'
@@ -78,13 +83,10 @@ def try_acquire_cache_rebuild_lock(timeout=0.1):
     Returns:
         File handle if lock acquired, None if lock could not be acquired
     """
-    if not CACHE_DIR:
-        return None
+    # Ensure config directory exists
+    os.makedirs(CONFIG_DIR, exist_ok=True)
     
-    # Ensure cache directory exists
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    
-    lock_file_path = os.path.join(CACHE_DIR, CACHE_REBUILD_LOCK)
+    lock_file_path = os.path.join(CONFIG_DIR, CACHE_REBUILD_LOCK)
     
     try:
         # Open lock file (create if doesn't exist)
@@ -156,13 +158,10 @@ cleanup_thread.start()
 
 def get_watcher_update_time():
     """Get the last time the watcher updated files"""
-    if not CACHE_DIR:
-        return 0
+    # Ensure config directory exists
+    os.makedirs(CONFIG_DIR, exist_ok=True)
     
-    # Ensure cache directory exists
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    
-    marker_path = os.path.join(CACHE_DIR, CACHE_UPDATE_MARKER)
+    marker_path = os.path.join(CONFIG_DIR, CACHE_UPDATE_MARKER)
     if os.path.exists(marker_path):
         try:
             with open(marker_path, 'r') as f:
@@ -173,13 +172,10 @@ def get_watcher_update_time():
 
 def update_watcher_timestamp():
     """Update the watcher cache invalidation timestamp"""
-    if not CACHE_DIR:
-        return
+    # Ensure config directory exists
+    os.makedirs(CONFIG_DIR, exist_ok=True)
     
-    # Ensure cache directory exists
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    
-    marker_path = os.path.join(CACHE_DIR, CACHE_UPDATE_MARKER)
+    marker_path = os.path.join(CONFIG_DIR, CACHE_UPDATE_MARKER)
     try:
         with open(marker_path, 'w') as f:
             f.write(str(time.time()))
@@ -194,13 +190,10 @@ def record_cache_change(change_type, old_path=None, new_path=None):
         old_path: Original file path (for 'remove' and 'rename')
         new_path: New file path (for 'add' and 'rename')
     """
-    if not CACHE_DIR:
-        return
+    # Ensure config directory exists
+    os.makedirs(CONFIG_DIR, exist_ok=True)
     
-    # Ensure cache directory exists
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    
-    changes_file = os.path.join(CACHE_DIR, CACHE_CHANGES_FILE)
+    changes_file = os.path.join(CONFIG_DIR, CACHE_CHANGES_FILE)
     
     try:
         change_entry = {
@@ -223,10 +216,10 @@ def apply_cache_changes():
     Returns:
         True if changes were applied, False if cache needs full rebuild
     """
-    if not CACHE_DIR or file_list_cache['files'] is None:
+    if file_list_cache['files'] is None:
         return False
     
-    changes_file = os.path.join(CACHE_DIR, CACHE_CHANGES_FILE)
+    changes_file = os.path.join(CONFIG_DIR, CACHE_CHANGES_FILE)
     
     if not os.path.exists(changes_file):
         return True  # No changes to apply
@@ -541,7 +534,7 @@ def index():
     return render_template('index.html')
 
 def preload_metadata_for_directories(files):
-    """No longer needed - markers are now centralized in CACHE_DIR"""
+    """No longer needed - markers are now centralized in /Config"""
     # This function is kept for backward compatibility but does nothing
     # since markers are now stored centrally, not per-directory
     pass
@@ -1580,7 +1573,7 @@ def get_version():
 @app.route('/api/logs', methods=['GET'])
 def get_logs():
     """API endpoint to get the log file contents"""
-    log_file = "ComicMaintainer.log"
+    log_file = os.path.join(LOG_DIR, "ComicMaintainer.log")
     
     if not os.path.exists(log_file):
         return jsonify({'error': 'Log file not found'}), 404
@@ -1946,7 +1939,7 @@ def cache_stats_endpoint():
                 'processed_files': processed_count,
                 'duplicate_files': duplicate_count,
                 'web_modified_files': web_modified_count,
-                'storage_location': 'CACHE_DIR/markers/'
+                'storage_location': '/Config/markers/'
             }
         })
     except Exception as e:
@@ -1955,7 +1948,7 @@ def cache_stats_endpoint():
 
 def prewarm_metadata_cache():
     """Prewarm metadata cache by ensuring marker files are loaded"""
-    # Note: With centralized markers in CACHE_DIR/markers/, markers are already
+    # Note: With centralized markers in /Config/markers/, markers are already
     # loaded efficiently when first accessed. This function is kept for 
     # backward compatibility but no longer needs to scan directories.
     # The markers.py module handles loading on first access.

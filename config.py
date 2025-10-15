@@ -2,9 +2,9 @@ import json
 import os
 import logging
 
-# Store config in CACHE_DIR for persistence
-CACHE_DIR = os.environ.get('CACHE_DIR', '/app/cache')
-CONFIG_FILE = os.path.join(CACHE_DIR, 'config.json')
+# Store config in /Config for persistence
+CONFIG_DIR = '/Config'
+CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.json')
 DEFAULT_FILENAME_FORMAT = '{series} - Chapter {issue}.cbz'
 DEFAULT_WATCHER_ENABLED = True
 DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5MB default
@@ -28,8 +28,8 @@ def get_config():
 def save_config(config):
     """Save configuration to file"""
     try:
-        # Ensure cache directory exists
-        os.makedirs(CACHE_DIR, exist_ok=True)
+        # Ensure config directory exists
+        os.makedirs(CONFIG_DIR, exist_ok=True)
         with open(CONFIG_FILE, 'w') as f:
             json.dump(config, f, indent=2)
         return True

@@ -52,10 +52,9 @@ docker build -t iceburn1/comictagger-watcher:latest .
 docker run -d \
   -v <host_dir_to_watch>:/watched_dir \
   -v <host_dir_for_duplicates>:/duplicates \
-  -v <host_dir_for_config>:/config \
+  -v <host_dir_for_config>:/Config \
   -e WATCHED_DIR=/watched_dir \
   -e DUPLICATE_DIR=/duplicates \
-  -e CACHE_DIR=/config \
   -p 5000:5000 \
   iceburn1/comictagger-watcher:latest
 ```
@@ -65,10 +64,9 @@ docker run -d \
 docker run -d \
   -v <host_dir_to_watch>:/watched_dir \
   -v <host_dir_for_duplicates>:/duplicates \
-  -v <host_dir_for_config>:/config \
+  -v <host_dir_for_config>:/Config \
   -e WATCHED_DIR=/watched_dir \
   -e DUPLICATE_DIR=/duplicates \
-  -e CACHE_DIR=/config \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -p 5000:5000 \
@@ -79,9 +77,10 @@ docker run -d \
 - Replace `<host_dir_for_config>` with the path to store persistent configuration and cache data.
 - `WATCHED_DIR` **must** be set to the directory to watch (usually `/watched_dir` if using the example above).
 - Optionally, mount a host directory to `/duplicates` to persist duplicates.
-- **Recommended**: Mount a host directory to `/config` (or your chosen path) and set `CACHE_DIR` to persist:
+- **Required**: Mount a host directory to `/Config` to persist:
   - Marker files (processed files, duplicates, web-modified files)
   - Configuration settings (filename format, watcher enabled, log rotation)
+  - Log files (stored in `/Config/Log/`)
   - File list cache for improved performance
 - The `-p 5000:5000` flag exposes the web interface on port 5000.
 - Set `PUID` and `PGID` to match your host user for proper file permissions (use `id -u` and `id -g` on Linux/macOS).
@@ -93,11 +92,6 @@ docker run -d \
 - `DUPLICATE_DIR`: Directory where duplicates are moved (required for duplicate handling)
 - `WEB_PORT`: Port for the web interface (default: `5000`)
 - `GUNICORN_WORKERS`: Number of Gunicorn worker processes (default: `2`). Job state is shared across workers via SQLite.
-- `CACHE_DIR`: **(Recommended)** Directory for persistent configuration and cache data (default: `/app/cache`). Mount a host directory here to persist:
-  - Marker files tracking processed/duplicate files
-  - Configuration settings (filename format, watcher state, log rotation)
-  - File list cache for performance optimization
-  - Job database (SQLite) for async processing state
 - `PUID`: User ID to run the service as (default: `99` for user `nobody`)
 - `PGID`: Group ID to run the service as (default: `100` for group `users`)
 - `LOG_MAX_BYTES`: Maximum log file size in bytes before rotation (default: `5242880` = 5MB). Can also be configured via the Settings UI.
@@ -193,7 +187,7 @@ The filename format can be customized through the web interface Settings modal. 
 
 **Note:** Decimal chapter numbers (e.g., 71.4, 71.11) are preserved without trailing zeros.
 
-The filename format setting is saved in `config.json` (located in `CACHE_DIR`) and applies to both web interface processing and watcher service processing. **Mount `CACHE_DIR` as a volume to persist this configuration across container restarts.**
+The filename format setting is saved in `config.json` (located in `/Config`) and applies to both web interface processing and watcher service processing. **Mount `/Config` as a volume to persist this configuration across container restarts.**
 
 ## API Endpoints
 
@@ -283,21 +277,25 @@ Files are processed and updated when:
 
 ## Data Persistence
 
-The application stores all persistent data in `CACHE_DIR` (default: `/app/cache`). **To preserve your data across container restarts, mount this directory as a volume.**
+The application stores all persistent data in `/Config`. **To preserve your data across container restarts, mount this directory as a volume.**
 
 ### What is Persisted
 
-When you mount `CACHE_DIR`, the following data is preserved:
+When you mount `/Config`, the following data is preserved:
 
 1. **Marker Files** - Track which files have been processed, duplicates, and web modifications
-   - Located in `CACHE_DIR/markers/`
+   - Located in `/Config/markers/`
    - `processed_files.json`, `duplicate_files.json`, `web_modified_files.json`
 
 2. **Configuration Settings** - Saved via the web interface Settings menu
-   - Located at `CACHE_DIR/config.json`
+   - Located at `/Config/config.json`
    - Includes: filename format template, watcher state, log rotation settings
 
-3. **Cache Files** - Performance optimization data
+3. **Log Files** - Application logs
+   - Located in `/Config/Log/`
+   - `ComicMaintainer.log` with automatic rotation
+
+4. **Cache Files** - Performance optimization data
    - File list cache, cache update markers
 
 ### Example with Persistence
@@ -305,26 +303,26 @@ When you mount `CACHE_DIR`, the following data is preserved:
 ```sh
 docker run -d \
   -v /host/comics:/watched_dir \
-  -v /host/config:/config \
+  -v /host/config:/Config \
   -e WATCHED_DIR=/watched_dir \
-  -e CACHE_DIR=/config \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -p 5000:5000 \
   iceburn1/comictagger-watcher:latest
 ```
 
-**Important**: The `/host/config` directory on your host will contain all marker files, configuration, and cache. Make sure it's backed up if you want to preserve your processing history and settings.
+**Important**: The `/host/config` directory on your host will contain all marker files, configuration, logs, and cache. Make sure it's backed up if you want to preserve your processing history and settings.
 
 ### Migrating from Previous Versions
 
-If upgrading from a version where `config.json` was stored in `/app`:
+If upgrading from a version where configuration and logs were stored in `/app` or used the `CACHE_DIR` environment variable:
 - Your old configuration will not be automatically migrated
 - The application will use default settings on first run
-- To preserve settings: manually copy `/app/config.json` from the old container to `$CACHE_DIR/config.json` in the new setup
+- To preserve settings: manually copy configuration files from the old container to `/Config` in the new setup
+- **Note**: The `CACHE_DIR` environment variable has been removed. All persistent data is now stored in `/Config` by default.
 
 ## Logging
-- All actions and errors are logged to `ComicMaintainer.log` (located in `/app/ComicMaintainer.log` within the container).
+- All actions and errors are logged to `ComicMaintainer.log` (located in `/Config/Log/ComicMaintainer.log`).
 - **Log Rotation**: Log files are automatically rotated when they reach a configurable size limit (default: 5MB)
   - Up to 3 backup files are kept (`ComicMaintainer.log.1`, `.2`, `.3`)
   - The rotation limit can be configured:

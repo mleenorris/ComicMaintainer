@@ -2,9 +2,11 @@
 FROM python:3.11-slim
 ENV PIP_USE_PEP517=true
 
-# Install system dependencies for ComicTagger and gosu for user switching
+# Install system dependencies for ComicTagger, PostgreSQL client, and gosu for user switching
 RUN apt-get update && apt-get install -y \
-    libqt5gui5 libqt5core5a libqt5widgets5 libqt5xml5 libicu-dev python3-pyqt5 pkg-config git g++ unrar-free make gosu && \
+    libqt5gui5 libqt5core5a libqt5widgets5 libqt5xml5 libicu-dev python3-pyqt5 \
+    pkg-config git g++ unrar-free make gosu \
+    libpq-dev postgresql-client && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

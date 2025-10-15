@@ -23,16 +23,16 @@ services:
       db:
         condition: service_healthy
     environment:
-      WATCHED_DIR: ${WATCHED_DIR}
-      DUPLICATE_DIR: ${DUPLICATE_DIR}
+      WATCHED_DIR: /watched_dir
+      DUPLICATE_DIR: ${DUPLICATE_DIR:-/duplicate_dir}
       WEB_PORT: ${WEB_PORT:-5000}
-      CACHE_DIR: ${CACHE_DIR:-/app/cache}
+      CACHE_DIR: /app/cache
       PUID: ${PUID:-99}
       PGID: ${PGID:-100}
       DATABASE_URL: postgresql://comicmaintainer:${POSTGRES_PASSWORD:-changeme}@db:5432/comicmaintainer
     volumes:
       - ${WATCHED_DIR}:/watched_dir
-      - ${DUPLICATE_DIR}:/duplicate_dir
+      - ${DUPLICATE_DIR:-./duplicates}:/duplicate_dir
       - ${CACHE_DIR:-./cache}:/app/cache
     ports:
       - "${WEB_PORT:-5000}:5000"

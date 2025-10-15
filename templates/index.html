@@ -530,6 +530,37 @@
             font-size: 13px;
         }
         
+        .progress-indicator-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            background: #3498db;
+            color: white;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+            animation: pulse 2s infinite;
+        }
+        
+        .progress-indicator-btn:hover {
+            background: #2980b9;
+            transform: scale(1.05);
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.8;
+            }
+        }
+        
         .file-list {
             background: var(--bg-secondary);
             border-radius: 8px;
@@ -1400,6 +1431,9 @@
                 </div>
                 <div class="header-right">
                     <div class="header-controls">
+                        <button id="progressIndicator" class="progress-indicator-btn" onclick="restoreProgressModal()" style="display: none;" title="Show progress">
+                            <span id="progressIndicatorText">⏳ Processing...</span>
+                        </button>
                         <div class="header-search">
                             <input type="text" id="headerSearchInput" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
                         </div>
@@ -1728,6 +1762,7 @@
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
                 <h2 id="progressTitle">Processing Files...</h2>
+                <button class="close-btn" onclick="minimizeProgressModal()" title="Minimize">&minus;</button>
             </div>
             <div class="modal-body">
                 <div style="margin-bottom: 15px;">
@@ -3506,6 +3541,7 @@
         
         function showProgressModal(title) {
             const modal = document.getElementById('progressModal');
+            const indicator = document.getElementById('progressIndicator');
             document.getElementById('progressTitle').textContent = title;
             document.getElementById('progressBarFill').style.width = '0%';
             document.getElementById('progressText').textContent = '0 / 0 files';
@@ -3513,6 +3549,7 @@
             document.getElementById('progressDetails').innerHTML = '';
             document.getElementById('progressCloseBtn').style.display = 'none';
             modal.classList.add('active');
+            indicator.style.display = 'none';
         }
         
         function updateProgress(current, total, successCount, errorCount) {
@@ -3527,6 +3564,13 @@
                 title = `Processing Files - ${successCount} succeeded, ${errorCount} failed`;
             }
             document.getElementById('progressTitle').textContent = title;
+            
+            // Update indicator if it's visible (modal is minimized)
+            const indicator = document.getElementById('progressIndicator');
+            if (indicator.style.display !== 'none') {
+                const indicatorText = document.getElementById('progressIndicatorText');
+                indicatorText.textContent = `⏳ ${current} / ${total} files (${percent}%)`;
+            }
         }
         
         function addProgressDetail(filename, success, error = null) {
@@ -3548,10 +3592,44 @@
         
         function completeProgress() {
             document.getElementById('progressCloseBtn').style.display = 'block';
+            
+            // Update indicator to show completion
+            const indicator = document.getElementById('progressIndicator');
+            if (indicator.style.display !== 'none') {
+                const indicatorText = document.getElementById('progressIndicatorText');
+                indicatorText.textContent = '✅ Processing Complete';
+            }
         }
         
         function closeProgressModal() {
             document.getElementById('progressModal').classList.remove('active');
+            document.getElementById('progressIndicator').style.display = 'none';
+        }
+        
+        function minimizeProgressModal() {
+            const modal = document.getElementById('progressModal');
+            const indicator = document.getElementById('progressIndicator');
+            const indicatorText = document.getElementById('progressIndicatorText');
+            
+            // Hide the modal
+            modal.classList.remove('active');
+            
+            // Show the indicator with current progress
+            const percentText = document.getElementById('progressPercent').textContent;
+            const progressText = document.getElementById('progressText').textContent;
+            indicatorText.textContent = `⏳ ${progressText} (${percentText})`;
+            indicator.style.display = 'flex';
+        }
+        
+        function restoreProgressModal() {
+            const modal = document.getElementById('progressModal');
+            const indicator = document.getElementById('progressIndicator');
+            
+            // Show the modal
+            modal.classList.add('active');
+            
+            // Hide the indicator
+            indicator.style.display = 'none';
         }
         
         async function loadLogs() {

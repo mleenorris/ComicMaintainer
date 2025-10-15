@@ -24,11 +24,62 @@ def _ensure_cache_dir():
     os.makedirs(CACHE_DIR, exist_ok=True)
 
 
+def _init_db_schema(conn):
+    """Initialize database schema on a connection"""
+    cursor = conn.cursor()
+    
+    # Jobs table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS jobs (
+            job_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            total_items INTEGER NOT NULL,
+            processed_items INTEGER DEFAULT 0,
+            error TEXT,
+            created_at REAL NOT NULL,
+            started_at REAL,
+            completed_at REAL
+        )
+    ''')
+    
+    # Job results table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS job_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT NOT NULL,
+            item TEXT NOT NULL,
+            success INTEGER NOT NULL,
+            error TEXT,
+            details TEXT,
+            FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
+        )
+    ''')
+    
+    # Create index for faster queries
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_job_results_job_id 
+        ON job_results(job_id)
+    ''')
+    
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_jobs_status 
+        ON jobs(status)
+    ''')
+    
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_jobs_completed_at 
+        ON jobs(completed_at)
+    ''')
+    
+    conn.commit()
+
+
 @contextmanager
 def get_db_connection():
     """
     Get a thread-local database connection.
     Uses context manager for automatic cleanup.
+    Ensures database is initialized on first access.
     """
     # Check if connection exists in thread-local storage
     if not hasattr(_thread_local, 'connection') or _thread_local.connection is None:
@@ -37,6 +88,8 @@ def get_db_connection():
         _thread_local.connection.row_factory = sqlite3.Row
         # Enable WAL mode for better concurrent access
         _thread_local.connection.execute('PRAGMA journal_mode=WAL')
+        # Ensure database is initialized in this process/thread
+        _init_db_schema(_thread_local.connection)
     
     try:
         yield _thread_local.connection
@@ -46,57 +99,16 @@ def get_db_connection():
 
 
 def init_db():
-    """Initialize database schema"""
+    """Initialize database schema (called on module import)"""
     _ensure_cache_dir()
     
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        # Jobs table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS jobs (
-                job_id TEXT PRIMARY KEY,
-                status TEXT NOT NULL,
-                total_items INTEGER NOT NULL,
-                processed_items INTEGER DEFAULT 0,
-                error TEXT,
-                created_at REAL NOT NULL,
-                started_at REAL,
-                completed_at REAL
-            )
-        ''')
-        
-        # Job results table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS job_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                job_id TEXT NOT NULL,
-                item TEXT NOT NULL,
-                success INTEGER NOT NULL,
-                error TEXT,
-                details TEXT,
-                FOREIGN KEY (job_id) REFERENCES jobs(job_id) ON DELETE CASCADE
-            )
-        ''')
-        
-        # Create index for faster queries
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_job_results_job_id 
-            ON job_results(job_id)
-        ''')
-        
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_jobs_status 
-            ON jobs(status)
-        ''')
-        
-        cursor.execute('''
-            CREATE INDEX IF NOT EXISTS idx_jobs_completed_at 
-            ON jobs(completed_at)
-        ''')
-        
-        conn.commit()
+    # Create a temporary connection to initialize the database
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    try:
+        _init_db_schema(conn)
         logging.info(f"Initialized job database at {DB_PATH}")
+    finally:
+        conn.close()
 
 
 def create_job(job_id: str, total_items: int, created_at: float) -> bool:

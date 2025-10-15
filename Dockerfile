@@ -26,7 +26,7 @@ RUN mkdir -p /Config && chmod 755 /Config
 WORKDIR /app
 
 # Copy all Python scripts to /app
-COPY *.py /app/
+COPY src/*.py /app/
 
 # Copy templates directory
 COPY templates /app/templates

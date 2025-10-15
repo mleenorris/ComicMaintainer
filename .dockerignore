@@ -7,6 +7,7 @@
 *.md
 README*
 LICENSE*
+docs/
 
 # IDE and editor files
 .vscode

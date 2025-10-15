@@ -11,29 +11,40 @@ from config import get_watcher_enabled, get_log_max_bytes
 from markers import is_file_processed, is_file_web_modified, clear_file_web_modified
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
-CACHE_DIR = os.environ.get('CACHE_DIR', '/app/cache')
+CONFIG_DIR = '/Config'
+LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
 PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
 CACHE_UPDATE_MARKER = '.cache_update'
 CACHE_CHANGES_FILE = '.cache_changes'
 
+# Ensure log directory exists
+os.makedirs(LOG_DIR, exist_ok=True)
+
 # Set up logging to file and stdout with rotation
+# Initialize basic logging first to avoid issues with get_log_max_bytes() logging errors
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [WATCHER] %(levelname)s %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+# Explicitly set root logger level to INFO (in case it was already configured by imports)
+logging.getLogger().setLevel(logging.INFO)
+
+# Now safely get log max bytes (which may log warnings)
 log_max_bytes = get_log_max_bytes()
 log_handler = RotatingFileHandler(
-    "ComicMaintainer.log",
+    os.path.join(LOG_DIR, "ComicMaintainer.log"),
     maxBytes=log_max_bytes,
     backupCount=3
 )
 log_handler.setLevel(logging.INFO)
 log_handler.setFormatter(logging.Formatter('%(asctime)s [WATCHER] %(levelname)s %(message)s'))
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [WATCHER] %(levelname)s %(message)s',
-    handlers=[
-        log_handler,
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+# Add the file handler to the root logger
+logging.getLogger().addHandler(log_handler)
 
 
 # Debounce settings
@@ -41,13 +52,10 @@ DEBOUNCE_SECONDS = 30
 
 def record_cache_change(change_type, old_path=None, new_path=None):
     """Record a file change for incremental cache updates"""
-    if not CACHE_DIR:
-        return
+    # Ensure config directory exists
+    os.makedirs(CONFIG_DIR, exist_ok=True)
     
-    # Ensure cache directory exists
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    
-    changes_file = os.path.join(CACHE_DIR, CACHE_CHANGES_FILE)
+    changes_file = os.path.join(CONFIG_DIR, CACHE_CHANGES_FILE)
     
     try:
         import json
@@ -68,13 +76,10 @@ def record_cache_change(change_type, old_path=None, new_path=None):
 
 def update_watcher_timestamp():
     """Update the watcher cache invalidation timestamp"""
-    if not CACHE_DIR:
-        return
+    # Ensure config directory exists
+    os.makedirs(CONFIG_DIR, exist_ok=True)
     
-    # Ensure cache directory exists
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    
-    marker_path = os.path.join(CACHE_DIR, CACHE_UPDATE_MARKER)
+    marker_path = os.path.join(CONFIG_DIR, CACHE_UPDATE_MARKER)
     try:
         with open(marker_path, 'w') as f:
             f.write(str(time.time()))

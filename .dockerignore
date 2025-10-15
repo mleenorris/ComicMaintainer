@@ -1,4 +1,22 @@
-# Python
+# Git files
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+README*
+LICENSE*
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+*.code-workspace
+
+# Python cache and build artifacts
 __pycache__/
 *.py[cod]
 *$py.class
@@ -25,32 +43,20 @@ wheels/
 
 # Logs
 *.log
+ComicMaintainer.log
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
+# OS files
 .DS_Store
 Thumbs.db
 
-# Project specific
+# Project runtime files (these are generated at runtime, not needed in image)
 .web_modified
 .processed_files
 .duplicate_files
 .cache_update
 .cache_changes
 .cache_rebuild_lock
-ComicMaintainer.log
 config.json
-
-# SQLite database files
-jobs.db
-jobs.db-wal
-jobs.db-shm
 
 # Marker file backups and temp files
 *.corrupt.*

@@ -19,23 +19,20 @@ RUN git clone --branch develop https://github.com/comictagger/comictagger.git /c
 # Create app directory for the application
 RUN mkdir -p /app && chmod 755 /app
 
-# Create cache directory for server-side caching
-RUN mkdir -p /app/cache && chmod 755 /app/cache
+# Create config directory for persistent data
+RUN mkdir -p /Config && chmod 755 /Config
 
 # Set working directory
 WORKDIR /app
 
-# Copy watcher and process script
-COPY watcher.py /app/watcher.py
-COPY process_file.py /app/process_file.py
-COPY web_app.py /app/web_app.py
-COPY config.py /app/config.py
-COPY job_manager.py /app/job_manager.py
-COPY markers.py /app/markers.py
-COPY version.py /app/version.py
+# Copy all Python scripts to /app
+COPY *.py /app/
+
+# Copy templates directory
 COPY templates /app/templates
-COPY start.sh /start.sh
-COPY entrypoint.sh /entrypoint.sh
+
+# Copy shell scripts to root
+COPY *.sh /
 
 # Make scripts executable
 RUN chmod +x /start.sh /entrypoint.sh
@@ -43,7 +40,6 @@ RUN chmod +x /start.sh /entrypoint.sh
 # Set default watched directory and script
 ENV PROCESS_SCRIPT=/app/process_file.py
 ENV WEB_PORT=5000
-ENV CACHE_DIR=/app/cache
 ENV PUID=99
 ENV PGID=100
 ENV MAX_WORKERS=4

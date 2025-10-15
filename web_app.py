@@ -2012,10 +2012,11 @@ def cache_stats_endpoint():
             enriched_age = time.time() - enriched_file_cache['timestamp'] if enriched_file_cache['timestamp'] else 0
         
         # Get marker counts from centralized storage
-        from markers import _load_marker_set, PROCESSED_MARKER_FILE, DUPLICATE_MARKER_FILE, WEB_MODIFIED_MARKER_FILE
-        processed_count = len(_load_marker_set(PROCESSED_MARKER_FILE))
-        duplicate_count = len(_load_marker_set(DUPLICATE_MARKER_FILE))
-        web_modified_count = len(_load_marker_set(WEB_MODIFIED_MARKER_FILE))
+        from markers import MARKER_TYPE_PROCESSED, MARKER_TYPE_DUPLICATE, MARKER_TYPE_WEB_MODIFIED
+        from marker_store import get_markers
+        processed_count = len(get_markers(MARKER_TYPE_PROCESSED))
+        duplicate_count = len(get_markers(MARKER_TYPE_DUPLICATE))
+        web_modified_count = len(get_markers(MARKER_TYPE_WEB_MODIFIED))
         
         return jsonify({
             'file_list_cache': {

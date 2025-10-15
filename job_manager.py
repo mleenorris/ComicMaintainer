@@ -109,6 +109,24 @@ class JobManager:
         self.executor.submit(self._process_job, job_id, process_func, items)
         logging.info(f"[JOB {job_id}] Job submitted to worker pool for async processing")
     
+    def _clear_active_job_if_current(self, job_id: str):
+        """
+        Clear the active job from preferences if it matches this job_id.
+        This prevents stale job references from persisting after job completion.
+        
+        Args:
+            job_id: Job ID to check against active job
+        """
+        try:
+            from preferences_store import get_active_job, clear_active_job
+            active_job = get_active_job()
+            
+            if active_job and active_job.get('job_id') == job_id:
+                clear_active_job()
+                logging.info(f"[JOB {job_id}] Cleared active job from preferences (job completed/failed)")
+        except Exception as e:
+            logging.error(f"[JOB {job_id}] Error clearing active job: {e}")
+    
     def _process_job(self, job_id: str, process_func: Callable[[str], JobResult], items: List[str]):
         """
         Process job items concurrently.
@@ -163,6 +181,10 @@ class JobManager:
             completed_at = time.time()
             job_store.update_job_status(job_id, JobStatus.COMPLETED.value, completed_at=completed_at)
             logging.info(f"[JOB {job_id}] Completed: {success_count} succeeded, {error_count} failed out of {len(items)} items")
+            
+            # Clear active job from preferences if this job is the active one
+            # This ensures stale job references don't persist after completion
+            self._clear_active_job_if_current(job_id)
         
         except Exception as e:
             logging.error(f"[JOB {job_id}] Fatal error during processing: {e}")
@@ -173,6 +195,10 @@ class JobManager:
                 completed_at=completed_at, 
                 error=str(e)
             )
+            
+            # Clear active job from preferences if this job is the active one
+            # This ensures stale job references don't persist after failure
+            self._clear_active_job_if_current(job_id)
     
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -213,6 +239,10 @@ class JobManager:
         completed_at = time.time()
         job_store.update_job_status(job_id, JobStatus.CANCELLED.value, completed_at=completed_at)
         logging.info(f"[JOB {job_id}] Job cancelled (was {job['status']})")
+        
+        # Clear active job from preferences if this job is the active one
+        self._clear_active_job_if_current(job_id)
+        
         return True
     
     def delete_job(self, job_id: str) -> bool:

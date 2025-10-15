@@ -3366,51 +3366,33 @@
                 return;
             }
             
-            showProgressModal('Processing Unmarked Files...');
-            
-            let successCount = 0;
-            let errorCount = 0;
-            let totalFiles = 0;
+            showProgressModal('Starting async processing...');
             
             try {
-                const response = await fetch('/api/process-unmarked?stream=true', {
+                console.log('[BATCH] Starting process unmarked files request...');
+                // Start the job
+                const response = await fetch('/api/jobs/process-unmarked', {
                     method: 'POST'
                 });
                 
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
-                    
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = JSON.parse(line.substring(6));
-                            
-                            if (data.done) {
-                                totalFiles = data.results.length;
-                                completeProgress();
-                                showMessage(`Processed ${successCount} of ${totalFiles} unmarked files successfully!`, 'success');
-                                // Refresh file list (force refresh to clear cache)
-                                await loadFiles(1, true);
-                            } else {
-                                if (data.success) {
-                                    successCount++;
-                                } else {
-                                    errorCount++;
-                                }
-                                updateProgress(data.current, data.total, successCount, errorCount);
-                                addProgressDetail(data.file, data.success, data.error);
-                            }
-                        }
-                    }
+                if (!response.ok) {
+                    console.error(`[BATCH] Failed to start processing unmarked files (HTTP ${response.status})`);
+                    throw new Error('Failed to start processing job');
                 }
+                
+                const data = await response.json();
+                const jobId = data.job_id;
+                const totalItems = data.total_items;
+                
+                console.log(`[BATCH] Created job ${jobId} for ${totalItems} unmarked files`);
+                showMessage(`Started processing ${totalItems} unmarked files in background`, 'info');
+                
+                // Poll for status
+                await pollJobStatus(jobId, 'Processing Unmarked Files...');
+                
             } catch (error) {
-                showMessage('Failed to process unmarked files: ' + error.message, 'error');
+                console.error('[BATCH] Error starting process unmarked files:', error);
+                showMessage('Failed to start processing: ' + error.message, 'error');
                 closeProgressModal();
             }
         }
@@ -3420,51 +3402,33 @@
                 return;
             }
             
-            showProgressModal('Renaming Unmarked Files...');
-            
-            let successCount = 0;
-            let errorCount = 0;
-            let totalFiles = 0;
+            showProgressModal('Starting async renaming...');
             
             try {
-                const response = await fetch('/api/rename-unmarked?stream=true', {
+                console.log('[BATCH] Starting rename unmarked files request...');
+                // Start the job
+                const response = await fetch('/api/jobs/rename-unmarked', {
                     method: 'POST'
                 });
                 
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
-                    
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = JSON.parse(line.substring(6));
-                            
-                            if (data.done) {
-                                totalFiles = data.results.length;
-                                completeProgress();
-                                showMessage(`Renamed ${successCount} of ${totalFiles} unmarked files successfully!`, 'success');
-                                // Refresh file list (force refresh to clear cache)
-                                await loadFiles(1, true);
-                            } else {
-                                if (data.success) {
-                                    successCount++;
-                                } else {
-                                    errorCount++;
-                                }
-                                updateProgress(data.current, data.total, successCount, errorCount);
-                                addProgressDetail(data.file, data.success, data.error);
-                            }
-                        }
-                    }
+                if (!response.ok) {
+                    console.error(`[BATCH] Failed to start renaming unmarked files (HTTP ${response.status})`);
+                    throw new Error('Failed to start renaming job');
                 }
+                
+                const data = await response.json();
+                const jobId = data.job_id;
+                const totalItems = data.total_items;
+                
+                console.log(`[BATCH] Created job ${jobId} for ${totalItems} unmarked files`);
+                showMessage(`Started renaming ${totalItems} unmarked files in background`, 'info');
+                
+                // Poll for status
+                await pollJobStatus(jobId, 'Renaming Unmarked Files...');
+                
             } catch (error) {
-                showMessage('Failed to rename unmarked files: ' + error.message, 'error');
+                console.error('[BATCH] Error starting rename unmarked files:', error);
+                showMessage('Failed to start renaming: ' + error.message, 'error');
                 closeProgressModal();
             }
         }
@@ -3474,51 +3438,33 @@
                 return;
             }
             
-            showProgressModal('Normalizing Metadata for Unmarked Files...');
-            
-            let successCount = 0;
-            let errorCount = 0;
-            let totalFiles = 0;
+            showProgressModal('Starting async normalizing...');
             
             try {
-                const response = await fetch('/api/normalize-unmarked?stream=true', {
+                console.log('[BATCH] Starting normalize unmarked files request...');
+                // Start the job
+                const response = await fetch('/api/jobs/normalize-unmarked', {
                     method: 'POST'
                 });
                 
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
-                    
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = JSON.parse(line.substring(6));
-                            
-                            if (data.done) {
-                                totalFiles = data.results.length;
-                                completeProgress();
-                                showMessage(`Normalized metadata for ${successCount} of ${totalFiles} unmarked files successfully!`, 'success');
-                                // Refresh file list (force refresh to clear cache)
-                                await loadFiles(1, true);
-                            } else {
-                                if (data.success) {
-                                    successCount++;
-                                } else {
-                                    errorCount++;
-                                }
-                                updateProgress(data.current, data.total, successCount, errorCount);
-                                addProgressDetail(data.file, data.success, data.error);
-                            }
-                        }
-                    }
+                if (!response.ok) {
+                    console.error(`[BATCH] Failed to start normalizing unmarked files (HTTP ${response.status})`);
+                    throw new Error('Failed to start normalizing job');
                 }
+                
+                const data = await response.json();
+                const jobId = data.job_id;
+                const totalItems = data.total_items;
+                
+                console.log(`[BATCH] Created job ${jobId} for ${totalItems} unmarked files`);
+                showMessage(`Started normalizing ${totalItems} unmarked files in background`, 'info');
+                
+                // Poll for status
+                await pollJobStatus(jobId, 'Normalizing Unmarked Files...');
+                
             } catch (error) {
-                showMessage('Failed to normalize metadata for unmarked files: ' + error.message, 'error');
+                console.error('[BATCH] Error starting normalize unmarked files:', error);
+                showMessage('Failed to start normalizing: ' + error.message, 'error');
                 closeProgressModal();
             }
         }

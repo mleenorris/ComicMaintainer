@@ -30,6 +30,7 @@ COPY watcher.py /app/watcher.py
 COPY process_file.py /app/process_file.py
 COPY web_app.py /app/web_app.py
 COPY config.py /app/config.py
+COPY markers.py /app/markers.py
 COPY version.py /app/version.py
 COPY templates /app/templates
 COPY start.sh /start.sh

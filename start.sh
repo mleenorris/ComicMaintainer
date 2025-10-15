@@ -21,5 +21,24 @@ GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
 gunicorn --workers ${GUNICORN_WORKERS} --bind 0.0.0.0:${WEB_PORT} --timeout 600 web_app:app &
 WEB_PID=$!
 
-# Wait for both processes
-wait $WATCHER_PID $WEB_PID
+# Function to check if a process is running
+is_running() {
+    kill -0 "$1" 2>/dev/null
+}
+
+# Monitor both processes and keep container alive as long as web server is running
+# The web server is the primary service, so keep container alive as long as it's running
+WATCHER_WARNED=0
+while is_running $WEB_PID; do
+    # Check if watcher died and log it once, but don't exit
+    if ! is_running $WATCHER_PID && [ $WATCHER_WARNED -eq 0 ]; then
+        echo "Warning: Watcher process (PID $WATCHER_PID) has exited, but web server is still running"
+        # Don't restart watcher automatically to avoid restart loops
+        WATCHER_WARNED=1
+    fi
+    sleep 5
+done
+
+# If we get here, the web server has exited
+echo "Web server has exited, shutting down container"
+exit 1

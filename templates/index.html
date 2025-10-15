@@ -2009,7 +2009,7 @@
         }
         
         // Load files on page load
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
             initTheme();
             loadVersion();
             
@@ -2022,7 +2022,7 @@
             loadFiles();
             
             // Check for active job and resume polling
-            checkAndResumeActiveJob();
+            await checkAndResumeActiveJob();
         });
         
         async function loadFiles(page = 1, refresh = false) {

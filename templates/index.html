@@ -2172,10 +2172,10 @@
             
             let html = `
                 <div class="file-list-header">
+                    <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)">
                     <button class="toggle-all-btn" onclick="toggleAllFolders()" id="toggleAllBtn" title="Expand/Collapse All">
                         ${allFoldersExpanded ? '▼' : '▶'}
                     </button>
-                    <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)">
                     <div>File</div>
                     <div>Size</div>
                     <div>Actions</div>

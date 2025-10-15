@@ -1915,6 +1915,8 @@
         let perPage = 100; // Default value, will be loaded from server
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
         let searchDebounceTimer = null;
+        let cacheRebuildPollTimer = null;
+        let isCacheRebuilding = false;
         
         // API helper functions for server-side preferences
         async function getPreferences() {
@@ -2120,6 +2122,9 @@
         // Note: We can't use async in beforeunload, so we track the active job in a variable
         let hasActiveJob = false;
         window.addEventListener('beforeunload', function(event) {
+            // Clean up cache rebuild polling timer
+            stopCacheRebuildPolling();
+            
             if (hasActiveJob) {
                 // Show warning to prevent accidental navigation during batch processing
                 const message = 'A batch processing job is still running. If you leave, you can resume it when you return, but progress tracking will be interrupted.';
@@ -2154,11 +2159,65 @@
                 totalFiles = data.total_files;
                 unmarkedCount = data.unmarked_count || 0;
                 
+                // Check if cache is rebuilding
+                const cacheRebuilding = data.cache_rebuilding || false;
+                handleCacheRebuildStatus(cacheRebuilding);
+                
                 renderFileList();
                 updatePagination();
                 updateButtonVisibility();
             } catch (error) {
                 showMessage('Failed to load files: ' + error.message, 'error');
+            }
+        }
+        
+        function handleCacheRebuildStatus(isRebuilding) {
+            if (isRebuilding && !isCacheRebuilding) {
+                // Cache rebuild just started
+                console.log('Cache rebuild started, will refresh when complete');
+                isCacheRebuilding = true;
+                startCacheRebuildPolling();
+            } else if (!isRebuilding && isCacheRebuilding) {
+                // Cache rebuild just completed
+                console.log('Cache rebuild completed, refreshing file list');
+                isCacheRebuilding = false;
+                stopCacheRebuildPolling();
+                // Auto-refresh the file list to show updated data
+                loadFiles(currentPage, false);
+            }
+        }
+        
+        function startCacheRebuildPolling() {
+            // Stop any existing polling
+            stopCacheRebuildPolling();
+            
+            // Poll every 2 seconds to check if rebuild is complete
+            cacheRebuildPollTimer = setInterval(async () => {
+                try {
+                    const response = await fetch(`/api/files?page=${currentPage}&per_page=${perPage}`);
+                    if (!response.ok) return;
+                    
+                    const data = await response.json();
+                    const cacheRebuilding = data.cache_rebuilding || false;
+                    
+                    if (!cacheRebuilding && isCacheRebuilding) {
+                        // Cache rebuild completed
+                        console.log('Cache rebuild detected as complete via polling');
+                        isCacheRebuilding = false;
+                        stopCacheRebuildPolling();
+                        // Refresh the file list to show updated data
+                        loadFiles(currentPage, false);
+                    }
+                } catch (error) {
+                    console.error('Error polling cache rebuild status:', error);
+                }
+            }, 2000);
+        }
+        
+        function stopCacheRebuildPolling() {
+            if (cacheRebuildPollTimer) {
+                clearInterval(cacheRebuildPollTimer);
+                cacheRebuildPollTimer = null;
             }
         }
         

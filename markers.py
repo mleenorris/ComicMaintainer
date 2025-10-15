@@ -167,6 +167,9 @@ def unmark_file_processed(filepath: str):
     _migrate_json_markers(PROCESSED_MARKER_FILE, MARKER_TYPE_PROCESSED)
     abs_path = os.path.abspath(filepath)
     remove_marker(abs_path, MARKER_TYPE_PROCESSED)
+    
+    # Invalidate enriched cache by updating marker timestamp
+    _update_marker_timestamp()
 
 
 # Duplicate files marker functions
@@ -193,6 +196,9 @@ def unmark_file_duplicate(filepath: str):
     _migrate_json_markers(DUPLICATE_MARKER_FILE, MARKER_TYPE_DUPLICATE)
     abs_path = os.path.abspath(filepath)
     remove_marker(abs_path, MARKER_TYPE_DUPLICATE)
+    
+    # Invalidate enriched cache by updating marker timestamp
+    _update_marker_timestamp()
 
 
 # Web modified files marker functions

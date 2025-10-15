@@ -16,6 +16,7 @@ The application now supports asynchronous file processing, allowing multiple fil
    - Tracks job status (queued, processing, completed, failed, cancelled)
    - Provides job lifecycle management (create, start, monitor, cancel, delete)
    - Automatic cleanup of old completed jobs (after 1 hour)
+   - Job state stored in SQLite database (`job_store.py`) for cross-process sharing
 
 2. **API Endpoints** (`web_app.py`)
    - `POST /api/jobs/process-all` - Start processing all files
@@ -151,30 +152,43 @@ These can still be used if needed, but the async endpoints are recommended for b
 ## Deployment Architecture
 
 The application uses:
-- **1 Gunicorn worker process** - Ensures job state consistency since jobs are stored in-memory
+- **Multiple Gunicorn worker processes** (default: 2, configurable via `GUNICORN_WORKERS` env var)
 - **4 ThreadPoolExecutor threads per worker** (configurable) - Provides concurrent file processing
+- **SQLite database** - Shared job state storage across all worker processes
 
-This architecture avoids the "Job not found" issue that would occur with multiple Gunicorn workers, where:
-- Worker A creates a job and stores it in its memory
-- Worker B receives the status poll but doesn't have the job in its memory
-- Result: "Job not found" error despite successful processing
-
-The single-worker configuration ensures all requests for a job are handled by the same process, while ThreadPoolExecutor provides efficient concurrent processing of files.
+Job state is stored in a SQLite database (`/app/cache/jobs.db`), which enables:
+- Multiple Gunicorn workers can safely share job information
+- Jobs survive server restarts
+- No "Job not found" errors when different workers handle different requests
+- Better scalability with horizontal scaling of workers
 
 ## Configuration
 
-### Adjusting Worker Count
+### Adjusting Gunicorn Workers
 
-To change the number of concurrent workers, modify `job_manager.py`:
+To change the number of Gunicorn worker processes, set the `GUNICORN_WORKERS` environment variable:
+
+```bash
+export GUNICORN_WORKERS=4  # Default is 2
+```
+
+**Recommendations:**
+- For small libraries: 1-2 workers
+- For medium libraries: 2-4 workers  
+- For large libraries with high traffic: 4-8 workers
+
+### Adjusting Thread Pool Size
+
+To change the number of concurrent threads per worker, modify `job_manager.py`:
 
 ```python
 def get_job_manager(max_workers: int = 4) -> JobManager:
 ```
 
 **Recommendations:**
-- For CPU-bound systems: 2-4 workers
-- For systems with fast storage: 4-8 workers
-- For systems with slow storage: 2-4 workers
+- For CPU-bound systems: 2-4 threads
+- For systems with fast storage: 4-8 threads
+- For systems with slow storage: 2-4 threads
 
 ### Adjusting Polling Interval
 
@@ -218,16 +232,19 @@ python3 /tmp/test_integration.py
 - Job continues processing remaining files
 - Fatal errors mark job as failed
 
-### Memory Management
+### Persistence and Storage
+- Job state stored in SQLite database (`/app/cache/jobs.db`)
+- Jobs survive server restarts
 - Old completed jobs automatically cleaned up after 1 hour
 - Can manually delete jobs via API
-- Job results stored in memory (not persisted to disk)
-- Single Gunicorn worker ensures job state consistency across requests
+- Thread-safe database access with WAL mode for concurrent operations
+- Multiple Gunicorn workers share job state via database
 
 ## Future Enhancements
 
 Potential improvements for future versions:
-- [ ] Persistent job storage (survive server restarts)
+- [x] Persistent job storage (survive server restarts) - ✅ Implemented with SQLite
+- [x] Multi-worker support - ✅ Implemented with shared SQLite backend
 - [ ] Job priority levels
 - [ ] Configurable worker pools per job type
 - [ ] WebSocket support for push notifications

@@ -47,6 +47,11 @@ Thumbs.db
 ComicMaintainer.log
 config.json
 
+# SQLite database files
+jobs.db
+jobs.db-wal
+jobs.db-shm
+
 # Marker file backups and temp files
 *.corrupt.*
 *.tmp

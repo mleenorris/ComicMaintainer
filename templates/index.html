@@ -2758,12 +2758,14 @@
             showProgressModal('Starting async processing...');
             
             try {
+                console.log('[BATCH] Starting process all files request...');
                 // Start the job
                 const response = await fetch('/api/jobs/process-all', {
                     method: 'POST'
                 });
                 
                 if (!response.ok) {
+                    console.error(`[BATCH] Failed to start processing (HTTP ${response.status})`);
                     throw new Error('Failed to start processing job');
                 }
                 
@@ -2771,12 +2773,14 @@
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
+                console.log(`[BATCH] Created job ${jobId} for ${totalItems} files`);
                 showMessage(`Started processing ${totalItems} files in background`, 'info');
                 
                 // Poll for status
                 await pollJobStatus(jobId, 'Processing Files...');
                 
             } catch (error) {
+                console.error('[BATCH] Error starting process all:', error);
                 showMessage('Failed to start processing: ' + error.message, 'error');
                 closeProgressModal();
             }
@@ -2797,6 +2801,7 @@
             const files = Array.from(selectedFiles);
             
             try {
+                console.log(`[BATCH] Starting process selected files request (${files.length} files)...`);
                 // Start the job
                 const response = await fetch('/api/jobs/process-selected', {
                     method: 'POST',
@@ -2809,6 +2814,7 @@
                 });
                 
                 if (!response.ok) {
+                    console.error(`[BATCH] Failed to start processing (HTTP ${response.status})`);
                     throw new Error('Failed to start processing job');
                 }
                 
@@ -2816,12 +2822,14 @@
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
+                console.log(`[BATCH] Created job ${jobId} for ${totalItems} files`);
                 showMessage(`Started processing ${totalItems} files in background`, 'info');
                 
                 // Poll for status
                 await pollJobStatus(jobId, 'Processing Selected Files...');
                 
             } catch (error) {
+                console.error('[BATCH] Error starting process selected:', error);
                 showMessage('Failed to start processing: ' + error.message, 'error');
                 closeProgressModal();
             }
@@ -2830,6 +2838,8 @@
         async function pollJobStatus(jobId, title) {
             const pollInterval = 500; // Poll every 500ms
             let lastProcessed = 0;
+            
+            console.log(`[JOB ${jobId}] Starting to poll job status: ${title}`);
             
             // Store active job ID in localStorage
             localStorage.setItem('activeJobId', jobId);
@@ -2842,6 +2852,7 @@
                     if (!response.ok) {
                         const errorData = await response.json().catch(() => ({}));
                         const errorMessage = errorData.error || `Failed to get job status (HTTP ${response.status})`;
+                        console.error(`[JOB ${jobId}] Status check failed: ${errorMessage}`);
                         throw new Error(errorMessage);
                     }
                     
@@ -2885,6 +2896,7 @@
                     
                     // Check if completed
                     if (status.status === 'completed') {
+                        console.log(`[JOB ${jobId}] Job completed: ${successCount}/${total} files succeeded`);
                         completeProgress();
                         showMessage(`Processed ${successCount} of ${total} files successfully!`, 'success');
                         // Refresh file list (force refresh to clear cache)
@@ -2894,6 +2906,7 @@
                         localStorage.removeItem('activeJobTitle');
                         break;
                     } else if (status.status === 'failed') {
+                        console.error(`[JOB ${jobId}] Job failed: ${status.error}`);
                         closeProgressModal();
                         showMessage(`Job failed: ${status.error}`, 'error');
                         // Clear active job from localStorage
@@ -2901,6 +2914,7 @@
                         localStorage.removeItem('activeJobTitle');
                         break;
                     } else if (status.status === 'cancelled') {
+                        console.log(`[JOB ${jobId}] Job was cancelled`);
                         closeProgressModal();
                         showMessage('Job was cancelled', 'warning');
                         // Clear active job from localStorage
@@ -2913,6 +2927,7 @@
                     await new Promise(resolve => setTimeout(resolve, pollInterval));
                 }
             } catch (error) {
+                console.error(`[JOB ${jobId}] Error during polling: ${error.message}`);
                 showMessage('Error checking job status: ' + error.message, 'error');
                 closeProgressModal();
                 // Clear active job from localStorage on error
@@ -2926,8 +2941,11 @@
             const activeJobTitle = localStorage.getItem('activeJobTitle');
             
             if (!activeJobId) {
+                console.log('[JOB RESUME] No active job found in localStorage');
                 return; // No active job
             }
+            
+            console.log(`[JOB RESUME] Found active job ${activeJobId} in localStorage, checking status...`);
             
             try {
                 // Check if job still exists and is active
@@ -2935,6 +2953,7 @@
                 
                 if (!response.ok) {
                     // Job not found (may have been cleaned up), clear from localStorage
+                    console.warn(`[JOB RESUME] Job ${activeJobId} not found on server (HTTP ${response.status})`);
                     localStorage.removeItem('activeJobId');
                     localStorage.removeItem('activeJobTitle');
                     showMessage('Previous batch processing job is no longer available', 'warning');
@@ -2942,14 +2961,17 @@
                 }
                 
                 const status = await response.json();
+                console.log(`[JOB RESUME] Job ${activeJobId} status: ${status.status}, ${status.processed_items}/${status.total_items} items processed`);
                 
                 // Resume if job is still processing or queued
                 if (status.status === 'processing' || status.status === 'queued') {
+                    console.log(`[JOB RESUME] Resuming job ${activeJobId}`);
                     showProgressModal(activeJobTitle || 'Resuming Job...');
                     showMessage('Resuming active job...', 'info');
                     await pollJobStatus(activeJobId, activeJobTitle || 'Processing...');
                 } else if (status.status === 'completed') {
                     // Job completed while we were away - show results
+                    console.log(`[JOB RESUME] Job ${activeJobId} already completed`);
                     let successCount = 0;
                     let errorCount = 0;
                     
@@ -2974,17 +2996,19 @@
                     await loadFiles(1, true);
                 } else if (status.status === 'failed') {
                     // Job failed while we were away
+                    console.error(`[JOB RESUME] Job ${activeJobId} already failed: ${status.error}`);
                     showMessage(`Batch processing failed: ${status.error || 'Unknown error'}`, 'error');
                     localStorage.removeItem('activeJobId');
                     localStorage.removeItem('activeJobTitle');
                 } else if (status.status === 'cancelled') {
                     // Job was cancelled
+                    console.log(`[JOB RESUME] Job ${activeJobId} was cancelled`);
                     showMessage('Batch processing was cancelled', 'warning');
                     localStorage.removeItem('activeJobId');
                     localStorage.removeItem('activeJobTitle');
                 }
             } catch (error) {
-                console.error('Error checking active job:', error);
+                console.error(`[JOB RESUME] Error checking active job ${activeJobId}:`, error);
                 // Clear stale job data
                 localStorage.removeItem('activeJobId');
                 localStorage.removeItem('activeJobTitle');

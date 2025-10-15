@@ -1343,10 +1343,14 @@ def async_process_all_files():
     """API endpoint to start async processing of all files"""
     from process_file import process_file
     
+    logging.info("[API] Request to process all files (async)")
     files = get_comic_files()
     
     if not files:
+        logging.warning("[API] No files found to process")
         return jsonify({'error': 'No files to process'}), 400
+    
+    logging.info(f"[API] Found {len(files)} files to process")
     
     # Create job
     job_manager = get_job_manager(max_workers=get_max_workers())
@@ -1359,14 +1363,14 @@ def async_process_all_files():
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
             handle_file_rename_in_cache(filepath, final_filepath)
-            logging.info(f"Processed file via async job: {filepath} -> {final_filepath}")
+            logging.info(f"[BATCH] Processed file: {filepath} -> {final_filepath}")
             return JobResult(
                 item=os.path.basename(filepath),
                 success=True,
                 details={'original': filepath, 'final': final_filepath}
             )
         except Exception as e:
-            logging.error(f"Error processing file {filepath}: {e}")
+            logging.error(f"[BATCH] Error processing file {filepath}: {e}")
             return JobResult(
                 item=os.path.basename(filepath),
                 success=False,
@@ -1376,6 +1380,7 @@ def async_process_all_files():
     # Start job
     job_manager.start_job(job_id, process_item, files)
     
+    logging.info(f"[API] Created and started job {job_id} for {len(files)} files")
     return jsonify({
         'job_id': job_id,
         'total_items': len(files)
@@ -1390,7 +1395,10 @@ def async_process_selected_files():
     data = request.json
     file_list = data.get('files', [])
     
+    logging.info(f"[API] Request to process {len(file_list)} selected files (async)")
+    
     if not file_list:
+        logging.warning("[API] No files specified in request")
         return jsonify({'error': 'No files specified'}), 400
     
     # Build full paths
@@ -1401,7 +1409,10 @@ def async_process_selected_files():
             full_paths.append(full_path)
     
     if not full_paths:
+        logging.warning(f"[API] None of the {len(file_list)} specified files exist")
         return jsonify({'error': 'No valid files to process'}), 400
+    
+    logging.info(f"[API] Found {len(full_paths)} valid files out of {len(file_list)} requested")
     
     # Create job
     job_manager = get_job_manager(max_workers=get_max_workers())
@@ -1414,14 +1425,14 @@ def async_process_selected_files():
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
             handle_file_rename_in_cache(filepath, final_filepath)
-            logging.info(f"Processed file via async job: {filepath} -> {final_filepath}")
+            logging.info(f"[BATCH] Processed file: {filepath} -> {final_filepath}")
             return JobResult(
                 item=os.path.basename(filepath),
                 success=True,
                 details={'original': filepath, 'final': final_filepath}
             )
         except Exception as e:
-            logging.error(f"Error processing file {filepath}: {e}")
+            logging.error(f"[BATCH] Error processing file {filepath}: {e}")
             return JobResult(
                 item=os.path.basename(filepath),
                 success=False,
@@ -1431,6 +1442,7 @@ def async_process_selected_files():
     # Start job
     job_manager.start_job(job_id, process_item, full_paths)
     
+    logging.info(f"[API] Created and started job {job_id} for {len(full_paths)} files")
     return jsonify({
         'job_id': job_id,
         'total_items': len(full_paths)
@@ -1440,10 +1452,12 @@ def async_process_selected_files():
 @app.route('/api/jobs/<job_id>', methods=['GET'])
 def get_job_status(job_id):
     """API endpoint to get job status"""
+    logging.debug(f"[API] Status request for job {job_id}")
     job_manager = get_job_manager(max_workers=get_max_workers())
     status = job_manager.get_job_status(job_id)
     
     if status is None:
+        logging.warning(f"[API] Job {job_id} not found")
         return jsonify({'error': 'Job not found'}), 404
     
     return jsonify(status)
@@ -1471,11 +1485,14 @@ def delete_job(job_id):
 @app.route('/api/jobs/<job_id>/cancel', methods=['POST'])
 def cancel_job(job_id):
     """API endpoint to cancel a job"""
+    logging.info(f"[API] Request to cancel job {job_id}")
     job_manager = get_job_manager(max_workers=get_max_workers())
     
     if job_manager.cancel_job(job_id):
+        logging.info(f"[API] Job {job_id} cancelled successfully")
         return jsonify({'success': True})
     else:
+        logging.warning(f"[API] Cannot cancel job {job_id} - not found or already completed")
         return jsonify({'error': 'Job not found or already completed'}), 400
 
 

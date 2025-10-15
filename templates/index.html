@@ -272,7 +272,7 @@
         .settings-dropdown-menu {
             display: none;
             position: absolute;
-            left: 0;
+            right: 0;
             top: calc(100% + 5px);
             background: var(--bg-secondary);
             border: 1px solid var(--border-secondary);
@@ -1430,6 +1430,31 @@
                     </svg>
                 </div>
                 <div class="header-right">
+                    <div class="settings-menu-wrapper">
+                        <button class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle">
+                            ⋮
+                        </button>
+                        <div class="settings-dropdown-menu" id="settingsDropdownMenu">
+                            <button class="settings-dropdown-item" onclick="openAboutModal(); closeSettingsMenu();">
+                                ℹ️ About
+                            </button>
+                            <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
+                                ⚙️ Settings
+                            </button>
+                            <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
+                                📋 View Logs
+                            </button>
+                            <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
+                                🌓 Toggle Theme
+                            </button>
+                            <button class="settings-dropdown-item" onclick="refreshFiles(); closeSettingsMenu();">
+                                🔄 Refresh
+                            </button>
+                            <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
+                                🔍 Scan Unmarked
+                            </button>
+                        </div>
+                    </div>
                     <div class="header-controls">
                         <button id="progressIndicator" class="progress-indicator-btn" onclick="restoreProgressModal()" style="display: none;" title="Show progress">
                             <span id="progressIndicatorText">⏳ Processing...</span>
@@ -1471,31 +1496,6 @@
                                     💾 Size
                                 </button>
                             </div>
-                        </div>
-                    </div>
-                    <div class="settings-menu-wrapper">
-                        <button class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle">
-                            ⋮
-                        </button>
-                        <div class="settings-dropdown-menu" id="settingsDropdownMenu">
-                            <button class="settings-dropdown-item" onclick="openAboutModal(); closeSettingsMenu();">
-                                ℹ️ About
-                            </button>
-                            <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
-                                ⚙️ Settings
-                            </button>
-                            <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
-                                📋 View Logs
-                            </button>
-                            <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
-                                🌓 Toggle Theme
-                            </button>
-                            <button class="settings-dropdown-item" onclick="refreshFiles(); closeSettingsMenu();">
-                                🔄 Refresh
-                            </button>
-                            <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
-                                🔍 Scan Unmarked
-                            </button>
                         </div>
                     </div>
                 </div>

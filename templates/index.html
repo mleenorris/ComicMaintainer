@@ -2108,10 +2108,12 @@
                 perPageSelect.value = perPage;
             }
             
-            loadFiles();
-            
-            // Check for active job and resume polling
+            // Check for active job and resume polling FIRST (before loading files)
+            // This ensures the progress modal appears immediately on page load
             await checkAndResumeActiveJob();
+            
+            // Then load files (don't await so file list loads in background)
+            loadFiles();
         });
         
         // Warn user before leaving page if there's an active batch job

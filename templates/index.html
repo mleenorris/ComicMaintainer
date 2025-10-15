@@ -1727,6 +1727,18 @@
                     </small>
                 </div>
                 
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Log Rotation</h3>
+                <div class="form-group">
+                    <label for="logMaxSize">Maximum Log File Size (MB)</label>
+                    <input type="number" id="logMaxSize" min="1" max="100" step="1" placeholder="5" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. Changes take effect on restart.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>LOG_MAX_BYTES</code> environment variable (in bytes).
+                    </small>
+                </div>
+                
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Filename Format</h3>
                 <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
                     Configure how files are renamed when processed. Use placeholders like <code>{series}</code>, <code>{issue}</code>, etc.
@@ -2940,6 +2952,11 @@
                 const watcherData = await watcherResponse.json();
                 document.getElementById('watcherToggleCheckbox').checked = watcherData.enabled;
                 
+                // Load log max size
+                const logResponse = await fetch('/api/settings/log-max-bytes');
+                const logData = await logResponse.json();
+                document.getElementById('logMaxSize').value = Math.round(logData.maxMB);
+                
                 document.getElementById('settingsModal').classList.add('active');
             } catch (error) {
                 showMessage('Failed to load settings: ' + error.message, 'error');
@@ -3008,14 +3025,21 @@
         
         async function saveFilenameFormat() {
             const format = document.getElementById('filenameFormat').value.trim();
+            const logMaxSize = parseFloat(document.getElementById('logMaxSize').value);
             
             if (!format) {
                 showMessage('Filename format cannot be empty', 'error');
                 return;
             }
             
+            if (isNaN(logMaxSize) || logMaxSize <= 0) {
+                showMessage('Log max size must be a positive number', 'error');
+                return;
+            }
+            
             try {
-                const response = await fetch('/api/settings/filename-format', {
+                // Save filename format
+                const formatResponse = await fetch('/api/settings/filename-format', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -3023,16 +3047,33 @@
                     body: JSON.stringify({ format: format })
                 });
                 
-                const result = await response.json();
+                const formatResult = await formatResponse.json();
                 
-                if (result.success) {
-                    showMessage('Filename format saved successfully!', 'success');
-                    closeSettings();
-                } else {
-                    showMessage(result.error || 'Failed to save filename format', 'error');
+                if (!formatResult.success) {
+                    showMessage(formatResult.error || 'Failed to save filename format', 'error');
+                    return;
                 }
+                
+                // Save log max size
+                const logResponse = await fetch('/api/settings/log-max-bytes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ maxMB: logMaxSize })
+                });
+                
+                const logResult = await logResponse.json();
+                
+                if (!logResult.success) {
+                    showMessage(logResult.error || 'Failed to save log max size', 'error');
+                    return;
+                }
+                
+                showMessage('Settings saved successfully! Log rotation will take effect on restart.', 'success');
+                closeSettings();
             } catch (error) {
-                showMessage('Failed to save filename format: ' + error.message, 'error');
+                showMessage('Failed to save settings: ' + error.message, 'error');
             }
         }
         

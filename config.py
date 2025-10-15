@@ -5,6 +5,7 @@ import logging
 CONFIG_FILE = 'config.json'
 DEFAULT_FILENAME_FORMAT = '{series} - Chapter {issue}.cbz'
 DEFAULT_WATCHER_ENABLED = True
+DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5MB default
 
 def get_config():
     """Get the current configuration"""
@@ -18,7 +19,8 @@ def get_config():
     # Return default config
     return {
         'filename_format': DEFAULT_FILENAME_FORMAT,
-        'watcher_enabled': DEFAULT_WATCHER_ENABLED
+        'watcher_enabled': DEFAULT_WATCHER_ENABLED,
+        'log_max_bytes': DEFAULT_LOG_MAX_BYTES
     }
 
 def save_config(config):
@@ -51,4 +53,24 @@ def set_watcher_enabled(enabled):
     """Set the watcher enabled setting"""
     config = get_config()
     config['watcher_enabled'] = enabled
+    return save_config(config)
+
+def get_log_max_bytes():
+    """Get the log max bytes setting"""
+    # Check environment variable first
+    env_value = os.environ.get('LOG_MAX_BYTES')
+    if env_value:
+        try:
+            return int(env_value)
+        except ValueError:
+            logging.warning(f"Invalid LOG_MAX_BYTES environment variable: {env_value}")
+    
+    # Fall back to config file
+    config = get_config()
+    return config.get('log_max_bytes', DEFAULT_LOG_MAX_BYTES)
+
+def set_log_max_bytes(max_bytes):
+    """Set the log max bytes setting"""
+    config = get_config()
+    config['log_max_bytes'] = max_bytes
     return save_config(config)

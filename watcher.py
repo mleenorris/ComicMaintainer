@@ -6,7 +6,8 @@ from watchdog.events import FileSystemEventHandler
 import subprocess
 import os
 import logging
-from config import get_watcher_enabled
+from logging.handlers import RotatingFileHandler
+from config import get_watcher_enabled, get_log_max_bytes
 from markers import is_file_processed, is_file_web_modified, clear_file_web_modified
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
@@ -15,12 +16,21 @@ PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
 CACHE_UPDATE_MARKER = '.cache_update'
 CACHE_CHANGES_FILE = '.cache_changes'
 
-# Set up logging to file and stdout
+# Set up logging to file and stdout with rotation
+log_max_bytes = get_log_max_bytes()
+log_handler = RotatingFileHandler(
+    "ComicMaintainer.log",
+    maxBytes=log_max_bytes,
+    backupCount=3
+)
+log_handler.setLevel(logging.INFO)
+log_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s %(message)s',
     handlers=[
-        logging.FileHandler("ComicMaintainer.log"),
+        log_handler,
         logging.StreamHandler(sys.stdout)
     ]
 )

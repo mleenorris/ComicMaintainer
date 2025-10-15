@@ -225,6 +225,7 @@ The service now supports asynchronous file processing with persistent job storag
 - ✅ **Persistent storage**: Jobs survive server restarts (stored in SQLite)
 - ✅ **Multi-worker support**: Multiple Gunicorn workers can share job state
 - ✅ **Scalable**: Handles large libraries efficiently with horizontal scaling
+- ✅ **Page refresh protection**: Warning dialog prevents accidental interruption; jobs auto-resume on return
 
 **Note:** The original streaming endpoints (`/api/process-all?stream=true`, etc.) remain available for backward compatibility, but the async endpoints are now used by default in the web interface.
 

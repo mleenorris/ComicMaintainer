@@ -150,18 +150,62 @@ These can still be used if needed, but the async endpoints are recommended for b
 
 ## Deployment Architecture
 
-The application uses:
-- **1 Gunicorn worker process** - Ensures job state consistency since jobs are stored in-memory
-- **4 ThreadPoolExecutor threads per worker** (configurable) - Provides concurrent file processing
+The application supports two deployment modes:
 
-This architecture avoids the "Job not found" issue that would occur with multiple Gunicorn workers, where:
+### Single-Worker Mode (Default)
+- **1 Gunicorn worker process** - Job state stored in-memory
+- **4 ThreadPoolExecutor threads per worker** (configurable) - Provides concurrent file processing
+- Simple setup with no external dependencies
+- Suitable for single-instance deployments
+
+### Multi-Worker Mode (Redis Backend)
+- **Multiple Gunicorn worker processes** - Job state shared via Redis
+- **4 ThreadPoolExecutor threads per worker** (configurable) - Each worker processes files concurrently
+- Requires Redis server for shared state storage
+- Enables horizontal scaling and high-availability deployments
+
+**Configuration**:
+```bash
+# In-memory (default)
+JOB_STORE_BACKEND=memory
+
+# Redis backend
+JOB_STORE_BACKEND=redis
+REDIS_URL=redis://localhost:6379/0
+```
+
+**Why Redis for Multi-Worker?**
+Without a shared backend, multi-worker deployments experience "Job not found" errors:
 - Worker A creates a job and stores it in its memory
 - Worker B receives the status poll but doesn't have the job in its memory
 - Result: "Job not found" error despite successful processing
 
-The single-worker configuration ensures all requests for a job are handled by the same process, while ThreadPoolExecutor provides efficient concurrent processing of files.
+Redis solves this by providing a shared job state store accessible to all workers.
 
 ## Configuration
+
+### Job Storage Backend
+
+Configure via environment variables:
+
+```bash
+# In-memory storage (default)
+export JOB_STORE_BACKEND=memory
+
+# Redis backend
+export JOB_STORE_BACKEND=redis
+export REDIS_URL=redis://localhost:6379/0
+```
+
+**Backend Comparison:**
+
+| Feature | In-Memory | Redis |
+|---------|-----------|-------|
+| Setup complexity | Simple | Requires Redis |
+| Multi-worker support | ❌ No | ✅ Yes |
+| Job persistence | ❌ Lost on restart | ✅ Survives restarts |
+| Horizontal scaling | ❌ No | ✅ Yes |
+| Performance | Fast | Very fast |
 
 ### Adjusting Worker Count
 
@@ -221,13 +265,15 @@ python3 /tmp/test_integration.py
 ### Memory Management
 - Old completed jobs automatically cleaned up after 1 hour
 - Can manually delete jobs via API
-- Job results stored in memory (not persisted to disk)
-- Single Gunicorn worker ensures job state consistency across requests
+- **In-memory backend**: Job results stored in memory (not persisted), single worker ensures consistency
+- **Redis backend**: Job state persisted in Redis with 24-hour expiration, accessible across all workers
 
 ## Future Enhancements
 
 Potential improvements for future versions:
-- [ ] Persistent job storage (survive server restarts)
+- [x] Persistent job storage (survive server restarts) - ✅ Implemented with Redis backend
+- [x] Multi-worker support - ✅ Implemented with Redis backend
+- [ ] PostgreSQL backend option for job storage
 - [ ] Job priority levels
 - [ ] Configurable worker pools per job type
 - [ ] WebSocket support for push notifications

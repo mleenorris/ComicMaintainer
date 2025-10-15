@@ -99,6 +99,10 @@ docker run -d \
 - `PUID`: User ID to run the service as (default: `99` for user `nobody`)
 - `PGID`: Group ID to run the service as (default: `100` for group `users`)
 - `LOG_MAX_BYTES`: Maximum log file size in bytes before rotation (default: `5242880` = 5MB). Can also be configured via the Settings UI.
+- `JOB_STORE_BACKEND`: Backend for job state storage (default: `memory`). Options:
+  - `memory`: In-memory storage (requires single worker, original behavior)
+  - `redis`: Redis backend (enables multi-worker deployments)
+- `REDIS_URL`: Redis connection URL (default: `redis://localhost:6379/0`). Required when `JOB_STORE_BACKEND=redis`.
 
 ## Web Interface
 The service includes a web-based interface for managing your comic files:
@@ -270,12 +274,44 @@ Files are processed and updated when:
 
 ## Production Server
 - The web interface runs on **Gunicorn**, a production-ready WSGI server for Python web applications
-- Configured with 1 worker process to ensure job state consistency (jobs stored in-memory)
-- Concurrent file processing provided by ThreadPoolExecutor (4 threads) within the worker
+- **Job State Storage Options**:
+  - **In-Memory (default)**: Configured with 1 worker process to ensure job state consistency
+  - **Redis**: Enables multi-worker deployments with shared job state across all workers
+- Concurrent file processing provided by ThreadPoolExecutor (4 threads) within each worker
 - 600-second timeout (10 minutes) to accommodate batch processing operations on large libraries
 - **Cache coordination**: File-based locking prevents cache rebuild conflicts
 - **Non-blocking cache rebuilds**: Serves stale cache instead of waiting when cache is being rebuilt
 - No development server warnings - ready for production deployment
+
+### Multi-Worker Deployment with Redis
+
+To scale horizontally with multiple Gunicorn workers:
+
+1. **Set up Redis** (using Docker Compose, separate Redis container, or managed service)
+2. **Configure the service** to use Redis backend:
+
+```sh
+docker run -d \
+  -v /host/comics:/watched_dir \
+  -v /host/config:/config \
+  -e WATCHED_DIR=/watched_dir \
+  -e CACHE_DIR=/config \
+  -e JOB_STORE_BACKEND=redis \
+  -e REDIS_URL=redis://redis-host:6379/0 \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -p 5000:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+3. **Update start.sh** to use multiple workers by changing `--workers 1` to `--workers 4` (or desired count)
+
+**Benefits of Redis Backend**:
+- ✅ Shared job state across all worker processes
+- ✅ No "Job not found" errors with multiple workers
+- ✅ Horizontal scaling for high-traffic deployments
+- ✅ Job state persists across container restarts (Redis must be persistent)
+- ✅ Load balancing across multiple workers
 
 ## Data Persistence
 

@@ -2294,7 +2294,7 @@
                                     <button class="dropdown-toggle" onclick="toggleDropdown(event, '${escapeJs(file.relative_path)}')">
                                         Actions
                                     </button>
-                                    <div class="dropdown-menu" id="dropdown-${escapeJs(file.relative_path).replace(/[^a-zA-Z0-9]/g, '_')}">
+                                    <div class="dropdown-menu" id="${getDropdownId(file.relative_path)}">
                                         <button class="dropdown-item" onclick="viewTags('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                             👁️ View/Edit
                                         </button>
@@ -2357,6 +2357,12 @@
                        .replace(/\n/g, '\\n')
                        .replace(/\r/g, '\\r')
                        .replace(/\t/g, '\\t');
+        }
+        
+        function getDropdownId(filepath) {
+            // Generate a consistent dropdown ID from filepath
+            // This must match the ID used in the HTML generation
+            return 'dropdown-' + filepath.replace(/[^a-zA-Z0-9]/g, '_');
         }
         
         function toggleSelectAll(checked) {
@@ -3644,8 +3650,13 @@
         function toggleDropdown(event, filepath) {
             event.stopPropagation();
             
-            const dropdownId = 'dropdown-' + filepath.replace(/[^a-zA-Z0-9]/g, '_');
+            const dropdownId = getDropdownId(filepath);
             const dropdown = document.getElementById(dropdownId);
+            
+            if (!dropdown) {
+                console.error('Dropdown not found for filepath:', filepath, 'ID:', dropdownId);
+                return;
+            }
             
             // Close all other dropdowns
             document.querySelectorAll('.dropdown-menu.show').forEach(menu => {

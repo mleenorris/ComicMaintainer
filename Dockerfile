@@ -46,6 +46,7 @@ ENV WEB_PORT=5000
 ENV CACHE_DIR=/app/cache
 ENV PUID=99
 ENV PGID=100
+ENV MAX_WORKERS=4
 
 # Expose web interface port
 EXPOSE 5000

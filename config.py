@@ -8,6 +8,7 @@ CONFIG_FILE = os.path.join(CACHE_DIR, 'config.json')
 DEFAULT_FILENAME_FORMAT = '{series} - Chapter {issue}.cbz'
 DEFAULT_WATCHER_ENABLED = True
 DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5MB default
+DEFAULT_MAX_WORKERS = 4  # Default number of concurrent workers
 
 def get_config():
     """Get the current configuration"""
@@ -78,3 +79,16 @@ def set_log_max_bytes(max_bytes):
     config = get_config()
     config['log_max_bytes'] = max_bytes
     return save_config(config)
+
+def get_max_workers():
+    """Get the max workers setting"""
+    # Check environment variable first
+    env_value = os.environ.get('MAX_WORKERS')
+    if env_value:
+        try:
+            return int(env_value)
+        except ValueError:
+            logging.warning(f"Invalid MAX_WORKERS environment variable: {env_value}")
+    
+    # Fall back to default
+    return DEFAULT_MAX_WORKERS

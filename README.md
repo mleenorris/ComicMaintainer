@@ -99,6 +99,10 @@ docker run -d \
 - `PUID`: User ID to run the service as (default: `99` for user `nobody`)
 - `PGID`: Group ID to run the service as (default: `100` for group `users`)
 - `LOG_MAX_BYTES`: Maximum log file size in bytes before rotation (default: `5242880` = 5MB). Can also be configured via the Settings UI.
+- `MAX_WORKERS`: Number of concurrent worker threads for file processing (default: `4`). Recommendations:
+  - For CPU-bound systems: 2-4 workers
+  - For systems with fast storage: 4-8 workers
+  - For systems with slow storage: 2-4 workers
 
 ## Web Interface
 The service includes a web-based interface for managing your comic files:

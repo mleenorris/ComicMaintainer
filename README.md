@@ -52,8 +52,10 @@ docker build -t iceburn1/comictagger-watcher:latest .
 docker run -d \
   -v <host_dir_to_watch>:/watched_dir \
   -v <host_dir_for_duplicates>:/duplicates \
+  -v <host_dir_for_config>:/config \
   -e WATCHED_DIR=/watched_dir \
   -e DUPLICATE_DIR=/duplicates \
+  -e CACHE_DIR=/config \
   -p 5000:5000 \
   iceburn1/comictagger-watcher:latest
 ```
@@ -63,8 +65,10 @@ docker run -d \
 docker run -d \
   -v <host_dir_to_watch>:/watched_dir \
   -v <host_dir_for_duplicates>:/duplicates \
+  -v <host_dir_for_config>:/config \
   -e WATCHED_DIR=/watched_dir \
   -e DUPLICATE_DIR=/duplicates \
+  -e CACHE_DIR=/config \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -p 5000:5000 \
@@ -72,8 +76,13 @@ docker run -d \
 ```
 
 - Replace `<host_dir_to_watch>` with the path to your comics folder.
+- Replace `<host_dir_for_config>` with the path to store persistent configuration and cache data.
 - `WATCHED_DIR` **must** be set to the directory to watch (usually `/watched_dir` if using the example above).
 - Optionally, mount a host directory to `/duplicates` to persist duplicates.
+- **Recommended**: Mount a host directory to `/config` (or your chosen path) and set `CACHE_DIR` to persist:
+  - Marker files (processed files, duplicates, web-modified files)
+  - Configuration settings (filename format, watcher enabled, log rotation)
+  - File list cache for improved performance
 - The `-p 5000:5000` flag exposes the web interface on port 5000.
 - Set `PUID` and `PGID` to match your host user for proper file permissions (use `id -u` and `id -g` on Linux/macOS).
 - Access the web interface at `http://localhost:5000`
@@ -83,7 +92,10 @@ docker run -d \
 - `PROCESS_SCRIPT`: Script to run for processing (default: `/app/process_file.py`)
 - `DUPLICATE_DIR`: Directory where duplicates are moved (required for duplicate handling)
 - `WEB_PORT`: Port for the web interface (default: `5000`)
-- `CACHE_DIR`: Directory for server-side caching files (default: `/app/cache`)
+- `CACHE_DIR`: **(Recommended)** Directory for persistent configuration and cache data (default: `/app/cache`). Mount a host directory here to persist:
+  - Marker files tracking processed/duplicate files
+  - Configuration settings (filename format, watcher state, log rotation)
+  - File list cache for performance optimization
 - `PUID`: User ID to run the service as (default: `99` for user `nobody`)
 - `PGID`: Group ID to run the service as (default: `100` for group `users`)
 - `LOG_MAX_BYTES`: Maximum log file size in bytes before rotation (default: `5242880` = 5MB). Can also be configured via the Settings UI.
@@ -178,7 +190,7 @@ The filename format can be customized through the web interface Settings modal. 
 
 **Note:** Decimal chapter numbers (e.g., 71.4, 71.11) are preserved without trailing zeros.
 
-The filename format setting is saved in `config.json` and applies to both web interface processing and watcher service processing.
+The filename format setting is saved in `config.json` (located in `CACHE_DIR`) and applies to both web interface processing and watcher service processing. **Mount `CACHE_DIR` as a volume to persist this configuration across container restarts.**
 
 ## API Endpoints
 

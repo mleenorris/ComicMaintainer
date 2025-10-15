@@ -10,6 +10,12 @@ import threading
 import time
 from config import get_filename_format, set_filename_format, DEFAULT_FILENAME_FORMAT, get_watcher_enabled, set_watcher_enabled
 from version import __version__
+from markers import (
+    is_file_processed, mark_file_processed, unmark_file_processed,
+    is_file_duplicate, mark_file_duplicate, unmark_file_duplicate,
+    is_file_web_modified, mark_file_web_modified, clear_file_web_modified,
+    cleanup_web_modified_markers
+)
 
 # Set up logging
 logging.basicConfig(
@@ -25,16 +31,9 @@ app = Flask(__name__)
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
 CACHE_DIR = os.environ.get('CACHE_DIR', '/app/cache')
-WEB_MODIFIED_MARKER = '.web_modified'
-PROCESSED_MARKER = '.processed_files'
-DUPLICATE_MARKER = '.duplicate_files'
 CACHE_UPDATE_MARKER = '.cache_update'
 CACHE_CHANGES_FILE = '.cache_changes'
 CACHE_REBUILD_LOCK = '.cache_rebuild_lock'
-
-# Global lock file to mark files modified by web interface
-web_modified_files = set()
-lock = threading.Lock()
 
 # Cache for file list to improve performance on large libraries
 file_list_cache = {
@@ -43,15 +42,6 @@ file_list_cache = {
     'watcher_update_time': 0  # Track last watcher update time
 }
 cache_lock = threading.Lock()
-
-# Cache for file metadata (processed/duplicate status) to improve filtering performance
-metadata_cache = {
-    'processed': {},  # {directory_path: {filename: bool}}
-    'duplicate': {},  # {directory_path: {filename: bool}}
-    'last_loaded': {}  # {directory_path: timestamp}
-}
-metadata_cache_lock = threading.Lock()
-METADATA_CACHE_TTL = 5  # Cache metadata for 5 seconds
 
 # Cache for enriched file list (files with metadata) to speed up filtering
 enriched_file_cache = {
@@ -117,165 +107,33 @@ def release_cache_rebuild_lock(lock_fd):
         except Exception as e:
             logging.error(f"Error releasing cache rebuild lock: {e}")
 
-def mark_web_modified(filepath):
-    """Mark a file as modified by the web interface"""
-    with lock:
-        web_modified_files.add(os.path.abspath(filepath))
-        # Write marker file
-        marker_path = os.path.join(os.path.dirname(filepath), WEB_MODIFIED_MARKER)
-        with open(marker_path, 'a') as f:
-            f.write(f"{os.path.basename(filepath)}\n")
-
-def is_web_modified(filepath):
-    """Check if a file was modified by the web interface"""
-    with lock:
-        return os.path.abspath(filepath) in web_modified_files
-
-def clear_web_modified(filepath):
-    """Clear the web modified marker for a file"""
-    with lock:
-        abs_path = os.path.abspath(filepath)
-        if abs_path in web_modified_files:
-            web_modified_files.discard(abs_path)
-
-def mark_file_processed(filepath, original_filepath=None):
-    """Mark a file as processed, optionally cleaning up old filename if renamed"""
-    marker_path = os.path.join(os.path.dirname(filepath), PROCESSED_MARKER)
-    try:
-        filename = os.path.basename(filepath)
-        # Read existing processed files
-        processed_files = set()
-        if os.path.exists(marker_path):
-            with open(marker_path, 'r') as f:
-                processed_files = set(f.read().splitlines())
-        
-        # If file was renamed, remove the old filename from the marker
-        if original_filepath and original_filepath != filepath:
-            original_filename = os.path.basename(original_filepath)
-            if original_filename in processed_files:
-                processed_files.discard(original_filename)
-                logging.info(f"Removed old filename '{original_filename}' from processed marker after rename")
-        
-        # Add current file
-        processed_files.add(filename)
-        
-        # Write back
-        with open(marker_path, 'w') as f:
-            f.write('\n'.join(sorted(processed_files)))
-        
-        # Invalidate metadata cache for this directory
-        directory = os.path.dirname(filepath)
-        with metadata_cache_lock:
-            if directory in metadata_cache['processed']:
-                del metadata_cache['processed'][directory]
-            cache_key = f"{directory}:{PROCESSED_MARKER}"
-            if cache_key in metadata_cache['last_loaded']:
-                del metadata_cache['last_loaded'][cache_key]
-        
-        # Invalidate enriched file cache
-        with enriched_file_cache_lock:
-            enriched_file_cache['files'] = None
-            enriched_file_cache['file_list_hash'] = None
-        
-        logging.info(f"Marked {filepath} as processed")
-    except Exception as e:
-        logging.error(f"Error marking file as processed: {e}")
-
-def load_marker_file(directory, marker_name):
-    """Load a marker file and return the set of filenames"""
-    marker_path = os.path.join(directory, marker_name)
-    if not os.path.exists(marker_path):
-        return set()
+# Wrapper functions for marker operations with cache invalidation
+def mark_file_processed_wrapper(filepath, original_filepath=None):
+    """Mark a file as processed and invalidate relevant caches"""
+    mark_file_processed_wrapper(filepath, original_filepath=original_filepath)
     
-    try:
-        with open(marker_path, 'r') as f:
-            return set(f.read().splitlines())
-    except Exception as e:
-        logging.error(f"Error reading marker file {marker_path}: {e}")
-        return set()
+    # Invalidate enriched file cache
+    with enriched_file_cache_lock:
+        enriched_file_cache['files'] = None
+        enriched_file_cache['file_list_hash'] = None
 
-def get_directory_metadata(directory, marker_name, cache_dict):
-    """Get metadata for all files in a directory with caching"""
-    with metadata_cache_lock:
-        current_time = time.time()
-        cache_key = f"{directory}:{marker_name}"
-        
-        # Check if cache is valid
-        if cache_key in metadata_cache['last_loaded']:
-            age = current_time - metadata_cache['last_loaded'][cache_key]
-            if age < METADATA_CACHE_TTL and directory in cache_dict:
-                return cache_dict[directory]
-        
-        # Load from disk
-        filenames = load_marker_file(directory, marker_name)
-        cache_dict[directory] = filenames
-        metadata_cache['last_loaded'][cache_key] = current_time
-        
-        return filenames
+def mark_file_duplicate_wrapper(filepath):
+    """Mark a file as duplicate and invalidate relevant caches"""
+    mark_file_duplicate_wrapper(filepath)
+    
+    # Invalidate enriched file cache
+    with enriched_file_cache_lock:
+        enriched_file_cache['files'] = None
+        enriched_file_cache['file_list_hash'] = None
 
-def is_file_processed(filepath):
-    """Check if a file has been processed"""
-    directory = os.path.dirname(filepath)
-    filename = os.path.basename(filepath)
-    processed_files = get_directory_metadata(directory, PROCESSED_MARKER, metadata_cache['processed'])
-    return filename in processed_files
-
-def mark_file_duplicate(filepath):
-    """Mark a file as a duplicate"""
-    marker_path = os.path.join(os.path.dirname(filepath), DUPLICATE_MARKER)
-    try:
-        filename = os.path.basename(filepath)
-        # Read existing duplicate files
-        duplicate_files = set()
-        if os.path.exists(marker_path):
-            with open(marker_path, 'r') as f:
-                duplicate_files = set(f.read().splitlines())
-        
-        # Add current file
-        duplicate_files.add(filename)
-        
-        # Write back
-        with open(marker_path, 'w') as f:
-            f.write('\n'.join(sorted(duplicate_files)))
-        
-        # Invalidate metadata cache for this directory
-        directory = os.path.dirname(filepath)
-        with metadata_cache_lock:
-            if directory in metadata_cache['duplicate']:
-                del metadata_cache['duplicate'][directory]
-            cache_key = f"{directory}:{DUPLICATE_MARKER}"
-            if cache_key in metadata_cache['last_loaded']:
-                del metadata_cache['last_loaded'][cache_key]
-        
-        # Invalidate enriched file cache
-        with enriched_file_cache_lock:
-            enriched_file_cache['files'] = None
-            enriched_file_cache['file_list_hash'] = None
-        
-        logging.info(f"Marked {filepath} as duplicate")
-    except Exception as e:
-        logging.error(f"Error marking file as duplicate: {e}")
-
-def is_file_duplicate(filepath):
-    """Check if a file is marked as a duplicate"""
-    directory = os.path.dirname(filepath)
-    filename = os.path.basename(filepath)
-    duplicate_files = get_directory_metadata(directory, DUPLICATE_MARKER, metadata_cache['duplicate'])
-    return filename in duplicate_files
-
-def cleanup_web_markers():
+def cleanup_web_markers_thread():
     """Periodically clean up old web modified markers"""
     while True:
         time.sleep(300)  # Run every 5 minutes
-        with lock:
-            # Keep only the last 100 files
-            if len(web_modified_files) > 100:
-                to_remove = list(web_modified_files)[:len(web_modified_files) - 100]
-                for f in to_remove:
-                    web_modified_files.discard(f)
+        cleanup_web_modified_markers(max_files=100)
 
 # Start cleanup thread
-cleanup_thread = threading.Thread(target=cleanup_web_markers, daemon=True)
+cleanup_thread = threading.Thread(target=cleanup_web_markers_thread, daemon=True)
 cleanup_thread.start()
 
 def get_watcher_update_time():
@@ -665,13 +523,10 @@ def index():
     return render_template('index.html')
 
 def preload_metadata_for_directories(files):
-    """Preload metadata for all directories containing the given files"""
-    directories = set(os.path.dirname(f) for f in files)
-    
-    for directory in directories:
-        # This will load and cache metadata for each directory
-        get_directory_metadata(directory, PROCESSED_MARKER, metadata_cache['processed'])
-        get_directory_metadata(directory, DUPLICATE_MARKER, metadata_cache['duplicate'])
+    """No longer needed - markers are now centralized in CACHE_DIR"""
+    # This function is kept for backward compatibility but does nothing
+    # since markers are now stored centrally, not per-directory
+    pass
 
 def get_enriched_file_list(files, force_rebuild=False):
     """Get file list enriched with metadata, using cache when possible
@@ -900,7 +755,7 @@ def process_all_files():
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             
             # Mark as processed using the final filepath, cleanup old filename if renamed
-            mark_file_processed(final_filepath, original_filepath=filepath)
+            mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
             
             # Update cache incrementally if file was renamed
             handle_file_rename_in_cache(filepath, final_filepath)
@@ -937,7 +792,7 @@ def rename_all_files():
             final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
             
             # Mark as processed using the final filepath
-            mark_file_processed(final_filepath)
+            mark_file_processed_wrapper(final_filepath)
             
             # Update cache incrementally if file was renamed
             handle_file_rename_in_cache(filepath, final_filepath)
@@ -974,7 +829,7 @@ def normalize_all_files():
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
             
             # Mark as processed using the final filepath
-            mark_file_processed(final_filepath)
+            mark_file_processed_wrapper(final_filepath)
             
             results.append({
                 'file': os.path.basename(final_filepath),
@@ -1009,7 +864,7 @@ def process_single_file(filepath):
         final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
         
         # Mark as processed using the final filepath, cleanup old filename if renamed
-        mark_file_processed(final_filepath, original_filepath=full_path)
+        mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
         
         # Update cache incrementally if file was renamed
         handle_file_rename_in_cache(full_path, final_filepath)
@@ -1038,7 +893,7 @@ def rename_single_file(filepath):
         final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
         
         # Mark as processed using the final filepath
-        mark_file_processed(final_filepath)
+        mark_file_processed_wrapper(final_filepath)
         
         # Update cache incrementally if file was renamed
         handle_file_rename_in_cache(full_path, final_filepath)
@@ -1067,7 +922,7 @@ def normalize_single_file(filepath):
         final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
         
         # Mark as processed using the final filepath
-        mark_file_processed(final_filepath)
+        mark_file_processed_wrapper(final_filepath)
         
         logging.info(f"Normalized metadata for file via web interface: {full_path}")
         return jsonify({'success': True})
@@ -1107,7 +962,7 @@ def process_selected_files():
             final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
             
             # Mark as processed using the final filepath, cleanup old filename if renamed
-            mark_file_processed(final_filepath, original_filepath=full_path)
+            mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
             
             # Update cache incrementally if file was renamed
             handle_file_rename_in_cache(full_path, final_filepath)
@@ -1159,7 +1014,7 @@ def rename_selected_files():
             final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
             
             # Mark as processed using the final filepath
-            mark_file_processed(final_filepath)
+            mark_file_processed_wrapper(final_filepath)
             
             # Update cache incrementally if file was renamed
             handle_file_rename_in_cache(full_path, final_filepath)
@@ -1211,7 +1066,7 @@ def normalize_selected_files():
             final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
             
             # Mark as processed using the final filepath
-            mark_file_processed(final_filepath)
+            mark_file_processed_wrapper(final_filepath)
             
             results.append({
                 'file': os.path.basename(final_filepath),
@@ -1361,7 +1216,7 @@ def process_unmarked_files():
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             
             # Mark as processed using the final filepath, cleanup old filename if renamed
-            mark_file_processed(final_filepath, original_filepath=filepath)
+            mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
             
             # Update cache incrementally if file was renamed
             handle_file_rename_in_cache(filepath, final_filepath)
@@ -1405,7 +1260,7 @@ def rename_unmarked_files():
             final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
             
             # Mark as processed using the final filepath
-            mark_file_processed(final_filepath)
+            mark_file_processed_wrapper(final_filepath)
             
             # Update cache incrementally if file was renamed
             handle_file_rename_in_cache(filepath, final_filepath)
@@ -1449,7 +1304,7 @@ def normalize_unmarked_files():
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
             
             # Mark as processed using the final filepath
-            mark_file_processed(final_filepath)
+            mark_file_processed_wrapper(final_filepath)
             
             results.append({
                 'file': os.path.basename(final_filepath),
@@ -1479,37 +1334,9 @@ def delete_single_file(filepath):
         os.remove(full_path)
         
         # Clear the file from any tracking markers
-        clear_web_modified(full_path)
-        
-        # Remove from processed marker if it exists
-        marker_path = os.path.join(os.path.dirname(full_path), PROCESSED_MARKER)
-        if os.path.exists(marker_path):
-            try:
-                with open(marker_path, 'r') as f:
-                    processed_files = set(f.read().splitlines())
-                
-                filename = os.path.basename(full_path)
-                if filename in processed_files:
-                    processed_files.discard(filename)
-                    with open(marker_path, 'w') as f:
-                        f.write('\n'.join(sorted(processed_files)))
-            except Exception as e:
-                logging.warning(f"Error updating processed marker after delete: {e}")
-        
-        # Remove from duplicate marker if it exists
-        duplicate_marker_path = os.path.join(os.path.dirname(full_path), DUPLICATE_MARKER)
-        if os.path.exists(duplicate_marker_path):
-            try:
-                with open(duplicate_marker_path, 'r') as f:
-                    duplicate_files = set(f.read().splitlines())
-                
-                filename = os.path.basename(full_path)
-                if filename in duplicate_files:
-                    duplicate_files.discard(filename)
-                    with open(duplicate_marker_path, 'w') as f:
-                        f.write('\n'.join(sorted(duplicate_files)))
-            except Exception as e:
-                logging.warning(f"Error updating duplicate marker after delete: {e}")
+        clear_file_web_modified(full_path)
+        unmark_file_processed(full_path)
+        unmark_file_duplicate(full_path)
         
         # Update cache incrementally instead of clearing it
         record_cache_change('remove', old_path=full_path)
@@ -1537,11 +1364,6 @@ def prewarm_cache_endpoint():
 def cache_stats_endpoint():
     """API endpoint to get cache statistics"""
     try:
-        with metadata_cache_lock:
-            processed_dirs = len(metadata_cache['processed'])
-            duplicate_dirs = len(metadata_cache['duplicate'])
-            cached_entries = len(metadata_cache['last_loaded'])
-        
         with cache_lock:
             file_count = len(file_list_cache['files']) if file_list_cache['files'] else 0
             cache_age = time.time() - file_list_cache['timestamp'] if file_list_cache['timestamp'] else 0
@@ -1549,6 +1371,12 @@ def cache_stats_endpoint():
         with enriched_file_cache_lock:
             enriched_count = len(enriched_file_cache['files']) if enriched_file_cache['files'] else 0
             enriched_age = time.time() - enriched_file_cache['timestamp'] if enriched_file_cache['timestamp'] else 0
+        
+        # Get marker counts from centralized storage
+        from markers import _load_marker_set, PROCESSED_MARKER_FILE, DUPLICATE_MARKER_FILE, WEB_MODIFIED_MARKER_FILE
+        processed_count = len(_load_marker_set(PROCESSED_MARKER_FILE))
+        duplicate_count = len(_load_marker_set(DUPLICATE_MARKER_FILE))
+        web_modified_count = len(_load_marker_set(WEB_MODIFIED_MARKER_FILE))
         
         return jsonify({
             'file_list_cache': {
@@ -1561,11 +1389,11 @@ def cache_stats_endpoint():
                 'age_seconds': enriched_age,
                 'is_populated': enriched_file_cache['files'] is not None
             },
-            'metadata_cache': {
-                'processed_directories': processed_dirs,
-                'duplicate_directories': duplicate_dirs,
-                'total_cached_entries': cached_entries,
-                'ttl_seconds': METADATA_CACHE_TTL
+            'markers': {
+                'processed_files': processed_count,
+                'duplicate_files': duplicate_count,
+                'web_modified_files': web_modified_count,
+                'storage_location': 'CACHE_DIR/markers/'
             }
         })
     except Exception as e:
@@ -1573,47 +1401,12 @@ def cache_stats_endpoint():
         return jsonify({'error': str(e)}), 500
 
 def prewarm_metadata_cache():
-    """Prewarm metadata cache by preloading all directory metadata on startup"""
-    if not WATCHED_DIR:
-        return
-    
-    # Try to acquire lock with longer timeout for startup
-    lock_fd = try_acquire_cache_rebuild_lock(timeout=0.5)
-    
-    if lock_fd is None:
-        logging.info("Another worker is already warming the cache, skipping")
-        return
-    
-    try:
-        logging.info("Prewarming metadata cache...")
-        start_time = time.time()
-        
-        # Get all comic files (this will use the file list cache)
-        files = get_comic_files(use_cache=True)
-        
-        if not files:
-            logging.info("No files found for metadata cache warming")
-            return
-        
-        # Extract unique directories
-        directories = set(os.path.dirname(f) for f in files)
-        
-        logging.info(f"Warming metadata cache for {len(directories)} directories...")
-        
-        # Preload metadata for all directories
-        for directory in directories:
-            # Load processed files metadata
-            get_directory_metadata(directory, PROCESSED_MARKER, metadata_cache['processed'])
-            # Load duplicate files metadata
-            get_directory_metadata(directory, DUPLICATE_MARKER, metadata_cache['duplicate'])
-        
-        elapsed = time.time() - start_time
-        logging.info(f"Metadata cache warmed for {len(directories)} directories in {elapsed:.2f}s")
-        
-    except Exception as e:
-        logging.error(f"Error prewarming metadata cache: {e}")
-    finally:
-        release_cache_rebuild_lock(lock_fd)
+    """Prewarm metadata cache by ensuring marker files are loaded"""
+    # Note: With centralized markers in CACHE_DIR/markers/, markers are already
+    # loaded efficiently when first accessed. This function is kept for 
+    # backward compatibility but no longer needs to scan directories.
+    # The markers.py module handles loading on first access.
+    logging.info("Metadata markers are stored centrally and loaded on-demand")
 
 def initialize_cache():
     """Initialize file list cache and prewarm metadata cache on startup"""

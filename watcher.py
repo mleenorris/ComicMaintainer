@@ -7,12 +7,11 @@ import subprocess
 import os
 import logging
 from config import get_watcher_enabled
+from markers import is_file_processed, is_file_web_modified, clear_file_web_modified
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
 CACHE_DIR = os.environ.get('CACHE_DIR', '/app/cache')
 PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
-WEB_MODIFIED_MARKER = '.web_modified'
-PROCESSED_MARKER = '.processed_files'
 CACHE_UPDATE_MARKER = '.cache_update'
 CACHE_CHANGES_FILE = '.cache_changes'
 
@@ -74,40 +73,12 @@ def update_watcher_timestamp():
 
 def is_web_modified(filepath):
     """Check if a file was recently modified by the web interface"""
-    marker_path = os.path.join(os.path.dirname(filepath), WEB_MODIFIED_MARKER)
-    if not os.path.exists(marker_path):
-        return False
-    
-    try:
-        with open(marker_path, 'r') as f:
-            modified_files = f.read().splitlines()
-            filename = os.path.basename(filepath)
-            if filename in modified_files:
-                # Remove the file from the marker
-                modified_files = [f for f in modified_files if f != filename]
-                with open(marker_path, 'w') as wf:
-                    wf.write('\n'.join(modified_files))
-                logging.info(f"Skipping {filepath} - modified by web interface")
-                return True
-    except Exception as e:
-        logging.error(f"Error checking web modified marker: {e}")
-    
+    if is_file_web_modified(filepath):
+        # Clear the marker and return True
+        clear_file_web_modified(filepath)
+        logging.info(f"Skipping {filepath} - modified by web interface")
+        return True
     return False
-
-def is_file_processed(filepath):
-    """Check if a file has been processed"""
-    marker_path = os.path.join(os.path.dirname(filepath), PROCESSED_MARKER)
-    if not os.path.exists(marker_path):
-        return False
-    
-    try:
-        with open(marker_path, 'r') as f:
-            processed_files = set(f.read().splitlines())
-            filename = os.path.basename(filepath)
-            return filename in processed_files
-    except Exception as e:
-        logging.error(f"Error checking if file is processed: {e}")
-        return False
 
 class ChangeHandler(FileSystemEventHandler):
     def on_moved(self, event):

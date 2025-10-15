@@ -6,7 +6,7 @@ This document describes the performance optimizations implemented to make search
 ## Problem
 The original implementation had performance issues when searching and filtering files:
 1. **Frontend**: Every keystroke triggered an immediate API call (no debouncing)
-2. **Backend**: Marker files (`.processed_files`, `.duplicate_files`) were read from disk for every file on every request
+2. **Backend**: Marker files (processed/duplicate status) were read from disk for every file on every request
 3. **Filter Switches**: Full file list with metadata was rebuilt on every filter change, causing 5+ second delays on large libraries (10,000+ files)
 
 ## Solutions Implemented
@@ -22,21 +22,27 @@ The original implementation had performance issues when searching and filtering 
 - Before: Typing "batman" = 6 API calls
 - After: Typing "batman" = 1-2 API calls
 
-### 2. Backend Metadata Caching
-**Location**: `web_app.py`
+### 2. Centralized Marker Storage
+**Location**: `markers.py`, `web_app.py`, `watcher.py`, `process_file.py`
 
-Added three-level caching strategy:
-1. **Directory-level caching**: Marker files are loaded once per directory
-2. **Time-based cache**: Metadata cached for 5 seconds (TTL)
-3. **Batch preloading**: All directories preloaded at request start
+Moved marker files from the watched directory to centralized server-side storage:
+1. **Centralized location**: All markers now stored in `CACHE_DIR/markers/` directory
+2. **JSON format**: Markers stored as JSON files with absolute file paths
+3. **Thread-safe**: Proper locking for concurrent access
 
 **Key changes**:
-- Added `metadata_cache` dictionary to cache processed/duplicate status
-- Implemented `preload_metadata_for_directories()` to batch-load metadata
-- Modified `is_file_processed()` and `is_file_duplicate()` to use cache
-- Cache invalidation on file status updates
+- Created new `markers.py` module for centralized marker management
+- Markers stored as JSON files in `CACHE_DIR/markers/` instead of scattered `.processed_files`, `.duplicate_files`, and `.web_modified` files throughout the watched directory
+- All modules updated to use centralized marker functions
+- Clean watched directory - no more hidden marker files
 
-**Impact**: ~90% faster (9.8x speedup) for consecutive requests
+**Benefits**:
+- Cleaner watched directory (no marker files mixed with comics)
+- Better separation of concerns (application data vs. user data)
+- Easier to backup and migrate marker data
+- Simpler permissions management
+
+**Impact**: Cleaner file structure and easier maintenance
 
 ### 3. Enriched File List Caching
 **Location**: `web_app.py`
@@ -121,17 +127,18 @@ Cache is automatically invalidated when:
 3. **Better scalability**: Can handle larger libraries
 
 ## Backward Compatibility
-- All changes are backward compatible
-- No database migrations required
+- **Note**: Marker storage location has changed in recent versions
+- Old marker files (`.processed_files`, `.duplicate_files`, `.web_modified`) in watched directories are no longer used
+- Files will need to be re-marked/re-processed after upgrading (or a migration script can be run)
 - No configuration changes needed
-- Existing marker files work as-is
+- No database required
 
 ## Cache Warming
 
 ### Automatic Startup Warming
 The application now automatically warms all caches on startup:
 1. **File list cache**: All comic files are scanned and cached
-2. **Metadata cache**: All directory metadata (processed/duplicate status) is preloaded
+2. **Marker data**: All file markers (processed/duplicate/web-modified status) are loaded from centralized storage
 
 This ensures the first user request is just as fast as subsequent requests, eliminating the "cold start" penalty.
 
@@ -143,7 +150,7 @@ Cache warming can be triggered manually via API endpoint:
 ### Cache Statistics
 Monitor cache health via API endpoint:
 - **Endpoint**: `GET /api/cache/stats`
-- **Returns**: File count, cache age, metadata directory counts, enriched file cache status, and TTL settings
+- **Returns**: File count, cache age, enriched file cache status, and marker counts
 
 ## Worker Coordination and Non-Blocking Cache Rebuilds
 

@@ -1475,13 +1475,13 @@
         <div class="controls-wrapper">
             <div class="actions-bar">
                 <div class="button-group">
-                    <button class="btn btn-success" onclick="processAllFiles()">
+                    <button class="btn btn-success" onclick="processAllFilesAsync()">
                         🚀<span> Process All</span>
                     </button>
                     <button class="btn btn-success" onclick="processUnmarkedFiles()">
                         ⚠️<span> Process Unmarked</span>
                     </button>
-                    <button class="btn btn-success" onclick="processSelectedFiles()" id="processSelectedBtn" disabled>
+                    <button class="btn btn-success" onclick="processSelectedFilesAsync()" id="processSelectedBtn" disabled>
                         ⚡<span> Process Selected</span>
                     </button>
                 </div>
@@ -2697,6 +2697,150 @@
                 }
             } catch (error) {
                 showMessage('Failed to process files: ' + error.message, 'error');
+                closeProgressModal();
+            }
+        }
+        
+        async function processAllFilesAsync() {
+            if (!confirm('This will process all files in the watched directory asynchronously. Continue?')) {
+                return;
+            }
+            
+            showProgressModal('Starting async processing...');
+            
+            try {
+                // Start the job
+                const response = await fetch('/api/jobs/process-all', {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to start processing job');
+                }
+                
+                const data = await response.json();
+                const jobId = data.job_id;
+                const totalItems = data.total_items;
+                
+                showMessage(`Started processing ${totalItems} files in background`, 'info');
+                
+                // Poll for status
+                await pollJobStatus(jobId, 'Processing Files...');
+                
+            } catch (error) {
+                showMessage('Failed to start processing: ' + error.message, 'error');
+                closeProgressModal();
+            }
+        }
+        
+        async function processSelectedFilesAsync() {
+            if (selectedFiles.size === 0) {
+                showMessage('Please select at least one file to process', 'error');
+                return;
+            }
+            
+            if (!confirm(`This will process ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''} asynchronously. Continue?`)) {
+                return;
+            }
+            
+            showProgressModal('Starting async processing...');
+            
+            const files = Array.from(selectedFiles);
+            
+            try {
+                // Start the job
+                const response = await fetch('/api/jobs/process-selected', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        files: files
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to start processing job');
+                }
+                
+                const data = await response.json();
+                const jobId = data.job_id;
+                const totalItems = data.total_items;
+                
+                showMessage(`Started processing ${totalItems} files in background`, 'info');
+                
+                // Poll for status
+                await pollJobStatus(jobId, 'Processing Selected Files...');
+                
+            } catch (error) {
+                showMessage('Failed to start processing: ' + error.message, 'error');
+                closeProgressModal();
+            }
+        }
+        
+        async function pollJobStatus(jobId, title) {
+            const pollInterval = 500; // Poll every 500ms
+            let lastProcessed = 0;
+            
+            try {
+                while (true) {
+                    const response = await fetch(`/api/jobs/${jobId}`);
+                    
+                    if (!response.ok) {
+                        throw new Error('Failed to get job status');
+                    }
+                    
+                    const status = await response.json();
+                    
+                    // Update progress
+                    const processed = status.processed_items;
+                    const total = status.total_items;
+                    
+                    // Count successes and errors from results
+                    let successCount = 0;
+                    let errorCount = 0;
+                    
+                    for (const result of status.results) {
+                        if (result.success) {
+                            successCount++;
+                        } else {
+                            errorCount++;
+                        }
+                    }
+                    
+                    updateProgress(processed, total, successCount, errorCount);
+                    
+                    // Add details for newly processed items
+                    if (processed > lastProcessed) {
+                        for (let i = lastProcessed; i < processed; i++) {
+                            const result = status.results[i];
+                            addProgressDetail(result.item, result.success, result.error);
+                        }
+                        lastProcessed = processed;
+                    }
+                    
+                    // Check if completed
+                    if (status.status === 'completed') {
+                        completeProgress();
+                        showMessage(`Processed ${successCount} of ${total} files successfully!`, 'success');
+                        // Refresh file list (force refresh to clear cache)
+                        await loadFiles(1, true);
+                        break;
+                    } else if (status.status === 'failed') {
+                        closeProgressModal();
+                        showMessage(`Job failed: ${status.error}`, 'error');
+                        break;
+                    } else if (status.status === 'cancelled') {
+                        closeProgressModal();
+                        showMessage('Job was cancelled', 'warning');
+                        break;
+                    }
+                    
+                    // Wait before next poll
+                    await new Promise(resolve => setTimeout(resolve, pollInterval));
+                }
+            } catch (error) {
+                showMessage('Error checking job status: ' + error.message, 'error');
                 closeProgressModal();
             }
         }

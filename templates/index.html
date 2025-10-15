@@ -2929,21 +2929,52 @@
                 const response = await fetch(`/api/jobs/${activeJobId}`);
                 
                 if (!response.ok) {
-                    // Job not found, clear from localStorage
+                    // Job not found (may have been cleaned up), clear from localStorage
                     localStorage.removeItem('activeJobId');
                     localStorage.removeItem('activeJobTitle');
+                    showMessage('Previous batch processing job is no longer available', 'warning');
                     return;
                 }
                 
                 const status = await response.json();
                 
-                // Only resume if job is still processing or queued
+                // Resume if job is still processing or queued
                 if (status.status === 'processing' || status.status === 'queued') {
                     showProgressModal(activeJobTitle || 'Resuming Job...');
                     showMessage('Resuming active job...', 'info');
                     await pollJobStatus(activeJobId, activeJobTitle || 'Processing...');
-                } else {
-                    // Job is complete/failed/cancelled, clear from localStorage
+                } else if (status.status === 'completed') {
+                    // Job completed while we were away - show results
+                    let successCount = 0;
+                    let errorCount = 0;
+                    
+                    if (status.results && Array.isArray(status.results)) {
+                        for (const result of status.results) {
+                            if (result.success) {
+                                successCount++;
+                            } else {
+                                errorCount++;
+                            }
+                        }
+                    }
+                    
+                    const total = status.total_items || 0;
+                    showMessage(`Batch processing completed: ${successCount} of ${total} files processed successfully${errorCount > 0 ? `, ${errorCount} failed` : ''}`, successCount > 0 ? 'success' : 'warning');
+                    
+                    // Clear from localStorage
+                    localStorage.removeItem('activeJobId');
+                    localStorage.removeItem('activeJobTitle');
+                    
+                    // Refresh file list to show updated status
+                    await loadFiles(1, true);
+                } else if (status.status === 'failed') {
+                    // Job failed while we were away
+                    showMessage(`Batch processing failed: ${status.error || 'Unknown error'}`, 'error');
+                    localStorage.removeItem('activeJobId');
+                    localStorage.removeItem('activeJobTitle');
+                } else if (status.status === 'cancelled') {
+                    // Job was cancelled
+                    showMessage('Batch processing was cancelled', 'warning');
                     localStorage.removeItem('activeJobId');
                     localStorage.removeItem('activeJobTitle');
                 }
@@ -2952,6 +2983,7 @@
                 // Clear stale job data
                 localStorage.removeItem('activeJobId');
                 localStorage.removeItem('activeJobTitle');
+                showMessage('Could not resume previous batch processing job', 'warning');
             }
         }
         

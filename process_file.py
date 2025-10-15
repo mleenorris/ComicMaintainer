@@ -6,12 +6,18 @@ from comicapi.comicarchive import ComicArchive
 from config import get_filename_format
 from markers import mark_file_duplicate, mark_file_processed
 
+CONFIG_DIR = '/Config'
+LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
+
+# Ensure log directory exists
+os.makedirs(LOG_DIR, exist_ok=True)
+
 # Set up logging to file and stdout (same as watcher.py)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [WATCHER] %(levelname)s %(message)s',
     handlers=[
-        logging.FileHandler("ComicMaintainer.log"),
+        logging.FileHandler(os.path.join(LOG_DIR, "ComicMaintainer.log")),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -21,14 +27,10 @@ CACHE_CHANGES_FILE = '.cache_changes'
 
 def update_watcher_timestamp():
     """Update the watcher cache invalidation timestamp"""
-    cache_dir = os.environ.get('CACHE_DIR', '/app/cache')
-    if not cache_dir:
-        return
+    # Ensure config directory exists
+    os.makedirs(CONFIG_DIR, exist_ok=True)
     
-    # Ensure cache directory exists
-    os.makedirs(cache_dir, exist_ok=True)
-    
-    marker_path = os.path.join(cache_dir, CACHE_UPDATE_MARKER)
+    marker_path = os.path.join(CONFIG_DIR, CACHE_UPDATE_MARKER)
     try:
         import time
         with open(marker_path, 'w') as f:
@@ -44,14 +46,11 @@ def record_cache_change(change_type, old_path=None, new_path=None):
         old_path: Original file path (for 'remove' and 'rename')
         new_path: New file path (for 'add' and 'rename')
     """
-    cache_dir = os.environ.get('CACHE_DIR', '/app/cache')
-    if not cache_dir:
-        return
     
-    # Ensure cache directory exists
-    os.makedirs(cache_dir, exist_ok=True)
+    # Ensure config directory exists
+    os.makedirs(CONFIG_DIR, exist_ok=True)
     
-    changes_file = os.path.join(cache_dir, CACHE_CHANGES_FILE)
+    changes_file = os.path.join(CONFIG_DIR, CACHE_CHANGES_FILE)
     
     try:
         import json

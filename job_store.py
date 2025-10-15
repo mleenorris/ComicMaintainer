@@ -12,16 +12,16 @@ from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 
 # Database configuration
-CACHE_DIR = os.environ.get('CACHE_DIR', '/app/cache')
-DB_PATH = os.path.join(CACHE_DIR, 'jobs.db')
+CONFIG_DIR = '/Config'
+DB_PATH = os.path.join(CONFIG_DIR, 'jobs.db')
 
 # Thread-local storage for database connections
 _thread_local = threading.local()
 
 
 def _ensure_cache_dir():
-    """Ensure cache directory exists"""
-    os.makedirs(CACHE_DIR, exist_ok=True)
+    """Ensure config directory exists"""
+    os.makedirs(CONFIG_DIR, exist_ok=True)
 
 
 def _init_db_schema(conn):

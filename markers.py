@@ -1,6 +1,6 @@
 """
 Centralized marker management for tracking file processing status.
-Markers are now stored server-side in CACHE_DIR instead of in the watched directory.
+Markers are now stored server-side in /Config instead of in the watched directory.
 
 Key Features:
 - Thread-safe operations with proper locking
@@ -30,8 +30,8 @@ import threading
 from typing import Set, Optional
 
 # Marker storage configuration
-CACHE_DIR = os.environ.get('CACHE_DIR', '/app/cache')
-MARKERS_DIR = os.path.join(CACHE_DIR, 'markers')
+CONFIG_DIR = '/Config'
+MARKERS_DIR = os.path.join(CONFIG_DIR, 'markers')
 
 # Marker file names in the cache directory
 PROCESSED_MARKER_FILE = 'processed_files.json'

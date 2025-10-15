@@ -147,6 +147,44 @@ Cache is automatically invalidated when:
 - No configuration changes needed
 - No database required
 
+## Configuration Persistence
+**Location**: `config.py`, `README.md`
+
+Starting from this version, `config.json` is now stored in `CACHE_DIR` instead of the application directory (`/app`). This change ensures all persistent application data is stored in one location that can be easily mounted as a volume for persistence across container restarts.
+
+**What is persisted in `CACHE_DIR`:**
+1. **Marker files** (`CACHE_DIR/markers/`):
+   - `processed_files.json` - tracks files that have been processed
+   - `duplicate_files.json` - tracks files marked as duplicates
+   - `web_modified_files.json` - tracks files modified via web interface
+2. **Configuration** (`CACHE_DIR/config.json`):
+   - Filename format template
+   - Watcher enabled/disabled state
+   - Log rotation settings
+3. **Cache files**:
+   - File list cache for improved performance
+   - Cache update markers
+
+**Benefits**:
+- Single volume mount for all persistent data
+- Configuration survives container restarts
+- Easier backup and migration
+- Consistent data location across all components
+
+**Migration**:
+- If you had a `config.json` in `/app` from a previous version, it will not be automatically migrated
+- The application will use default settings and create a new `config.json` in `CACHE_DIR` on first save
+- To preserve old settings, manually copy the old `/app/config.json` to `$CACHE_DIR/config.json`
+
+**Docker Usage**:
+Mount `CACHE_DIR` as a volume to persist all data:
+```sh
+docker run -d \
+  -v <host_dir_for_config>:/config \
+  -e CACHE_DIR=/config \
+  ...
+```
+
 ## Cache Warming
 
 ### Automatic Startup Warming

@@ -95,7 +95,7 @@ The service includes a web-based interface for managing your comic files:
 - **Process All Files**: One-click button to process all comic files in the watched directory
 - **Process Selected Files**: Process only the files you've selected with checkboxes
 - **Folder Selection**: Click the checkbox next to any folder name to select/deselect all files in that folder
-- **View/Edit Individual Tags**: Click on any file to view and edit its metadata tags
+- **View/Edit Individual Tags**: Use the Actions dropdown menu on any file to view and edit its metadata tags
 - **Batch Update**: Select multiple files and update common tags (series, publisher, year, writer) for all of them at once
 - **Filename Format Settings**: Configure how files are renamed when processed using customizable templates
 - **Smart Processing**: Files modified through the web interface are marked to prevent the watcher from re-processing them automatically
@@ -115,8 +115,8 @@ The service includes a web-based interface for managing your comic files:
    - Use "Select All" to select everything
 6. Click "Process All Files" to run the standard processing on all files
 7. Click "Process Selected" to run processing only on your selected files
-8. Click "View/Edit" on any file to see and modify its tags
-9. Use the "Actions" dropdown menu on any file to:
+8. Use the "Actions" dropdown menu on any file to:
+   - **View/Edit**: View and edit tags for the file
    - **Process**: Run full processing (rename + normalize metadata)
    - **Rename**: Rename the file based on metadata
    - **Normalize**: Normalize metadata only

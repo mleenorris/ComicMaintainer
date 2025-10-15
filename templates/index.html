@@ -2230,14 +2230,15 @@
                             </div>
                             <div>${fileSize}</div>
                             <div class="file-actions">
-                                <button class="btn btn-primary btn-small" onclick="viewTags('${escapeJs(file.relative_path)}')">
-                                    View/Edit
-                                </button>
                                 <div class="file-actions-dropdown">
                                     <button class="dropdown-toggle" onclick="toggleDropdown(event, '${escapeJs(file.relative_path)}')">
                                         Actions
                                     </button>
                                     <div class="dropdown-menu" id="dropdown-${escapeJs(file.relative_path).replace(/[^a-zA-Z0-9]/g, '_')}">
+                                        <button class="dropdown-item" onclick="viewTags('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                            👁️ View/Edit
+                                        </button>
+                                        <div class="dropdown-divider"></div>
                                         <button class="dropdown-item" onclick="processSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                             🚀 Process
                                         </button>

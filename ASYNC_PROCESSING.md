@@ -148,6 +148,19 @@ The original synchronous/streaming endpoints remain available:
 
 These can still be used if needed, but the async endpoints are recommended for better performance and user experience.
 
+## Deployment Architecture
+
+The application uses:
+- **1 Gunicorn worker process** - Ensures job state consistency since jobs are stored in-memory
+- **4 ThreadPoolExecutor threads per worker** (configurable) - Provides concurrent file processing
+
+This architecture avoids the "Job not found" issue that would occur with multiple Gunicorn workers, where:
+- Worker A creates a job and stores it in its memory
+- Worker B receives the status poll but doesn't have the job in its memory
+- Result: "Job not found" error despite successful processing
+
+The single-worker configuration ensures all requests for a job are handled by the same process, while ThreadPoolExecutor provides efficient concurrent processing of files.
+
 ## Configuration
 
 ### Adjusting Worker Count
@@ -209,6 +222,7 @@ python3 /tmp/test_integration.py
 - Old completed jobs automatically cleaned up after 1 hour
 - Can manually delete jobs via API
 - Job results stored in memory (not persisted to disk)
+- Single Gunicorn worker ensures job state consistency across requests
 
 ## Future Enhancements
 

@@ -110,7 +110,7 @@ def release_cache_rebuild_lock(lock_fd):
 # Wrapper functions for marker operations with cache invalidation
 def mark_file_processed_wrapper(filepath, original_filepath=None):
     """Mark a file as processed and invalidate relevant caches"""
-    mark_file_processed_wrapper(filepath, original_filepath=original_filepath)
+    mark_file_processed(filepath, original_filepath=original_filepath)
     
     # Invalidate enriched file cache
     with enriched_file_cache_lock:
@@ -119,7 +119,7 @@ def mark_file_processed_wrapper(filepath, original_filepath=None):
 
 def mark_file_duplicate_wrapper(filepath):
     """Mark a file as duplicate and invalidate relevant caches"""
-    mark_file_duplicate_wrapper(filepath)
+    mark_file_duplicate(filepath)
     
     # Invalidate enriched file cache
     with enriched_file_cache_lock:

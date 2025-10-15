@@ -81,6 +81,17 @@ This means you can:
 
 ## Usage
 
+### Page Refresh During Processing
+
+If you attempt to refresh or close the page while a batch job is running:
+- A warning dialog will appear to prevent accidental navigation
+- You can choose to stay on the page and continue monitoring
+- If you proceed with navigation, the job continues running in the background
+- When you return, the job automatically resumes polling and shows current progress
+- Job state is preserved in localStorage and SQLite database
+
+**Note:** The warning only appears when a job is actively running. Once a job completes, the warning is automatically cleared.
+
 ### Starting a Job
 
 **Process all files:**

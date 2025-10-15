@@ -1163,6 +1163,12 @@
                 font-size: 18px;
             }
             
+            .settings-dropdown-menu {
+                right: auto;
+                left: 0;
+                min-width: 200px;
+            }
+            
             .actions-bar {
                 padding: 10px;
                 gap: 6px;
@@ -2023,6 +2029,18 @@
             
             // Check for active job and resume polling
             await checkAndResumeActiveJob();
+        });
+        
+        // Warn user before leaving page if there's an active batch job
+        window.addEventListener('beforeunload', function(event) {
+            const activeJobId = localStorage.getItem('activeJobId');
+            if (activeJobId) {
+                // Show warning to prevent accidental navigation during batch processing
+                const message = 'A batch processing job is still running. If you leave, you can resume it when you return, but progress tracking will be interrupted.';
+                event.preventDefault();
+                event.returnValue = message; // For older browsers
+                return message;
+            }
         });
         
         async function loadFiles(page = 1, refresh = false) {

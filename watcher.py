@@ -24,11 +24,11 @@ log_handler = RotatingFileHandler(
     backupCount=3
 )
 log_handler.setLevel(logging.INFO)
-log_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+log_handler.setFormatter(logging.Formatter('%(asctime)s [WATCHER] %(levelname)s %(message)s'))
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(message)s',
+    format='%(asctime)s [WATCHER] %(levelname)s %(message)s',
     handlers=[
         log_handler,
         logging.StreamHandler(sys.stdout)

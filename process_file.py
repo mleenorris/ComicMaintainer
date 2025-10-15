@@ -9,7 +9,7 @@ from markers import mark_file_duplicate, mark_file_processed
 # Set up logging to file and stdout (same as watcher.py)
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(message)s',
+    format='%(asctime)s [WATCHER] %(levelname)s %(message)s',
     handlers=[
         logging.FileHandler("ComicMaintainer.log"),
         logging.StreamHandler(sys.stdout)

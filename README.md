@@ -29,8 +29,9 @@ This service automatically watches a directory for new or changed comic archive 
 ## How It Works
 1. The watcher service monitors a specified directory for new or changed `.cbz`/`.cbr` files.
 2. When a file is detected and stable, it runs `process_file.py` to:
-   - Read and update comic metadata using ComicTagger
-   - Rename the file using the configured filename format (e.g., `{series} - Chapter {issue}.cbz` → `Batman - Chapter 0001.cbz`)
+   - **Check if the file is already normalized**: If the metadata (title, series) and filename already match the expected format, the file is immediately marked as processed without making any changes
+   - Read and update comic metadata using ComicTagger (if normalization is needed)
+   - Rename the file using the configured filename format (e.g., `{series} - Chapter {issue}.cbz` → `Batman - Chapter 0001.cbz`) (if normalization is needed)
    - If a file with the new name already exists, the file is marked as a duplicate and, if `DUPLICATE_DIR` is set, moved to the duplicate directory preserving the original parent folder
 3. All actions and errors are logged.
 
@@ -190,6 +191,33 @@ The web interface exposes several REST API endpoints:
   ```
   
 The version is displayed in the web interface header for easy identification of the running instance.
+
+## Smart Processing
+The service intelligently detects files that are already properly formatted to avoid unnecessary processing:
+
+### Already Normalized Detection
+When processing a file, the service first checks if:
+1. **Title metadata** matches the expected format (`Chapter {issue_number}`)
+2. **Series metadata** matches the folder name (with appropriate character conversions)
+3. **Filename** matches the configured filename format template
+
+If all three conditions are met, the file is marked as processed **without making any changes**. This:
+- ✅ Prevents unnecessary file I/O operations
+- ✅ Avoids redundant metadata updates
+- ✅ Speeds up processing for large libraries
+- ✅ Properly tracks already-correct files in the processing status
+
+### When Processing is Skipped
+Files are marked as processed without changes when:
+- The metadata and filename are already in the correct format
+- The file has been manually curated and matches the expected format
+- A file was previously processed and hasn't been modified
+
+### When Processing Occurs
+Files are processed and updated when:
+- Metadata (title/series) doesn't match the expected format
+- The filename doesn't match the configured format
+- The file is new or has been modified since last processing
 
 ## ComicTagger Integration
 - ComicTagger is installed in the container from the **develop branch** and used via its Python API.

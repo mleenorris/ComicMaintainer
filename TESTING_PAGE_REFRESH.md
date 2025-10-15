@@ -28,6 +28,7 @@ This document provides a manual testing guide to verify that batch jobs are prop
 - Browser shows a warning dialog: "A batch processing job is still running..."
 - Dialog offers "Leave" and "Stay" options
 - Console shows: `[JOB <job_id>] Starting to poll job status`
+- Active job is stored on server in `/Config/preferences.db`
 
 **Actual Result:** ✅ / ❌ (fill in after testing)
 
@@ -61,7 +62,7 @@ This document provides a manual testing guide to verify that batch jobs are prop
 **Expected Result:**
 - Page refreshes
 - Progress modal automatically reopens
-- Console shows: `[JOB RESUME] Found active job <job_id> in localStorage`
+- Console shows: `[JOB RESUME] Found active job <job_id> on server`
 - Console shows: `[JOB RESUME] Resuming job <job_id>`
 - Job continues from where it left off
 - Progress updates resume
@@ -81,8 +82,8 @@ This document provides a manual testing guide to verify that batch jobs are prop
 **Expected Result:**
 - No warning dialog appears
 - Page refreshes normally
-- No active job found in localStorage
-- Console shows: `[JOB RESUME] No active job found in localStorage`
+- No active job found on server
+- Console shows: `[JOB RESUME] No active job found on server`
 
 **Actual Result:** ✅ / ❌ (fill in after testing)
 
@@ -115,9 +116,10 @@ This document provides a manual testing guide to verify that batch jobs are prop
 4. Try to refresh Tab 2
 
 **Expected Result:**
-- Warning appears in both tabs (they share localStorage)
+- Warning appears in both tabs (they share server state)
 - Job can be monitored from either tab
 - Refreshing either tab resumes polling
+- Both tabs see the same active job from server
 
 **Actual Result:** ✅ / ❌ (fill in after testing)
 
@@ -148,14 +150,14 @@ During testing, check the browser console for these log messages:
 
 **Job Resumption After Refresh:**
 ```
-[JOB RESUME] Found active job <job_id> in localStorage
+[JOB RESUME] Found active job <job_id> on server
 [JOB RESUME] Job <job_id> status: processing, X/Y items processed
 [JOB RESUME] Resuming job <job_id>
 ```
 
 **No Active Job:**
 ```
-[JOB RESUME] No active job found in localStorage
+[JOB RESUME] No active job found on server
 ```
 
 ## Edge Cases
@@ -168,12 +170,12 @@ During testing, check the browser console for these log messages:
 ### Edge Case 2: Browser Crash
 **Scenario:** Browser crashes during job execution
 
-**Expected:** Job continues in backend, resumes when browser reopens
+**Expected:** Job continues in backend, active job tracked on server, resumes when browser reopens and navigates to the page
 
 ### Edge Case 3: Network Interruption
 **Scenario:** Network connection drops during polling
 
-**Expected:** Polling errors logged, localStorage keeps job ID, resumes when connection restored
+**Expected:** Polling errors logged, server keeps job ID in preferences.db, resumes when connection restored
 
 ## Verification Checklist
 
@@ -190,5 +192,6 @@ During testing, check the browser console for these log messages:
 
 - The warning is a browser feature and may look different across browsers
 - The exact wording of buttons ("Leave", "Stay", "Cancel") varies by browser
-- localStorage is per-origin, so different ports/domains won't share state
+- Active job state is stored server-side at `/Config/preferences.db`, so it works across all browsers and devices
 - Jobs are stored in SQLite at `/Config/jobs.db`
+- User preferences (theme, perPage) are also stored in `/Config/preferences.db`

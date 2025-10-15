@@ -518,6 +518,104 @@
             cursor: not-allowed;
         }
         
+        /* Action dropdown styles */
+        .action-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .action-dropdown-toggle {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.3s;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .action-dropdown-toggle::after {
+            content: '▼';
+            font-size: 10px;
+            margin-left: 3px;
+        }
+        
+        .action-dropdown-toggle.process {
+            background: #27ae60;
+        }
+        
+        .action-dropdown-toggle.process:hover {
+            background: #229954;
+        }
+        
+        .action-dropdown-toggle.rename {
+            background: #9b59b6;
+        }
+        
+        .action-dropdown-toggle.rename:hover {
+            background: #8e44ad;
+        }
+        
+        .action-dropdown-toggle.normalize {
+            background: #16a085;
+        }
+        
+        .action-dropdown-toggle.normalize:hover {
+            background: #138d75;
+        }
+        
+        .action-dropdown-toggle:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .action-dropdown-menu {
+            display: none;
+            position: absolute;
+            left: 0;
+            top: calc(100% + 5px);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-secondary);
+            border-radius: 5px;
+            box-shadow: var(--shadow-md);
+            z-index: 1000;
+            min-width: 180px;
+            overflow: hidden;
+        }
+        
+        .action-dropdown-menu.show {
+            display: block;
+        }
+        
+        .action-dropdown-item {
+            padding: 10px 15px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
+            font-size: 13px;
+            color: var(--text-primary);
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: inherit;
+        }
+        
+        .action-dropdown-item:hover {
+            background: var(--bg-hover);
+        }
+        
+        .action-dropdown-item:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
         .button-group {
             display: flex;
             gap: 8px;
@@ -1520,41 +1618,66 @@
         <div class="controls-wrapper">
             <div class="actions-bar">
                 <div class="button-group">
-                    <button class="btn btn-success" onclick="processAllFilesAsync()">
-                        🚀<span> Process All</span>
-                    </button>
-                    <button class="btn btn-success" onclick="processUnmarkedFiles()">
-                        ⚠️<span> Process Unmarked</span>
-                    </button>
-                    <button class="btn btn-success" onclick="processSelectedFilesAsync()" id="processSelectedBtn" disabled>
-                        ⚡<span> Process Selected</span>
-                    </button>
-                </div>
-                <div class="button-group">
-                    <button class="btn btn-rename" onclick="renameAllFiles()">
-                        📝<span> Rename All</span>
-                    </button>
-                    <button class="btn btn-rename" onclick="renameUnmarkedFiles()">
-                        📝<span> Rename Unmarked</span>
-                    </button>
-                    <button class="btn btn-rename" onclick="renameSelectedFiles()" id="renameSelectedBtn" disabled>
-                        📝<span> Rename Selected</span>
-                    </button>
-                </div>
-                <div class="button-group">
-                    <button class="btn btn-normalize" onclick="normalizeAllFiles()">
-                        🔧<span> Normalize All</span>
-                    </button>
-                    <button class="btn btn-normalize" onclick="normalizeUnmarkedFiles()">
-                        🔧<span> Normalize Unmarked</span>
-                    </button>
-                    <button class="btn btn-normalize" onclick="normalizeSelectedFiles()" id="normalizeSelectedBtn" disabled>
-                        🔧<span> Normalize Selected</span>
-                    </button>
+                    <!-- Process Dropdown -->
+                    <div class="action-dropdown">
+                        <button class="action-dropdown-toggle process" onclick="toggleActionDropdown(event, 'processDropdown')">
+                            🚀 Process
+                        </button>
+                        <div class="action-dropdown-menu" id="processDropdown">
+                            <button class="action-dropdown-item" onclick="processAllFilesAsync(); closeAllActionDropdowns();">
+                                🚀 Process All
+                            </button>
+                            <button class="action-dropdown-item" onclick="processUnmarkedFiles(); closeAllActionDropdowns();">
+                                ⚠️ Process Unmarked
+                            </button>
+                            <button class="action-dropdown-item" id="processSelectedItem" onclick="processSelectedFilesAsync(); closeAllActionDropdowns();" disabled>
+                                ⚡ Process Selected
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Rename Dropdown -->
+                    <div class="action-dropdown">
+                        <button class="action-dropdown-toggle rename" onclick="toggleActionDropdown(event, 'renameDropdown')">
+                            📝 Rename
+                        </button>
+                        <div class="action-dropdown-menu" id="renameDropdown">
+                            <button class="action-dropdown-item" onclick="renameAllFiles(); closeAllActionDropdowns();">
+                                📝 Rename All
+                            </button>
+                            <button class="action-dropdown-item" onclick="renameUnmarkedFiles(); closeAllActionDropdowns();">
+                                📝 Rename Unmarked
+                            </button>
+                            <button class="action-dropdown-item" id="renameSelectedItem" onclick="renameSelectedFiles(); closeAllActionDropdowns();" disabled>
+                                📝 Rename Selected
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Normalize Dropdown -->
+                    <div class="action-dropdown">
+                        <button class="action-dropdown-toggle normalize" onclick="toggleActionDropdown(event, 'normalizeDropdown')">
+                            🔧 Normalize
+                        </button>
+                        <div class="action-dropdown-menu" id="normalizeDropdown">
+                            <button class="action-dropdown-item" onclick="normalizeAllFiles(); closeAllActionDropdowns();">
+                                🔧 Normalize All
+                            </button>
+                            <button class="action-dropdown-item" onclick="normalizeUnmarkedFiles(); closeAllActionDropdowns();">
+                                🔧 Normalize Unmarked
+                            </button>
+                            <button class="action-dropdown-item" id="normalizeSelectedItem" onclick="normalizeSelectedFiles(); closeAllActionDropdowns();" disabled>
+                                🔧 Normalize Selected
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 <div class="button-group">
                     <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>
                         ✏️<span> Update Selected</span>
+                    </button>
+                    <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteSelectedBtn" disabled>
+                        🗑️<span> Delete Selected</span>
                     </button>
                 </div>
                 <span class="select-info" id="selectInfo">No files selected</span>
@@ -2611,22 +2734,25 @@
             const count = selectedFiles.size;
             const info = document.getElementById('selectInfo');
             const batchBtn = document.getElementById('batchUpdateBtn');
-            const processSelectedBtn = document.getElementById('processSelectedBtn');
-            const renameSelectedBtn = document.getElementById('renameSelectedBtn');
-            const normalizeSelectedBtn = document.getElementById('normalizeSelectedBtn');
+            const deleteSelectedBtn = document.getElementById('deleteSelectedBtn');
+            const processSelectedItem = document.getElementById('processSelectedItem');
+            const renameSelectedItem = document.getElementById('renameSelectedItem');
+            const normalizeSelectedItem = document.getElementById('normalizeSelectedItem');
             
             if (count === 0) {
                 info.textContent = 'No files selected';
                 batchBtn.disabled = true;
-                processSelectedBtn.disabled = true;
-                renameSelectedBtn.disabled = true;
-                normalizeSelectedBtn.disabled = true;
+                if (deleteSelectedBtn) deleteSelectedBtn.disabled = true;
+                if (processSelectedItem) processSelectedItem.disabled = true;
+                if (renameSelectedItem) renameSelectedItem.disabled = true;
+                if (normalizeSelectedItem) normalizeSelectedItem.disabled = true;
             } else {
                 info.textContent = `${count} file${count > 1 ? 's' : ''} selected`;
                 batchBtn.disabled = false;
-                processSelectedBtn.disabled = false;
-                renameSelectedBtn.disabled = false;
-                normalizeSelectedBtn.disabled = false;
+                if (deleteSelectedBtn) deleteSelectedBtn.disabled = false;
+                if (processSelectedItem) processSelectedItem.disabled = false;
+                if (renameSelectedItem) renameSelectedItem.disabled = false;
+                if (normalizeSelectedItem) normalizeSelectedItem.disabled = false;
             }
         }
         
@@ -4095,7 +4221,95 @@
                     settingsMenu.classList.remove('show');
                 }
             }
+            // Close action dropdowns when clicking outside
+            if (!event.target.closest('.action-dropdown')) {
+                closeAllActionDropdowns();
+            }
         });
+        
+        // Function to toggle action dropdowns
+        function toggleActionDropdown(event, dropdownId) {
+            event.stopPropagation();
+            
+            const dropdown = document.getElementById(dropdownId);
+            if (!dropdown) {
+                console.error('Action dropdown not found:', dropdownId);
+                return;
+            }
+            
+            // Close all other action dropdowns
+            document.querySelectorAll('.action-dropdown-menu.show').forEach(menu => {
+                if (menu.id !== dropdownId) {
+                    menu.classList.remove('show');
+                }
+            });
+            
+            // Toggle this dropdown
+            dropdown.classList.toggle('show');
+        }
+        
+        // Function to close all action dropdowns
+        function closeAllActionDropdowns() {
+            document.querySelectorAll('.action-dropdown-menu.show').forEach(menu => {
+                menu.classList.remove('show');
+            });
+        }
+        
+        // Function to delete selected files
+        async function deleteSelectedFiles() {
+            const selectedFiles = Array.from(document.querySelectorAll('input[name="fileSelect"]:checked'))
+                .map(cb => cb.dataset.filepath);
+            
+            if (selectedFiles.length === 0) {
+                showMessage('No files selected', 'error');
+                return;
+            }
+            
+            // Confirm deletion
+            if (!confirm(`Are you sure you want to delete ${selectedFiles.length} file(s)? This action cannot be undone.`)) {
+                return;
+            }
+            
+            showProgressModal(`Deleting ${selectedFiles.length} file(s)...`);
+            
+            let successCount = 0;
+            let failCount = 0;
+            
+            // Delete files one by one
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const filepath = selectedFiles[i];
+                updateProgress(i + 1, selectedFiles.length, `Deleting: ${getBasename(filepath)}`);
+                
+                try {
+                    const response = await fetch(`/api/delete-file/${encodeURIComponent(filepath)}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (response.ok) {
+                        successCount++;
+                        addProgressDetail(`✅ Deleted: ${getBasename(filepath)}`, 'success');
+                    } else {
+                        const data = await response.json();
+                        failCount++;
+                        addProgressDetail(`❌ Failed: ${getBasename(filepath)} - ${data.error || 'Unknown error'}`, 'error');
+                    }
+                } catch (error) {
+                    failCount++;
+                    addProgressDetail(`❌ Failed: ${getBasename(filepath)} - ${error.message}`, 'error');
+                }
+            }
+            
+            completeProgress();
+            
+            if (failCount === 0) {
+                showMessage(`Deleted ${successCount} file(s) successfully!`, 'success');
+            } else {
+                showMessage(`Deleted ${successCount} file(s), ${failCount} failed`, 'warning');
+            }
+            
+            // Refresh file list
+            await loadFiles(1, true);
+        }
     </script>
 </body>
 </html>

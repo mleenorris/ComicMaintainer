@@ -712,139 +712,274 @@ def update_tags(filepath):
 
 @app.route('/api/files/tags', methods=['POST'])
 def batch_update_tags():
-    """API endpoint to update tags for multiple files"""
+    """API endpoint to update tags for multiple files with streaming progress"""
     data = request.json
     files = data.get('files', [])
     tag_updates = data.get('tags', {})
+    stream = request.args.get('stream', 'false').lower() == 'true'
     
     if not files or not tag_updates:
         return jsonify({'error': 'Files and tags are required'}), 400
     
-    results = []
-    for filepath in files:
-        full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
-        if os.path.exists(full_path):
-            success = update_file_tags(full_path, tag_updates)
-            results.append({
-                'file': filepath,
-                'success': success
-            })
-        else:
-            results.append({
-                'file': filepath,
-                'success': False,
-                'error': 'File not found'
-            })
+    if not stream:
+        # Non-streaming mode (backward compatible)
+        results = []
+        for filepath in files:
+            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+            if os.path.exists(full_path):
+                success = update_file_tags(full_path, tag_updates)
+                results.append({
+                    'file': filepath,
+                    'success': success
+                })
+            else:
+                results.append({
+                    'file': filepath,
+                    'success': False,
+                    'error': 'File not found'
+                })
+        
+        return jsonify({'results': results})
     
-    return jsonify({'results': results})
+    # Streaming mode - send progress updates
+    def generate():
+        import json
+        results = []
+        for i, filepath in enumerate(files):
+            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+            result = {'file': filepath}
+            
+            if os.path.exists(full_path):
+                success = update_file_tags(full_path, tag_updates)
+                result['success'] = success
+                if not success:
+                    result['error'] = 'Failed to update tags'
+            else:
+                result['success'] = False
+                result['error'] = 'File not found'
+            
+            results.append(result)
+            
+            # Send progress update
+            progress = {
+                'current': i + 1,
+                'total': len(files),
+                'file': os.path.basename(filepath),
+                'success': result['success'],
+                'error': result.get('error')
+            }
+            yield f"data: {json.dumps(progress)}\n\n"
+        
+        # Send final results
+        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+    
+    return app.response_class(generate(), mimetype='text/event-stream')
+
 
 @app.route('/api/process-all', methods=['POST'])
 def process_all_files():
-    """API endpoint to process all files in the watched directory"""
+    """API endpoint to process all files in the watched directory with streaming progress"""
     from process_file import process_file
     
+    stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
-    results = []
     
-    for filepath in files:
-        try:
-            # Mark as web modified to prevent watcher from processing
-            mark_file_web_modified(filepath)
-            
-            # Process the file and get the final filepath (may be renamed)
-            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
-            
-            # Mark as processed using the final filepath, cleanup old filename if renamed
-            mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-            
-            # Update cache incrementally if file was renamed
-            handle_file_rename_in_cache(filepath, final_filepath)
-            
-            results.append({
-                'file': os.path.basename(final_filepath),
-                'success': True
-            })
-            logging.info(f"Processed file via web interface: {filepath} -> {final_filepath}")
-        except Exception as e:
-            results.append({
-                'file': os.path.basename(filepath),
-                'success': False,
-                'error': str(e)
-            })
-            logging.error(f"Error processing file {filepath}: {e}")
+    if not stream:
+        # Non-streaming mode (backward compatible)
+        results = []
+        for filepath in files:
+            try:
+                mark_file_web_modified(filepath)
+                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+                handle_file_rename_in_cache(filepath, final_filepath)
+                results.append({
+                    'file': os.path.basename(final_filepath),
+                    'success': True
+                })
+                logging.info(f"Processed file via web interface: {filepath} -> {final_filepath}")
+            except Exception as e:
+                results.append({
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e)
+                })
+                logging.error(f"Error processing file {filepath}: {e}")
+        
+        return jsonify({'results': results})
     
-    return jsonify({'results': results})
+    # Streaming mode - send progress updates
+    def generate():
+        import json
+        results = []
+        for i, filepath in enumerate(files):
+            result = {'file': os.path.basename(filepath)}
+            
+            try:
+                mark_file_web_modified(filepath)
+                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+                handle_file_rename_in_cache(filepath, final_filepath)
+                result['success'] = True
+                logging.info(f"Processed file via web interface: {filepath} -> {final_filepath}")
+            except Exception as e:
+                result['success'] = False
+                result['error'] = str(e)
+                logging.error(f"Error processing file {filepath}: {e}")
+            
+            results.append(result)
+            
+            # Send progress update
+            progress = {
+                'current': i + 1,
+                'total': len(files),
+                'file': result['file'],
+                'success': result['success'],
+                'error': result.get('error')
+            }
+            yield f"data: {json.dumps(progress)}\n\n"
+        
+        # Send final results
+        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+    
+    return app.response_class(generate(), mimetype='text/event-stream')
+
 
 @app.route('/api/rename-all', methods=['POST'])
 def rename_all_files():
-    """API endpoint to rename all files in the watched directory"""
+    """API endpoint to rename all files in the watched directory with streaming progress"""
     from process_file import process_file
     
+    stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
-    results = []
     
-    for filepath in files:
-        try:
-            # Mark as web modified to prevent watcher from processing
-            mark_file_web_modified(filepath)
-            
-            # Only rename the file
-            final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
-            
-            # Mark as processed using the final filepath
-            mark_file_processed_wrapper(final_filepath)
-            
-            # Update cache incrementally if file was renamed
-            handle_file_rename_in_cache(filepath, final_filepath)
-            
-            results.append({
-                'file': os.path.basename(final_filepath),
-                'success': True
-            })
-            logging.info(f"Renamed file via web interface: {filepath} -> {final_filepath}")
-        except Exception as e:
-            results.append({
-                'file': os.path.basename(filepath),
-                'success': False,
-                'error': str(e)
-            })
-            logging.error(f"Error renaming file {filepath}: {e}")
+    if not stream:
+        # Non-streaming mode (backward compatible)
+        results = []
+        for filepath in files:
+            try:
+                mark_file_web_modified(filepath)
+                final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+                mark_file_processed_wrapper(final_filepath)
+                handle_file_rename_in_cache(filepath, final_filepath)
+                results.append({
+                    'file': os.path.basename(final_filepath),
+                    'success': True
+                })
+                logging.info(f"Renamed file via web interface: {filepath} -> {final_filepath}")
+            except Exception as e:
+                results.append({
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e)
+                })
+                logging.error(f"Error renaming file {filepath}: {e}")
+        
+        return jsonify({'results': results})
     
-    return jsonify({'results': results})
+    # Streaming mode - send progress updates
+    def generate():
+        import json
+        results = []
+        for i, filepath in enumerate(files):
+            result = {'file': os.path.basename(filepath)}
+            
+            try:
+                mark_file_web_modified(filepath)
+                final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+                mark_file_processed_wrapper(final_filepath)
+                handle_file_rename_in_cache(filepath, final_filepath)
+                result['success'] = True
+                logging.info(f"Renamed file via web interface: {filepath} -> {final_filepath}")
+            except Exception as e:
+                result['success'] = False
+                result['error'] = str(e)
+                logging.error(f"Error renaming file {filepath}: {e}")
+            
+            results.append(result)
+            
+            # Send progress update
+            progress = {
+                'current': i + 1,
+                'total': len(files),
+                'file': result['file'],
+                'success': result['success'],
+                'error': result.get('error')
+            }
+            yield f"data: {json.dumps(progress)}\n\n"
+        
+        # Send final results
+        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+    
+    return app.response_class(generate(), mimetype='text/event-stream')
+
 
 @app.route('/api/normalize-all', methods=['POST'])
 def normalize_all_files():
-    """API endpoint to normalize metadata for all files in the watched directory"""
+    """API endpoint to normalize metadata for all files in the watched directory with streaming progress"""
     from process_file import process_file
     
+    stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
-    results = []
     
-    for filepath in files:
-        try:
-            # Mark as web modified to prevent watcher from processing
-            mark_file_web_modified(filepath)
-            
-            # Only normalize metadata
-            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
-            
-            # Mark as processed using the final filepath
-            mark_file_processed_wrapper(final_filepath)
-            
-            results.append({
-                'file': os.path.basename(final_filepath),
-                'success': True
-            })
-            logging.info(f"Normalized metadata for file via web interface: {filepath}")
-        except Exception as e:
-            results.append({
-                'file': os.path.basename(filepath),
-                'success': False,
-                'error': str(e)
-            })
-            logging.error(f"Error normalizing metadata for file {filepath}: {e}")
+    if not stream:
+        # Non-streaming mode (backward compatible)
+        results = []
+        for filepath in files:
+            try:
+                mark_file_web_modified(filepath)
+                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+                mark_file_processed_wrapper(final_filepath)
+                results.append({
+                    'file': os.path.basename(final_filepath),
+                    'success': True
+                })
+                logging.info(f"Normalized metadata for file via web interface: {filepath}")
+            except Exception as e:
+                results.append({
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e)
+                })
+                logging.error(f"Error normalizing metadata for file {filepath}: {e}")
+        
+        return jsonify({'results': results})
     
-    return jsonify({'results': results})
+    # Streaming mode - send progress updates
+    def generate():
+        import json
+        results = []
+        for i, filepath in enumerate(files):
+            result = {'file': os.path.basename(filepath)}
+            
+            try:
+                mark_file_web_modified(filepath)
+                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+                mark_file_processed_wrapper(final_filepath)
+                result['success'] = True
+                logging.info(f"Normalized metadata for file via web interface: {filepath}")
+            except Exception as e:
+                result['success'] = False
+                result['error'] = str(e)
+                logging.error(f"Error normalizing metadata for file {filepath}: {e}")
+            
+            results.append(result)
+            
+            # Send progress update
+            progress = {
+                'current': i + 1,
+                'total': len(files),
+                'file': result['file'],
+                'success': result['success'],
+                'error': result.get('error')
+            }
+            yield f"data: {json.dumps(progress)}\n\n"
+        
+        # Send final results
+        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+    
+    return app.response_class(generate(), mimetype='text/event-stream')
+
 
 @app.route('/api/process-file/<path:filepath>', methods=['POST'])
 def process_single_file(filepath):
@@ -932,156 +1067,265 @@ def normalize_single_file(filepath):
 
 @app.route('/api/process-selected', methods=['POST'])
 def process_selected_files():
-    """API endpoint to process selected files"""
+    """API endpoint to process selected files with streaming progress"""
     from process_file import process_file
     
     data = request.json
     file_list = data.get('files', [])
+    stream = request.args.get('stream', 'false').lower() == 'true'
     
     if not file_list:
         return jsonify({'error': 'No files specified'}), 400
     
-    results = []
-    
-    for filepath in file_list:
-        full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+    if not stream:
+        # Non-streaming mode (backward compatible)
+        results = []
+        for filepath in file_list:
+            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+            
+            if not os.path.exists(full_path):
+                results.append({
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': 'File not found'
+                })
+                continue
+            
+            try:
+                mark_file_web_modified(full_path)
+                final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+                mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
+                handle_file_rename_in_cache(full_path, final_filepath)
+                results.append({
+                    'file': os.path.basename(final_filepath),
+                    'success': True
+                })
+                logging.info(f"Processed file via web interface: {full_path} -> {final_filepath}")
+            except Exception as e:
+                results.append({
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e)
+                })
+                logging.error(f"Error processing file {full_path}: {e}")
         
-        if not os.path.exists(full_path):
-            results.append({
-                'file': os.path.basename(filepath),
-                'success': False,
-                'error': 'File not found'
-            })
-            continue
-        
-        try:
-            # Mark as web modified to prevent watcher from processing
-            mark_file_web_modified(full_path)
-            
-            # Process the file and get the final filepath (may be renamed)
-            final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
-            
-            # Mark as processed using the final filepath, cleanup old filename if renamed
-            mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
-            
-            # Update cache incrementally if file was renamed
-            handle_file_rename_in_cache(full_path, final_filepath)
-            
-            results.append({
-                'file': os.path.basename(final_filepath),
-                'success': True
-            })
-            logging.info(f"Processed file via web interface: {full_path} -> {final_filepath}")
-        except Exception as e:
-            results.append({
-                'file': os.path.basename(filepath),
-                'success': False,
-                'error': str(e)
-            })
-            logging.error(f"Error processing file {full_path}: {e}")
+        return jsonify({'results': results})
     
-    return jsonify({'results': results})
+    # Streaming mode - send progress updates
+    def generate():
+        import json
+        results = []
+        for i, filepath in enumerate(file_list):
+            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+            result = {'file': os.path.basename(filepath)}
+            
+            if not os.path.exists(full_path):
+                result['success'] = False
+                result['error'] = 'File not found'
+            else:
+                try:
+                    mark_file_web_modified(full_path)
+                    final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+                    mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
+                    handle_file_rename_in_cache(full_path, final_filepath)
+                    result['success'] = True
+                    logging.info(f"Processed file via web interface: {full_path} -> {final_filepath}")
+                except Exception as e:
+                    result['success'] = False
+                    result['error'] = str(e)
+                    logging.error(f"Error processing file {full_path}: {e}")
+            
+            results.append(result)
+            
+            # Send progress update
+            progress = {
+                'current': i + 1,
+                'total': len(file_list),
+                'file': result['file'],
+                'success': result['success'],
+                'error': result.get('error')
+            }
+            yield f"data: {json.dumps(progress)}\n\n"
+        
+        # Send final results
+        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+    
+    return app.response_class(generate(), mimetype='text/event-stream')
+
 
 @app.route('/api/rename-selected', methods=['POST'])
 def rename_selected_files():
-    """API endpoint to rename selected files"""
+    """API endpoint to rename selected files with streaming progress"""
     from process_file import process_file
     
     data = request.json
     file_list = data.get('files', [])
+    stream = request.args.get('stream', 'false').lower() == 'true'
     
     if not file_list:
         return jsonify({'error': 'No files specified'}), 400
     
-    results = []
-    
-    for filepath in file_list:
-        full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+    if not stream:
+        # Non-streaming mode (backward compatible)
+        results = []
+        for filepath in file_list:
+            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+            
+            if not os.path.exists(full_path):
+                results.append({
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': 'File not found'
+                })
+                continue
+            
+            try:
+                mark_file_web_modified(full_path)
+                final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
+                mark_file_processed_wrapper(final_filepath)
+                handle_file_rename_in_cache(full_path, final_filepath)
+                results.append({
+                    'file': os.path.basename(final_filepath),
+                    'success': True
+                })
+                logging.info(f"Renamed file via web interface: {full_path} -> {final_filepath}")
+            except Exception as e:
+                results.append({
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e)
+                })
+                logging.error(f"Error renaming file {full_path}: {e}")
         
-        if not os.path.exists(full_path):
-            results.append({
-                'file': os.path.basename(filepath),
-                'success': False,
-                'error': 'File not found'
-            })
-            continue
-        
-        try:
-            # Mark as web modified to prevent watcher from processing
-            mark_file_web_modified(full_path)
-            
-            # Only rename the file
-            final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
-            
-            # Mark as processed using the final filepath
-            mark_file_processed_wrapper(final_filepath)
-            
-            # Update cache incrementally if file was renamed
-            handle_file_rename_in_cache(full_path, final_filepath)
-            
-            results.append({
-                'file': os.path.basename(final_filepath),
-                'success': True
-            })
-            logging.info(f"Renamed file via web interface: {full_path} -> {final_filepath}")
-        except Exception as e:
-            results.append({
-                'file': os.path.basename(filepath),
-                'success': False,
-                'error': str(e)
-            })
-            logging.error(f"Error renaming file {full_path}: {e}")
+        return jsonify({'results': results})
     
-    return jsonify({'results': results})
+    # Streaming mode - send progress updates
+    def generate():
+        import json
+        results = []
+        for i, filepath in enumerate(file_list):
+            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+            result = {'file': os.path.basename(filepath)}
+            
+            if not os.path.exists(full_path):
+                result['success'] = False
+                result['error'] = 'File not found'
+            else:
+                try:
+                    mark_file_web_modified(full_path)
+                    final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
+                    mark_file_processed_wrapper(final_filepath)
+                    handle_file_rename_in_cache(full_path, final_filepath)
+                    result['success'] = True
+                    logging.info(f"Renamed file via web interface: {full_path} -> {final_filepath}")
+                except Exception as e:
+                    result['success'] = False
+                    result['error'] = str(e)
+                    logging.error(f"Error renaming file {full_path}: {e}")
+            
+            results.append(result)
+            
+            # Send progress update
+            progress = {
+                'current': i + 1,
+                'total': len(file_list),
+                'file': result['file'],
+                'success': result['success'],
+                'error': result.get('error')
+            }
+            yield f"data: {json.dumps(progress)}\n\n"
+        
+        # Send final results
+        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+    
+    return app.response_class(generate(), mimetype='text/event-stream')
+
 
 @app.route('/api/normalize-selected', methods=['POST'])
 def normalize_selected_files():
-    """API endpoint to normalize metadata for selected files"""
+    """API endpoint to normalize metadata for selected files with streaming progress"""
     from process_file import process_file
     
     data = request.json
     file_list = data.get('files', [])
+    stream = request.args.get('stream', 'false').lower() == 'true'
     
     if not file_list:
         return jsonify({'error': 'No files specified'}), 400
     
-    results = []
-    
-    for filepath in file_list:
-        full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+    if not stream:
+        # Non-streaming mode (backward compatible)
+        results = []
+        for filepath in file_list:
+            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+            
+            if not os.path.exists(full_path):
+                results.append({
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': 'File not found'
+                })
+                continue
+            
+            try:
+                mark_file_web_modified(full_path)
+                final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
+                mark_file_processed_wrapper(final_filepath)
+                results.append({
+                    'file': os.path.basename(final_filepath),
+                    'success': True
+                })
+                logging.info(f"Normalized metadata for file via web interface: {full_path}")
+            except Exception as e:
+                results.append({
+                    'file': os.path.basename(filepath),
+                    'success': False,
+                    'error': str(e)
+                })
+                logging.error(f"Error normalizing metadata for file {full_path}: {e}")
         
-        if not os.path.exists(full_path):
-            results.append({
-                'file': os.path.basename(filepath),
-                'success': False,
-                'error': 'File not found'
-            })
-            continue
-        
-        try:
-            # Mark as web modified to prevent watcher from processing
-            mark_file_web_modified(full_path)
-            
-            # Only normalize metadata
-            final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
-            
-            # Mark as processed using the final filepath
-            mark_file_processed_wrapper(final_filepath)
-            
-            results.append({
-                'file': os.path.basename(final_filepath),
-                'success': True
-            })
-            logging.info(f"Normalized metadata for file via web interface: {full_path}")
-        except Exception as e:
-            results.append({
-                'file': os.path.basename(filepath),
-                'success': False,
-                'error': str(e)
-            })
-            logging.error(f"Error normalizing metadata for file {full_path}: {e}")
+        return jsonify({'results': results})
     
-    return jsonify({'results': results})
+    # Streaming mode - send progress updates
+    def generate():
+        import json
+        results = []
+        for i, filepath in enumerate(file_list):
+            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+            result = {'file': os.path.basename(filepath)}
+            
+            if not os.path.exists(full_path):
+                result['success'] = False
+                result['error'] = 'File not found'
+            else:
+                try:
+                    mark_file_web_modified(full_path)
+                    final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
+                    mark_file_processed_wrapper(final_filepath)
+                    result['success'] = True
+                    logging.info(f"Normalized metadata for file via web interface: {full_path}")
+                except Exception as e:
+                    result['success'] = False
+                    result['error'] = str(e)
+                    logging.error(f"Error normalizing metadata for file {full_path}: {e}")
+            
+            results.append(result)
+            
+            # Send progress update
+            progress = {
+                'current': i + 1,
+                'total': len(file_list),
+                'file': result['file'],
+                'success': result['success'],
+                'error': result.get('error')
+            }
+            yield f"data: {json.dumps(progress)}\n\n"
+        
+        # Send final results
+        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+    
+    return app.response_class(generate(), mimetype='text/event-stream')
+
 
 @app.route('/api/settings/filename-format', methods=['GET'])
 def get_filename_format_api():

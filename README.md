@@ -92,10 +92,12 @@ docker run -d \
 - `PROCESS_SCRIPT`: Script to run for processing (default: `/app/process_file.py`)
 - `DUPLICATE_DIR`: Directory where duplicates are moved (required for duplicate handling)
 - `WEB_PORT`: Port for the web interface (default: `5000`)
+- `GUNICORN_WORKERS`: Number of Gunicorn worker processes (default: `2`). Job state is shared across workers via SQLite.
 - `CACHE_DIR`: **(Recommended)** Directory for persistent configuration and cache data (default: `/app/cache`). Mount a host directory here to persist:
   - Marker files tracking processed/duplicate files
   - Configuration settings (filename format, watcher state, log rotation)
   - File list cache for performance optimization
+  - Job database (SQLite) for async processing state
 - `PUID`: User ID to run the service as (default: `99` for user `nobody`)
 - `PGID`: Group ID to run the service as (default: `100` for group `users`)
 - `LOG_MAX_BYTES`: Maximum log file size in bytes before rotation (default: `5242880` = 5MB). Can also be configured via the Settings UI.
@@ -198,7 +200,7 @@ The filename format setting is saved in `config.json` (located in `CACHE_DIR`) a
 The web interface exposes several REST API endpoints:
 
 ### Asynchronous Processing (New!)
-The service now supports asynchronous file processing, allowing multiple files to be processed concurrently in the background:
+The service now supports asynchronous file processing with persistent job storage in SQLite:
 
 - **POST** `/api/jobs/process-all` - Start async processing of all files
   - Returns: `{"job_id": "...", "total_items": 123}`
@@ -222,7 +224,9 @@ The service now supports asynchronous file processing, allowing multiple files t
 - ✅ **Concurrent execution**: Multiple files processed simultaneously
 - ✅ **Non-blocking**: Web interface remains responsive during processing
 - ✅ **Progress tracking**: Real-time status updates via polling
-- ✅ **Scalable**: Handles large libraries efficiently
+- ✅ **Persistent storage**: Jobs survive server restarts (stored in SQLite)
+- ✅ **Multi-worker support**: Multiple Gunicorn workers can share job state
+- ✅ **Scalable**: Handles large libraries efficiently with horizontal scaling
 
 **Note:** The original streaming endpoints (`/api/process-all?stream=true`, etc.) remain available for backward compatibility, but the async endpoints are now used by default in the web interface.
 

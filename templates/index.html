@@ -247,6 +247,39 @@
             font-weight: 500;
         }
         
+        .watcher-status-indicator {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: var(--text-header);
+            padding: 8px 12px;
+            border-radius: 5px;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.3s;
+            cursor: help;
+        }
+        
+        .watcher-status-indicator.running {
+            background: rgba(46, 204, 113, 0.2);
+            border-color: rgba(46, 204, 113, 0.4);
+        }
+        
+        .watcher-status-indicator.stopped {
+            background: rgba(231, 76, 60, 0.2);
+            border-color: rgba(231, 76, 60, 0.4);
+        }
+        
+        .watcher-status-indicator .watcher-icon {
+            font-size: 16px;
+        }
+        
+        .watcher-status-indicator .watcher-text {
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        
         .settings-menu-wrapper {
             position: relative;
         }
@@ -1251,6 +1284,17 @@
                 min-width: auto;
             }
             
+            .watcher-status-indicator {
+                padding: 8px;
+                font-size: 16px;
+                min-width: 36px;
+                justify-content: center;
+            }
+            
+            .watcher-status-indicator .watcher-text {
+                display: none;
+            }
+            
             .settings-menu-toggle {
                 width: 36px;
                 height: 36px;
@@ -1538,6 +1582,10 @@
                     <rect x="66" y="68" width="8" height="12" fill="#7CB8B8"/>
                     <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
                 </svg>
+                <div class="watcher-status-indicator" id="watcherStatus" title="Watcher Status">
+                    <span class="watcher-icon">⚙️</span>
+                    <span class="watcher-text">Checking...</span>
+                </div>
                 <div class="settings-menu-wrapper">
                     <button class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle">
                         ⋮
@@ -2267,6 +2315,9 @@
             if (perPageSelect) {
                 perPageSelect.value = perPage;
             }
+            
+            // Start watcher status polling
+            startWatcherStatusPolling();
             
             // Check for active job and resume polling FIRST (before loading files)
             // This ensures the progress modal appears immediately on page load
@@ -4367,6 +4418,68 @@
             // Refresh file list
             await loadFiles(1, true);
         }
+        
+        // Watcher status polling
+        let watcherStatusInterval;
+        
+        async function updateWatcherStatus() {
+            try {
+                const response = await fetch('/api/watcher/status');
+                const data = await response.json();
+                
+                const statusIndicator = document.getElementById('watcherStatus');
+                const iconElement = statusIndicator.querySelector('.watcher-icon');
+                const textElement = statusIndicator.querySelector('.watcher-text');
+                
+                // Remove previous status classes
+                statusIndicator.classList.remove('running', 'stopped');
+                
+                if (data.running) {
+                    statusIndicator.classList.add('running');
+                    iconElement.textContent = '✅';
+                    textElement.textContent = 'Watcher Running';
+                    statusIndicator.title = 'File watcher is running and monitoring for changes';
+                } else {
+                    statusIndicator.classList.add('stopped');
+                    iconElement.textContent = '⛔';
+                    textElement.textContent = 'Watcher Stopped';
+                    if (data.enabled) {
+                        statusIndicator.title = 'File watcher is enabled but not running';
+                    } else {
+                        statusIndicator.title = 'File watcher is disabled';
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching watcher status:', error);
+                const statusIndicator = document.getElementById('watcherStatus');
+                const iconElement = statusIndicator.querySelector('.watcher-icon');
+                const textElement = statusIndicator.querySelector('.watcher-text');
+                
+                statusIndicator.classList.remove('running', 'stopped');
+                iconElement.textContent = '❓';
+                textElement.textContent = 'Status Unknown';
+                statusIndicator.title = 'Unable to determine watcher status';
+            }
+        }
+        
+        // Start polling watcher status every 10 seconds
+        function startWatcherStatusPolling() {
+            // Update immediately
+            updateWatcherStatus();
+            
+            // Then update every 10 seconds
+            if (watcherStatusInterval) {
+                clearInterval(watcherStatusInterval);
+            }
+            watcherStatusInterval = setInterval(updateWatcherStatus, 10000);
+        }
+        
+        // Stop polling on page unload
+        window.addEventListener('beforeunload', () => {
+            if (watcherStatusInterval) {
+                clearInterval(watcherStatusInterval);
+            }
+        });
     </script>
 </body>
 </html>

@@ -2268,16 +2268,19 @@ def delete_single_file(filepath):
         return jsonify({'error': 'File not found'}), 404
     
     try:
+        # Mark as web modified before deletion to prevent watcher from processing
+        mark_file_web_modified(full_path)
+        
         # Delete the file
         os.remove(full_path)
         
-        # Clear the file from any tracking markers
-        clear_file_web_modified(full_path)
+        # Clear processed and duplicate markers (web_modified marker will be consumed by watcher)
         unmark_file_processed(full_path)
         unmark_file_duplicate(full_path)
         
         # Update cache incrementally instead of clearing it
         record_cache_change('remove', old_path=full_path)
+        update_watcher_timestamp()
         
         logging.info(f"Deleted file via web interface: {full_path}")
         return jsonify({'success': True})

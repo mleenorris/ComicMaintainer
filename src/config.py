@@ -5,7 +5,7 @@ import logging
 # Store config in /Config for persistence
 CONFIG_DIR = '/Config'
 CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.json')
-DEFAULT_FILENAME_FORMAT = '{series} - Chapter {issue}.cbz'
+DEFAULT_FILENAME_FORMAT = '{series} - Chapter {issue}'
 DEFAULT_WATCHER_ENABLED = True
 DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5MB default
 DEFAULT_MAX_WORKERS = 4  # Default number of concurrent workers

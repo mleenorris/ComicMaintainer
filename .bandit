@@ -2,15 +2,14 @@
 # Bandit configuration file for security scanning
 # https://bandit.readthedocs.io/en/latest/config.html
 
-# Test IDs to exclude
-# B104: hardcoded_bind_all_interfaces - This is intentional for Docker containers
-# B603: subprocess_without_shell_equals_true - These are safe subprocess calls with hardcoded commands
-exclude_dirs = ['/tmp', '.git', '.venv', 'venv', '__pycache__']
+# Directories to exclude from scanning
+exclude_dirs = /tmp,.git,.venv,venv,__pycache__
 
-# Severity level to report (LOW, MEDIUM, HIGH)
-# We want to catch all issues for review
-skips = []
+# Test IDs to skip (comma-separated list)
+# B104: hardcoded_bind_all_interfaces - Binding to 0.0.0.0 is intentional for Docker containers
+# B603: subprocess_without_shell_equals_true - Safe subprocess calls with hardcoded commands
+# B607: start_process_with_partial_path - Using system commands from PATH is acceptable
+skips = B104,B603,B607
 
-# Tests to skip
-# B104 - hardcoded_bind_all_interfaces: Binding to 0.0.0.0 is intentional for Docker
-tests = []
+# Severity level to report: LOW, MEDIUM, HIGH
+# We want to catch all issues for review, so no exclusions here

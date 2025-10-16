@@ -194,8 +194,14 @@ class ChangeHandler(FileSystemEventHandler):
             if event.src_path in self.last_processed:
                 del self.last_processed[event.src_path]
             
-            # Record the deletion for incremental cache update
+            # Skip cache update if file was deleted via web interface
             if self._allowed_extension(event.src_path):
+                if is_web_modified(event.src_path):
+                    logging.info(f"Skipping cache update for {event.src_path} - deleted by web interface")
+                    clear_file_web_modified(event.src_path)
+                    return
+                
+                # Record the deletion for incremental cache update
                 record_cache_change('remove', old_path=event.src_path)
                 update_watcher_timestamp()
 

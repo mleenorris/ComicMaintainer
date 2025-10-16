@@ -94,8 +94,8 @@
         
         .header-content {
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            gap: 10px;
         }
         
         .header-left h1 {
@@ -118,10 +118,12 @@
             display: flex;
             align-items: center;
             gap: 8px;
+            flex: 1;
         }
         
         .header-search {
             position: relative;
+            flex: 1;
         }
         
         .header-search input {
@@ -131,7 +133,7 @@
             background: rgba(255, 255, 255, 0.1);
             color: var(--text-header);
             font-size: 13px;
-            width: 200px;
+            width: 100%;
             transition: all 0.3s;
         }
         
@@ -1177,9 +1179,8 @@
             }
             
             .header-content {
-                flex-direction: column;
+                flex-wrap: wrap;
                 gap: 10px;
-                align-items: flex-start;
             }
             
             .header h1 {
@@ -1191,14 +1192,10 @@
                 display: none;
             }
             
-            .header-right {
-                width: 100%;
-                justify-content: space-between;
-            }
-            
             .header-controls {
                 flex: 1;
                 gap: 6px;
+                width: 100%;
             }
             
             .header-search {
@@ -1496,115 +1493,111 @@
     <div class="header">
         <div class="container">
             <div class="header-content">
-                <div class="header-left">
-                    <svg width="48" height="48" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-                        <!-- Brown border/frame -->
-                        <rect x="5" y="5" width="90" height="90" rx="10" fill="#8B5A3C" stroke="#5C3A28" stroke-width="2"/>
-                        <rect x="10" y="10" width="80" height="80" rx="8" fill="#A67C52"/>
-                        
-                        <!-- Teal shelf background -->
-                        <rect x="15" y="15" width="70" height="70" rx="6" fill="#7CB8B8"/>
-                        
-                        <!-- Three comic books -->
-                        <!-- Left book - yellow/green -->
-                        <rect x="20" y="22" width="18" height="30" rx="2" fill="#D4D46E" stroke="#5C3A28" stroke-width="1.5"/>
-                        <rect x="20" y="22" width="18" height="8" fill="#B8B85A"/>
-                        <text x="29" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
-                        <text x="29" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
-                        
-                        <!-- Middle book - orange/red -->
-                        <rect x="41" y="22" width="18" height="30" rx="2" fill="#E67E5A" stroke="#5C3A28" stroke-width="1.5"/>
-                        <rect x="41" y="22" width="18" height="8" fill="#CC6644"/>
-                        <text x="50" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">O</text>
-                        <text x="50" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
-                        
-                        <!-- Right book - beige -->
-                        <rect x="62" y="22" width="18" height="30" rx="2" fill="#E8D4C4" stroke="#5C3A28" stroke-width="1.5"/>
-                        <rect x="62" y="22" width="18" height="8" fill="#D4BCA8"/>
-                        <text x="71" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
-                        <text x="71" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
-                        
-                        <!-- Label "COMIC LIBRARY" -->
-                        <rect x="20" y="54" width="60" height="10" rx="2" fill="#F4C430"/>
-                        <text x="50" y="61.5" font-family="Arial, sans-serif" font-size="6" font-weight="bold" fill="#5C3A28" text-anchor="middle">COMIC LIBRARY</text>
-                        
-                        <!-- Bottom shelf with books -->
-                        <rect x="20" y="68" width="8" height="12" fill="#6A8AB8"/>
-                        <rect x="30" y="68" width="6" height="12" fill="#E67E5A"/>
-                        <rect x="38" y="68" width="8" height="12" fill="#7CB8B8"/>
-                        <rect x="48" y="68" width="6" height="12" fill="#E8D4C4"/>
-                        <rect x="58" y="68" width="6" height="12" fill="#E67E5A"/>
-                        <rect x="66" y="68" width="8" height="12" fill="#7CB8B8"/>
-                        <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
-                    </svg>
-                </div>
-                <div class="header-right">
-                    <div class="settings-menu-wrapper">
-                        <button class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle">
-                            ⋮
+                <svg width="48" height="48" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Brown border/frame -->
+                    <rect x="5" y="5" width="90" height="90" rx="10" fill="#8B5A3C" stroke="#5C3A28" stroke-width="2"/>
+                    <rect x="10" y="10" width="80" height="80" rx="8" fill="#A67C52"/>
+                    
+                    <!-- Teal shelf background -->
+                    <rect x="15" y="15" width="70" height="70" rx="6" fill="#7CB8B8"/>
+                    
+                    <!-- Three comic books -->
+                    <!-- Left book - yellow/green -->
+                    <rect x="20" y="22" width="18" height="30" rx="2" fill="#D4D46E" stroke="#5C3A28" stroke-width="1.5"/>
+                    <rect x="20" y="22" width="18" height="8" fill="#B8B85A"/>
+                    <text x="29" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                    <text x="29" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
+                    
+                    <!-- Middle book - orange/red -->
+                    <rect x="41" y="22" width="18" height="30" rx="2" fill="#E67E5A" stroke="#5C3A28" stroke-width="1.5"/>
+                    <rect x="41" y="22" width="18" height="8" fill="#CC6644"/>
+                    <text x="50" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">O</text>
+                    <text x="50" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
+                    
+                    <!-- Right book - beige -->
+                    <rect x="62" y="22" width="18" height="30" rx="2" fill="#E8D4C4" stroke="#5C3A28" stroke-width="1.5"/>
+                    <rect x="62" y="22" width="18" height="8" fill="#D4BCA8"/>
+                    <text x="71" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                    <text x="71" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                    
+                    <!-- Label "COMIC LIBRARY" -->
+                    <rect x="20" y="54" width="60" height="10" rx="2" fill="#F4C430"/>
+                    <text x="50" y="61.5" font-family="Arial, sans-serif" font-size="6" font-weight="bold" fill="#5C3A28" text-anchor="middle">COMIC LIBRARY</text>
+                    
+                    <!-- Bottom shelf with books -->
+                    <rect x="20" y="68" width="8" height="12" fill="#6A8AB8"/>
+                    <rect x="30" y="68" width="6" height="12" fill="#E67E5A"/>
+                    <rect x="38" y="68" width="8" height="12" fill="#7CB8B8"/>
+                    <rect x="48" y="68" width="6" height="12" fill="#E8D4C4"/>
+                    <rect x="58" y="68" width="6" height="12" fill="#E67E5A"/>
+                    <rect x="66" y="68" width="8" height="12" fill="#7CB8B8"/>
+                    <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
+                </svg>
+                <div class="settings-menu-wrapper">
+                    <button class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle">
+                        ⋮
+                    </button>
+                    <div class="settings-dropdown-menu" id="settingsDropdownMenu">
+                        <button class="settings-dropdown-item" onclick="openAboutModal(); closeSettingsMenu();">
+                            ℹ️ About
                         </button>
-                        <div class="settings-dropdown-menu" id="settingsDropdownMenu">
-                            <button class="settings-dropdown-item" onclick="openAboutModal(); closeSettingsMenu();">
-                                ℹ️ About
+                        <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
+                            ⚙️ Settings
+                        </button>
+                        <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
+                            📋 View Logs
+                        </button>
+                        <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
+                            🌓 Toggle Theme
+                        </button>
+                        <button class="settings-dropdown-item" onclick="refreshFiles(); closeSettingsMenu();">
+                            🔄 Refresh
+                        </button>
+                        <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
+                            🔍 Scan Unmarked
+                        </button>
+                    </div>
+                </div>
+                <div class="header-controls">
+                    <button id="progressIndicator" class="progress-indicator-btn" onclick="restoreProgressModal()" style="display: none;" title="Show progress">
+                        <span id="progressIndicatorText">⏳ Processing...</span>
+                    </button>
+                    <div class="header-search">
+                        <input type="text" id="headerSearchInput" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
+                    </div>
+                    <div class="header-filter-dropdown">
+                        <button class="header-filter-toggle" onclick="toggleHeaderFilterDropdown(event)" id="headerFilterToggle">
+                            <span id="headerFilterLabel">📚 All</span>
+                        </button>
+                        <div class="header-dropdown-menu" id="headerFilterMenu">
+                            <button class="header-dropdown-item active" onclick="setHeaderFilter('all')" data-filter="all">
+                                📚 All Files
                             </button>
-                            <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
-                                ⚙️ Settings
+                            <button class="header-dropdown-item" onclick="setHeaderFilter('unmarked')" data-filter="unmarked">
+                                ⚠️ Unmarked
                             </button>
-                            <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
-                                📋 View Logs
+                            <button class="header-dropdown-item" onclick="setHeaderFilter('marked')" data-filter="marked">
+                                ✅ Marked
                             </button>
-                            <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
-                                🌓 Toggle Theme
-                            </button>
-                            <button class="settings-dropdown-item" onclick="refreshFiles(); closeSettingsMenu();">
-                                🔄 Refresh
-                            </button>
-                            <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
-                                🔍 Scan Unmarked
+                            <button class="header-dropdown-item" onclick="setHeaderFilter('duplicates')" data-filter="duplicates">
+                                🔁 Duplicates
                             </button>
                         </div>
                     </div>
-                    <div class="header-controls">
-                        <button id="progressIndicator" class="progress-indicator-btn" onclick="restoreProgressModal()" style="display: none;" title="Show progress">
-                            <span id="progressIndicatorText">⏳ Processing...</span>
+                    <div class="header-sort-dropdown">
+                        <button class="header-sort-toggle" onclick="toggleHeaderSortDropdown(event)" id="headerSortToggle">
+                            <span id="headerSortLabel">🔤 Name</span>
                         </button>
-                        <div class="header-search">
-                            <input type="text" id="headerSearchInput" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
-                        </div>
-                        <div class="header-filter-dropdown">
-                            <button class="header-filter-toggle" onclick="toggleHeaderFilterDropdown(event)" id="headerFilterToggle">
-                                <span id="headerFilterLabel">📚 All</span>
+                        <div class="header-dropdown-menu" id="headerSortMenu">
+                            <button class="header-dropdown-item active" onclick="setSort('name')" data-sort="name">
+                                🔤 Name
                             </button>
-                            <div class="header-dropdown-menu" id="headerFilterMenu">
-                                <button class="header-dropdown-item active" onclick="setHeaderFilter('all')" data-filter="all">
-                                    📚 All Files
-                                </button>
-                                <button class="header-dropdown-item" onclick="setHeaderFilter('unmarked')" data-filter="unmarked">
-                                    ⚠️ Unmarked
-                                </button>
-                                <button class="header-dropdown-item" onclick="setHeaderFilter('marked')" data-filter="marked">
-                                    ✅ Marked
-                                </button>
-                                <button class="header-dropdown-item" onclick="setHeaderFilter('duplicates')" data-filter="duplicates">
-                                    🔁 Duplicates
-                                </button>
-                            </div>
-                        </div>
-                        <div class="header-sort-dropdown">
-                            <button class="header-sort-toggle" onclick="toggleHeaderSortDropdown(event)" id="headerSortToggle">
-                                <span id="headerSortLabel">🔤 Name</span>
+                            <button class="header-dropdown-item" onclick="setSort('date')" data-sort="date">
+                                📅 Date
                             </button>
-                            <div class="header-dropdown-menu" id="headerSortMenu">
-                                <button class="header-dropdown-item active" onclick="setSort('name')" data-sort="name">
-                                    🔤 Name
-                                </button>
-                                <button class="header-dropdown-item" onclick="setSort('date')" data-sort="date">
-                                    📅 Date
-                                </button>
-                                <button class="header-dropdown-item" onclick="setSort('size')" data-sort="size">
-                                    💾 Size
-                                </button>
-                            </div>
+                            <button class="header-dropdown-item" onclick="setSort('size')" data-sort="size">
+                                💾 Size
+                            </button>
                         </div>
                     </div>
                 </div>

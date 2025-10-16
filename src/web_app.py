@@ -2404,15 +2404,16 @@ def initialize_cache():
         
         # First, load the file list cache
         logging.info("Building file list cache...")
-        get_comic_files(use_cache=True)
-        logging.info("File list cache initialized")
+        files = get_comic_files(use_cache=True)
+        logging.info(f"File list cache initialized with {len(files)} files")
         
-        # Release lock temporarily for metadata cache warming
-        release_cache_rebuild_lock(lock_fd)
-        lock_fd = None
-        
-        # Then, prewarm the metadata cache (will acquire its own lock)
+        # Then, prewarm the metadata cache (markers)
         prewarm_metadata_cache()
+        
+        # Finally, build the enriched file cache to speed up first page load
+        logging.info("Building enriched file cache...")
+        enriched_files = get_enriched_file_list(files, force_rebuild=True)
+        logging.info(f"Enriched file cache initialized with {len(enriched_files)} files")
         
         logging.info("Cache initialization complete")
     finally:

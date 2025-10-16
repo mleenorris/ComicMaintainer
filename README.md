@@ -164,7 +164,7 @@ The service includes a web-based interface for managing your comic files:
 - **Search debouncing**: 300ms delay reduces API calls by 87% while typing
 - **Metadata caching**: File status (processed/duplicate) cached for 5 seconds, reducing disk I/O by 90%
 - **Asynchronous cache rebuilding**: Cache rebuilds happen in background threads, providing instant API responses even during cache updates (returns stale cache while rebuilding)
-- **Cache warming on startup**: All caches (file list and metadata) are preloaded automatically when the service starts, eliminating "cold start" delays
+- **Cache warming on startup**: All caches (file list, metadata, and enriched file list) are preloaded automatically when the service starts, eliminating "cold start" delays and ensuring instant first page load
 - Files are loaded in pages of 100 to ensure fast initial load times
 - File list is cached on service startup and maintained in memory
 - Cache does not expire based on time, providing instant page navigation

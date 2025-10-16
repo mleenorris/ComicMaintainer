@@ -33,7 +33,7 @@ This service automatically watches a directory for new or changed comic archive 
 2. When a file is detected and stable, it runs `process_file.py` to:
    - **Check if the file is already normalized**: If the metadata (title, series) and filename already match the expected format, the file is immediately marked as processed without making any changes
    - Read and update comic metadata using ComicTagger (if normalization is needed)
-   - Rename the file using the configured filename format (e.g., `{series} - Chapter {issue}.cbz` → `Batman - Chapter 0001.cbz`) (if normalization is needed)
+   - Rename the file using the configured filename format (e.g., `{series} - Chapter {issue}` → `Batman - Chapter 0001.cbz` or `.cbr` depending on original format) (if normalization is needed)
    - If a file with the new name already exists, the file is marked as a duplicate and, if `DUPLICATE_DIR` is set, moved to the duplicate directory preserving the original parent folder
 3. All actions and errors are logged.
 
@@ -188,13 +188,15 @@ The filename format can be customized through the web interface Settings modal. 
 - `{publisher}` - Publisher name
 
 **Examples:**
-- `{series} - Chapter {issue}.cbz` → `Batman - Chapter 0005.cbz` (default)
-- `{series} - Chapter {issue}.cbz` → `Manga - Chapter 0071.4.cbz` (decimal chapters)
-- `{series} v{volume} #{issue_no_pad}.cbz` → `Batman v1 #5.cbz`
-- `{series} ({year}) - {title}.cbz` → `Batman (2023) - Dark Knight.cbz`
-- `{series} #{issue} - {title}.cbz` → `Batman #0005 - Dark Knight.cbz`
+- `{series} - Chapter {issue}` → `Batman - Chapter 0005.cbz` or `.cbr` (default)
+- `{series} - Chapter {issue}` → `Manga - Chapter 0071.4.cbz` or `.cbr` (decimal chapters)
+- `{series} v{volume} #{issue_no_pad}` → `Batman v1 #5.cbz` or `.cbr`
+- `{series} ({year}) - {title}` → `Batman (2023) - Dark Knight.cbz` or `.cbr`
+- `{series} #{issue} - {title}` → `Batman #0005 - Dark Knight.cbz` or `.cbr`
 
-**Note:** Decimal chapter numbers (e.g., 71.4, 71.11) are preserved without trailing zeros.
+**Note:** 
+- Decimal chapter numbers (e.g., 71.4, 71.11) are preserved without trailing zeros.
+- The original file extension (`.cbz` or `.cbr`) is automatically preserved when renaming files.
 
 The filename format setting is saved in `config.json` (located in `/Config`) and applies to both web interface processing and watcher service processing. **Mount `/Config` as a volume to persist this configuration across container restarts.**
 

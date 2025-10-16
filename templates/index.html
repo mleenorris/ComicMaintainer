@@ -2639,6 +2639,15 @@
         function renderFileList() {
             const fileList = document.getElementById('fileList');
             
+            // Clean up selectedFiles to remove files that no longer exist
+            // This must happen before the early return for empty file lists
+            const currentFilePaths = new Set(files.map(f => f.relative_path));
+            for (const filepath of selectedFiles) {
+                if (!currentFilePaths.has(filepath)) {
+                    selectedFiles.delete(filepath);
+                }
+            }
+            
             if (files.length === 0) {
                 // Check if we have search/filter active to show appropriate message
                 if (searchQuery || filterMode !== 'all') {
@@ -2658,6 +2667,9 @@
                         </div>
                     `;
                 }
+                // Update UI state after clearing selections
+                updateSelectInfo();
+                updateSelectAllCheckbox();
                 return;
             }
             
@@ -2772,14 +2784,6 @@
             });
             
             fileList.innerHTML = html;
-            
-            // Clean up selectedFiles to remove files that no longer exist
-            const currentFilePaths = new Set(files.map(f => f.relative_path));
-            for (const filepath of selectedFiles) {
-                if (!currentFilePaths.has(filepath)) {
-                    selectedFiles.delete(filepath);
-                }
-            }
             
             updateSelectInfo();
             updateSelectAllCheckbox();

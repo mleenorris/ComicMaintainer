@@ -4250,28 +4250,27 @@
         
         // Function to delete selected files
         async function deleteSelectedFiles() {
-            const selectedFiles = Array.from(document.querySelectorAll('input[name="fileSelect"]:checked'))
-                .map(cb => cb.dataset.filepath);
+            const selectedFilesArray = Array.from(selectedFiles);
             
-            if (selectedFiles.length === 0) {
+            if (selectedFilesArray.length === 0) {
                 showMessage('No files selected', 'error');
                 return;
             }
             
             // Confirm deletion
-            if (!confirm(`Are you sure you want to delete ${selectedFiles.length} file(s)? This action cannot be undone.`)) {
+            if (!confirm(`Are you sure you want to delete ${selectedFilesArray.length} file(s)? This action cannot be undone.`)) {
                 return;
             }
             
-            showProgressModal(`Deleting ${selectedFiles.length} file(s)...`);
+            showProgressModal(`Deleting ${selectedFilesArray.length} file(s)...`);
             
             let successCount = 0;
             let failCount = 0;
             
             // Delete files one by one
-            for (let i = 0; i < selectedFiles.length; i++) {
-                const filepath = selectedFiles[i];
-                updateProgress(i + 1, selectedFiles.length, `Deleting: ${getBasename(filepath)}`);
+            for (let i = 0; i < selectedFilesArray.length; i++) {
+                const filepath = selectedFilesArray[i];
+                updateProgress(i + 1, selectedFilesArray.length, `Deleting: ${getBasename(filepath)}`);
                 
                 try {
                     const response = await fetch(`/api/delete-file/${encodeURIComponent(filepath)}`, {

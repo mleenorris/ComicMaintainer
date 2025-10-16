@@ -2271,6 +2271,9 @@
                     body: JSON.stringify({ enabled: enabled })
                 });
                 
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const result = await response.json();
                 
                 if (result.success) {
@@ -2292,6 +2295,9 @@
         async function loadVersion() {
             try {
                 const response = await fetch('/api/version');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const data = await response.json();
                 const versionElement = document.getElementById('appVersion');
                 if (versionElement && data.version) {
@@ -2361,6 +2367,9 @@
                 }
                 
                 const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const data = await response.json();
                 
                 files = data.files;
@@ -2616,6 +2625,9 @@
             try {
                 showMessage('Scanning for unmarked files...', 'info');
                 const response = await fetch('/api/scan-unmarked');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const data = await response.json();
                 
                 showMessage(`Found ${data.unmarked_count} unmarked file(s) and ${data.marked_count} marked file(s) out of ${data.total_count} total files.`, 'success');
@@ -2970,6 +2982,9 @@
         async function viewTags(filepath) {
             try {
                 const response = await fetch(`/api/file/${encodeURIComponent(filepath)}/tags`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const tags = await response.json();
                 
                 if (tags.error) {
@@ -3019,6 +3034,9 @@
                     body: JSON.stringify(tags)
                 });
                 
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const result = await response.json();
                 
                 if (result.success) {
@@ -3918,6 +3936,9 @@
                     method: 'POST'
                 });
                 
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const result = await response.json();
                 
                 if (result.success) {
@@ -3943,6 +3964,9 @@
                     method: 'POST'
                 });
                 
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const result = await response.json();
                 
                 if (result.success) {
@@ -3968,6 +3992,9 @@
                     method: 'POST'
                 });
                 
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const result = await response.json();
                 
                 if (result.success) {
@@ -3993,6 +4020,9 @@
                     method: 'DELETE'
                 });
                 
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const result = await response.json();
                 
                 if (result.success) {
@@ -4028,6 +4058,9 @@
             try {
                 // Load filename format
                 const formatResponse = await fetch('/api/settings/filename-format');
+                if (!formatResponse.ok) {
+                    throw new Error(`HTTP error! status: ${formatResponse.status}`);
+                }
                 const formatData = await formatResponse.json();
                 
                 document.getElementById('filenameFormat').value = formatData.format || '';
@@ -4039,11 +4072,17 @@
                 
                 // Load watcher status
                 const watcherResponse = await fetch('/api/settings/watcher-enabled');
+                if (!watcherResponse.ok) {
+                    throw new Error(`HTTP error! status: ${watcherResponse.status}`);
+                }
                 const watcherData = await watcherResponse.json();
                 document.getElementById('watcherToggleCheckbox').checked = watcherData.enabled;
                 
                 // Load log max size
                 const logResponse = await fetch('/api/settings/log-max-bytes');
+                if (!logResponse.ok) {
+                    throw new Error(`HTTP error! status: ${logResponse.status}`);
+                }
                 const logData = await logResponse.json();
                 document.getElementById('logMaxSize').value = Math.round(logData.maxMB);
                 
@@ -4070,6 +4109,9 @@
             try {
                 // Load version
                 const response = await fetch('/api/version');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const data = await response.json();
                 const aboutVersionElement = document.getElementById('aboutVersion');
                 if (aboutVersionElement && data.version) {
@@ -4191,6 +4233,9 @@
                 logStats.textContent = '';
                 
                 const response = await fetch(`/api/logs?lines=${lines}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const data = await response.json();
                 
                 if (data.error) {
@@ -4230,6 +4275,9 @@
                     body: JSON.stringify({ format: format })
                 });
                 
+                if (!formatResponse.ok) {
+                    throw new Error(`HTTP error! status: ${formatResponse.status}`);
+                }
                 const formatResult = await formatResponse.json();
                 
                 if (!formatResult.success) {
@@ -4246,6 +4294,9 @@
                     body: JSON.stringify({ maxMB: logMaxSize })
                 });
                 
+                if (!logResponse.ok) {
+                    throw new Error(`HTTP error! status: ${logResponse.status}`);
+                }
                 const logResult = await logResponse.json();
                 
                 if (!logResult.success) {
@@ -4263,6 +4314,9 @@
         async function resetFilenameFormat() {
             try {
                 const response = await fetch('/api/settings/filename-format');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const data = await response.json();
                 
                 document.getElementById('filenameFormat').value = data.default;
@@ -4426,6 +4480,9 @@
         async function updateWatcherStatus() {
             try {
                 const response = await fetch('/api/watcher/status');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const data = await response.json();
                 
                 const statusIndicator = document.getElementById('watcherStatus');

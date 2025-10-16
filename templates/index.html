@@ -1170,7 +1170,7 @@
             }
             
             .header {
-                padding: 10px 0;
+                padding: 15px 0;
             }
             
             .header .container {
@@ -1265,7 +1265,7 @@
             }
             
             .actions-bar {
-                padding: 10px;
+                padding: 12px 10px;
                 gap: 6px;
                 flex-wrap: nowrap;
                 overflow-x: auto;
@@ -1311,18 +1311,17 @@
             }
             
             .file-list-header {
-                grid-template-columns: 25px 25px 1fr;
+                grid-template-columns: 25px 25px 1fr 60px;
                 padding: 10px;
                 font-size: 13px;
             }
             
-            .file-list-header > div:nth-child(4),
             .file-list-header > div:nth-child(5) {
                 display: none;
             }
             
             .file-item {
-                grid-template-columns: 30px 1fr 80px;
+                grid-template-columns: 30px 1fr 60px 60px;
                 padding: 10px;
                 gap: 8px;
             }
@@ -1331,9 +1330,9 @@
                 padding-left: 25px;
             }
             
-            .file-item > div:nth-child(4) {
-                grid-column: 2 / 4;
-                margin-top: 8px;
+            .file-item > div:nth-child(3) {
+                font-size: 11px;
+                text-align: right;
             }
             
             .file-actions {
@@ -1388,10 +1387,17 @@
             
             .file-name {
                 font-size: 14px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                max-width: 100%;
             }
             
             .file-path {
                 font-size: 11px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
             
             .directory-header {
@@ -1798,6 +1804,43 @@
             <div class="modal-footer">
                 <button class="btn" onclick="closeBatchModal()">Cancel</button>
                 <button class="btn btn-primary" onclick="saveBatchTags()">Update Selected Files</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- File Info Modal -->
+    <div class="modal" id="fileInfoModal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2>File Information</h2>
+                <button class="close-btn" onclick="closeFileInfoModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label style="font-weight: 600; color: var(--text-secondary);">File Name:</label>
+                    <p id="fileInfoName" style="word-wrap: break-word; word-break: break-all; color: var(--text-primary); padding: 10px; background: var(--bg-hover); border-radius: 5px; margin-top: 5px;"></p>
+                </div>
+                <div class="form-group">
+                    <label style="font-weight: 600; color: var(--text-secondary);">Full Path:</label>
+                    <p id="fileInfoPath" style="word-wrap: break-word; word-break: break-all; color: var(--text-primary); padding: 10px; background: var(--bg-hover); border-radius: 5px; margin-top: 5px;"></p>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
+                    <div>
+                        <label style="font-weight: 600; color: var(--text-secondary);">Size:</label>
+                        <p id="fileInfoSize" style="color: var(--text-primary); margin-top: 5px;"></p>
+                    </div>
+                    <div>
+                        <label style="font-weight: 600; color: var(--text-secondary);">Processed:</label>
+                        <p id="fileInfoProcessed" style="color: var(--text-primary); margin-top: 5px;"></p>
+                    </div>
+                </div>
+                <div style="margin-top: 15px;">
+                    <label style="font-weight: 600; color: var(--text-secondary);">Duplicate:</label>
+                    <p id="fileInfoDuplicate" style="color: var(--text-primary); margin-top: 5px;"></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeFileInfoModal()">Close</button>
             </div>
         </div>
     </div>
@@ -2635,6 +2678,9 @@
                                         Actions
                                     </button>
                                     <div class="dropdown-menu" id="${getDropdownId(file.relative_path)}">
+                                        <button class="dropdown-item" onclick="showFileInfo('${escapeJs(file.relative_path)}', '${escapeJs(file.name)}'); closeAllDropdowns();">
+                                            ℹ️ Info
+                                        </button>
                                         <button class="dropdown-item" onclick="viewTags('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                             👁️ View/Edit
                                         </button>
@@ -2848,6 +2894,26 @@
             });
             
             renderFileList();
+        }
+        
+        function showFileInfo(filepath, filename) {
+            // Show file information in a modal
+            document.getElementById('fileInfoPath').textContent = filepath;
+            document.getElementById('fileInfoName').textContent = filename;
+            
+            // Find the file in the files array to get size info
+            const file = files.find(f => f.relative_path === filepath);
+            if (file) {
+                document.getElementById('fileInfoSize').textContent = formatFileSize(file.size);
+                document.getElementById('fileInfoProcessed').textContent = file.processed ? '✅ Yes' : '⚠️ No';
+                document.getElementById('fileInfoDuplicate').textContent = file.duplicate ? '🔁 Yes' : 'No';
+            }
+            
+            document.getElementById('fileInfoModal').classList.add('active');
+        }
+        
+        function closeFileInfoModal() {
+            document.getElementById('fileInfoModal').classList.remove('active');
         }
         
         async function viewTags(filepath) {

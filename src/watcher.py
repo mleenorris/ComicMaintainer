@@ -198,6 +198,7 @@ class ChangeHandler(FileSystemEventHandler):
             if self._allowed_extension(event.src_path):
                 if is_web_modified(event.src_path):
                     logging.info(f"Skipping cache update for {event.src_path} - deleted by web interface")
+                    clear_file_web_modified(event.src_path)
                     return
                 
                 # Record the deletion for incremental cache update

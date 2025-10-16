@@ -4387,7 +4387,7 @@
             // Delete files one by one
             for (let i = 0; i < selectedFilesArray.length; i++) {
                 const filepath = selectedFilesArray[i];
-                updateProgress(i + 1, selectedFilesArray.length, `Deleting: ${getBasename(filepath)}`);
+                updateProgress(i + 1, selectedFilesArray.length, successCount, failCount);
                 
                 try {
                     const response = await fetch(`/api/delete-file/${encodeURIComponent(filepath)}`, {
@@ -4396,15 +4396,15 @@
                     
                     if (response.ok) {
                         successCount++;
-                        addProgressDetail(`✅ Deleted: ${getBasename(filepath)}`, 'success');
+                        addProgressDetail(filepath, true);
                     } else {
                         const data = await response.json();
                         failCount++;
-                        addProgressDetail(`❌ Failed: ${getBasename(filepath)} - ${data.error || 'Unknown error'}`, 'error');
+                        addProgressDetail(filepath, false, data.error || 'Unknown error');
                     }
                 } catch (error) {
                     failCount++;
-                    addProgressDetail(`❌ Failed: ${getBasename(filepath)} - ${error.message}`, 'error');
+                    addProgressDetail(filepath, false, error.message);
                 }
             }
             

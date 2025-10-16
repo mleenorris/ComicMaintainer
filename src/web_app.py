@@ -76,7 +76,8 @@ enriched_file_cache = {
     'timestamp': 0,
     'file_list_hash': None,  # Hash of raw file list to detect changes
     'rebuild_in_progress': False,  # Track if async rebuild is running
-    'rebuild_thread': None  # Reference to rebuild thread
+    'rebuild_thread': None,  # Reference to rebuild thread
+    'watcher_update_time': 0  # Track last watcher update time for invalidation
 }
 enriched_file_cache_lock = threading.Lock()
 
@@ -142,6 +143,7 @@ def mark_file_processed_wrapper(filepath, original_filepath=None):
     with enriched_file_cache_lock:
         enriched_file_cache['files'] = None
         enriched_file_cache['file_list_hash'] = None
+        enriched_file_cache['watcher_update_time'] = 0  # Reset to force rebuild
 
 def mark_file_duplicate_wrapper(filepath):
     """Mark a file as duplicate and invalidate relevant caches"""
@@ -151,6 +153,7 @@ def mark_file_duplicate_wrapper(filepath):
     with enriched_file_cache_lock:
         enriched_file_cache['files'] = None
         enriched_file_cache['file_list_hash'] = None
+        enriched_file_cache['watcher_update_time'] = 0  # Reset to force rebuild
 
 def cleanup_web_markers_thread():
     """Periodically clean up old web modified markers"""
@@ -603,6 +606,7 @@ def rebuild_enriched_cache_async(files, file_list_hash):
             enriched_file_cache['files'] = all_files
             enriched_file_cache['timestamp'] = time.time()
             enriched_file_cache['file_list_hash'] = file_list_hash
+            enriched_file_cache['watcher_update_time'] = get_watcher_update_time()
             enriched_file_cache['rebuild_in_progress'] = False
             enriched_file_cache['rebuild_thread'] = None
         
@@ -630,8 +634,18 @@ def get_enriched_file_list(files, force_rebuild=False):
     # Create a simple hash of the file list to detect changes
     file_list_hash = hash(tuple(files))
     
+    # Check if watcher has updated files since cache was built
+    watcher_update_time = get_watcher_update_time()
+    
     # Check if cache is valid (without holding lock)
     with enriched_file_cache_lock:
+        # Invalidate cache if watcher has processed files since cache was built
+        if (enriched_file_cache['files'] is not None and 
+            watcher_update_time > enriched_file_cache['watcher_update_time']):
+            logging.info(f"Invalidating enriched cache: watcher has processed files (watcher time: {watcher_update_time}, cache time: {enriched_file_cache['watcher_update_time']})")
+            enriched_file_cache['files'] = None
+            enriched_file_cache['file_list_hash'] = None
+        
         if (not force_rebuild and 
             enriched_file_cache['files'] is not None and 
             enriched_file_cache['file_list_hash'] == file_list_hash):
@@ -741,6 +755,7 @@ def get_enriched_file_list(files, force_rebuild=False):
             enriched_file_cache['files'] = all_files
             enriched_file_cache['timestamp'] = time.time()
             enriched_file_cache['file_list_hash'] = file_list_hash
+            enriched_file_cache['watcher_update_time'] = get_watcher_update_time()
             enriched_file_cache['rebuild_in_progress'] = False
             enriched_file_cache['rebuild_thread'] = None
         

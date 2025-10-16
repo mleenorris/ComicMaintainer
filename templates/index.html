@@ -2051,7 +2051,7 @@
                     </small>
                     <ul style="margin: 10px 0 10px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.6;">
                         <li><code>{series}</code> - Series name</li>
-                        <li><code>{issue}</code> - Issue number (padded to 4 digits, e.g., 0001, or 0071.4 for decimals)</li>
+                        <li><code>{issue}</code> - Issue number (padded based on settings, default 4 digits, e.g., 0001, or 0071.4 for decimals)</li>
                         <li><code>{issue_no_pad}</code> - Issue number (no padding, e.g., 1, or 71.4 for decimals)</li>
                         <li><code>{title}</code> - Issue title</li>
                         <li><code>{volume}</code> - Volume number</li>
@@ -2066,6 +2066,18 @@
                 <div style="margin-top: 15px; padding: 10px; background: var(--bg-hover); border-radius: 5px;">
                     <small style="color: var(--text-muted);">
                         <strong>Current format:</strong> <span id="currentFormat" style="font-family: monospace;"></span>
+                    </small>
+                </div>
+                
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Issue Number Padding</h3>
+                <div class="form-group">
+                    <label for="issueNumberPadding">Number of Digits for {issue} Placeholder</label>
+                    <input type="number" id="issueNumberPadding" min="0" max="10" step="1" placeholder="4" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Controls how many digits the <code>{issue}</code> placeholder uses (default: 4). For example, with padding set to 4, issue 5 becomes 0005, with padding 3 it becomes 005, and with padding 0 it remains 5.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> This only affects the <code>{issue}</code> placeholder. Use <code>{issue_no_pad}</code> for unpadded issue numbers regardless of this setting.
                     </small>
                 </div>
             </div>
@@ -4090,6 +4102,14 @@
                 const logData = await logResponse.json();
                 document.getElementById('logMaxSize').value = Math.round(logData.maxMB);
                 
+                // Load issue number padding
+                const paddingResponse = await fetch('/api/settings/issue-number-padding');
+                if (!paddingResponse.ok) {
+                    throw new Error(`HTTP error! status: ${paddingResponse.status}`);
+                }
+                const paddingData = await paddingResponse.json();
+                document.getElementById('issueNumberPadding').value = paddingData.padding;
+                
                 document.getElementById('settingsModal').classList.add('active');
             } catch (error) {
                 showMessage('Failed to load settings: ' + error.message, 'error');
@@ -4258,6 +4278,7 @@
         async function saveFilenameFormat() {
             const format = document.getElementById('filenameFormat').value.trim();
             const logMaxSize = parseFloat(document.getElementById('logMaxSize').value);
+            const issueNumberPadding = parseInt(document.getElementById('issueNumberPadding').value);
             
             if (!format) {
                 showMessage('Filename format cannot be empty', 'error');
@@ -4266,6 +4287,11 @@
             
             if (isNaN(logMaxSize) || logMaxSize <= 0) {
                 showMessage('Log max size must be a positive number', 'error');
+                return;
+            }
+            
+            if (isNaN(issueNumberPadding) || issueNumberPadding < 0) {
+                showMessage('Issue number padding must be 0 or greater', 'error');
                 return;
             }
             
@@ -4305,6 +4331,25 @@
                 
                 if (!logResult.success) {
                     showMessage(logResult.error || 'Failed to save log max size', 'error');
+                    return;
+                }
+                
+                // Save issue number padding
+                const paddingResponse = await fetch('/api/settings/issue-number-padding', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ padding: issueNumberPadding })
+                });
+                
+                if (!paddingResponse.ok) {
+                    throw new Error(`HTTP error! status: ${paddingResponse.status}`);
+                }
+                const paddingResult = await paddingResponse.json();
+                
+                if (!paddingResult.success) {
+                    showMessage(paddingResult.error || 'Failed to save issue number padding', 'error');
                     return;
                 }
                 

@@ -9,6 +9,7 @@ DEFAULT_FILENAME_FORMAT = '{series} - Chapter {issue}'
 DEFAULT_WATCHER_ENABLED = True
 DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5MB default
 DEFAULT_MAX_WORKERS = 4  # Default number of concurrent workers
+DEFAULT_ISSUE_NUMBER_PADDING = 4  # Default padding for issue numbers
 
 def get_config():
     """Get the current configuration"""
@@ -92,3 +93,27 @@ def get_max_workers():
     
     # Fall back to default
     return DEFAULT_MAX_WORKERS
+
+def get_issue_number_padding():
+    """Get the issue number padding setting"""
+    config = get_config()
+    padding = config.get('issue_number_padding', DEFAULT_ISSUE_NUMBER_PADDING)
+    try:
+        padding = int(padding)
+        if padding < 0:
+            return DEFAULT_ISSUE_NUMBER_PADDING
+        return padding
+    except (ValueError, TypeError):
+        return DEFAULT_ISSUE_NUMBER_PADDING
+
+def set_issue_number_padding(padding):
+    """Set the issue number padding setting"""
+    try:
+        padding = int(padding)
+        if padding < 0:
+            return False
+        config = get_config()
+        config['issue_number_padding'] = padding
+        return save_config(config)
+    except (ValueError, TypeError):
+        return False

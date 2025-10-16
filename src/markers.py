@@ -19,7 +19,7 @@ import json
 import logging
 import threading
 from typing import Set, Optional
-from marker_store import add_marker, remove_marker, has_marker, get_markers, cleanup_markers
+from marker_store import add_marker, remove_marker, has_marker, get_markers, cleanup_markers, get_all_markers_by_type
 
 # Marker storage configuration (for legacy JSON migration)
 CONFIG_DIR = '/Config'
@@ -207,3 +207,19 @@ def cleanup_web_modified_markers(max_files: int = 100):
     if total_markers > max_files:
         deleted = cleanup_markers(MARKER_TYPE_WEB_MODIFIED, max_files)
         logging.info(f"Cleaned up web modified markers, removed {deleted} old markers, keeping {max_files}")
+
+
+def get_all_marker_data():
+    """
+    Get all marker data (processed and duplicate) in a single batch query.
+    This is much faster than checking each file individually.
+    
+    Returns:
+        Dict with 'processed' and 'duplicate' keys, each containing a set of filepaths
+    """
+    # Ensure migrations are done
+    _migrate_json_markers(PROCESSED_MARKER_FILE, MARKER_TYPE_PROCESSED)
+    _migrate_json_markers(DUPLICATE_MARKER_FILE, MARKER_TYPE_DUPLICATE)
+    
+    # Get all markers in one query
+    return get_all_markers_by_type([MARKER_TYPE_PROCESSED, MARKER_TYPE_DUPLICATE])

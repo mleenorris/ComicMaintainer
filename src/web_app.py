@@ -15,7 +15,7 @@ from markers import (
     is_file_processed, mark_file_processed, unmark_file_processed,
     is_file_duplicate, mark_file_duplicate, unmark_file_duplicate,
     is_file_web_modified, mark_file_web_modified, clear_file_web_modified,
-    cleanup_web_modified_markers
+    cleanup_web_modified_markers, get_all_marker_data
 )
 from job_manager import get_job_manager, JobResult
 from preferences_store import (
@@ -578,9 +578,15 @@ def rebuild_enriched_cache_async(files, file_list_hash):
         # Preload metadata for all directories (batch operation)
         preload_metadata_for_directories(files)
         
+        # Get all marker data in one batch query (much faster than individual queries)
+        marker_data = get_all_marker_data()
+        processed_files = marker_data.get('processed', set())
+        duplicate_files = marker_data.get('duplicate', set())
+        
         # Build file list with metadata
         all_files = []
         for f in files:
+            abs_path = os.path.abspath(f)
             rel_path = os.path.relpath(f, WATCHED_DIR) if WATCHED_DIR else f
             all_files.append({
                 'path': f,
@@ -588,8 +594,8 @@ def rebuild_enriched_cache_async(files, file_list_hash):
                 'relative_path': rel_path,
                 'size': os.path.getsize(f),
                 'modified': os.path.getmtime(f),
-                'processed': is_file_processed(f),
-                'duplicate': is_file_duplicate(f)
+                'processed': abs_path in processed_files,
+                'duplicate': abs_path in duplicate_files
             })
         
         # Update cache
@@ -711,8 +717,14 @@ def get_enriched_file_list(files, force_rebuild=False):
         logging.info("Building initial cache synchronously")
         preload_metadata_for_directories(files)
         
+        # Get all marker data in one batch query (much faster than individual queries)
+        marker_data = get_all_marker_data()
+        processed_files = marker_data.get('processed', set())
+        duplicate_files = marker_data.get('duplicate', set())
+        
         all_files = []
         for f in files:
+            abs_path = os.path.abspath(f)
             rel_path = os.path.relpath(f, WATCHED_DIR) if WATCHED_DIR else f
             all_files.append({
                 'path': f,
@@ -720,8 +732,8 @@ def get_enriched_file_list(files, force_rebuild=False):
                 'relative_path': rel_path,
                 'size': os.path.getsize(f),
                 'modified': os.path.getmtime(f),
-                'processed': is_file_processed(f),
-                'duplicate': is_file_duplicate(f)
+                'processed': abs_path in processed_files,
+                'duplicate': abs_path in duplicate_files
             })
         
         # Update cache

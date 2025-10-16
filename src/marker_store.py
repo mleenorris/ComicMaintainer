@@ -167,6 +167,45 @@ def get_markers(marker_type: str) -> Set[str]:
         return set()
 
 
+def get_all_markers_by_type(marker_types: list) -> dict:
+    """
+    Get all markers for multiple marker types in a single query.
+    Returns a dict mapping marker_type to set of filepaths.
+    
+    This is much faster than calling get_markers() multiple times.
+    
+    Args:
+        marker_types: List of marker type strings (e.g., ['processed', 'duplicate'])
+    
+    Returns:
+        Dict mapping marker_type to set of filepaths
+        Example: {'processed': {'/path/file1.cbz', ...}, 'duplicate': {'/path/file2.cbz', ...}}
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Build query with IN clause for multiple types
+            placeholders = ','.join('?' * len(marker_types))
+            cursor.execute(f'''
+                SELECT marker_type, filepath FROM markers 
+                WHERE marker_type IN ({placeholders})
+            ''', marker_types)
+            
+            # Build result dictionary
+            result = {marker_type: set() for marker_type in marker_types}
+            for row in cursor.fetchall():
+                marker_type = row['marker_type']
+                filepath = row['filepath']
+                if marker_type in result:
+                    result[marker_type].add(filepath)
+            
+            return result
+    except Exception as e:
+        logging.error(f"Error getting markers for types {marker_types}: {e}")
+        return {marker_type: set() for marker_type in marker_types}
+
+
 def cleanup_markers(marker_type: str, max_files: int) -> int:
     """Clean up old markers, keeping only the most recent ones"""
     try:

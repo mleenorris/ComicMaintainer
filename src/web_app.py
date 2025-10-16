@@ -81,6 +81,14 @@ enriched_file_cache = {
 }
 enriched_file_cache_lock = threading.Lock()
 
+# Cache for filtered and sorted results to speed up filter switching
+filtered_results_cache = {
+    # Key: (filter_mode, search_query, sort_mode, file_list_hash)
+    # Value: {'filtered_files': [...], 'timestamp': ...}
+}
+filtered_results_cache_lock = threading.Lock()
+MAX_FILTERED_CACHE_SIZE = 20  # Keep up to 20 different filter combinations
+
 def try_acquire_cache_rebuild_lock(timeout=0.1):
     """Try to acquire a file-based lock for cache rebuilding across processes
     
@@ -144,6 +152,10 @@ def mark_file_processed_wrapper(filepath, original_filepath=None):
         enriched_file_cache['files'] = None
         enriched_file_cache['file_list_hash'] = None
         enriched_file_cache['watcher_update_time'] = 0  # Reset to force rebuild
+    
+    # Invalidate filtered results cache (since processed status changed)
+    with filtered_results_cache_lock:
+        filtered_results_cache.clear()
 
 def mark_file_duplicate_wrapper(filepath):
     """Mark a file as duplicate and invalidate relevant caches"""
@@ -154,6 +166,10 @@ def mark_file_duplicate_wrapper(filepath):
         enriched_file_cache['files'] = None
         enriched_file_cache['file_list_hash'] = None
         enriched_file_cache['watcher_update_time'] = 0  # Reset to force rebuild
+    
+    # Invalidate filtered results cache (since duplicate status changed)
+    with filtered_results_cache_lock:
+        filtered_results_cache.clear()
 
 def cleanup_web_markers_thread():
     """Periodically clean up old web modified markers"""
@@ -352,12 +368,20 @@ def clear_file_cache():
     with cache_lock:
         file_list_cache['files'] = None
         file_list_cache['timestamp'] = 0
+    
+    # Also clear filtered results cache
+    with filtered_results_cache_lock:
+        filtered_results_cache.clear()
 
 def handle_file_rename_in_cache(original_path, final_path):
     """Handle file rename in cache - record change if file was actually renamed"""
     if original_path != final_path:
         record_cache_change('rename', old_path=original_path, new_path=final_path)
         update_watcher_timestamp()
+        
+        # Clear filtered results cache since file list changed
+        with filtered_results_cache_lock:
+            filtered_results_cache.clear()
 
 def get_credits_by_role(credits_list, role_synonyms):
     """Extract credits for a specific role from credits list"""
@@ -645,6 +669,10 @@ def get_enriched_file_list(files, force_rebuild=False):
             logging.info(f"Invalidating enriched cache: watcher has processed files (watcher time: {watcher_update_time}, cache time: {enriched_file_cache['watcher_update_time']})")
             enriched_file_cache['files'] = None
             enriched_file_cache['file_list_hash'] = None
+            
+            # Also clear filtered results cache since enriched data changed
+            with filtered_results_cache_lock:
+                filtered_results_cache.clear()
         
         if (not force_rebuild and 
             enriched_file_cache['files'] is not None and 
@@ -765,27 +793,30 @@ def get_enriched_file_list(files, force_rebuild=False):
         if lock_fd is not None:
             release_cache_rebuild_lock(lock_fd)
 
-@app.route('/api/files')
-def list_files():
-    """API endpoint to list all comic files with pagination"""
-    # Get pagination parameters
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 100, type=int)
-    refresh = request.args.get('refresh', 'false').lower() == 'true'
+def get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, file_list_hash):
+    """Get filtered and sorted files with caching
     
-    # Get filter parameters
-    search_query = request.args.get('search', '', type=str).strip()
-    filter_mode = request.args.get('filter', 'all', type=str)  # 'all', 'marked', 'unmarked', 'duplicates'
-    sort_mode = request.args.get('sort', 'name', type=str)  # 'name', 'date', 'size'
+    Args:
+        all_files: List of all enriched files
+        filter_mode: Filter mode ('all', 'marked', 'unmarked', 'duplicates')
+        search_query: Search query string
+        sort_mode: Sort mode ('name', 'date', 'size')
+        file_list_hash: Hash of the file list to detect changes
+        
+    Returns:
+        List of filtered and sorted files
+    """
+    # Create cache key
+    cache_key = (filter_mode, search_query, sort_mode, file_list_hash)
     
-    # Get files with optional cache refresh
-    files = get_comic_files(use_cache=not refresh)
+    # Check cache
+    with filtered_results_cache_lock:
+        if cache_key in filtered_results_cache:
+            logging.debug(f"Using filtered results cache for filter={filter_mode}, search='{search_query}', sort={sort_mode}")
+            return filtered_results_cache[cache_key]['filtered_files']
     
-    # Get enriched file list with metadata (cached)
-    all_files = get_enriched_file_list(files, force_rebuild=refresh)
-    
-    # Calculate unmarked count from all files (before filtering)
-    unmarked_count = sum(1 for f in all_files if not f['processed'])
+    # Cache miss - compute filtered and sorted results
+    logging.info(f"Computing filtered results for filter={filter_mode}, search='{search_query}', sort={sort_mode}")
     
     # Apply filters
     filtered_files = all_files
@@ -813,6 +844,53 @@ def list_files():
         filtered_files = sorted(filtered_files, key=lambda f: f['size'], reverse=True)
     else:  # Default to 'name'
         filtered_files = sorted(filtered_files, key=lambda f: f['name'].lower())
+    
+    # Store in cache (with LRU eviction if needed)
+    with filtered_results_cache_lock:
+        # Evict oldest cache entries if cache is full
+        if len(filtered_results_cache) >= MAX_FILTERED_CACHE_SIZE:
+            # Remove entries with oldest timestamp
+            oldest_key = min(filtered_results_cache.keys(), 
+                           key=lambda k: filtered_results_cache[k]['timestamp'])
+            del filtered_results_cache[oldest_key]
+            logging.debug(f"Evicted oldest filtered results cache entry")
+        
+        # Add new entry
+        filtered_results_cache[cache_key] = {
+            'filtered_files': filtered_files,
+            'timestamp': time.time()
+        }
+    
+    return filtered_files
+
+
+@app.route('/api/files')
+def list_files():
+    """API endpoint to list all comic files with pagination"""
+    # Get pagination parameters
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 100, type=int)
+    refresh = request.args.get('refresh', 'false').lower() == 'true'
+    
+    # Get filter parameters
+    search_query = request.args.get('search', '', type=str).strip()
+    filter_mode = request.args.get('filter', 'all', type=str)  # 'all', 'marked', 'unmarked', 'duplicates'
+    sort_mode = request.args.get('sort', 'name', type=str)  # 'name', 'date', 'size'
+    
+    # Get files with optional cache refresh
+    files = get_comic_files(use_cache=not refresh)
+    
+    # Get enriched file list with metadata (cached)
+    all_files = get_enriched_file_list(files, force_rebuild=refresh)
+    
+    # Calculate unmarked count from all files (before filtering)
+    unmarked_count = sum(1 for f in all_files if not f['processed'])
+    
+    # Create a hash of the file list to detect changes
+    file_list_hash = hash(tuple(f['path'] for f in all_files))
+    
+    # Get filtered and sorted files (with caching)
+    filtered_files = get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, file_list_hash)
     
     total_filtered = len(filtered_files)
     

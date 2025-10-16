@@ -3,7 +3,7 @@ import os
 import re
 import logging
 from comicapi.comicarchive import ComicArchive
-from config import get_filename_format
+from config import get_filename_format, get_issue_number_padding
 from markers import mark_file_duplicate, mark_file_processed
 
 CONFIG_DIR = '/Config'
@@ -92,7 +92,7 @@ def format_filename(template, tags, issue_number, original_extension='.cbz'):
     
     Supported placeholders:
     {series} - Series name
-    {issue} - Issue number (padded to 4 digits)
+    {issue} - Issue number (padded based on settings, default 4 digits)
     {issue_no_pad} - Issue number (no padding)
     {title} - Issue title
     {volume} - Volume number
@@ -107,7 +107,8 @@ def format_filename(template, tags, issue_number, original_extension='.cbz'):
         issue_str = str(issue_number)
         issue_float = float(issue_str)
         integer = int(issue_float)
-        issue_padded = f"{integer:04d}"
+        padding = get_issue_number_padding()
+        issue_padded = f"{integer:0{padding}d}"
         
         # Check if there's a decimal part
         if '.' in issue_str:

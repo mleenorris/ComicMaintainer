@@ -180,7 +180,7 @@ The filename format can be customized through the web interface Settings modal. 
 
 **Available Placeholders:**
 - `{series}` - Series name
-- `{issue}` - Issue number (padded to 4 digits, e.g., 0001, or 0071.4 for decimals)
+- `{issue}` - Issue number (padded based on settings, default 4 digits, e.g., 0001, or 0071.4 for decimals)
 - `{issue_no_pad}` - Issue number (no padding, e.g., 1, or 71.4 for decimals)
 - `{title}` - Issue title
 - `{volume}` - Volume number
@@ -188,17 +188,25 @@ The filename format can be customized through the web interface Settings modal. 
 - `{publisher}` - Publisher name
 
 **Examples:**
-- `{series} - Chapter {issue}` → `Batman - Chapter 0005.cbz` or `.cbr` (default)
+- `{series} - Chapter {issue}` → `Batman - Chapter 0005.cbz` or `.cbr` (default, with 4-digit padding)
 - `{series} - Chapter {issue}` → `Manga - Chapter 0071.4.cbz` or `.cbr` (decimal chapters)
 - `{series} v{volume} #{issue_no_pad}` → `Batman v1 #5.cbz` or `.cbr`
 - `{series} ({year}) - {title}` → `Batman (2023) - Dark Knight.cbz` or `.cbr`
 - `{series} #{issue} - {title}` → `Batman #0005 - Dark Knight.cbz` or `.cbr`
 
+**Issue Number Padding:**
+The padding for the `{issue}` placeholder is configurable in Settings (default: 4 digits). This allows you to control how issue numbers are formatted:
+- **Padding 4** (default): Issue 5 → `0005`, Issue 71.4 → `0071.4`
+- **Padding 3**: Issue 5 → `005`, Issue 71.4 → `071.4`
+- **Padding 0**: Issue 5 → `5`, Issue 71.4 → `71.4` (no padding)
+- **Padding 6**: Issue 5 → `000005`, Issue 71.4 → `000071.4`
+
 **Note:** 
+- The `{issue_no_pad}` placeholder is always unpadded regardless of the padding setting.
 - Decimal chapter numbers (e.g., 71.4, 71.11) are preserved without trailing zeros.
 - The original file extension (`.cbz` or `.cbr`) is automatically preserved when renaming files.
 
-The filename format setting is saved in `config.json` (located in `/Config`) and applies to both web interface processing and watcher service processing. **Mount `/Config` as a volume to persist this configuration across container restarts.**
+The filename format and padding settings are saved in `config.json` (located in `/Config`) and apply to both web interface processing and watcher service processing. **Mount `/Config` as a volume to persist this configuration across container restarts.**
 
 ## API Endpoints
 

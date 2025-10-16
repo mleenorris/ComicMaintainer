@@ -9,7 +9,7 @@ from comicapi.comicarchive import ComicArchive
 import glob
 import threading
 import time
-from config import get_filename_format, set_filename_format, DEFAULT_FILENAME_FORMAT, get_watcher_enabled, set_watcher_enabled, get_log_max_bytes, set_log_max_bytes, get_max_workers
+from config import get_filename_format, set_filename_format, DEFAULT_FILENAME_FORMAT, get_watcher_enabled, set_watcher_enabled, get_log_max_bytes, set_log_max_bytes, get_max_workers, get_issue_number_padding, set_issue_number_padding, DEFAULT_ISSUE_NUMBER_PADDING
 from version import __version__
 from markers import (
     is_file_processed, mark_file_processed, unmark_file_processed,
@@ -2032,6 +2032,38 @@ def set_log_max_bytes_api():
             return jsonify({'error': 'Failed to save log max bytes setting'}), 500
     except (ValueError, TypeError):
         return jsonify({'error': 'Invalid maxMB value'}), 400
+
+@app.route('/api/settings/issue-number-padding', methods=['GET'])
+def get_issue_number_padding_api():
+    """API endpoint to get the issue number padding setting"""
+    return jsonify({
+        'padding': get_issue_number_padding(),
+        'default': DEFAULT_ISSUE_NUMBER_PADDING
+    })
+
+@app.route('/api/settings/issue-number-padding', methods=['POST'])
+def set_issue_number_padding_api():
+    """API endpoint to set the issue number padding setting"""
+    data = request.json
+    padding = data.get('padding')
+    
+    if padding is None:
+        return jsonify({'error': 'Padding value is required'}), 400
+    
+    try:
+        padding = int(padding)
+        if padding < 0:
+            return jsonify({'error': 'Padding must be 0 or greater'}), 400
+        
+        success = set_issue_number_padding(padding)
+        
+        if success:
+            logging.info(f"Issue number padding updated to: {padding}")
+            return jsonify({'success': True, 'padding': padding})
+        else:
+            return jsonify({'error': 'Failed to save issue number padding setting'}), 500
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid padding value'}), 400
 
 @app.route('/api/version', methods=['GET'])
 def get_version():

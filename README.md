@@ -352,6 +352,52 @@ If upgrading from a version where configuration and logs were stored in `/app` o
 
 ## GitHub Actions / CI
 - The repository includes a GitHub Actions workflow to automatically build and push the Docker image to Docker Hub on every push or pull request to `master`.
+- Automated security scanning runs on every push, pull request, and weekly schedule
+
+## Security
+
+This project implements automated security vulnerability scanning to ensure code and dependency safety.
+
+### Security Scanning
+
+The project uses multiple security scanning tools:
+
+1. **Bandit** - Scans Python code for common security issues
+2. **pip-audit** - Checks dependencies for known vulnerabilities
+3. **Trivy** - Scans Docker images for OS and library vulnerabilities
+
+Security scans run automatically:
+- On every push and pull request
+- Weekly scheduled scans (Mondays at 9:00 AM UTC)
+- Manual trigger available via GitHub Actions
+
+### Running Security Scans Locally
+
+```bash
+# Install security tools
+pip install -r requirements-dev.txt
+
+# Scan code for security issues
+bandit -r src/
+
+# Check dependencies for vulnerabilities
+pip-audit -r requirements.txt
+
+# Scan Docker image
+docker build -t comictagger-watcher:scan .
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy image comictagger-watcher:scan
+```
+
+For more information, see [SECURITY.md](SECURITY.md).
+
+### Security Best Practices
+
+- Use custom PUID/PGID for proper file permissions
+- Expose only necessary ports
+- Use reverse proxy with HTTPS for external access
+- Keep the Docker image updated regularly
+- Review [SECURITY.md](SECURITY.md) for detailed security guidelines
 
 ## Requirements
 - Docker

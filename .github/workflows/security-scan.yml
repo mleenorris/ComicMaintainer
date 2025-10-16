@@ -1,0 +1,180 @@
+name: Security Vulnerability Scanning
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  schedule:
+    # Run security scans weekly on Monday at 9:00 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit[toml] pip-audit safety
+      
+      - name: Run Bandit security scan
+        continue-on-error: true
+        run: |
+          bandit -r src/ -f json -o bandit-report.json
+          bandit -r src/ -f txt -o bandit-report.txt
+      
+      - name: Upload Bandit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-security-report
+          path: |
+            bandit-report.json
+            bandit-report.txt
+          retention-days: 30
+      
+      - name: Run pip-audit for dependency vulnerabilities
+        continue-on-error: true
+        run: |
+          pip-audit -r requirements.txt --format json --output pip-audit-report.json || true
+          pip-audit -r requirements.txt --format markdown --output pip-audit-report.md || true
+      
+      - name: Upload pip-audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pip-audit-report
+          path: |
+            pip-audit-report.json
+            pip-audit-report.md
+          retention-days: 30
+      
+      - name: Check for critical vulnerabilities
+        run: |
+          echo "=== Bandit Security Scan Summary ==="
+          if [ -f bandit-report.txt ]; then
+            tail -20 bandit-report.txt
+          fi
+          
+          echo ""
+          echo "=== Dependency Vulnerability Summary ==="
+          if [ -f pip-audit-report.json ]; then
+            python3 -c "
+          import json
+          import sys
+          with open('pip-audit-report.json', 'r') as f:
+              data = json.load(f)
+          
+          total_vulns = sum(len(dep.get('vulns', [])) for dep in data.get('dependencies', []))
+          
+          if total_vulns > 0:
+              print(f'❌ Found {total_vulns} known vulnerabilities in dependencies')
+              for dep in data.get('dependencies', []):
+                  if dep.get('vulns'):
+                      print(f\"  - {dep['name']} {dep['version']}: {len(dep['vulns'])} vulnerabilities\")
+              sys.exit(1)
+          else:
+              print('✅ No known vulnerabilities found in dependencies')
+          "
+          else
+            echo "⚠️  pip-audit report not found"
+          fi
+      
+      - name: Generate security summary
+        if: always()
+        run: |
+          echo "# Security Scan Summary" > security-summary.md
+          echo "" >> security-summary.md
+          echo "**Scan Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> security-summary.md
+          echo "" >> security-summary.md
+          
+          if [ -f bandit-report.txt ]; then
+            echo "## Bandit Code Security Scan" >> security-summary.md
+            echo '```' >> security-summary.md
+            tail -30 bandit-report.txt >> security-summary.md
+            echo '```' >> security-summary.md
+          fi
+          
+          echo "" >> security-summary.md
+          
+          if [ -f pip-audit-report.md ]; then
+            echo "## Dependency Vulnerability Scan" >> security-summary.md
+            cat pip-audit-report.md >> security-summary.md
+          fi
+      
+      - name: Upload security summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-summary
+          path: security-summary.md
+          retention-days: 90
+
+  docker-security-scan:
+    name: Docker Image Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Docker image for scanning
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: comictagger-watcher:scan
+          load: true
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'comictagger-watcher:scan'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+      
+      - name: Upload Trivy results to GitHub Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+      
+      - name: Run Trivy vulnerability scanner (table format)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'comictagger-watcher:scan'
+          format: 'table'
+          output: 'trivy-results.txt'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+      
+      - name: Upload Trivy results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-security-report
+          path: trivy-results.txt
+          retention-days: 30

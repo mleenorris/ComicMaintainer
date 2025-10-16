@@ -776,6 +776,7 @@ def list_files():
     # Get filter parameters
     search_query = request.args.get('search', '', type=str).strip()
     filter_mode = request.args.get('filter', 'all', type=str)  # 'all', 'marked', 'unmarked', 'duplicates'
+    sort_mode = request.args.get('sort', 'name', type=str)  # 'name', 'date', 'size'
     
     # Get files with optional cache refresh
     files = get_comic_files(use_cache=not refresh)
@@ -804,6 +805,14 @@ def list_files():
             f for f in filtered_files
             if query_lower in f['name'].lower() or query_lower in f['relative_path'].lower()
         ]
+    
+    # Apply sorting
+    if sort_mode == 'date':
+        filtered_files = sorted(filtered_files, key=lambda f: f['modified'], reverse=True)
+    elif sort_mode == 'size':
+        filtered_files = sorted(filtered_files, key=lambda f: f['size'], reverse=True)
+    else:  # Default to 'name'
+        filtered_files = sorted(filtered_files, key=lambda f: f['name'].lower())
     
     total_filtered = len(filtered_files)
     

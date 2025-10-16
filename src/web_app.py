@@ -1887,6 +1887,31 @@ def set_watcher_enabled_api():
     else:
         return jsonify({'error': 'Failed to save watcher enabled setting'}), 500
 
+@app.route('/api/watcher/status', methods=['GET'])
+def get_watcher_status_api():
+    """API endpoint to get the watcher process status"""
+    import subprocess
+    
+    is_running = False
+    try:
+        # Check if watcher.py process is running
+        result = subprocess.run(
+            ['pgrep', '-f', 'python.*watcher.py'],
+            capture_output=True,
+            text=True
+        )
+        is_running = result.returncode == 0 and len(result.stdout.strip()) > 0
+    except Exception as e:
+        logging.error(f"Error checking watcher status: {e}")
+    
+    # Get the enabled setting from config
+    enabled_setting = get_watcher_enabled()
+    
+    return jsonify({
+        'running': is_running,
+        'enabled': enabled_setting
+    })
+
 @app.route('/api/settings/log-max-bytes', methods=['GET'])
 def get_log_max_bytes_api():
     """API endpoint to get the log max bytes setting"""

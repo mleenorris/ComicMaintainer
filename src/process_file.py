@@ -86,7 +86,7 @@ def parse_chapter_number(filename):
             return m.group()
     return None
 
-def format_filename(template, tags, issue_number):
+def format_filename(template, tags, issue_number, original_extension='.cbz'):
     """
     Format filename based on template and available tags
     
@@ -98,6 +98,9 @@ def format_filename(template, tags, issue_number):
     {volume} - Volume number
     {year} - Publication year
     {publisher} - Publisher name
+    
+    Args:
+        original_extension: The extension to use (.cbz or .cbr), preserves original file format
     """
     # Parse issue number into integer and decimal parts
     try:
@@ -145,9 +148,9 @@ def format_filename(template, tags, issue_number):
     # Clean up extra spaces and ensure proper extension
     result = re.sub(r'\s+', ' ', result).strip()
     
-    # Ensure .cbz extension
-    if not result.lower().endswith('.cbz'):
-        result += '.cbz'
+    # Ensure proper extension (preserve original format)
+    if not (result.lower().endswith('.cbz') or result.lower().endswith('.cbr')):
+        result += original_extension
     
     return result
 
@@ -204,8 +207,10 @@ def is_file_already_normalized(filepath, fixtitle=True, fixseries=True, fixfilen
                 # Can't format filename without issue number
                 return False
                 
+            # Get original file extension to preserve format
+            original_ext = os.path.splitext(filepath)[1].lower()
             filename_template = get_filename_format()
-            expected_filename = format_filename(filename_template, tags, tags.issue or '')
+            expected_filename = format_filename(filename_template, tags, tags.issue or '', original_extension=original_ext)
             current_filename = os.path.basename(filepath)
             
             if current_filename != expected_filename:
@@ -299,8 +304,11 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
             # Get filename format template
             filename_template = get_filename_format()
             
+            # Get original file extension to preserve format
+            original_ext = os.path.splitext(filepath)[1].lower()
+            
             # Format the new filename
-            newFileName = format_filename(filename_template, tags, tags.issue or '')
+            newFileName = format_filename(filename_template, tags, tags.issue or '', original_extension=original_ext)
             
             newFilePath = os.path.join(os.path.dirname(filepath), newFileName)
             if os.path.abspath(filepath) != os.path.abspath(newFilePath):

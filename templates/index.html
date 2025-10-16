@@ -2045,7 +2045,7 @@
                 </p>
                 <div class="form-group">
                     <label for="filenameFormat">Filename Template</label>
-                    <input type="text" id="filenameFormat" placeholder="{series} - Chapter {issue}.cbz">
+                    <input type="text" id="filenameFormat" placeholder="{series} - Chapter {issue}">
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
                         Available placeholders:
                     </small>
@@ -2059,7 +2059,8 @@
                         <li><code>{publisher}</code> - Publisher name</li>
                     </ul>
                     <small style="display: block; margin-top: 10px; color: var(--text-muted);">
-                        <strong>Example:</strong> <code>{series} v{volume} #{issue_no_pad} ({year}).cbz</code>
+                        <strong>Example:</strong> <code>{series} v{volume} #{issue_no_pad} ({year})</code><br>
+                        <strong>Note:</strong> File extension (.cbz or .cbr) is automatically preserved
                     </small>
                 </div>
                 <div style="margin-top: 15px; padding: 10px; background: var(--bg-hover); border-radius: 5px;">

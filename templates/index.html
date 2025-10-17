@@ -2137,6 +2137,147 @@
         let cacheRebuildPollTimer = null;
         let isCacheRebuilding = false;
         
+        // Server-Sent Events connection for real-time updates
+        let eventSource = null;
+        let eventSourceReconnectTimer = null;
+        const EVENT_SOURCE_RECONNECT_DELAY = 5000; // 5 seconds
+        
+        // Initialize SSE connection
+        function initEventSource() {
+            // Close existing connection if any
+            if (eventSource) {
+                eventSource.close();
+            }
+            
+            try {
+                eventSource = new EventSource('/api/events/stream');
+                
+                eventSource.onopen = () => {
+                    console.log('SSE: Connected to event stream');
+                };
+                
+                eventSource.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        handleServerEvent(data);
+                    } catch (error) {
+                        console.error('SSE: Error parsing event data:', error);
+                    }
+                };
+                
+                eventSource.onerror = (error) => {
+                    console.warn('SSE: Connection error, will retry in 5s', error);
+                    eventSource.close();
+                    
+                    // Auto-reconnect after delay
+                    if (eventSourceReconnectTimer) {
+                        clearTimeout(eventSourceReconnectTimer);
+                    }
+                    eventSourceReconnectTimer = setTimeout(initEventSource, EVENT_SOURCE_RECONNECT_DELAY);
+                };
+            } catch (error) {
+                console.error('SSE: Failed to initialize EventSource:', error);
+                // Fallback to polling if SSE is not supported
+                console.log('SSE: Falling back to polling mechanisms');
+            }
+        }
+        
+        // Handle different types of server events
+        function handleServerEvent(data) {
+            const eventType = data.type;
+            const eventData = data.data;
+            
+            console.log('SSE Event:', eventType, eventData);
+            
+            switch(eventType) {
+                case 'cache_updated':
+                    handleCacheUpdatedEvent(eventData);
+                    break;
+                case 'watcher_status':
+                    handleWatcherStatusEvent(eventData);
+                    break;
+                case 'file_processed':
+                    handleFileProcessedEvent(eventData);
+                    break;
+                case 'job_updated':
+                    handleJobUpdatedEvent(eventData);
+                    break;
+                default:
+                    console.log('SSE: Unknown event type:', eventType);
+            }
+        }
+        
+        // Handle cache update events
+        function handleCacheUpdatedEvent(data) {
+            if (data.rebuild_complete) {
+                console.log('SSE: Cache rebuild completed, refreshing file list');
+                isCacheRebuilding = false;
+                stopCacheRebuildPolling(); // Stop polling if still active
+                loadFiles(currentPage, false);
+            } else {
+                console.log('SSE: Cache rebuild in progress');
+                isCacheRebuilding = true;
+            }
+        }
+        
+        // Handle watcher status events
+        function handleWatcherStatusEvent(data) {
+            console.log('SSE: Watcher status updated:', data);
+            updateWatcherStatusDisplay(data.running, data.enabled);
+        }
+        
+        // Handle file processed events
+        function handleFileProcessedEvent(data) {
+            console.log('SSE: File processed:', data.filename, 'Success:', data.success);
+            // File list will be updated by cache_updated event
+        }
+        
+        // Handle job update events
+        function handleJobUpdatedEvent(data) {
+            console.log('SSE: Job updated:', data.job_id, 'Status:', data.status);
+            // Job polling will handle displaying progress
+        }
+        
+        // Update watcher status display
+        function updateWatcherStatusDisplay(running, enabled) {
+            const statusIndicator = document.getElementById('watcherStatus');
+            if (!statusIndicator) return;
+            
+            const iconElement = statusIndicator.querySelector('.watcher-icon');
+            const textElement = statusIndicator.querySelector('.watcher-text');
+            
+            // Remove previous status classes
+            statusIndicator.classList.remove('running', 'stopped');
+            
+            if (running) {
+                statusIndicator.classList.add('running');
+                iconElement.textContent = '✅';
+                textElement.textContent = 'Watcher Running';
+                statusIndicator.title = 'File watcher is running and monitoring for changes';
+            } else {
+                statusIndicator.classList.add('stopped');
+                iconElement.textContent = '⛔';
+                textElement.textContent = 'Watcher Stopped';
+                if (enabled) {
+                    statusIndicator.title = 'File watcher is enabled but not running';
+                } else {
+                    statusIndicator.title = 'File watcher is disabled';
+                }
+            }
+        }
+        
+        // Clean up SSE connection on page unload
+        function cleanupEventSource() {
+            if (eventSourceReconnectTimer) {
+                clearTimeout(eventSourceReconnectTimer);
+                eventSourceReconnectTimer = null;
+            }
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+        }
+        
         // API helper functions for server-side preferences
         async function getPreferences() {
             try {
@@ -2335,7 +2476,10 @@
                 perPageSelect.value = perPage;
             }
             
-            // Start watcher status polling
+            // Initialize SSE connection for real-time updates
+            initEventSource();
+            
+            // Start watcher status polling (will be replaced by SSE over time)
             startWatcherStatusPolling();
             
             // Check for active job and resume polling FIRST (before loading files)
@@ -2352,6 +2496,9 @@
         window.addEventListener('beforeunload', function(event) {
             // Clean up cache rebuild polling timer
             stopCacheRebuildPolling();
+            
+            // Clean up SSE connection
+            cleanupEventSource();
             
             if (hasActiveJob) {
                 // Show warning to prevent accidental navigation during batch processing

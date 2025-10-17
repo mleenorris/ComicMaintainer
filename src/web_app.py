@@ -22,6 +22,11 @@ from preferences_store import (
     get_preference, set_preference, get_all_preferences,
     get_active_job, set_active_job, clear_active_job
 )
+from event_broadcaster import (
+    get_broadcaster, event_stream_generator,
+    broadcast_cache_updated, broadcast_watcher_status,
+    broadcast_file_processed, broadcast_job_updated
+)
 
 CONFIG_DIR = '/Config'
 LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
@@ -156,6 +161,10 @@ def mark_file_processed_wrapper(filepath, original_filepath=None):
     # Invalidate filtered results cache (since processed status changed)
     with filtered_results_cache_lock:
         filtered_results_cache.clear()
+    
+    # Broadcast event to connected clients
+    broadcast_file_processed(filepath, success=True)
+    broadcast_cache_updated(rebuild_complete=False)
 
 def mark_file_duplicate_wrapper(filepath):
     """Mark a file as duplicate and invalidate relevant caches"""
@@ -170,6 +179,10 @@ def mark_file_duplicate_wrapper(filepath):
     # Invalidate filtered results cache (since duplicate status changed)
     with filtered_results_cache_lock:
         filtered_results_cache.clear()
+    
+    # Broadcast event to connected clients
+    broadcast_file_processed(filepath, success=True)
+    broadcast_cache_updated(rebuild_complete=False)
 
 def cleanup_web_markers_thread():
     """Periodically clean up old web modified markers"""
@@ -633,6 +646,9 @@ def rebuild_enriched_cache_async(files, file_list_hash):
             enriched_file_cache['watcher_update_time'] = get_watcher_update_time()
             enriched_file_cache['rebuild_in_progress'] = False
             enriched_file_cache['rebuild_thread'] = None
+        
+        # Broadcast cache update event
+        broadcast_cache_updated(rebuild_complete=True)
         
         logging.info(f"Async cache rebuild: Complete ({len(all_files)} files)")
     except Exception as e:
@@ -2478,6 +2494,57 @@ def cache_stats_endpoint():
     except Exception as e:
         logging.error(f"Error getting cache stats: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/events/stream', methods=['GET'])
+def events_stream():
+    """
+    Server-Sent Events (SSE) endpoint for real-time updates
+    
+    Clients can subscribe to receive real-time events:
+    - cache_updated: File cache has been rebuilt
+    - watcher_status: Watcher service status changed
+    - file_processed: File has been processed
+    - job_updated: Batch job status changed
+    
+    Example JavaScript usage:
+        const eventSource = new EventSource('/api/events/stream');
+        eventSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            console.log('Event:', data.type, data.data);
+        };
+    """
+    broadcaster = get_broadcaster()
+    client_queue = broadcaster.subscribe()
+    
+    def cleanup():
+        broadcaster.unsubscribe(client_queue)
+    
+    try:
+        response = app.response_class(
+            event_stream_generator(client_queue, timeout=300),  # 5 minute timeout
+            mimetype='text/event-stream',
+            headers={
+                'Cache-Control': 'no-cache',
+                'X-Accel-Buffering': 'no',  # Disable nginx buffering
+                'Connection': 'keep-alive'
+            }
+        )
+        # Register cleanup on response completion
+        response.call_on_close(cleanup)
+        return response
+    except Exception as e:
+        logging.error(f"Error in SSE stream: {e}")
+        cleanup()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/events/stats', methods=['GET'])
+def events_stats():
+    """Get statistics about the event broadcasting system"""
+    broadcaster = get_broadcaster()
+    return jsonify({
+        'active_clients': broadcaster.get_client_count(),
+        'total_events_broadcast': broadcaster.get_event_count()
+    })
 
 def prewarm_metadata_cache():
     """Prewarm metadata cache by ensuring marker files are loaded"""

@@ -407,6 +407,18 @@ For more information, see [SECURITY.md](SECURITY.md).
 - Keep the Docker image updated regularly
 - Review [SECURITY.md](SECURITY.md) for detailed security guidelines
 
+## Performance & Reliability
+
+### High-Performance Caching
+The application uses an advanced caching system that:
+- **Non-blocking cache operations**: Workers never block waiting for cache rebuild
+- **Async background rebuilding**: Cache updates happen in background threads
+- **Instant response times**: All API requests respond in <100ms even during cache rebuild
+- **Multi-worker safe**: Designed for concurrent access by multiple Gunicorn workers
+- **Automatic recovery**: Frontend automatically polls and refreshes when cache is ready
+
+See [docs/WORKER_TIMEOUT_FIX.md](docs/WORKER_TIMEOUT_FIX.md) for technical details on the non-blocking cache architecture.
+
 ## Requirements
 - Docker
 - (Optional) Docker Hub account for pushing images

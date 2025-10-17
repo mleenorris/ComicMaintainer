@@ -822,6 +822,24 @@ def list_files():
     # Get enriched file list with metadata (cached)
     all_files = get_enriched_file_list(files, force_rebuild=refresh)
     
+    # Check if cache rebuild is in progress
+    with enriched_file_cache_lock:
+        cache_rebuilding = enriched_file_cache['rebuild_in_progress']
+    
+    # If cache is empty and rebuild is in progress, return minimal response
+    # This prevents worker timeout while cache is being built
+    if not all_files and cache_rebuilding:
+        logging.debug("Cache is rebuilding, returning empty response")
+        return jsonify({
+            'files': [],
+            'page': 1,
+            'per_page': per_page,
+            'total_files': 0,
+            'total_pages': 1,
+            'unmarked_count': 0,
+            'cache_rebuilding': True
+        })
+    
     # Calculate unmarked count from all files (before filtering)
     unmarked_count = sum(1 for f in all_files if not f['processed'])
     
@@ -851,10 +869,6 @@ def list_files():
         end_idx = start_idx + per_page
         
         paginated_files = filtered_files[start_idx:end_idx]
-    
-    # Check if cache rebuild is in progress
-    with enriched_file_cache_lock:
-        cache_rebuilding = enriched_file_cache['rebuild_in_progress']
     
     return jsonify({
         'files': paginated_files,

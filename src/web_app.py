@@ -725,73 +725,12 @@ def get_enriched_file_list(files, force_rebuild=False):
             # No stale cache - need to build synchronously for first request
             logging.info("No stale cache available, building synchronously for first request")
     
-    # First-time cache build - do it synchronously
-    # This only happens on the very first request when cache is empty
-    lock_fd = try_acquire_cache_rebuild_lock(timeout=0.5)
-    
-    try:
-        if lock_fd is None:
-            # Another worker is building, wait for async rebuild to complete
-            # Poll the cache every 0.5 seconds for up to 10 seconds
-            logging.info("Waiting for async cache rebuild to complete")
-            max_wait_time = 10  # seconds
-            poll_interval = 0.5  # seconds
-            wait_start = time.time()
-            
-            while time.time() - wait_start < max_wait_time:
-                time.sleep(poll_interval)
-                with enriched_file_cache_lock:
-                    if enriched_file_cache['files'] is not None:
-                        logging.info(f"Async cache rebuild completed after {time.time() - wait_start:.1f}s")
-                        return enriched_file_cache['files']
-            
-            # Still no cache after max wait time, return empty list
-            logging.warning(f"Cache still empty after waiting {max_wait_time}s, returning empty list")
-            return []
-        
-        # We have the lock - check if cache was built while waiting
-        with enriched_file_cache_lock:
-            if enriched_file_cache['files'] is not None:
-                logging.debug("Cache was built while waiting for lock")
-                return enriched_file_cache['files']
-        
-        # Build cache synchronously
-        logging.info("Building initial cache synchronously")
-        preload_metadata_for_directories(files)
-        
-        # Get all marker data in one batch query (much faster than individual queries)
-        marker_data = get_all_marker_data()
-        processed_files = marker_data.get('processed', set())
-        duplicate_files = marker_data.get('duplicate', set())
-        
-        all_files = []
-        for f in files:
-            abs_path = os.path.abspath(f)
-            rel_path = os.path.relpath(f, WATCHED_DIR) if WATCHED_DIR else f
-            all_files.append({
-                'path': f,
-                'name': os.path.basename(f),
-                'relative_path': rel_path,
-                'size': os.path.getsize(f),
-                'modified': os.path.getmtime(f),
-                'processed': abs_path in processed_files,
-                'duplicate': abs_path in duplicate_files
-            })
-        
-        # Update cache
-        with enriched_file_cache_lock:
-            enriched_file_cache['files'] = all_files
-            enriched_file_cache['timestamp'] = time.time()
-            enriched_file_cache['file_list_hash'] = file_list_hash
-            enriched_file_cache['watcher_update_time'] = get_watcher_update_time()
-            enriched_file_cache['rebuild_in_progress'] = False
-            enriched_file_cache['rebuild_thread'] = None
-        
-        return all_files
-    finally:
-        # Always release the lock if we acquired it
-        if lock_fd is not None:
-            release_cache_rebuild_lock(lock_fd)
+    # First-time cache build or another worker is building
+    # Return empty list immediately to avoid blocking the worker
+    # The async rebuild will populate the cache for subsequent requests
+    logging.info("No cache available, async rebuild in progress - returning empty list for now")
+    logging.info("Cache will be available on next request after rebuild completes")
+    return []
 
 def get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, file_list_hash):
     """Get filtered and sorted files with caching
@@ -2535,12 +2474,12 @@ def prewarm_metadata_cache():
     logging.info("Metadata markers are stored centrally and loaded on-demand")
 
 def initialize_cache():
-    """Initialize file list cache and prewarm metadata cache on startup"""
+    """Initialize file list cache and trigger async metadata cache rebuild on startup"""
     if not WATCHED_DIR:
         return
     
     # Try to acquire lock to coordinate cache initialization across workers
-    lock_fd = try_acquire_cache_rebuild_lock(timeout=0.5)
+    lock_fd = try_acquire_cache_rebuild_lock(timeout=0.1)
     
     if lock_fd is None:
         logging.info("Another worker is already initializing caches, skipping")
@@ -2549,18 +2488,19 @@ def initialize_cache():
     try:
         logging.info("Initializing caches on startup...")
         
-        # First, load the file list cache
+        # Load the file list cache quickly
         logging.info("Building file list cache...")
         files = get_comic_files(use_cache=True)
         logging.info(f"File list cache initialized with {len(files)} files")
         
-        # Then, prewarm the metadata cache (markers)
+        # Prewarm the metadata cache (markers) - this is fast as it's centralized
         prewarm_metadata_cache()
         
-        # Finally, build the enriched file cache to speed up first page load
-        logging.info("Building enriched file cache...")
-        enriched_files = get_enriched_file_list(files, force_rebuild=True)
-        logging.info(f"Enriched file cache initialized with {len(enriched_files)} files")
+        # Trigger async enriched file cache rebuild instead of building synchronously
+        # This prevents worker timeouts during startup
+        logging.info("Triggering async enriched file cache rebuild...")
+        get_enriched_file_list(files, force_rebuild=True)
+        logging.info("Async cache rebuild triggered - cache will be available shortly")
         
         logging.info("Cache initialization complete")
     finally:

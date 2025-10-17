@@ -708,7 +708,7 @@
             padding: 15px;
             font-weight: 600;
             display: grid;
-            grid-template-columns: 30px 40px 1fr 150px 240px;
+            grid-template-columns: 30px 40px 1fr 150px 180px 240px;
             gap: 10px;
             border-bottom: 2px solid var(--border-secondary);
             align-items: center;
@@ -806,7 +806,7 @@
             padding: 15px;
             padding-left: 45px;
             display: grid;
-            grid-template-columns: 40px 1fr 150px 240px;
+            grid-template-columns: 40px 1fr 150px 180px 240px;
             gap: 10px;
             border-bottom: 1px solid var(--border-primary);
             align-items: center;
@@ -1174,11 +1174,11 @@
             }
             
             .file-list-header {
-                grid-template-columns: 30px 40px 1fr 120px 200px;
+                grid-template-columns: 30px 40px 1fr 120px 150px 200px;
             }
             
             .file-item {
-                grid-template-columns: 40px 1fr 120px 200px;
+                grid-template-columns: 40px 1fr 120px 150px 200px;
                 margin-left: 30px;
             }
             
@@ -1360,6 +1360,7 @@
                 font-size: 13px;
             }
             
+            .file-list-header > div:nth-child(4),
             .file-list-header > div:nth-child(5) {
                 display: none;
             }
@@ -2524,6 +2525,9 @@
                 if (sortMode !== 'name') {
                     url += `&sort=${encodeURIComponent(sortMode)}`;
                 }
+                if (sortDirection !== 'asc') {
+                    url += `&direction=${encodeURIComponent(sortDirection)}`;
+                }
                 
                 const response = await fetch(url);
                 if (!response.ok) {
@@ -2685,6 +2689,7 @@
         }
         
         let sortMode = 'name'; // 'name', 'date', 'size'
+        let sortDirection = 'asc'; // 'asc', 'desc'
         
         function setHeaderFilter(mode) {
             filterMode = mode;
@@ -2716,7 +2721,13 @@
         }
         
         function setSort(mode) {
-            sortMode = mode;
+            // If same mode is selected, toggle direction; otherwise reset to asc
+            if (sortMode === mode) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortMode = mode;
+                sortDirection = 'asc';
+            }
             
             // Update dropdown label and active state
             const sortLabels = {
@@ -2725,7 +2736,8 @@
                 'size': '💾 Size'
             };
             
-            document.getElementById('headerSortLabel').textContent = sortLabels[mode];
+            const arrow = sortDirection === 'asc' ? '↑' : '↓';
+            document.getElementById('headerSortLabel').textContent = sortLabels[mode] + ' ' + arrow;
             
             // Update active class on dropdown items
             document.querySelectorAll('#headerSortMenu .header-dropdown-item').forEach(item => {
@@ -2855,6 +2867,7 @@
                     </button>
                     <div>File</div>
                     <div>Size</div>
+                    <div>Modified</div>
                     <div>Actions</div>
                 </div>
             `;
@@ -2890,6 +2903,7 @@
                 filesByDirectory[dir].forEach(file => {
                     const isSelected = selectedFiles.has(file.relative_path);
                     const fileSize = formatFileSize(file.size);
+                    const modifiedDate = formatModifiedDate(file.modified);
                     const processedBadge = file.processed ? '✅' : '⚠️';
                     const processedTitle = file.processed ? 'Processed' : 'Not processed yet';
                     const duplicateBadge = file.duplicate ? '🔁' : '';
@@ -2906,6 +2920,7 @@
                                 ${!dir ? `<div class="file-path">${escapeHtml(file.relative_path)}</div>` : ''}
                             </div>
                             <div>${fileSize}</div>
+                            <div style="color: var(--text-muted); font-size: 13px;">${modifiedDate}</div>
                             <div class="file-actions">
                                 <div class="file-actions-dropdown">
                                     <button class="dropdown-toggle" onclick="toggleDropdown(event, '${escapeJs(file.relative_path)}')">
@@ -2953,6 +2968,39 @@
             if (bytes < 1024) return bytes + ' B';
             if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
             return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+        
+        function formatModifiedDate(timestamp) {
+            const date = new Date(timestamp * 1000); // Convert Unix timestamp to milliseconds
+            const now = new Date();
+            const diffMs = now - date;
+            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+            
+            // Show relative time for recent files
+            if (diffDays === 0) {
+                const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+                if (diffHours === 0) {
+                    const diffMinutes = Math.floor(diffMs / (1000 * 60));
+                    if (diffMinutes < 1) return 'Just now';
+                    return `${diffMinutes} min ago`;
+                }
+                return `${diffHours}h ago`;
+            } else if (diffDays === 1) {
+                return 'Yesterday';
+            } else if (diffDays < 7) {
+                return `${diffDays} days ago`;
+            }
+            
+            // Show date for older files
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            
+            // Show year only if different from current year
+            if (year !== now.getFullYear()) {
+                return `${year}-${month}-${day}`;
+            }
+            return `${month}-${day}`;
         }
         
         function escapeHtml(text) {

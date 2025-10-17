@@ -1,6 +1,7 @@
 
 import time
 import sys
+import signal
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import subprocess
@@ -206,18 +207,33 @@ class ChangeHandler(FileSystemEventHandler):
                 update_watcher_timestamp()
 
 if __name__ == "__main__":
-    event_handler = ChangeHandler()
-    observer = Observer()
-    if WATCHED_DIR:
-        observer.schedule(event_handler, WATCHED_DIR, recursive=True)
-        observer.start()
-    else:
+    if not WATCHED_DIR:
         logging.error("WATCHED_DIR environment variable is not set. Exiting.")
         sys.exit(1)
+    
+    event_handler = ChangeHandler()
+    observer = Observer()
+    observer.schedule(event_handler, WATCHED_DIR, recursive=True)
+    observer.start()
     logging.info(f"Watching directory: {WATCHED_DIR}")
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
+    
+    # Set up signal handlers for graceful shutdown
+    def signal_handler(signum, frame):
+        signal_name = signal.Signals(signum).name
+        logging.info(f"Received {signal_name} signal, shutting down watcher...")
         observer.stop()
-    observer.join()
+    
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Wait for observer thread to finish (event-driven, no polling)
+    # This blocks until observer.stop() is called by signal handler
+    try:
+        observer.join()
+    except KeyboardInterrupt:
+        # Fallback for systems where SIGINT handler doesn't work
+        logging.info("Keyboard interrupt received, shutting down watcher...")
+        observer.stop()
+        observer.join()
+    
+    logging.info("Watcher stopped gracefully")

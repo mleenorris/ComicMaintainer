@@ -1420,8 +1420,20 @@
             }
             
             .dropdown-toggle {
-                width: 100%;
+                width: 32px;
+                min-width: 32px;
+                padding: 6px;
                 justify-content: center;
+                font-size: 0;
+            }
+            
+            .dropdown-toggle::before {
+                content: none;
+            }
+            
+            .dropdown-toggle::after {
+                margin-left: 0;
+                font-size: 14px;
             }
             
             .dropdown-menu {

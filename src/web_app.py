@@ -771,7 +771,7 @@ def get_enriched_file_list(files, force_rebuild=False):
     logging.info("Cache will be available on next request after rebuild completes")
     return []
 
-def get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, file_list_hash):
+def get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, sort_direction, file_list_hash):
     """Get filtered and sorted files with caching
     
     Args:
@@ -779,22 +779,23 @@ def get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, f
         filter_mode: Filter mode ('all', 'marked', 'unmarked', 'duplicates')
         search_query: Search query string
         sort_mode: Sort mode ('name', 'date', 'size')
+        sort_direction: Sort direction ('asc', 'desc')
         file_list_hash: Hash of the file list to detect changes
         
     Returns:
         List of filtered and sorted files
     """
     # Create cache key
-    cache_key = (filter_mode, search_query, sort_mode, file_list_hash)
+    cache_key = (filter_mode, search_query, sort_mode, sort_direction, file_list_hash)
     
     # Check cache
     with filtered_results_cache_lock:
         if cache_key in filtered_results_cache:
-            logging.debug(f"Using filtered results cache for filter={filter_mode}, search='{search_query}', sort={sort_mode}")
+            logging.debug(f"Using filtered results cache for filter={filter_mode}, search='{search_query}', sort={sort_mode}, direction={sort_direction}")
             return filtered_results_cache[cache_key]['filtered_files']
     
     # Cache miss - compute filtered and sorted results
-    logging.info(f"Computing filtered results for filter={filter_mode}, search='{search_query}', sort={sort_mode}")
+    logging.info(f"Computing filtered results for filter={filter_mode}, search='{search_query}', sort={sort_mode}, direction={sort_direction}")
     
     # Apply filters
     filtered_files = all_files
@@ -816,12 +817,13 @@ def get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, f
         ]
     
     # Apply sorting
+    reverse = (sort_direction == 'desc')
     if sort_mode == 'date':
-        filtered_files = sorted(filtered_files, key=lambda f: f['modified'], reverse=True)
+        filtered_files = sorted(filtered_files, key=lambda f: f['modified'], reverse=reverse)
     elif sort_mode == 'size':
-        filtered_files = sorted(filtered_files, key=lambda f: f['size'], reverse=True)
+        filtered_files = sorted(filtered_files, key=lambda f: f['size'], reverse=reverse)
     else:  # Default to 'name'
-        filtered_files = sorted(filtered_files, key=lambda f: f['name'].lower())
+        filtered_files = sorted(filtered_files, key=lambda f: f['name'].lower(), reverse=reverse)
     
     # Store in cache (with LRU eviction if needed)
     with filtered_results_cache_lock:
@@ -854,6 +856,7 @@ def list_files():
     search_query = request.args.get('search', '', type=str).strip()
     filter_mode = request.args.get('filter', 'all', type=str)  # 'all', 'marked', 'unmarked', 'duplicates'
     sort_mode = request.args.get('sort', 'name', type=str)  # 'name', 'date', 'size'
+    sort_direction = request.args.get('direction', 'asc', type=str)  # 'asc', 'desc'
     
     # Get files with optional cache refresh
     files = get_comic_files(use_cache=not refresh)
@@ -886,7 +889,7 @@ def list_files():
     file_list_hash = hash(tuple(f['path'] for f in all_files))
     
     # Get filtered and sorted files (with caching)
-    filtered_files = get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, file_list_hash)
+    filtered_files = get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, sort_direction, file_list_hash)
     
     total_filtered = len(filtered_files)
     

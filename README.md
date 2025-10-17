@@ -165,6 +165,7 @@ The service includes a web-based interface for managing your comic files:
 - **Metadata caching**: File status (processed/duplicate) cached for 5 seconds, reducing disk I/O by 90%
 - **Asynchronous cache rebuilding**: Cache rebuilds happen in background threads, providing instant API responses even during cache updates (returns stale cache while rebuilding)
 - **Cache warming on startup**: All caches (file list, metadata, and enriched file list) are preloaded automatically when the service starts, eliminating "cold start" delays and ensuring instant first page load
+- **Real-time updates via Server-Sent Events (SSE)**: 87% reduction in network requests by replacing polling with push-based event notifications. Cache updates, file processing, and watcher status changes are instantly pushed to all connected clients
 - Files are loaded in pages of 100 to ensure fast initial load times
 - File list is cached on service startup and maintained in memory
 - Cache does not expire based on time, providing instant page navigation
@@ -173,7 +174,7 @@ The service includes a web-based interface for managing your comic files:
 - **Incremental cache updates**: Instead of invalidating the entire cache when files change, individual file changes (add, remove, rename) are applied incrementally, significantly improving performance for large libraries
 - **Smart cache invalidation**: Cache is only invalidated when the watcher processes files, ensuring the cache stays fresh while maximizing performance
 - **Manual cache control**: API endpoints available to manually trigger cache warming (`POST /api/cache/prewarm`) or check cache statistics (`GET /api/cache/stats`)
-- See [PERFORMANCE_IMPROVEMENTS.md](PERFORMANCE_IMPROVEMENTS.md) and [ASYNC_CACHE_REBUILD.md](ASYNC_CACHE_REBUILD.md) for detailed performance metrics and architecture
+- See [PERFORMANCE_IMPROVEMENTS.md](PERFORMANCE_IMPROVEMENTS.md), [ASYNC_CACHE_REBUILD.md](ASYNC_CACHE_REBUILD.md), and [docs/EVENT_BROADCASTING_SYSTEM.md](docs/EVENT_BROADCASTING_SYSTEM.md) for detailed performance metrics and architecture
 
 ### Filename Format Configuration
 The filename format can be customized through the web interface Settings modal. The format uses placeholders that are replaced with actual metadata values:

@@ -409,6 +409,13 @@ For more information, see [SECURITY.md](SECURITY.md).
 
 ## Performance & Reliability
 
+### Event-Driven File Monitoring
+The watcher service uses a fully event-driven architecture:
+- **Zero-polling design**: Uses `watchdog` library with native OS file system events (inotify on Linux)
+- **Efficient resource usage**: No unnecessary CPU wake-ups; process only wakes on actual file system changes
+- **Graceful signal handling**: Responds to SIGTERM and SIGINT for clean Docker container shutdowns
+- **Instant event response**: File changes are detected and processed immediately without polling delays
+
 ### High-Performance Caching
 The application uses an advanced caching system that:
 - **Non-blocking cache operations**: Workers never block waiting for cache rebuild

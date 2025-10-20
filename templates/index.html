@@ -2214,6 +2214,7 @@
                     handleFileProcessedEvent(eventData);
                     break;
                 case 'job_updated':
+                    // Real-time job progress updates via SSE (no polling needed!)
                     handleJobUpdatedEvent(eventData);
                     break;
                 default:
@@ -2246,10 +2247,55 @@
             // File list will be updated by cache_updated event
         }
         
-        // Handle job update events
+        // Handle job update events (real-time via SSE)
         function handleJobUpdatedEvent(data) {
-            console.log('SSE: Job updated:', data.job_id, 'Status:', data.status);
-            // Job polling will handle displaying progress
+            const jobId = data.job_id;
+            const status = data.status;
+            const progress = data.progress || {};
+            
+            console.log(`SSE: Job ${jobId} updated - status: ${status}, progress: ${progress.processed}/${progress.total}`);
+            
+            // Only handle updates for the current active job
+            if (!hasActiveJob || currentJobId !== jobId) {
+                console.log(`SSE: Ignoring job update for ${jobId} (not current job)`);
+                return;
+            }
+            
+            // Update progress UI in real-time
+            const processed = progress.processed || 0;
+            const total = progress.total || 0;
+            const successCount = progress.success || 0;
+            const errorCount = progress.errors || 0;
+            
+            updateProgress(processed, total, successCount, errorCount);
+            
+            // Handle job completion
+            if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+                console.log(`SSE: Job ${jobId} finished with status: ${status}`);
+                
+                // Allow a brief moment for final updates, then finalize
+                setTimeout(async () => {
+                    if (status === 'completed') {
+                        updateProgressModal('Completed!', `All ${total} items processed (${successCount} succeeded, ${errorCount} failed)`, 'success');
+                        await clearActiveJobOnServer();
+                        hasActiveJob = false;
+                        setTimeout(() => {
+                            closeProgressModal();
+                            loadFiles(currentPage, true);
+                        }, 2000);
+                    } else if (status === 'failed') {
+                        updateProgressModal('Failed', 'Job processing failed', 'error');
+                        await clearActiveJobOnServer();
+                        hasActiveJob = false;
+                        setTimeout(closeProgressModal, 3000);
+                    } else if (status === 'cancelled') {
+                        updateProgressModal('Cancelled', 'Job was cancelled', 'warning');
+                        await clearActiveJobOnServer();
+                        hasActiveJob = false;
+                        setTimeout(closeProgressModal, 2000);
+                    }
+                }, 500);
+            }
         }
         
         // Update watcher status display
@@ -3496,12 +3542,14 @@
         }
         
         async function pollJobStatus(jobId, title) {
-            const pollInterval = 500; // Poll every 500ms
+            // Reduced polling frequency since SSE provides real-time updates
+            // This serves as a fallback in case SSE connection is lost
+            const pollInterval = 5000; // Poll every 5 seconds (was 500ms)
             let lastProcessed = 0;
             let consecutiveErrors = 0;
             const maxConsecutiveErrors = 5; // Give up after 5 consecutive errors
             
-            console.log(`[JOB ${jobId}] Starting to poll job status: ${title}`);
+            console.log(`[JOB ${jobId}] Starting fallback polling (5s interval) with primary SSE updates: ${title}`);
             
             // Store active job ID on server and in local variable
             await setActiveJobOnServer(jobId, title);

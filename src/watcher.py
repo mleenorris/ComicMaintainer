@@ -9,6 +9,10 @@ import logging
 from logging.handlers import RotatingFileHandler
 from config import get_watcher_enabled, get_log_max_bytes
 from markers import is_file_processed, is_file_web_modified, clear_file_web_modified
+from error_handler import (
+    setup_debug_logging, log_debug, log_error_with_context,
+    log_function_entry, log_function_exit
+)
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
 CONFIG_DIR = '/Config'
@@ -46,12 +50,18 @@ log_handler.setFormatter(logging.Formatter('%(asctime)s [WATCHER] %(levelname)s 
 # Add the file handler to the root logger
 logging.getLogger().addHandler(log_handler)
 
+# Setup debug logging if DEBUG_MODE is enabled
+setup_debug_logging()
+log_debug("Watcher module initialized", watched_dir=WATCHED_DIR, process_script=PROCESS_SCRIPT)
+
 
 # Debounce settings
 DEBOUNCE_SECONDS = 30
 
 def record_cache_change(change_type, old_path=None, new_path=None):
     """Record a file change for incremental cache updates"""
+    log_function_entry("record_cache_change", change_type=change_type, old_path=old_path, new_path=new_path)
+    
     # Ensure config directory exists
     os.makedirs(CONFIG_DIR, exist_ok=True)
     
@@ -67,37 +77,64 @@ def record_cache_change(change_type, old_path=None, new_path=None):
             'timestamp': time.time()
         }
         
+        log_debug("Writing cache change entry", entry=change_entry)
+        
         with open(changes_file, 'a') as f:
             f.write(json.dumps(change_entry) + '\n')
         
         logging.info(f"Recorded cache change: {change_type} {old_path or ''} -> {new_path or ''}")
+        log_function_exit("record_cache_change", result="success")
     except Exception as e:
+        log_error_with_context(
+            e,
+            context=f"Recording cache change: {change_type}",
+            additional_info={"old_path": old_path, "new_path": new_path, "changes_file": changes_file}
+        )
         logging.error(f"Error recording cache change: {e}")
 
 def update_watcher_timestamp():
     """Update the watcher cache invalidation timestamp"""
+    log_function_entry("update_watcher_timestamp")
+    
     # Ensure config directory exists
     os.makedirs(CONFIG_DIR, exist_ok=True)
     
     marker_path = os.path.join(CONFIG_DIR, CACHE_UPDATE_MARKER)
     try:
+        timestamp = str(time.time())
+        log_debug("Updating watcher timestamp", marker_path=marker_path, timestamp=timestamp)
+        
         with open(marker_path, 'w') as f:
-            f.write(str(time.time()))
+            f.write(timestamp)
+        
+        log_function_exit("update_watcher_timestamp", result="success")
     except Exception as e:
+        log_error_with_context(
+            e,
+            context="Updating watcher timestamp",
+            additional_info={"marker_path": marker_path}
+        )
         logging.error(f"Error updating watcher timestamp: {e}")
 
 def is_web_modified(filepath):
     """Check if a file was recently modified by the web interface"""
+    log_debug("Checking if file is web modified", filepath=filepath)
+    
     if is_file_web_modified(filepath):
         # Clear the marker and return True
         clear_file_web_modified(filepath)
         logging.info(f"Skipping {filepath} - modified by web interface")
+        log_debug("File was web modified, skipping", filepath=filepath)
         return True
+    
+    log_debug("File was not web modified", filepath=filepath)
     return False
 
 class ChangeHandler(FileSystemEventHandler):
     def on_moved(self, event):
         # Only process if destination is .cbr or .cbz and debounce allows
+        log_debug("File move event detected", src=event.src_path, dest=event.dest_path, is_dir=event.is_directory)
+        
         if not event.is_directory and self._should_process(event.dest_path) and self._should_process(event.src_path):
             if not get_watcher_enabled():
                 logging.debug(f"Watcher disabled, skipping: {event.dest_path}")
@@ -111,27 +148,54 @@ class ChangeHandler(FileSystemEventHandler):
                 return
             if self._allowed_extension(event.dest_path) and self._is_file_stable(event.dest_path):
                 logging.info(f"File moved/renamed: {event.src_path} -> {event.dest_path}")
-                result = subprocess.run([sys.executable, PROCESS_SCRIPT, event.dest_path])
+                log_debug("Processing moved file", src=event.src_path, dest=event.dest_path, script=PROCESS_SCRIPT)
+                
+                try:
+                    result = subprocess.run([sys.executable, PROCESS_SCRIPT, event.dest_path])
+                    log_debug("File processing completed", dest=event.dest_path, returncode=result.returncode)
+                except Exception as e:
+                    log_error_with_context(
+                        e,
+                        context=f"Processing moved file: {event.dest_path}",
+                        additional_info={"src_path": event.src_path, "dest_path": event.dest_path}
+                    )
+                
                 # Note: process_file.py now marks files as processed itself
                 self.last_processed[event.dest_path] = time.time()
             else:
                 logging.info(f"Moved file not stable yet: {event.dest_path}")
+                log_debug("File not stable or wrong extension", dest=event.dest_path)
     def _is_file_stable(self, path, wait_time=2, checks=3):
         """Return True if file size is unchanged for wait_time*checks seconds."""
+        log_debug("Checking file stability", path=path, wait_time=wait_time, checks=checks)
+        
         try:
             prev_size = None
-            for _ in range(checks):
+            for check_num in range(checks):
                 if not os.path.exists(path):
+                    log_debug("File does not exist during stability check", path=path)
                     return False
+                
                 size = os.path.getsize(path)
+                log_debug("File size check", path=path, check=check_num, size=size, prev_size=prev_size)
+                
                 if prev_size is not None and size != prev_size:
+                    log_debug("File size changed, continuing checks", path=path, old_size=prev_size, new_size=size)
                     prev_size = size
                     time.sleep(wait_time)
                     continue
+                
                 prev_size = size
                 time.sleep(wait_time)
+            
+            log_debug("File is stable", path=path, final_size=prev_size)
             return True
         except Exception as e:
+            log_error_with_context(
+                e,
+                context=f"Checking file stability: {path}",
+                additional_info={"path": path, "wait_time": wait_time, "checks": checks}
+            )
             logging.info(f"Error checking file stability for {path}: {e}")
             return False
     def __init__(self):
@@ -150,6 +214,8 @@ class ChangeHandler(FileSystemEventHandler):
         return False
 
     def on_modified(self, event):
+        log_debug("File modified event detected", path=event.src_path, is_dir=event.is_directory)
+        
         if not event.is_directory and self._should_process(event.src_path) and self._allowed_extension(event.src_path):
             if not get_watcher_enabled():
                 logging.debug(f"Watcher disabled, skipping: {event.src_path}")
@@ -163,12 +229,26 @@ class ChangeHandler(FileSystemEventHandler):
                 return
             if self._is_file_stable(event.src_path):
                 logging.info(f"File modified: {event.src_path}")
-                result = subprocess.run([sys.executable, PROCESS_SCRIPT, event.src_path])
+                log_debug("Processing modified file", path=event.src_path, script=PROCESS_SCRIPT)
+                
+                try:
+                    result = subprocess.run([sys.executable, PROCESS_SCRIPT, event.src_path])
+                    log_debug("File processing completed", path=event.src_path, returncode=result.returncode)
+                except Exception as e:
+                    log_error_with_context(
+                        e,
+                        context=f"Processing modified file: {event.src_path}",
+                        additional_info={"path": event.src_path}
+                    )
+                
                 # Note: process_file.py now marks files as processed itself
                 self.last_processed[event.src_path] = time.time()
             else:
                 logging.info(f"File not stable yet: {event.src_path}")
+                log_debug("Modified file not stable", path=event.src_path)
     def on_created(self, event):
+        log_debug("File created event detected", path=event.src_path, is_dir=event.is_directory)
+        
         if not event.is_directory and self._should_process(event.src_path) and self._allowed_extension(event.src_path):
             if not get_watcher_enabled():
                 logging.debug(f"Watcher disabled, skipping: {event.src_path}")
@@ -182,13 +262,27 @@ class ChangeHandler(FileSystemEventHandler):
                 return
             if self._is_file_stable(event.src_path):
                 logging.info(f"File created: {event.src_path}")
-                result = subprocess.run([sys.executable, PROCESS_SCRIPT, event.src_path])
+                log_debug("Processing created file", path=event.src_path, script=PROCESS_SCRIPT)
+                
+                try:
+                    result = subprocess.run([sys.executable, PROCESS_SCRIPT, event.src_path])
+                    log_debug("File processing completed", path=event.src_path, returncode=result.returncode)
+                except Exception as e:
+                    log_error_with_context(
+                        e,
+                        context=f"Processing created file: {event.src_path}",
+                        additional_info={"path": event.src_path}
+                    )
+                
                 # Note: process_file.py now marks files as processed itself
                 # process_file.py will record cache changes (add or rename as appropriate)
                 self.last_processed[event.src_path] = time.time()
             else:
                 logging.info(f"File not stable yet: {event.src_path}")
+                log_debug("Created file not stable", path=event.src_path)
     def on_deleted(self, event):
+        log_debug("File deleted event detected", path=event.src_path, is_dir=event.is_directory)
+        
         if not event.is_directory:
             logging.info(f"File deleted: {event.src_path}")
             if event.src_path in self.last_processed:
@@ -202,22 +296,47 @@ class ChangeHandler(FileSystemEventHandler):
                     return
                 
                 # Record the deletion for incremental cache update
+                log_debug("Recording cache change for deletion", path=event.src_path)
                 record_cache_change('remove', old_path=event.src_path)
                 update_watcher_timestamp()
 
 if __name__ == "__main__":
+    log_debug("Watcher starting", watched_dir=WATCHED_DIR)
+    
     event_handler = ChangeHandler()
     observer = Observer()
+    
     if WATCHED_DIR:
+        log_debug("Scheduling observer", path=WATCHED_DIR, recursive=True)
         observer.schedule(event_handler, WATCHED_DIR, recursive=True)
         observer.start()
     else:
         logging.error("WATCHED_DIR environment variable is not set. Exiting.")
+        log_error_with_context(
+            ValueError("WATCHED_DIR not set"),
+            context="Starting watcher service",
+            additional_info={"env_vars": dict(os.environ)}
+        )
         sys.exit(1)
+    
     logging.info(f"Watching directory: {WATCHED_DIR}")
+    log_debug("Watcher observer started successfully", watched_dir=WATCHED_DIR)
+    
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
+        logging.info("Keyboard interrupt received, stopping watcher")
+        log_debug("Stopping observer due to keyboard interrupt")
         observer.stop()
+    except Exception as e:
+        log_error_with_context(
+            e,
+            context="Running watcher main loop",
+            additional_info={"watched_dir": WATCHED_DIR}
+        )
+        observer.stop()
+        raise
+    
     observer.join()
+    log_debug("Watcher shutdown complete")

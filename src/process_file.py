@@ -5,6 +5,10 @@ import logging
 from comicapi.comicarchive import ComicArchive
 from config import get_filename_format, get_issue_number_padding
 from markers import mark_file_duplicate, mark_file_processed
+from error_handler import (
+    setup_debug_logging, log_debug, log_error_with_context,
+    log_function_entry, log_function_exit
+)
 
 CONFIG_DIR = '/Config'
 LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
@@ -22,20 +26,36 @@ logging.basicConfig(
     ]
 )
 
+# Setup debug logging if DEBUG_MODE is enabled
+setup_debug_logging()
+log_debug("process_file module initialized")
+
 CACHE_UPDATE_MARKER = '.cache_update'
 CACHE_CHANGES_FILE = '.cache_changes'
 
 def update_watcher_timestamp():
     """Update the watcher cache invalidation timestamp"""
+    log_function_entry("update_watcher_timestamp")
+    
     # Ensure config directory exists
     os.makedirs(CONFIG_DIR, exist_ok=True)
     
     marker_path = os.path.join(CONFIG_DIR, CACHE_UPDATE_MARKER)
     try:
         import time
+        timestamp = str(time.time())
+        log_debug("Updating watcher timestamp", marker_path=marker_path, timestamp=timestamp)
+        
         with open(marker_path, 'w') as f:
-            f.write(str(time.time()))
+            f.write(timestamp)
+        
+        log_function_exit("update_watcher_timestamp", result="success")
     except Exception as e:
+        log_error_with_context(
+            e,
+            context="Updating watcher timestamp in process_file",
+            additional_info={"marker_path": marker_path}
+        )
         logging.error(f"Error updating watcher timestamp: {e}")
 
 def record_cache_change(change_type, old_path=None, new_path=None):
@@ -46,6 +66,7 @@ def record_cache_change(change_type, old_path=None, new_path=None):
         old_path: Original file path (for 'remove' and 'rename')
         new_path: New file path (for 'add' and 'rename')
     """
+    log_function_entry("record_cache_change", change_type=change_type, old_path=old_path, new_path=new_path)
     
     # Ensure config directory exists
     os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -63,27 +84,49 @@ def record_cache_change(change_type, old_path=None, new_path=None):
             'timestamp': time.time()
         }
         
+        log_debug("Writing cache change entry", entry=change_entry)
+        
         # Append the change to the file
         with open(changes_file, 'a') as f:
             f.write(json.dumps(change_entry) + '\n')
         
         logging.info(f"Recorded cache change: {change_type} {old_path or ''} -> {new_path or ''}")
+        log_function_exit("record_cache_change", result="success")
     except Exception as e:
+        log_error_with_context(
+            e,
+            context=f"Recording cache change in process_file: {change_type}",
+            additional_info={"old_path": old_path, "new_path": new_path, "changes_file": changes_file}
+        )
         logging.error(f"Error recording cache change: {e}")
 
 # mark_file_duplicate is now imported from markers module
 
 def parse_chapter_number(filename):
+    log_function_entry("parse_chapter_number", filename=filename)
+    
     match = re.search(r'(?i)ch(?:apter)?[-._\s]*([0-9]+(?:\.[0-9]+)?)', filename)
     if match:
-        return match.group(1)
+        chapter_num = match.group(1)
+        log_debug("Found chapter number via chapter keyword", filename=filename, chapter=chapter_num)
+        log_function_exit("parse_chapter_number", result=chapter_num)
+        return chapter_num
+    
     matches = list(re.finditer(r'(?<![\(\[])[0-9]+(?:\.[0-9]+)?(?![\)\]])', filename))
+    log_debug("Searching for chapter number in filename", filename=filename, matches_count=len(matches))
+    
     for m in matches:
         start, end = m.start(), m.end()
         before = filename[:start]
         after = filename[end:]
         if (not re.search(r'[\(\[]$', before)) and (not re.search(r'^[\)\]]', after)):
-            return m.group()
+            chapter_num = m.group()
+            log_debug("Found chapter number via number pattern", filename=filename, chapter=chapter_num)
+            log_function_exit("parse_chapter_number", result=chapter_num)
+            return chapter_num
+    
+    log_debug("No chapter number found in filename", filename=filename)
+    log_function_exit("parse_chapter_number", result=None)
     return None
 
 def format_filename(template, tags, issue_number, original_extension='.cbz'):
@@ -160,16 +203,22 @@ def is_file_already_normalized(filepath, fixtitle=True, fixseries=True, fixfilen
     Check if a file is already normalized (metadata and filename match expected format).
     Returns True if the file doesn't need any changes.
     """
+    log_function_entry("is_file_already_normalized", filepath=filepath, fixtitle=fixtitle, fixseries=fixseries, fixfilename=fixfilename)
+    
     try:
+        log_debug("Opening comic archive", filepath=filepath)
         ca = ComicArchive(filepath)
         tags = ca.read_tags('cr')
+        log_debug("Read tags from archive", filepath=filepath, has_tags=tags is not None)
         
         # Check title normalization if requested
         if fixtitle:
+            log_debug("Checking title normalization", filepath=filepath)
             issue_number = None
             try:
                 if tags.issue:
                     issue_number = tags.issue
+                    log_debug("Found issue number in tags", issue_number=issue_number)
             except:
                 pass
             
@@ -178,14 +227,20 @@ def is_file_already_normalized(filepath, fixtitle=True, fixseries=True, fixfilen
             
             if issue_number:
                 expected_title = f"Chapter {issue_number}"
+                log_debug("Checking title", current_title=tags.title, expected_title=expected_title)
                 if tags.title != expected_title:
+                    log_debug("Title mismatch, normalization needed", filepath=filepath)
+                    log_function_exit("is_file_already_normalized", result=False)
                     return False
             else:
                 # Can't determine issue number, so can't verify title
+                log_debug("Cannot determine issue number", filepath=filepath)
+                log_function_exit("is_file_already_normalized", result=False)
                 return False
         
         # Check series normalization if requested
         if fixseries:
+            log_debug("Checking series normalization", filepath=filepath)
             if not comicfolder:
                 comicfolder = os.path.dirname(filepath)
             seriesname = os.path.basename(comicfolder)
@@ -194,18 +249,26 @@ def is_file_already_normalized(filepath, fixtitle=True, fixseries=True, fixfilen
             seriesnamecompare = re.sub(r"\(\*\)|\[\*\]", "", seriesnamecompare)
             
             series_name_tag = tags.series
+            log_debug("Checking series", current_series=series_name_tag, expected_series=seriesnamecompare)
             if series_name_tag:
                 tags_series_compare = re.sub(r"\(\*\)|\[\*\]", "", series_name_tag)
                 if tags_series_compare.strip() != seriesnamecompare.strip():
+                    log_debug("Series mismatch, normalization needed", filepath=filepath)
+                    log_function_exit("is_file_already_normalized", result=False)
                     return False
             else:
                 # No series tag, needs to be set
+                log_debug("No series tag found, normalization needed", filepath=filepath)
+                log_function_exit("is_file_already_normalized", result=False)
                 return False
         
         # Check filename normalization if requested
         if fixfilename:
+            log_debug("Checking filename normalization", filepath=filepath)
             if not tags.issue:
                 # Can't format filename without issue number
+                log_debug("No issue tag for filename check", filepath=filepath)
+                log_function_exit("is_file_already_normalized", result=False)
                 return False
                 
             # Get original file extension to preserve format
@@ -214,11 +277,21 @@ def is_file_already_normalized(filepath, fixtitle=True, fixseries=True, fixfilen
             expected_filename = format_filename(filename_template, tags, tags.issue or '', original_extension=original_ext)
             current_filename = os.path.basename(filepath)
             
+            log_debug("Checking filename", current=current_filename, expected=expected_filename)
             if current_filename != expected_filename:
+                log_debug("Filename mismatch, normalization needed", filepath=filepath)
+                log_function_exit("is_file_already_normalized", result=False)
                 return False
         
+        log_debug("File is already normalized", filepath=filepath)
+        log_function_exit("is_file_already_normalized", result=True)
         return True
     except Exception as e:
+        log_error_with_context(
+            e,
+            context=f"Checking if file is normalized: {filepath}",
+            additional_info={"filepath": filepath, "fixtitle": fixtitle, "fixseries": fixseries, "fixfilename": fixfilename}
+        )
         logging.error(f"Error checking if file is normalized: {e}")
         return False
 

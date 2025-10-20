@@ -2007,6 +2007,7 @@
                 <div id="progressDetails" style="max-height: 200px; overflow-y: auto; padding: 10px; background: var(--bg-hover); border-radius: 5px; font-size: 13px; color: var(--text-muted);"></div>
             </div>
             <div class="modal-footer">
+                <button class="btn btn-danger" id="progressCancelBtn" onclick="cancelCurrentJob()" style="display: none;">Cancel</button>
                 <button class="btn" id="progressCloseBtn" onclick="closeProgressModal()" style="display: none;">Close</button>
             </div>
         </div>
@@ -2506,6 +2507,7 @@
         // Warn user before leaving page if there's an active batch job
         // Note: We can't use async in beforeunload, so we track the active job in a variable
         let hasActiveJob = false;
+        let currentJobId = null;  // Track current job ID for cancellation
         window.addEventListener('beforeunload', function(event) {
             // Clean up cache rebuild polling timer
             stopCacheRebuildPolling();
@@ -3501,9 +3503,10 @@
             
             console.log(`[JOB ${jobId}] Starting to poll job status: ${title}`);
             
-            // Store active job ID on server
+            // Store active job ID on server and in local variable
             await setActiveJobOnServer(jobId, title);
             hasActiveJob = true;
+            currentJobId = jobId;  // Track for cancellation
             
             while (true) {
                 try {
@@ -3598,25 +3601,28 @@
                         showMessage(`Processed ${successCount} of ${total} files successfully!`, 'success');
                         // Refresh file list (force refresh to clear cache)
                         await loadFiles(1, true);
-                        // Clear active job from server
+                        // Clear active job from server and local state
                         await clearActiveJobOnServer();
                         hasActiveJob = false;
+                        currentJobId = null;
                         break;
                     } else if (status.status === 'failed') {
                         console.error(`[JOB ${jobId}] Job failed: ${status.error}`);
                         closeProgressModal();
                         showMessage(`Job failed: ${status.error}`, 'error');
-                        // Clear active job from server
+                        // Clear active job from server and local state
                         await clearActiveJobOnServer();
                         hasActiveJob = false;
+                        currentJobId = null;
                         break;
                     } else if (status.status === 'cancelled') {
                         console.log(`[JOB ${jobId}] Job was cancelled`);
                         closeProgressModal();
                         showMessage('Job was cancelled', 'warning');
-                        // Clear active job from server
+                        // Clear active job from server and local state
                         await clearActiveJobOnServer();
                         hasActiveJob = false;
+                        currentJobId = null;
                         break;
                     }
                     
@@ -3636,6 +3642,7 @@
                         // DON'T clear active job from server - it might still be running
                         // The user can refresh to check if it's still active
                         hasActiveJob = false;
+                        currentJobId = null;
                         break;
                     }
                     
@@ -3643,6 +3650,45 @@
                     const backoffDelay = pollInterval * Math.pow(2, consecutiveErrors - 1);
                     await new Promise(resolve => setTimeout(resolve, backoffDelay));
                 }
+            }
+        }
+        
+        async function cancelCurrentJob() {
+            if (!currentJobId) {
+                showMessage('No active job to cancel', 'error');
+                return;
+            }
+            
+            if (!confirm('Are you sure you want to cancel the current batch processing job?')) {
+                return;
+            }
+            
+            try {
+                console.log(`[CANCEL] Cancelling job ${currentJobId}...`);
+                
+                const response = await fetch(`/api/jobs/${currentJobId}/cancel`, {
+                    method: 'POST'
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || `Failed to cancel job (HTTP ${response.status})`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    console.log(`[CANCEL] Job ${currentJobId} cancelled successfully`);
+                    showMessage('Batch processing cancelled', 'warning');
+                    
+                    // The polling loop will detect the cancelled status and exit
+                    // We don't need to do anything else here
+                } else {
+                    throw new Error(result.error || 'Failed to cancel job');
+                }
+            } catch (error) {
+                console.error(`[CANCEL] Error cancelling job ${currentJobId}:`, error);
+                showMessage('Failed to cancel job: ' + error.message, 'error');
             }
         }
         
@@ -4368,6 +4414,7 @@
             document.getElementById('progressPercent').textContent = '0%';
             document.getElementById('progressDetails').innerHTML = '';
             document.getElementById('progressCloseBtn').style.display = 'none';
+            document.getElementById('progressCancelBtn').style.display = 'inline-block';  // Show cancel button
             modal.classList.add('active');
             indicator.style.display = 'none';
         }
@@ -4412,6 +4459,7 @@
         
         function completeProgress() {
             document.getElementById('progressCloseBtn').style.display = 'block';
+            document.getElementById('progressCancelBtn').style.display = 'none';  // Hide cancel button when complete
             
             // Update indicator to show completion
             const indicator = document.getElementById('progressIndicator');
@@ -4424,6 +4472,7 @@
         function closeProgressModal() {
             document.getElementById('progressModal').classList.remove('active');
             document.getElementById('progressIndicator').style.display = 'none';
+            document.getElementById('progressCancelBtn').style.display = 'none';  // Hide cancel button
         }
         
         function minimizeProgressModal() {

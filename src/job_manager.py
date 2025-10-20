@@ -69,7 +69,8 @@ class JobManager:
         """
         log_function_entry("JobManager.__init__", max_workers=max_workers)
         self.max_workers = max_workers
-        self.executor = ThreadPoolExecutor(max_workers=max_workers)
+        # Executor for managing jobs (job orchestration)
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="job-mgr")
         self._cleanup_thread = threading.Thread(target=self._cleanup_old_jobs, daemon=True)
         self._cleanup_thread.start()
         log_debug("JobManager initialized", max_workers=max_workers)
@@ -167,12 +168,18 @@ class JobManager:
         """
         log_function_entry("_process_job", job_id=job_id, items_count=len(items))
         
+        # Create a separate executor for processing items to avoid deadlock
+        # The job manager executor runs _process_job, and this executor runs the items
+        # This prevents the thread pool from deadlocking when trying to submit items
+        # to the same pool that's running the job orchestration
+        item_executor = ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix=f"job-{job_id[:8]}")
+        
         try:
             logging.info(f"[JOB {job_id}] Starting processing of {len(items)} items with {self.max_workers} workers")
             log_debug("Submitting items to executor", job_id=job_id, workers=self.max_workers, items_count=len(items))
             
-            # Submit all items for processing
-            futures = {self.executor.submit(process_func, item): item for item in items}
+            # Submit all items for processing to the dedicated item executor
+            futures = {item_executor.submit(process_func, item): item for item in items}
             log_debug("All items submitted to executor", job_id=job_id, futures_count=len(futures))
             
             # Track progress
@@ -253,6 +260,12 @@ class JobManager:
             # This ensures stale job references don't persist after failure
             self._clear_active_job_if_current(job_id)
             log_function_exit("_process_job", result="failed")
+        
+        finally:
+            # Always shutdown the item executor to free resources
+            log_debug("Shutting down item executor", job_id=job_id)
+            item_executor.shutdown(wait=True)
+            log_debug("Item executor shut down", job_id=job_id)
     
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """

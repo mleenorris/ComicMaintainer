@@ -104,6 +104,27 @@ docker run -d \
   - For systems with fast storage: 4-8 workers
   - For systems with slow storage: 2-4 workers
 
+#### Debug Logging and Error Reporting (Optional)
+- `DEBUG_MODE`: Enable extensive debug logging throughout the application (default: `false`). Set to `true` to enable detailed debug output including function entry/exit, parameter values, and operation details.
+- `GITHUB_TOKEN`: GitHub Personal Access Token for automatic issue creation on errors (optional). When set, errors will automatically create GitHub issues with full context and stack traces.
+- `GITHUB_REPOSITORY`: GitHub repository in `owner/repo` format (default: `mleenorris/ComicMaintainer`). Used for issue creation.
+- `GITHUB_ISSUE_ASSIGNEE`: Username to assign auto-generated issues to (default: `copilot`). Issues are also tagged with `bug` and `auto-generated` labels.
+
+**Example with debug logging and GitHub integration:**
+```sh
+docker run -d \
+  -v <host_dir_to_watch>:/watched_dir \
+  -v <host_dir_for_config>:/Config \
+  -e WATCHED_DIR=/watched_dir \
+  -e DEBUG_MODE=true \
+  -e GITHUB_TOKEN=ghp_your_token_here \
+  -e GITHUB_ISSUE_ASSIGNEE=your_username \
+  -p 5000:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+**Note:** GitHub issue creation is rate-limited internally to prevent duplicate issues for the same error. The error handling system caches up to 100 unique errors to avoid creating duplicate issues.
+
 ## Web Interface
 The service includes a web-based interface for managing your comic files:
 
@@ -358,6 +379,30 @@ If upgrading from a version where configuration and logs were stored in `/app` o
     - Via the **Settings** menu in the web interface (changes take effect on restart)
     - Via the `LOG_MAX_BYTES` environment variable (in bytes, e.g., `LOG_MAX_BYTES=10485760` for 10MB)
   - View logs directly in the web interface via the "View Logs" option in the settings menu
+
+### Debug Logging
+- **Debug Mode**: Enable extensive debug logging by setting `DEBUG_MODE=true` environment variable
+- When enabled, debug logs include:
+  - Function entry and exit with parameters and return values
+  - Detailed operation tracking (file checks, cache operations, metadata processing)
+  - Variable values and state at key decision points
+  - Performance insights for troubleshooting
+- Debug logs are written to the same log file as regular logs but with DEBUG level
+- Useful for troubleshooting issues, understanding file processing flow, and monitoring system behavior
+- Example: `docker run -e DEBUG_MODE=true ...`
+
+### Automatic Error Reporting
+- **GitHub Issue Creation**: Errors can automatically create GitHub issues when configured
+- Set `GITHUB_TOKEN` environment variable with a Personal Access Token (needs `repo` scope)
+- Each error generates a detailed issue with:
+  - Full stack trace and error context
+  - Timestamp and error ID for tracking
+  - Additional diagnostic information (file paths, operation details)
+  - Automatic assignment to configured user (default: `copilot`)
+  - Tagged with `bug` and `auto-generated` labels
+- Duplicate detection prevents creating multiple issues for the same error
+- Rate limiting built-in to avoid API abuse
+- Example: `docker run -e GITHUB_TOKEN=ghp_xxx -e GITHUB_ISSUE_ASSIGNEE=username ...`
 
 ## GitHub Actions / CI
 - The repository includes a GitHub Actions workflow to automatically build and push the Docker image to Docker Hub on every push or pull request to `master`.

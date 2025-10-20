@@ -194,29 +194,6 @@ def cleanup_web_markers_thread():
 cleanup_thread = threading.Thread(target=cleanup_web_markers_thread, daemon=True)
 cleanup_thread.start()
 
-def watcher_monitor_thread():
-    """Monitor watcher timestamp and broadcast events when files are processed"""
-    last_watcher_time = get_watcher_update_time()
-    
-    while True:
-        time.sleep(2)  # Check every 2 seconds
-        
-        try:
-            current_watcher_time = get_watcher_update_time()
-            
-            # If watcher timestamp changed, broadcast cache update event
-            if current_watcher_time > last_watcher_time:
-                logging.info(f"Watcher activity detected, broadcasting cache update event")
-                broadcast_cache_updated(rebuild_complete=False)
-                last_watcher_time = current_watcher_time
-                
-        except Exception as e:
-            logging.error(f"Error in watcher monitor thread: {e}")
-
-# Start watcher monitor thread
-watcher_monitor = threading.Thread(target=watcher_monitor_thread, daemon=True)
-watcher_monitor.start()
-
 def get_watcher_update_time():
     """Get the last time the watcher updated files"""
     # Ensure config directory exists
@@ -242,6 +219,29 @@ def update_watcher_timestamp():
             f.write(str(time.time()))
     except Exception as e:
         logging.error(f"Error updating watcher timestamp: {e}")
+
+def watcher_monitor_thread():
+    """Monitor watcher timestamp and broadcast events when files are processed"""
+    last_watcher_time = get_watcher_update_time()
+    
+    while True:
+        time.sleep(2)  # Check every 2 seconds
+        
+        try:
+            current_watcher_time = get_watcher_update_time()
+            
+            # If watcher timestamp changed, broadcast cache update event
+            if current_watcher_time > last_watcher_time:
+                logging.info(f"Watcher activity detected, broadcasting cache update event")
+                broadcast_cache_updated(rebuild_complete=False)
+                last_watcher_time = current_watcher_time
+                
+        except Exception as e:
+            logging.error(f"Error in watcher monitor thread: {e}")
+
+# Start watcher monitor thread
+watcher_monitor = threading.Thread(target=watcher_monitor_thread, daemon=True)
+watcher_monitor.start()
 
 def record_cache_change(change_type, old_path=None, new_path=None):
     """Record a file change for incremental cache updates

@@ -131,7 +131,8 @@ The service includes a web-based interface for managing your comic files:
 ### Features
 - **Optimized for Large Libraries**: Pagination (100 files per page) and caching ensure fast loading even with thousands of files
 - **Search Functionality**: Find files across all pages by searching file names and paths - pagination automatically adjusts to show only matching results
-- **Asynchronous Processing** (New!): Files are processed concurrently in the background for faster completion
+- **Asynchronous Processing**: Files are processed concurrently in the background for faster completion
+- **Real-time Progress Updates**: Job progress is pushed via Server-Sent Events (SSE) for instant feedback without polling
 - **Process All Files**: One-click button to process all comic files in the watched directory asynchronously
 - **Process Selected Files**: Process only the files you've selected with checkboxes, with concurrent execution
 - **Folder Selection**: Click the checkbox next to any folder name to select/deselect all files in that folder
@@ -186,7 +187,7 @@ The service includes a web-based interface for managing your comic files:
 - **Metadata caching**: File status (processed/duplicate) cached for 5 seconds, reducing disk I/O by 90%
 - **Asynchronous cache rebuilding**: Cache rebuilds happen in background threads, providing instant API responses even during cache updates (returns stale cache while rebuilding)
 - **Cache warming on startup**: All caches (file list, metadata, and enriched file list) are preloaded automatically when the service starts, eliminating "cold start" delays and ensuring instant first page load
-- **Real-time updates via Server-Sent Events (SSE)**: 87% reduction in network requests by replacing polling with push-based event notifications. Cache updates, file processing, and watcher status changes are instantly pushed to all connected clients
+- **Real-time updates via Server-Sent Events (SSE)**: ~90% reduction in network requests by replacing polling with push-based event notifications. Cache updates, file processing, watcher status changes, and **job progress updates** are instantly pushed to all connected clients
 - Files are loaded in pages of 100 to ensure fast initial load times
 - File list is cached on service startup and maintained in memory
 - Cache does not expire based on time, providing instant page navigation
@@ -195,7 +196,7 @@ The service includes a web-based interface for managing your comic files:
 - **Incremental cache updates**: Instead of invalidating the entire cache when files change, individual file changes (add, remove, rename) are applied incrementally, significantly improving performance for large libraries
 - **Smart cache invalidation**: Cache is only invalidated when the watcher processes files, ensuring the cache stays fresh while maximizing performance
 - **Manual cache control**: API endpoints available to manually trigger cache warming (`POST /api/cache/prewarm`) or check cache statistics (`GET /api/cache/stats`)
-- See [PERFORMANCE_IMPROVEMENTS.md](PERFORMANCE_IMPROVEMENTS.md), [ASYNC_CACHE_REBUILD.md](ASYNC_CACHE_REBUILD.md), and [docs/EVENT_BROADCASTING_SYSTEM.md](docs/EVENT_BROADCASTING_SYSTEM.md) for detailed performance metrics and architecture
+- See [PERFORMANCE_IMPROVEMENTS.md](PERFORMANCE_IMPROVEMENTS.md), [ASYNC_CACHE_REBUILD.md](ASYNC_CACHE_REBUILD.md), [docs/EVENT_BROADCASTING_SYSTEM.md](docs/EVENT_BROADCASTING_SYSTEM.md), and [docs/PROGRESS_CALLBACKS.md](docs/PROGRESS_CALLBACKS.md) for detailed performance metrics and architecture
 
 ### Filename Format Configuration
 The filename format can be customized through the web interface Settings modal. The format uses placeholders that are replaced with actual metadata values:
@@ -258,7 +259,7 @@ The service now supports asynchronous file processing with persistent job storag
 **Benefits of Async Processing:**
 - ✅ **Concurrent execution**: Multiple files processed simultaneously
 - ✅ **Non-blocking**: Web interface remains responsive during processing
-- ✅ **Progress tracking**: Real-time status updates via polling
+- ✅ **Progress tracking**: Real-time status updates via SSE (Server-Sent Events) with minimal fallback polling
 - ✅ **Persistent storage**: Jobs survive server restarts (stored in SQLite)
 - ✅ **Multi-worker support**: Multiple Gunicorn workers can share job state
 - ✅ **Scalable**: Handles large libraries efficiently with horizontal scaling

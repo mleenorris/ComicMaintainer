@@ -133,11 +133,44 @@ class JobManager:
         log_debug("Updating job status to PROCESSING", job_id=job_id, started_at=started_at)
         job_store.update_job_status(job_id, JobStatus.PROCESSING.value, started_at=started_at)
         
+        # Broadcast status change to PROCESSING
+        self._broadcast_job_progress(job_id, JobStatus.PROCESSING.value, 0, len(items), 0, 0)
+        
         # Submit job to thread pool
         log_debug("Submitting job to executor", job_id=job_id)
         self.executor.submit(self._process_job, job_id, process_func, items)
         logging.info(f"[JOB {job_id}] Job submitted to worker pool for async processing")
         log_function_exit("start_job")
+    
+    def _broadcast_job_progress(self, job_id: str, status: str, processed: int, total: int, success: int, errors: int):
+        """
+        Broadcast job progress update via SSE.
+        
+        Args:
+            job_id: Job ID
+            status: Current job status
+            processed: Number of items processed
+            total: Total number of items
+            success: Number of successful items
+            errors: Number of failed items
+        """
+        try:
+            from event_broadcaster import broadcast_job_updated
+            broadcast_job_updated(
+                job_id=job_id,
+                status=status,
+                progress={
+                    'processed': processed,
+                    'total': total,
+                    'success': success,
+                    'errors': errors,
+                    'percentage': (processed / total * 100) if total > 0 else 0
+                }
+            )
+            log_debug("Broadcast job progress", job_id=job_id, processed=processed, total=total)
+        except Exception as e:
+            # Don't fail job processing if broadcast fails
+            logging.warning(f"[JOB {job_id}] Failed to broadcast progress: {e}")
     
     def _clear_active_job_if_current(self, job_id: str):
         """
@@ -212,6 +245,16 @@ class JobManager:
                     
                     log_debug("Item processed", job_id=job_id, completed=completed_count, success=success_count, errors=error_count)
                     
+                    # Broadcast progress update after each item (real-time callback)
+                    self._broadcast_job_progress(
+                        job_id=job_id,
+                        status=JobStatus.PROCESSING.value,
+                        processed=completed_count,
+                        total=len(items),
+                        success=success_count,
+                        errors=error_count
+                    )
+                    
                     # Log progress every 10 items or on last item
                     if completed_count % 10 == 0 or completed_count == len(items):
                         logging.info(f"[JOB {job_id}] Progress: {completed_count}/{len(items)} items processed "
@@ -228,12 +271,32 @@ class JobManager:
                     job_store.add_job_result(job_id, item, False, str(e))
                     completed_count += 1
                     error_count += 1
+                    
+                    # Broadcast progress update for error case too
+                    self._broadcast_job_progress(
+                        job_id=job_id,
+                        status=JobStatus.PROCESSING.value,
+                        processed=completed_count,
+                        total=len(items),
+                        success=success_count,
+                        errors=error_count
+                    )
             
             # Mark job as completed
             completed_at = time.time()
             log_debug("Job processing complete, updating status", job_id=job_id, success=success_count, errors=error_count)
             job_store.update_job_status(job_id, JobStatus.COMPLETED.value, completed_at=completed_at)
             logging.info(f"[JOB {job_id}] Completed: {success_count} succeeded, {error_count} failed out of {len(items)} items")
+            
+            # Broadcast final completion status
+            self._broadcast_job_progress(
+                job_id=job_id,
+                status=JobStatus.COMPLETED.value,
+                processed=len(items),
+                total=len(items),
+                success=success_count,
+                errors=error_count
+            )
             
             # Clear active job from preferences if this job is the active one
             # This ensures stale job references don't persist after completion
@@ -254,6 +317,16 @@ class JobManager:
                 JobStatus.FAILED.value, 
                 completed_at=completed_at, 
                 error=str(e)
+            )
+            
+            # Broadcast failure status
+            self._broadcast_job_progress(
+                job_id=job_id,
+                status=JobStatus.FAILED.value,
+                processed=completed_count,
+                total=len(items),
+                success=success_count,
+                errors=error_count
             )
             
             # Clear active job from preferences if this job is the active one
@@ -306,6 +379,16 @@ class JobManager:
         completed_at = time.time()
         job_store.update_job_status(job_id, JobStatus.CANCELLED.value, completed_at=completed_at)
         logging.info(f"[JOB {job_id}] Job cancelled (was {job['status']})")
+        
+        # Broadcast cancellation status
+        self._broadcast_job_progress(
+            job_id=job_id,
+            status=JobStatus.CANCELLED.value,
+            processed=job['processed_items'],
+            total=job['total_items'],
+            success=0,  # Don't have detailed success/error counts at this point
+            errors=0
+        )
         
         # Clear active job from preferences if this job is the active one
         self._clear_active_job_if_current(job_id)

@@ -184,15 +184,23 @@ def mark_file_duplicate_wrapper(filepath):
     broadcast_file_processed(filepath, success=True)
     broadcast_cache_updated(rebuild_complete=False)
 
-def cleanup_web_markers_thread():
-    """Periodically clean up old web modified markers"""
-    while True:
-        time.sleep(300)  # Run every 5 minutes
+def cleanup_web_markers_scheduled():
+    """Clean up old web modified markers and reschedule"""
+    try:
         cleanup_web_modified_markers(max_files=100)
+    except Exception as e:
+        logging.error(f"Error cleaning up web markers: {e}")
+    finally:
+        # Reschedule for next run (5 minutes)
+        cleanup_timer = threading.Timer(300.0, cleanup_web_markers_scheduled)
+        cleanup_timer.daemon = True
+        cleanup_timer.start()
 
-# Start cleanup thread
-cleanup_thread = threading.Thread(target=cleanup_web_markers_thread, daemon=True)
-cleanup_thread.start()
+# Start cleanup timer (event-based, not polling)
+cleanup_timer = threading.Timer(300.0, cleanup_web_markers_scheduled)
+cleanup_timer.daemon = True
+cleanup_timer.start()
+logging.info("Web markers cleanup scheduled (every 5 minutes)")
 
 def get_watcher_update_time():
     """Get the last time the watcher updated files"""
@@ -220,28 +228,46 @@ def update_watcher_timestamp():
     except Exception as e:
         logging.error(f"Error updating watcher timestamp: {e}")
 
-def watcher_monitor_thread():
-    """Monitor watcher timestamp and broadcast events when files are processed"""
-    last_watcher_time = get_watcher_update_time()
+class WatcherMonitorHandler(FileSystemEventHandler):
+    """File system event handler to monitor watcher activity marker file"""
     
-    while True:
-        time.sleep(2)  # Check every 2 seconds
-        
-        try:
-            current_watcher_time = get_watcher_update_time()
-            
-            # If watcher timestamp changed, broadcast cache update event
-            if current_watcher_time > last_watcher_time:
-                logging.info(f"Watcher activity detected, broadcasting cache update event")
-                broadcast_cache_updated(rebuild_complete=False)
-                last_watcher_time = current_watcher_time
-                
-        except Exception as e:
-            logging.error(f"Error in watcher monitor thread: {e}")
+    def on_modified(self, event):
+        if not event.is_directory and event.src_path.endswith(CACHE_UPDATE_MARKER):
+            logging.info(f"Watcher activity detected via file system event, broadcasting cache update")
+            broadcast_cache_updated(rebuild_complete=False)
+    
+    def on_created(self, event):
+        if not event.is_directory and event.src_path.endswith(CACHE_UPDATE_MARKER):
+            logging.info(f"Watcher activity detected via file system event, broadcasting cache update")
+            broadcast_cache_updated(rebuild_complete=False)
 
-# Start watcher monitor thread
-watcher_monitor = threading.Thread(target=watcher_monitor_thread, daemon=True)
-watcher_monitor.start()
+def setup_watcher_monitor():
+    """Setup file system watcher to monitor watcher activity marker file"""
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler
+    
+    try:
+        # Ensure config directory exists
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        
+        event_handler = WatcherMonitorHandler()
+        observer = Observer()
+        observer.schedule(event_handler, CONFIG_DIR, recursive=False)
+        observer.start()
+        logging.info(f"Watcher monitor started using file system events on {CONFIG_DIR}")
+        
+        # Return observer so it's not garbage collected
+        return observer
+    except Exception as e:
+        logging.error(f"Error setting up watcher monitor: {e}")
+        return None
+
+# Import watchdog components at module level
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+# Start watcher monitor using file system events instead of polling
+watcher_monitor_observer = setup_watcher_monitor()
 
 def record_cache_change(change_type, old_path=None, new_path=None):
     """Record a file change for incremental cache updates

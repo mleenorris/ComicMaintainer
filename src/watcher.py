@@ -322,9 +322,14 @@ if __name__ == "__main__":
     logging.info(f"Watching directory: {WATCHED_DIR}")
     log_debug("Watcher observer started successfully", watched_dir=WATCHED_DIR)
     
+    # Use an Event object instead of sleep polling
+    # This allows the thread to wait efficiently until interrupted
+    import threading
+    shutdown_event = threading.Event()
+    
     try:
-        while True:
-            time.sleep(1)
+        # Wait for shutdown signal instead of polling with sleep
+        shutdown_event.wait()
     except KeyboardInterrupt:
         logging.info("Keyboard interrupt received, stopping watcher")
         log_debug("Stopping observer due to keyboard interrupt")

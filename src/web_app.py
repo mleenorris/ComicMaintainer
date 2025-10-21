@@ -306,6 +306,21 @@ def load_files_from_store():
         logging.error(f"Error loading files from store: {e}")
         return []
 
+def load_files_with_metadata_from_store():
+    """Load file list with metadata from the file store database
+    
+    Returns:
+        Dictionary mapping file paths to their metadata
+    """
+    try:
+        files_with_metadata = file_store.get_all_files_with_metadata()
+        logging.debug(f"Loaded {len(files_with_metadata)} files with metadata from store")
+        # Convert to dict for fast lookup
+        return {item['filepath']: item for item in files_with_metadata}
+    except Exception as e:
+        logging.error(f"Error loading files with metadata from store: {e}")
+        return {}
+
 def get_comic_files(use_cache=True):
     """Get all comic files using the file store database with optional in-memory caching"""
     if not WATCHED_DIR:
@@ -588,8 +603,7 @@ def rebuild_enriched_cache_async(files, file_list_hash):
         duplicate_files = marker_data.get('duplicate', set())
         
         # Get all file metadata from database in a single query (much faster than os.path calls)
-        file_metadata_list = file_store.get_all_files_with_metadata()
-        file_metadata = {item['filepath']: item for item in file_metadata_list}
+        file_metadata = load_files_with_metadata_from_store()
         
         # Build file list with metadata
         all_files = []

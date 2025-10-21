@@ -1311,8 +1311,10 @@
             .actions-bar {
                 padding: 12px 10px;
                 gap: 6px;
-                flex-wrap: nowrap;
-                overflow-x: auto;
+                flex-wrap: wrap;
+                overflow-x: visible;
+                margin-left: 0;
+                margin-right: 0;
             }
             
             .btn {
@@ -1331,10 +1333,24 @@
                 display: none;
             }
             
+            /* Make action dropdown toggles icon-only on mobile */
+            .action-dropdown-toggle {
+                padding: 10px;
+                font-size: 18px;
+                min-width: 40px;
+                width: 40px;
+                height: 40px;
+                justify-content: center;
+            }
+            
+            .action-dropdown-toggle::after {
+                display: none;
+            }
+            
             .button-group {
                 display: flex;
                 gap: 6px;
-                flex-wrap: nowrap;
+                flex-wrap: wrap;
             }
             
             .button-group .btn {
@@ -1342,7 +1358,7 @@
             }
             
             .button-group:last-of-type {
-                margin-left: 6px;
+                margin-left: 0;
             }
             
             .select-info {

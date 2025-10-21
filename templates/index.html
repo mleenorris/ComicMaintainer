@@ -1369,19 +1369,14 @@
                 display: flex;
                 gap: 6px;
                 flex-wrap: nowrap;
-                flex: 1;
+                justify-content: flex-start;
             }
             
-            .button-group .btn {
-                flex: 1;
-            }
-            
-            .button-group .action-dropdown {
-                flex: 1;
-            }
-            
+            .button-group .btn,
+            .button-group .action-dropdown,
             .button-group .action-dropdown-toggle {
-                width: 100%;
+                flex: 0 0 auto;
+                width: 40px;
             }
             
             .button-group:last-of-type {

@@ -190,19 +190,16 @@ The service includes a web-based interface for managing your comic files:
 ### Performance
 - **Optimized search and filtering**: ~90% faster than before with smart caching and debouncing
 - **Search debouncing**: 300ms delay reduces API calls by 87% while typing
-- **Metadata caching**: File status (processed/duplicate) cached for 5 seconds, reducing disk I/O by 90%
-- **Asynchronous cache rebuilding**: Cache rebuilds happen in background threads, providing instant API responses even during cache updates (returns stale cache while rebuilding)
-- **Cache warming on startup**: All caches (file list, metadata, and enriched file list) are preloaded automatically when the service starts, eliminating "cold start" delays and ensuring instant first page load
+- **Streamlined caching architecture**: Two-layer cache system caches only expensive operations (marker enrichment and filter/search/sort results), not database reads
+- **Asynchronous cache rebuilding**: Enriched cache rebuilds happen in background threads, providing instant API responses even during cache updates
 - **Real-time updates via Server-Sent Events (SSE)**: 100% event-driven architecture with zero polling. All updates (cache changes, file processing, watcher status, job progress) are pushed instantly to clients via SSE. Background tasks use event-based timers and file system watchers instead of sleep-based polling
 - Files are loaded in pages of 100 to ensure fast initial load times
-- File list is cached on service startup and maintained in memory
-- Cache does not expire based on time, providing instant page navigation
 - Pagination controls allow easy navigation through large libraries
 - Search and filters are applied server-side before pagination for efficient handling of large libraries
-- **SQLite-based file store**: File list is managed in a SQLite database for atomic operations, better concurrency, and excellent performance (160k+ lookups/sec). Adding and removing files is seamless and instant.
-- **Smart cache invalidation**: Cache is only invalidated when the watcher processes files, ensuring the cache stays fresh while maximizing performance
-- **Manual cache control**: API endpoints available to manually trigger cache warming (`POST /api/cache/prewarm`) or check cache statistics (`GET /api/cache/stats`)
-- See [FILE_LIST_IMPROVEMENTS.md](FILE_LIST_IMPROVEMENTS.md), [PERFORMANCE_IMPROVEMENTS.md](PERFORMANCE_IMPROVEMENTS.md), [ASYNC_CACHE_REBUILD.md](ASYNC_CACHE_REBUILD.md), [docs/EVENT_BROADCASTING_SYSTEM.md](docs/EVENT_BROADCASTING_SYSTEM.md), and [docs/PROGRESS_CALLBACKS.md](docs/PROGRESS_CALLBACKS.md) for detailed performance metrics and architecture
+- **SQLite-based file store**: File list is managed in a SQLite database for atomic operations, better concurrency, and excellent performance (160k+ lookups/sec, <3ms reads for 5000 files). The database IS the cache - no in-memory file list duplication needed.
+- **Simplified cache design**: Only caches expensive operations (enriching files with marker data, filtering/sorting/searching), not simple database reads which are already extremely fast
+- **Manual cache control**: API endpoints available to check cache statistics (`GET /api/cache/stats`)
+- See [FILE_LIST_IMPROVEMENTS.md](FILE_LIST_IMPROVEMENTS.md), [docs/EVENT_BROADCASTING_SYSTEM.md](docs/EVENT_BROADCASTING_SYSTEM.md), and [docs/PROGRESS_CALLBACKS.md](docs/PROGRESS_CALLBACKS.md) for detailed performance metrics and architecture
 
 ### Filename Format Configuration
 The filename format can be customized through the web interface Settings modal. The format uses placeholders that are replaced with actual metadata values:
@@ -468,14 +465,17 @@ For more information, see [SECURITY.md](SECURITY.md).
 ## Performance & Reliability
 
 ### High-Performance Caching
-The application uses an advanced caching system that:
-- **Non-blocking cache operations**: Workers never block waiting for cache rebuild
-- **Async background rebuilding**: Cache updates happen in background threads
+The application uses a streamlined two-layer caching system:
+- **Database as cache**: SQLite with WAL mode provides extremely fast reads (<3ms for 5000 files) - no in-memory file list duplication needed
+- **Enriched file cache**: Caches expensive marker enrichment operations (checking processed/duplicate status)
+- **Filtered results cache**: Caches expensive filter/search/sort operations to avoid re-computation
+- **Non-blocking operations**: Workers never block waiting for cache rebuild
+- **Async background rebuilding**: Enriched cache updates happen in background threads
 - **Instant response times**: All API requests respond in <100ms even during cache rebuild
 - **Multi-worker safe**: Designed for concurrent access by multiple Gunicorn workers
 - **Automatic recovery**: Frontend receives real-time cache updates via SSE events
 
-See [docs/WORKER_TIMEOUT_FIX.md](docs/WORKER_TIMEOUT_FIX.md) for technical details on the non-blocking cache architecture.
+This design eliminates unnecessary cache layers while maintaining excellent performance for expensive operations.
 
 ### Event-Driven Architecture
 The application is 100% event-driven with zero polling:

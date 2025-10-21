@@ -3519,10 +3519,14 @@
             // SSE provides real-time updates, polling has been completely removed
             console.log(`[JOB ${jobId}] Tracking job status via SSE events: ${title}`);
             
-            // Store active job ID on server and in local variable
-            await setActiveJobOnServer(jobId, title);
+            // Set active job state IMMEDIATELY to avoid race condition where
+            // SSE events arrive before this completes. This ensures we don't
+            // miss any events that arrive while setActiveJobOnServer is in flight.
             hasActiveJob = true;
             currentJobId = jobId;  // Track for cancellation
+            
+            // Store active job ID on server (async, but job tracking already enabled)
+            await setActiveJobOnServer(jobId, title);
             
             // Fetch initial job state to display immediately
             try {

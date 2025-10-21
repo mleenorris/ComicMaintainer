@@ -187,7 +187,7 @@ The service includes a web-based interface for managing your comic files:
 - **Metadata caching**: File status (processed/duplicate) cached for 5 seconds, reducing disk I/O by 90%
 - **Asynchronous cache rebuilding**: Cache rebuilds happen in background threads, providing instant API responses even during cache updates (returns stale cache while rebuilding)
 - **Cache warming on startup**: All caches (file list, metadata, and enriched file list) are preloaded automatically when the service starts, eliminating "cold start" delays and ensuring instant first page load
-- **Real-time updates via Server-Sent Events (SSE)**: ~90% reduction in network requests by replacing polling with push-based event notifications. Cache updates, file processing, watcher status changes, and **job progress updates** are instantly pushed to all connected clients
+- **Real-time updates via Server-Sent Events (SSE)**: 100% event-driven architecture with zero polling. All updates (cache changes, file processing, watcher status, job progress) are pushed instantly to clients via SSE. Background tasks use event-based timers and file system watchers instead of sleep-based polling
 - Files are loaded in pages of 100 to ensure fast initial load times
 - File list is cached on service startup and maintained in memory
 - Cache does not expire based on time, providing instant page navigation
@@ -462,9 +462,18 @@ The application uses an advanced caching system that:
 - **Async background rebuilding**: Cache updates happen in background threads
 - **Instant response times**: All API requests respond in <100ms even during cache rebuild
 - **Multi-worker safe**: Designed for concurrent access by multiple Gunicorn workers
-- **Automatic recovery**: Frontend automatically polls and refreshes when cache is ready
+- **Automatic recovery**: Frontend receives real-time cache updates via SSE events
 
 See [docs/WORKER_TIMEOUT_FIX.md](docs/WORKER_TIMEOUT_FIX.md) for technical details on the non-blocking cache architecture.
+
+### Event-Driven Architecture
+The application is 100% event-driven with zero polling:
+- **Frontend**: All updates received via Server-Sent Events (SSE) - no polling loops
+- **Backend**: Uses file system watchers (watchdog) and event-based timers instead of sleep polling
+- **Watcher**: Main loop uses Event.wait() instead of sleep(1) polling
+- **Cleanup tasks**: Scheduled with threading.Timer instead of infinite sleep loops
+- **Job tracking**: Real-time progress updates via SSE, no fallback polling needed
+- **Resource efficient**: Eliminates unnecessary CPU usage from polling loops
 
 ## Requirements
 - Docker

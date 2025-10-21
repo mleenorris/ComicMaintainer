@@ -27,6 +27,8 @@ from event_broadcaster import (
     broadcast_cache_updated, broadcast_watcher_status,
     broadcast_file_processed, broadcast_job_updated
 )
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 CONFIG_DIR = '/Config'
 LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
@@ -243,9 +245,6 @@ class WatcherMonitorHandler(FileSystemEventHandler):
 
 def setup_watcher_monitor():
     """Setup file system watcher to monitor watcher activity marker file"""
-    from watchdog.observers import Observer
-    from watchdog.events import FileSystemEventHandler
-    
     try:
         # Ensure config directory exists
         os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -261,10 +260,6 @@ def setup_watcher_monitor():
     except Exception as e:
         logging.error(f"Error setting up watcher monitor: {e}")
         return None
-
-# Import watchdog components at module level
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
 
 # Start watcher monitor using file system events instead of polling
 watcher_monitor_observer = setup_watcher_monitor()

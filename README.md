@@ -80,12 +80,12 @@ docker run -d \
 ```
 
 - Replace `<host_dir_to_watch>` with the path to your comics folder.
-- Replace `<host_dir_for_config>` with the path to store persistent configuration and cache data.
+- Replace `<host_dir_for_config>` with the path to store persistent configuration data.
 - `WATCHED_DIR` **must** be set to the directory to watch (usually `/watched_dir` if using the example above).
 - Optionally, mount a host directory to `/duplicates` to persist duplicates.
 - **Required**: Mount a host directory to `/Config` to persist:
   - Unified database (`/Config/store/comicmaintainer.db`) containing:
-    - File list cache for improved performance
+    - File list for fast access
     - Processing markers (processed files, duplicates, web-modified files)
     - Metadata (last sync timestamp, configuration)
   - Configuration settings (filename format, watcher enabled, log rotation)
@@ -129,13 +129,13 @@ docker run -d \
   iceburn1/comictagger-watcher:latest
 ```
 
-**Note:** GitHub issue creation is rate-limited internally to prevent duplicate issues for the same error. The error handling system caches up to 100 unique errors to avoid creating duplicate issues.
+**Note:** GitHub issue creation creates detailed error reports automatically when errors occur.
 
 ## Web Interface
 The service includes a web-based interface for managing your comic files:
 
 ### Features
-- **Optimized for Large Libraries**: Pagination (100 files per page) and caching ensure fast loading even with thousands of files
+- **Optimized for Large Libraries**: Pagination (100 files per page) and fast SQLite database ensure quick loading even with thousands of files
 - **Search Functionality**: Find files across all pages by searching file names and paths - pagination automatically adjusts to show only matching results
 - **Asynchronous Processing**: Files are processed concurrently in the background for faster completion
 - **Real-time Progress Updates**: Job progress is pushed via Server-Sent Events (SSE) for instant feedback without polling
@@ -173,7 +173,7 @@ The service includes a web-based interface for managing your comic files:
     - **Settings**: Configure the filename format for renamed files, theme, watcher, and log rotation
     - **View Logs**: View application logs directly in the browser
     - **Toggle Theme**: Switch between light and dark mode
-    - **Refresh**: Update the file list (automatically clears cache)
+    - **Refresh**: Update the file list
     - **Scan Unmarked**: See a count of processed vs unprocessed files
 12. Use the **expand/collapse button (▼/▶)** at the top of the file list to expand or collapse all folders at once
 13. Use the filter buttons to view:
@@ -188,17 +188,13 @@ The service includes a web-based interface for managing your comic files:
     - 🔁 = duplicate file
 
 ### Performance
-- **Optimized search and filtering**: ~90% faster than before with smart caching and debouncing
+- **Optimized search and filtering**: Server-side processing with efficient database queries
 - **Search debouncing**: 300ms delay reduces API calls by 87% while typing
-- **Streamlined caching architecture**: Two-layer cache system caches only expensive operations (marker enrichment and filter/search/sort results), not database reads
-- **Asynchronous cache rebuilding**: Enriched cache rebuilds happen in background threads, providing instant API responses even during cache updates
-- **Real-time updates via Server-Sent Events (SSE)**: 100% event-driven architecture with zero polling. All updates (cache changes, file processing, watcher status, job progress) are pushed instantly to clients via SSE. Background tasks use event-based timers and file system watchers instead of sleep-based polling
+- **Real-time updates via Server-Sent Events (SSE)**: 100% event-driven architecture with zero polling. All updates (file processing, watcher status, job progress) are pushed instantly to clients via SSE. Background tasks use event-based timers and file system watchers instead of sleep-based polling
 - Files are loaded in pages of 100 to ensure fast initial load times
 - Pagination controls allow easy navigation through large libraries
 - Search and filters are applied server-side before pagination for efficient handling of large libraries
-- **SQLite-based file store**: File list is managed in a SQLite database for atomic operations, better concurrency, and excellent performance (160k+ lookups/sec, <3ms reads for 5000 files). The database IS the cache - no in-memory file list duplication needed.
-- **Simplified cache design**: Only caches expensive operations (enriching files with marker data, filtering/sorting/searching), not simple database reads which are already extremely fast
-- **Manual cache control**: API endpoints available to check cache statistics (`GET /api/cache/stats`)
+- **SQLite-based file store**: File list is managed in a SQLite database for atomic operations, better concurrency, and excellent performance (160k+ lookups/sec, <3ms reads for 5000 files)
 - See [FILE_LIST_IMPROVEMENTS.md](FILE_LIST_IMPROVEMENTS.md), [docs/EVENT_BROADCASTING_SYSTEM.md](docs/EVENT_BROADCASTING_SYSTEM.md), and [docs/PROGRESS_CALLBACKS.md](docs/PROGRESS_CALLBACKS.md) for detailed performance metrics and architecture
 
 ### Filename Format Configuration
@@ -314,11 +310,9 @@ Files are processed and updated when:
 
 ## Production Server
 - The web interface runs on **Gunicorn**, a production-ready WSGI server for Python web applications
-- Configured with 1 worker process to ensure job state consistency (jobs stored in-memory)
-- Concurrent file processing provided by ThreadPoolExecutor (4 threads) within the worker
+- Configured with multiple worker processes for better concurrency
+- Concurrent file processing provided by ThreadPoolExecutor (4 threads) within each worker
 - 600-second timeout (10 minutes) to accommodate batch processing operations on large libraries
-- **Cache coordination**: File-based locking prevents cache rebuild conflicts
-- **Non-blocking cache rebuilds**: Serves stale cache instead of waiting when cache is being rebuilt
 - No development server warnings - ready for production deployment
 
 ## Data Persistence
@@ -347,9 +341,6 @@ When you mount `/Config`, the following data is preserved:
    - Located in `/Config/Log/`
    - `ComicMaintainer.log` with automatic rotation
 
-5. **Cache Files** - Performance optimization data
-   - In-memory caches backed by SQLite databases for reliability
-
 ### Example with Persistence
 
 ```sh
@@ -363,7 +354,7 @@ docker run -d \
   iceburn1/comictagger-watcher:latest
 ```
 
-**Important**: The `/host/config` directory on your host will contain the marker database, configuration, logs, and cache. Make sure it's backed up if you want to preserve your processing history and settings.
+**Important**: The `/host/config` directory on your host will contain the marker database, configuration, and logs. Make sure it's backed up if you want to preserve your processing history and settings.
 
 ### Migrating from Previous Versions
 
@@ -393,7 +384,7 @@ If upgrading from a version where configuration and logs were stored in `/app` o
 - **Debug Mode**: Enable extensive debug logging by setting `DEBUG_MODE=true` environment variable
 - When enabled, debug logs include:
   - Function entry and exit with parameters and return values
-  - Detailed operation tracking (file checks, cache operations, metadata processing)
+  - Detailed operation tracking (file checks, database operations, metadata processing)
   - Variable values and state at key decision points
   - Performance insights for troubleshooting
 - Debug logs are written to the same log file as regular logs but with DEBUG level
@@ -409,8 +400,6 @@ If upgrading from a version where configuration and logs were stored in `/app` o
   - Additional diagnostic information (file paths, operation details)
   - Automatic assignment to configured user (default: `copilot`)
   - Tagged with `bug` and `auto-generated` labels
-- Duplicate detection prevents creating multiple issues for the same error
-- Rate limiting built-in to avoid API abuse
 - Example: `docker run -e GITHUB_TOKEN=ghp_xxx -e GITHUB_ISSUE_ASSIGNEE=username ...`
 
 ## GitHub Actions / CI
@@ -464,18 +453,15 @@ For more information, see [SECURITY.md](SECURITY.md).
 
 ## Performance & Reliability
 
-### High-Performance Caching
-The application uses a streamlined two-layer caching system:
-- **Database as cache**: SQLite with WAL mode provides extremely fast reads (<3ms for 5000 files) - no in-memory file list duplication needed
-- **Enriched file cache**: Caches expensive marker enrichment operations (checking processed/duplicate status)
-- **Filtered results cache**: Caches expensive filter/search/sort operations to avoid re-computation
-- **Non-blocking operations**: Workers never block waiting for cache rebuild
-- **Async background rebuilding**: Enriched cache updates happen in background threads
-- **Instant response times**: All API requests respond in <100ms even during cache rebuild
+### High-Performance Database
+The application uses SQLite for fast, reliable data access:
+- **SQLite with WAL mode**: Provides extremely fast reads (<3ms for 5000 files) with excellent concurrency
+- **Batch operations**: Marker data (processed/duplicate status) is fetched in batch for efficiency
+- **On-demand processing**: Filter/search/sort operations are computed as needed
 - **Multi-worker safe**: Designed for concurrent access by multiple Gunicorn workers
-- **Automatic recovery**: Frontend receives real-time cache updates via SSE events
+- **Real-time updates**: Frontend receives instant updates via Server-Sent Events (SSE)
 
-This design eliminates unnecessary cache layers while maintaining excellent performance for expensive operations.
+This design provides excellent performance through efficient database queries without complex caching layers.
 
 ### Event-Driven Architecture
 The application is 100% event-driven with zero polling:

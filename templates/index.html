@@ -2318,7 +2318,9 @@
                 // Allow a brief moment for final updates, then finalize
                 setTimeout(async () => {
                     if (status === 'completed') {
-                        updateProgressModal('Completed!', `All ${total} items processed (${successCount} succeeded, ${errorCount} failed)`, 'success');
+                        // Update modal title and call completeProgress to show close button
+                        document.getElementById('progressTitle').textContent = `Completed! All ${total} items processed (${successCount} succeeded, ${errorCount} failed)`;
+                        completeProgress();
                         await clearActiveJobOnServer();
                         hasActiveJob = false;
                         setTimeout(() => {
@@ -2326,12 +2328,14 @@
                             loadFiles(currentPage, true);
                         }, 2000);
                     } else if (status === 'failed') {
-                        updateProgressModal('Failed', 'Job processing failed', 'error');
+                        document.getElementById('progressTitle').textContent = 'Failed - Job processing failed';
+                        completeProgress();
                         await clearActiveJobOnServer();
                         hasActiveJob = false;
                         setTimeout(closeProgressModal, 3000);
                     } else if (status === 'cancelled') {
-                        updateProgressModal('Cancelled', 'Job was cancelled', 'warning');
+                        document.getElementById('progressTitle').textContent = 'Cancelled - Job was cancelled';
+                        completeProgress();
                         await clearActiveJobOnServer();
                         hasActiveJob = false;
                         setTimeout(closeProgressModal, 2000);

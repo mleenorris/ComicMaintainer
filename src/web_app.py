@@ -157,6 +157,9 @@ def mark_file_processed_wrapper(filepath, original_filepath=None):
     """Mark a file as processed and invalidate relevant caches"""
     mark_file_processed(filepath, original_filepath=original_filepath)
     
+    # Update watcher timestamp to invalidate caches
+    update_watcher_timestamp()
+    
     # Invalidate enriched file cache
     with enriched_file_cache_lock:
         enriched_file_cache['files'] = None
@@ -174,6 +177,9 @@ def mark_file_processed_wrapper(filepath, original_filepath=None):
 def mark_file_duplicate_wrapper(filepath):
     """Mark a file as duplicate and invalidate relevant caches"""
     mark_file_duplicate(filepath)
+    
+    # Update watcher timestamp to invalidate caches
+    update_watcher_timestamp()
     
     # Invalidate enriched file cache
     with enriched_file_cache_lock:

@@ -80,12 +80,14 @@ docker run -d \
 - `WATCHED_DIR` **must** be set to the directory to watch (usually `/watched_dir` if using the example above).
 - Optionally, mount a host directory to `/duplicates` to persist duplicates.
 - **Required**: Mount a host directory to `/Config` to persist:
-  - Marker database (processed files, duplicates, web-modified files stored in SQLite)
+  - Unified database (`/Config/store/comicmaintainer.db`) containing:
+    - File list cache for improved performance
+    - Processing markers (processed files, duplicates, web-modified files)
+    - Metadata (last sync timestamp, configuration)
   - Configuration settings (filename format, watcher enabled, log rotation)
   - User preferences (theme, pagination settings) stored in SQLite
   - Active job tracking for batch processing resumption
   - Log files (stored in `/Config/Log/`)
-  - File list cache for improved performance
 - The `-p 5000:5000` flag exposes the web interface on port 5000.
 - Set `PUID` and `PGID` to match your host user for proper file permissions (use `id -u` and `id -g` on Linux/macOS).
 - Access the web interface at `http://localhost:5000`

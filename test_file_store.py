@@ -20,12 +20,18 @@ TEST_CONFIG_DIR = tempfile.mkdtemp(prefix='test_config_')
 os.environ['CONFIG_DIR_OVERRIDE'] = TEST_CONFIG_DIR
 
 import file_store
+import unified_store
 
-# Override CONFIG_DIR in file_store module
+# Override CONFIG_DIR in unified_store module (which file_store wraps)
+unified_store.CONFIG_DIR = TEST_CONFIG_DIR
+unified_store.STORE_DIR = os.path.join(TEST_CONFIG_DIR, 'store')
+unified_store.DB_PATH = os.path.join(unified_store.STORE_DIR, 'comicmaintainer.db')
+unified_store._db_initialized = False
+
+# Update file_store references
 file_store.CONFIG_DIR = TEST_CONFIG_DIR
-file_store.FILE_STORE_DIR = os.path.join(TEST_CONFIG_DIR, 'file_store')
-file_store.DB_PATH = os.path.join(file_store.FILE_STORE_DIR, 'files.db')
-file_store._db_initialized = False
+file_store.FILE_STORE_DIR = unified_store.STORE_DIR
+file_store.DB_PATH = unified_store.DB_PATH
 
 
 def test_basic_operations():

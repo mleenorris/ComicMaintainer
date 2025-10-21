@@ -17,6 +17,7 @@ from markers import (
     is_file_web_modified, mark_file_web_modified, clear_file_web_modified,
     cleanup_web_modified_markers, get_all_marker_data
 )
+import file_store
 from job_manager import get_job_manager, JobResult
 from preferences_store import (
     get_preference, set_preference, get_all_preferences,
@@ -64,10 +65,12 @@ app = Flask(__name__)
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
 CACHE_UPDATE_MARKER = '.cache_update'
-CACHE_CHANGES_FILE = '.cache_changes'
 CACHE_REBUILD_LOCK = '.cache_rebuild_lock'
 
-# Cache for file list to improve performance on large libraries
+# Initialize file store on startup
+file_store.init_db()
+
+# In-memory cache for file list (backed by SQLite)
 file_list_cache = {
     'files': None,
     'timestamp': 0,
@@ -243,161 +246,78 @@ def watcher_monitor_thread():
 watcher_monitor = threading.Thread(target=watcher_monitor_thread, daemon=True)
 watcher_monitor.start()
 
-def record_cache_change(change_type, old_path=None, new_path=None):
-    """Record a file change for incremental cache updates
+def record_file_change(change_type, old_path=None, new_path=None):
+    """Record a file change directly in the file store
     
     Args:
         change_type: 'add', 'remove', or 'rename'
         old_path: Original file path (for 'remove' and 'rename')
         new_path: New file path (for 'add' and 'rename')
     """
-    # Ensure config directory exists
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    
-    changes_file = os.path.join(CONFIG_DIR, CACHE_CHANGES_FILE)
-    
     try:
-        change_entry = {
-            'type': change_type,
-            'old_path': old_path,
-            'new_path': new_path,
-            'timestamp': time.time()
-        }
+        if change_type == 'add' and new_path:
+            file_store.add_file(new_path)
+            logging.info(f"Added file to store: {new_path}")
+        elif change_type == 'remove' and old_path:
+            file_store.remove_file(old_path)
+            logging.info(f"Removed file from store: {old_path}")
+        elif change_type == 'rename' and old_path and new_path:
+            file_store.rename_file(old_path, new_path)
+            logging.info(f"Renamed file in store: {old_path} -> {new_path}")
         
+        # Invalidate in-memory cache to force reload from database
         with cache_lock:
-            # Append the change to the file
-            with open(changes_file, 'a') as f:
-                f.write(json.dumps(change_entry) + '\n')
+            file_list_cache['files'] = None
     except Exception as e:
-        logging.error(f"Error recording cache change: {e}")
+        logging.error(f"Error recording file change: {e}")
 
-def apply_cache_changes():
-    """Apply pending cache changes incrementally instead of invalidating entire cache
+def load_files_from_store():
+    """Load file list from the file store database
     
     Returns:
-        True if changes were applied, False if cache needs full rebuild
+        List of file paths sorted alphabetically
     """
-    if file_list_cache['files'] is None:
-        return False
-    
-    changes_file = os.path.join(CONFIG_DIR, CACHE_CHANGES_FILE)
-    
-    if not os.path.exists(changes_file):
-        return True  # No changes to apply
-    
     try:
-        with cache_lock:
-            # Read all pending changes
-            with open(changes_file, 'r') as f:
-                lines = f.readlines()
-            
-            if not lines:
-                return True
-            
-            # Get current cache
-            cached_files = file_list_cache['files']
-            if cached_files is None:
-                return False
-            
-            # Convert to set for faster operations
-            cached_set = set(cached_files)
-            
-            # Apply each change
-            for line in lines:
-                try:
-                    change = json.loads(line.strip())
-                    change_type = change.get('type')
-                    old_path = change.get('old_path')
-                    new_path = change.get('new_path')
-                    
-                    if change_type == 'add' and new_path:
-                        # Add new file if it exists and not already in cache
-                        if os.path.exists(new_path) and new_path not in cached_set:
-                            cached_set.add(new_path)
-                            logging.info(f"Cache: Added {new_path}")
-                    
-                    elif change_type == 'remove' and old_path:
-                        # Remove file from cache
-                        if old_path in cached_set:
-                            cached_set.discard(old_path)
-                            logging.info(f"Cache: Removed {old_path}")
-                    
-                    elif change_type == 'rename' and old_path and new_path:
-                        # Remove old path and add new path
-                        if old_path in cached_set:
-                            cached_set.discard(old_path)
-                        if os.path.exists(new_path):
-                            cached_set.add(new_path)
-                            logging.info(f"Cache: Renamed {old_path} -> {new_path}")
-                
-                except json.JSONDecodeError as e:
-                    logging.warning(f"Invalid cache change entry: {line.strip()}")
-                except Exception as e:
-                    logging.error(f"Error applying cache change: {e}")
-            
-            # Update cache with modified list (sorted)
-            file_list_cache['files'] = sorted(list(cached_set))
-            file_list_cache['timestamp'] = time.time()
-            
-            # Clear the changes file after applying
-            try:
-                os.remove(changes_file)
-            except:
-                pass
-            
-            logging.info(f"Applied {len(lines)} cache changes incrementally")
-            return True
-    
+        files = file_store.get_all_files()
+        logging.debug(f"Loaded {len(files)} files from store")
+        return files
     except Exception as e:
-        logging.error(f"Error applying cache changes: {e}")
-        return False
+        logging.error(f"Error loading files from store: {e}")
+        return []
 
 def get_comic_files(use_cache=True):
-    """Get all comic files in the watched directory with optional caching"""
+    """Get all comic files using the file store database with optional in-memory caching"""
     if not WATCHED_DIR:
         return []
     
-    # Check cache if enabled
+    # Check in-memory cache if enabled
     if use_cache:
         with cache_lock:
             watcher_update_time = get_watcher_update_time()
             
             # Check if watcher has changes since cache was created
             if watcher_update_time > file_list_cache['watcher_update_time']:
-                # Try to apply incremental changes first
-                if file_list_cache['files'] is not None:
-                    if apply_cache_changes():
-                        # Successfully applied changes incrementally
-                        file_list_cache['watcher_update_time'] = watcher_update_time
-                        return file_list_cache['files']
-                    else:
-                        # Failed to apply changes, need full rebuild
-                        logging.info("Cache: Incremental update failed, rebuilding")
-                
-                # If no cache or incremental update failed, will rebuild below
+                # Invalidate cache when watcher has updated files
+                logging.info("Cache: Watcher update detected, invalidating cache")
                 file_list_cache['files'] = None
                 file_list_cache['watcher_update_time'] = watcher_update_time
             
-            # Return cached files if valid (no time-based expiration)
+            # Return cached files if valid
             if file_list_cache['files'] is not None:
                 return file_list_cache['files']
     
-    # Build file list
-    logging.info("Cache: Building full file list")
-    files = []
-    for ext in ['*.cbz', '*.cbr', '*.CBZ', '*.CBR']:
-        files.extend(glob.glob(os.path.join(WATCHED_DIR, '**', ext), recursive=True))
+    # Load from file store database
+    logging.info("Cache: Loading file list from database")
+    files = load_files_from_store()
     
-    sorted_files = sorted(files)
-    
-    # Update cache
+    # Update in-memory cache
     if use_cache:
         with cache_lock:
-            file_list_cache['files'] = sorted_files
+            file_list_cache['files'] = files
             file_list_cache['timestamp'] = time.time()
             file_list_cache['watcher_update_time'] = get_watcher_update_time()
     
-    return sorted_files
+    return files
 
 def clear_file_cache():
     """Clear the file list cache"""
@@ -410,9 +330,9 @@ def clear_file_cache():
         filtered_results_cache.clear()
 
 def handle_file_rename_in_cache(original_path, final_path):
-    """Handle file rename in cache - record change if file was actually renamed"""
+    """Handle file rename in file store - record change if file was actually renamed"""
     if original_path != final_path:
-        record_cache_change('rename', old_path=original_path, new_path=final_path)
+        record_file_change('rename', old_path=original_path, new_path=final_path)
         update_watcher_timestamp()
         
         # Clear filtered results cache since file list changed
@@ -2383,8 +2303,8 @@ def delete_single_file(filepath):
         unmark_file_processed(full_path)
         unmark_file_duplicate(full_path)
         
-        # Update cache incrementally instead of clearing it
-        record_cache_change('remove', old_path=full_path)
+        # Update file store
+        record_file_change('remove', old_path=full_path)
         update_watcher_timestamp()
         
         logging.info(f"Deleted file via web interface: {full_path}")
@@ -2594,6 +2514,17 @@ def initialize_cache():
     
     try:
         logging.info("Initializing caches on startup...")
+        
+        # Sync file store with filesystem if not recently synced
+        last_sync = file_store.get_last_sync_timestamp()
+        current_time = time.time()
+        # Sync if never synced or last sync was more than 5 minutes ago
+        if last_sync is None or (current_time - last_sync) > 300:
+            logging.info("Syncing file store with filesystem...")
+            added, removed, updated = file_store.sync_with_filesystem(WATCHED_DIR)
+            logging.info(f"File store sync complete: +{added} new files, -{removed} deleted files, ~{updated} updated files")
+        else:
+            logging.info(f"File store was recently synced ({int(current_time - last_sync)}s ago), skipping sync")
         
         # Load the file list cache quickly
         logging.info("Building file list cache...")

@@ -9,6 +9,7 @@ from error_handler import (
     setup_debug_logging, log_debug, log_error_with_context,
     log_function_entry, log_function_exit
 )
+import file_store
 
 CONFIG_DIR = '/Config'
 LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
@@ -30,8 +31,10 @@ logging.basicConfig(
 setup_debug_logging()
 log_debug("process_file module initialized")
 
+# Initialize file store
+file_store.init_db()
+
 CACHE_UPDATE_MARKER = '.cache_update'
-CACHE_CHANGES_FILE = '.cache_changes'
 
 def update_watcher_timestamp():
     """Update the watcher cache invalidation timestamp"""
@@ -58,45 +61,33 @@ def update_watcher_timestamp():
         )
         logging.error(f"Error updating watcher timestamp: {e}")
 
-def record_cache_change(change_type, old_path=None, new_path=None):
-    """Record a file change for incremental cache updates
+def record_file_change(change_type, old_path=None, new_path=None):
+    """Record a file change directly in the file store
     
     Args:
         change_type: 'add', 'remove', or 'rename'
         old_path: Original file path (for 'remove' and 'rename')
         new_path: New file path (for 'add' and 'rename')
     """
-    log_function_entry("record_cache_change", change_type=change_type, old_path=old_path, new_path=new_path)
-    
-    # Ensure config directory exists
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    
-    changes_file = os.path.join(CONFIG_DIR, CACHE_CHANGES_FILE)
+    log_function_entry("record_file_change", change_type=change_type, old_path=old_path, new_path=new_path)
     
     try:
-        import json
-        import time
+        if change_type == 'add' and new_path:
+            file_store.add_file(new_path)
+            logging.info(f"Added file to store: {new_path}")
+        elif change_type == 'remove' and old_path:
+            file_store.remove_file(old_path)
+            logging.info(f"Removed file from store: {old_path}")
+        elif change_type == 'rename' and old_path and new_path:
+            file_store.rename_file(old_path, new_path)
+            logging.info(f"Renamed file in store: {old_path} -> {new_path}")
         
-        change_entry = {
-            'type': change_type,
-            'old_path': old_path,
-            'new_path': new_path,
-            'timestamp': time.time()
-        }
-        
-        log_debug("Writing cache change entry", entry=change_entry)
-        
-        # Append the change to the file
-        with open(changes_file, 'a') as f:
-            f.write(json.dumps(change_entry) + '\n')
-        
-        logging.info(f"Recorded cache change: {change_type} {old_path or ''} -> {new_path or ''}")
-        log_function_exit("record_cache_change", result="success")
+        log_function_exit("record_file_change", result="success")
     except Exception as e:
         log_error_with_context(
             e,
-            context=f"Recording cache change in process_file: {change_type}",
-            additional_info={"old_path": old_path, "new_path": new_path, "changes_file": changes_file}
+            context=f"Recording file change in process_file: {change_type}",
+            additional_info={"old_path": old_path, "new_path": new_path}
         )
         logging.error(f"Error recording cache change: {e}")
 
@@ -475,8 +466,8 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
                         os.rename(filepath, newFilePath)
                         final_filepath = newFilePath
                         log_debug("Successfully renamed file", new_path=final_filepath)
-                        # Record the rename for incremental cache update
-                        record_cache_change('rename', old_path=filepath, new_path=newFilePath)
+                        # Record the rename in file store
+                        record_file_change('rename', old_path=filepath, new_path=newFilePath)
                     except Exception as e:
                         log_error_with_context(
                             e,

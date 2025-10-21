@@ -13,13 +13,16 @@ from error_handler import (
     setup_debug_logging, log_debug, log_error_with_context,
     log_function_entry, log_function_exit
 )
+import file_store
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
 CONFIG_DIR = '/Config'
 LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
 PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
 CACHE_UPDATE_MARKER = '.cache_update'
-CACHE_CHANGES_FILE = '.cache_changes'
+
+# Initialize file store on startup
+file_store.init_db()
 
 # Ensure log directory exists
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -58,39 +61,29 @@ log_debug("Watcher module initialized", watched_dir=WATCHED_DIR, process_script=
 # Debounce settings
 DEBOUNCE_SECONDS = 30
 
-def record_cache_change(change_type, old_path=None, new_path=None):
-    """Record a file change for incremental cache updates"""
-    log_function_entry("record_cache_change", change_type=change_type, old_path=old_path, new_path=new_path)
-    
-    # Ensure config directory exists
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    
-    changes_file = os.path.join(CONFIG_DIR, CACHE_CHANGES_FILE)
+def record_file_change(change_type, old_path=None, new_path=None):
+    """Record a file change directly in the file store"""
+    log_function_entry("record_file_change", change_type=change_type, old_path=old_path, new_path=new_path)
     
     try:
-        import json
+        if change_type == 'add' and new_path:
+            file_store.add_file(new_path)
+            logging.info(f"Added file to store: {new_path}")
+        elif change_type == 'remove' and old_path:
+            file_store.remove_file(old_path)
+            logging.info(f"Removed file from store: {old_path}")
+        elif change_type == 'rename' and old_path and new_path:
+            file_store.rename_file(old_path, new_path)
+            logging.info(f"Renamed file in store: {old_path} -> {new_path}")
         
-        change_entry = {
-            'type': change_type,
-            'old_path': old_path,
-            'new_path': new_path,
-            'timestamp': time.time()
-        }
-        
-        log_debug("Writing cache change entry", entry=change_entry)
-        
-        with open(changes_file, 'a') as f:
-            f.write(json.dumps(change_entry) + '\n')
-        
-        logging.info(f"Recorded cache change: {change_type} {old_path or ''} -> {new_path or ''}")
-        log_function_exit("record_cache_change", result="success")
+        log_function_exit("record_file_change", result="success")
     except Exception as e:
         log_error_with_context(
             e,
-            context=f"Recording cache change: {change_type}",
-            additional_info={"old_path": old_path, "new_path": new_path, "changes_file": changes_file}
+            context=f"Recording file change: {change_type}",
+            additional_info={"old_path": old_path, "new_path": new_path}
         )
-        logging.error(f"Error recording cache change: {e}")
+        logging.error(f"Error recording file change: {e}")
 
 def update_watcher_timestamp():
     """Update the watcher cache invalidation timestamp"""
@@ -295,22 +288,15 @@ class ChangeHandler(FileSystemEventHandler):
                     clear_file_web_modified(event.src_path)
                     return
                 
-                # Record the deletion for incremental cache update
-                log_debug("Recording cache change for deletion", path=event.src_path)
-                record_cache_change('remove', old_path=event.src_path)
+                # Record the deletion in file store
+                log_debug("Recording file change for deletion", path=event.src_path)
+                record_file_change('remove', old_path=event.src_path)
                 update_watcher_timestamp()
 
 if __name__ == "__main__":
     log_debug("Watcher starting", watched_dir=WATCHED_DIR)
     
-    event_handler = ChangeHandler()
-    observer = Observer()
-    
-    if WATCHED_DIR:
-        log_debug("Scheduling observer", path=WATCHED_DIR, recursive=True)
-        observer.schedule(event_handler, WATCHED_DIR, recursive=True)
-        observer.start()
-    else:
+    if not WATCHED_DIR:
         logging.error("WATCHED_DIR environment variable is not set. Exiting.")
         log_error_with_context(
             ValueError("WATCHED_DIR not set"),
@@ -318,6 +304,23 @@ if __name__ == "__main__":
             additional_info={"env_vars": dict(os.environ)}
         )
         sys.exit(1)
+    
+    # Perform initial filesystem sync to populate/update file store
+    logging.info("Performing initial filesystem sync...")
+    log_debug("Starting filesystem sync")
+    added, removed, updated = file_store.sync_with_filesystem(WATCHED_DIR)
+    logging.info(f"Initial sync complete: +{added} new files, -{removed} deleted files, ~{updated} updated files")
+    log_debug("Filesystem sync complete", added=added, removed=removed, updated=updated)
+    
+    # Update watcher timestamp after initial sync
+    update_watcher_timestamp()
+    
+    event_handler = ChangeHandler()
+    observer = Observer()
+    
+    log_debug("Scheduling observer", path=WATCHED_DIR, recursive=True)
+    observer.schedule(event_handler, WATCHED_DIR, recursive=True)
+    observer.start()
     
     logging.info(f"Watching directory: {WATCHED_DIR}")
     log_debug("Watcher observer started successfully", watched_dir=WATCHED_DIR)

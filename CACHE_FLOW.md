@@ -1,6 +1,8 @@
-# Filter Cache Flow Diagram
+# Request Flow - No Caching (Simplified Architecture)
 
-## Request Flow with Cache
+**Note**: In-memory caching has been removed as SQLite database queries are fast enough (< 10ms for 5000 files). This document is kept for historical reference.
+
+## Request Flow (Direct Database Queries)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐

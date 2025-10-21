@@ -66,7 +66,9 @@ class EventBroadcaster:
         self._clients: Set[Queue] = set()
         self._clients_lock = threading.Lock()
         self._event_count = 0
-        self._last_events: Dict[str, Event] = {}  # Store last event of each type
+        # Store last event of each type. For job_updated events, key is (event_type, job_id)
+        # to track each job separately. For other events, key is just event_type.
+        self._last_events: Dict[Any, Event] = {}
         
         logging.info("EventBroadcaster initialized")
     
@@ -157,7 +159,12 @@ class EventBroadcaster:
         return self._event_count
     
     def get_last_event(self, event_type: str) -> Optional[Event]:
-        """Get the last event of a specific type"""
+        """
+        Get the last event of a specific type.
+        
+        Note: For job_updated events, use a composite key (event_type, job_id)
+        to retrieve job-specific events.
+        """
         return self._last_events.get(event_type)
 
 

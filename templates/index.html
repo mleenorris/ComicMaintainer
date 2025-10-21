@@ -65,12 +65,17 @@
             box-sizing: border-box;
         }
         
+        html {
+            overflow-x: hidden;
+        }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
             transition: background-color 0.3s, color 0.3s;
             overflow: hidden;
+            overflow-x: hidden;
             height: 100vh;
             display: flex;
             flex-direction: column;
@@ -1200,6 +1205,8 @@
             
             .container {
                 padding: 10px;
+                max-width: 100vw;
+                overflow-x: hidden;
             }
             
             .header {
@@ -1312,9 +1319,10 @@
                 padding: 12px 10px;
                 gap: 6px;
                 flex-wrap: wrap;
-                overflow-x: visible;
+                overflow-x: hidden;
                 margin-left: 0;
                 margin-right: 0;
+                max-width: 100%;
             }
             
             .btn {
@@ -1374,10 +1382,16 @@
                 order: 10;
             }
             
+            .file-list {
+                overflow-x: hidden;
+                max-width: 100%;
+            }
+            
             .file-list-header {
                 grid-template-columns: 25px 25px 1fr 60px;
                 padding: 10px;
                 font-size: 13px;
+                overflow: hidden;
             }
             
             .file-list-header > div:nth-child(4),
@@ -1389,6 +1403,7 @@
                 grid-template-columns: 30px 1fr 60px 60px;
                 padding: 10px;
                 gap: 8px;
+                overflow: hidden;
             }
             
             .file-item.indented {
@@ -1468,6 +1483,7 @@
                 text-overflow: ellipsis;
                 white-space: nowrap;
                 max-width: 100%;
+                min-width: 0;
             }
             
             .file-path {
@@ -1475,6 +1491,7 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+                min-width: 0;
             }
             
             .directory-header {
@@ -1482,12 +1499,14 @@
                 font-size: 13px;
                 grid-template-columns: 30px 1fr;
                 gap: 8px;
+                overflow: hidden;
             }
             
             .directory-header-clickable {
                 grid-template-columns: 12px 14px 1fr 60px;
                 gap: 6px;
                 font-size: 12px;
+                overflow: hidden;
             }
             
             .directory-path {
@@ -1495,6 +1514,7 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+                min-width: 0;
             }
             
             .directory-file-count {
@@ -1559,14 +1579,17 @@
             
             .file-list-header {
                 grid-template-columns: 20px 20px 1fr 55px;
+                overflow: hidden;
             }
             
             .file-item {
                 grid-template-columns: 25px 1fr 55px 55px;
+                overflow: hidden;
             }
             
             .directory-header {
                 font-size: 12px;
+                overflow: hidden;
             }
         }
     </style>

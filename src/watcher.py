@@ -166,7 +166,12 @@ class ChangeHandler(FileSystemEventHandler):
                 logging.info(f"Moved file not stable yet: {event.dest_path}")
                 log_debug("File not stable or wrong extension", dest=event.dest_path)
     def _is_file_stable(self, path, wait_time=2, checks=3):
-        """Return True if file size is unchanged for wait_time*checks seconds."""
+        """Return True if file size is unchanged for wait_time*checks seconds.
+        
+        Note: The time.sleep() calls here are NOT polling - they are intentional
+        debouncing delays to ensure files have finished copying/writing before
+        processing. This is a necessary wait for file stability verification.
+        """
         log_debug("Checking file stability", path=path, wait_time=wait_time, checks=checks)
         
         try:
@@ -322,9 +327,16 @@ if __name__ == "__main__":
     logging.info(f"Watching directory: {WATCHED_DIR}")
     log_debug("Watcher observer started successfully", watched_dir=WATCHED_DIR)
     
+    # Use an Event object instead of sleep polling
+    # Event.wait() blocks efficiently without consuming CPU, unlike a while True + sleep(1) loop
+    # The watchdog observer runs in its own thread and handles file events asynchronously
+    import threading
+    shutdown_event = threading.Event()
+    
     try:
-        while True:
-            time.sleep(1)
+        # Wait indefinitely for shutdown signal (Ctrl+C or exception)
+        # This is event-driven: the thread sleeps until interrupted, using no CPU
+        shutdown_event.wait()
     except KeyboardInterrupt:
         logging.info("Keyboard interrupt received, stopping watcher")
         log_debug("Stopping observer due to keyboard interrupt")

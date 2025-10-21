@@ -71,8 +71,8 @@ class JobManager:
         self.max_workers = max_workers
         # Executor for managing jobs (job orchestration)
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="job-mgr")
-        self._cleanup_thread = threading.Thread(target=self._cleanup_old_jobs, daemon=True)
-        self._cleanup_thread.start()
+        self._cleanup_timer = None
+        self._schedule_cleanup()
         log_debug("JobManager initialized", max_workers=max_workers)
         log_function_exit("JobManager.__init__")
     
@@ -420,25 +420,32 @@ class JobManager:
         """
         return job_store.list_jobs()
     
+    def _schedule_cleanup(self):
+        """Schedule the next cleanup run using timer (event-based)"""
+        self._cleanup_timer = threading.Timer(300.0, self._cleanup_old_jobs)
+        self._cleanup_timer.daemon = True
+        self._cleanup_timer.start()
+    
     def _cleanup_old_jobs(self):
         """
-        Periodically clean up old completed jobs.
-        Runs in a background thread.
+        Clean up old completed jobs and reschedule.
+        Uses event-based timer instead of polling with sleep.
         """
-        while True:
-            time.sleep(300)  # Run every 5 minutes
+        try:
+            cutoff_time = time.time() - 86400  # 24 hours
+            deleted = job_store.cleanup_old_jobs(cutoff_time)
             
-            try:
-                cutoff_time = time.time() - 86400  # 24 hours
-                deleted = job_store.cleanup_old_jobs(cutoff_time)
-                
-                if deleted > 0:
-                    logging.info(f"[JOB CLEANUP] Removed {deleted} old completed jobs (>24 hours)")
-                else:
-                    logging.debug(f"[JOB CLEANUP] No old jobs to clean up")
-            
-            except Exception as e:
-                logging.error(f"[JOB CLEANUP] Error during cleanup: {e}")
+            if deleted > 0:
+                logging.info(f"[JOB CLEANUP] Removed {deleted} old completed jobs (>24 hours)")
+            else:
+                logging.debug(f"[JOB CLEANUP] No old jobs to clean up")
+        
+        except Exception as e:
+            logging.error(f"[JOB CLEANUP] Error during cleanup: {e}")
+        
+        finally:
+            # Reschedule for next run (5 minutes)
+            self._schedule_cleanup()
     
     def shutdown(self):
         """Shutdown the job manager and wait for all jobs to complete."""

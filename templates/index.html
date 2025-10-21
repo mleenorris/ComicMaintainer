@@ -2148,7 +2148,7 @@
         let perPage = 100; // Default value, will be loaded from server
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
         let searchDebounceTimer = null;
-        let cacheRebuildPollTimer = null;
+        // Cache rebuild polling removed - using SSE events only
         let isCacheRebuilding = false;
         
         // Server-Sent Events connection for real-time updates
@@ -2227,7 +2227,6 @@
             if (data.rebuild_complete) {
                 console.log('SSE: Cache rebuild completed, refreshing file list');
                 isCacheRebuilding = false;
-                stopCacheRebuildPolling(); // Stop polling if still active
                 loadFiles(currentPage, false);
             } else {
                 console.log('SSE: Cache rebuild in progress');
@@ -2539,8 +2538,8 @@
             // Initialize SSE connection for real-time updates
             initEventSource();
             
-            // Start watcher status polling (will be replaced by SSE over time)
-            startWatcherStatusPolling();
+            // Fetch initial watcher status, then rely on SSE for updates
+            updateWatcherStatus();
             
             // Check for active job and resume polling FIRST (before loading files)
             // This ensures the progress modal appears immediately on page load
@@ -2555,9 +2554,6 @@
         let hasActiveJob = false;
         let currentJobId = null;  // Track current job ID for cancellation
         window.addEventListener('beforeunload', function(event) {
-            // Clean up cache rebuild polling timer
-            stopCacheRebuildPolling();
-            
             // Clean up SSE connection
             cleanupEventSource();
             
@@ -2616,61 +2612,18 @@
         function handleCacheRebuildStatus(isRebuilding) {
             if (isRebuilding && !isCacheRebuilding) {
                 // Cache rebuild just started
-                console.log('Cache rebuild started, will refresh when complete');
+                console.log('Cache rebuild started, will refresh when complete via SSE events');
                 isCacheRebuilding = true;
-                startCacheRebuildPolling();
             } else if (!isRebuilding && isCacheRebuilding) {
                 // Cache rebuild just completed
                 console.log('Cache rebuild completed, refreshing file list');
                 isCacheRebuilding = false;
-                stopCacheRebuildPolling();
                 // Auto-refresh the file list to show updated data
                 loadFiles(currentPage, false);
             }
         }
         
-        function startCacheRebuildPolling() {
-            // Stop any existing polling
-            stopCacheRebuildPolling();
-            
-            // Poll every 2 seconds to check if rebuild is complete
-            cacheRebuildPollTimer = setInterval(async () => {
-                try {
-                    // Build URL with current page and filters for consistent polling
-                    let url = `/api/files?page=${currentPage}&per_page=${perPage}`;
-                    if (searchQuery) {
-                        url += `&search=${encodeURIComponent(searchQuery)}`;
-                    }
-                    if (filterMode !== 'all') {
-                        url += `&filter=${encodeURIComponent(filterMode)}`;
-                    }
-                    
-                    const response = await fetch(url);
-                    if (!response.ok) return;
-                    
-                    const data = await response.json();
-                    const cacheRebuilding = data.cache_rebuilding || false;
-                    
-                    if (!cacheRebuilding && isCacheRebuilding) {
-                        // Cache rebuild completed
-                        console.log('Cache rebuild detected as complete via polling');
-                        isCacheRebuilding = false;
-                        stopCacheRebuildPolling();
-                        // Refresh the file list to show updated data
-                        loadFiles(currentPage, false);
-                    }
-                } catch (error) {
-                    console.error('Error polling cache rebuild status:', error);
-                }
-            }, 2000);
-        }
-        
-        function stopCacheRebuildPolling() {
-            if (cacheRebuildPollTimer) {
-                clearInterval(cacheRebuildPollTimer);
-                cacheRebuildPollTimer = null;
-            }
-        }
+        // Cache rebuild polling removed - using SSE events only
         
         function updatePagination() {
             const paginationDiv = document.getElementById('pagination');
@@ -3483,7 +3436,7 @@
                 showMessage(`Started processing ${totalItems} files in background`, 'info');
                 
                 // Poll for status
-                await pollJobStatus(jobId, 'Processing Files...');
+                await trackJobStatus(jobId, 'Processing Files...');
                 
             } catch (error) {
                 console.error('[BATCH] Error starting process all:', error);
@@ -3532,7 +3485,7 @@
                 showMessage(`Started processing ${totalItems} files in background`, 'info');
                 
                 // Poll for status
-                await pollJobStatus(jobId, 'Processing Selected Files...');
+                await trackJobStatus(jobId, 'Processing Selected Files...');
                 
             } catch (error) {
                 console.error('[BATCH] Error starting process selected:', error);
@@ -3541,164 +3494,53 @@
             }
         }
         
-        async function pollJobStatus(jobId, title) {
-            // Reduced polling frequency since SSE provides real-time updates
-            // This serves as a fallback in case SSE connection is lost
-            const pollInterval = 5000; // Poll every 5 seconds (was 500ms)
-            let lastProcessed = 0;
-            let consecutiveErrors = 0;
-            const maxConsecutiveErrors = 5; // Give up after 5 consecutive errors
-            
-            console.log(`[JOB ${jobId}] Starting fallback polling (5s interval) with primary SSE updates: ${title}`);
+        async function trackJobStatus(jobId, title) {
+            // Job progress updates via SSE only - no polling
+            // SSE provides real-time updates, polling has been completely removed
+            console.log(`[JOB ${jobId}] Tracking job status via SSE events: ${title}`);
             
             // Store active job ID on server and in local variable
             await setActiveJobOnServer(jobId, title);
             hasActiveJob = true;
             currentJobId = jobId;  // Track for cancellation
             
-            while (true) {
-                try {
-                    const response = await fetch(`/api/jobs/${jobId}`);
-                    
-                    if (!response.ok) {
-                        // Handle different HTTP status codes differently
-                        if (response.status === 404) {
-                            // Job not found - it was likely cleaned up or deleted
-                            console.warn(`[JOB ${jobId}] Job not found (404) - may have been cleaned up`);
-                            closeProgressModal();
-                            showMessage('Job no longer exists on server', 'warning');
-                            await clearActiveJobOnServer();
-                            hasActiveJob = false;
-                            break;
-                        } else if (response.status >= 500) {
-                            // Server error - retry with backoff
-                            consecutiveErrors++;
-                            console.warn(`[JOB ${jobId}] Server error (${response.status}), retry ${consecutiveErrors}/${maxConsecutiveErrors}`);
-                            
-                            if (consecutiveErrors >= maxConsecutiveErrors) {
-                                throw new Error(`Server error after ${maxConsecutiveErrors} retries (HTTP ${response.status})`);
-                            }
-                            
-                            // Exponential backoff: wait longer after each error
-                            const backoffDelay = pollInterval * Math.pow(2, consecutiveErrors - 1);
-                            await new Promise(resolve => setTimeout(resolve, backoffDelay));
-                            continue;
-                        } else {
-                            // Other client errors - these are probably permanent
-                            const errorData = await response.json().catch(() => ({}));
-                            const errorMessage = errorData.error || `Failed to get job status (HTTP ${response.status})`;
-                            console.error(`[JOB ${jobId}] Status check failed: ${errorMessage}`);
-                            throw new Error(errorMessage);
-                        }
-                    }
-                    
+            // Fetch initial job state to display immediately
+            try {
+                const response = await fetch(`/api/jobs/${jobId}`);
+                if (response.ok) {
                     const status = await response.json();
+                    const processed = status.processed_items || 0;
+                    const total = status.total_items || 0;
                     
-                    // Validate status object
-                    if (!status || typeof status.processed_items === 'undefined' || typeof status.total_items === 'undefined') {
-                        // Invalid response - retry
-                        consecutiveErrors++;
-                        console.warn(`[JOB ${jobId}] Invalid job status response, retry ${consecutiveErrors}/${maxConsecutiveErrors}`);
-                        
-                        if (consecutiveErrors >= maxConsecutiveErrors) {
-                            throw new Error('Invalid job status response after multiple retries');
-                        }
-                        
-                        await new Promise(resolve => setTimeout(resolve, pollInterval));
-                        continue;
-                    }
-                    
-                    // Reset error counter on successful fetch
-                    consecutiveErrors = 0;
-                    
-                    // Update progress
-                    const processed = status.processed_items;
-                    const total = status.total_items;
-                    
-                    // Count successes and errors from results
+                    // Count successes and errors
                     let successCount = 0;
                     let errorCount = 0;
-                    
                     if (status.results && Array.isArray(status.results)) {
                         for (const result of status.results) {
-                            if (result.success) {
-                                successCount++;
-                            } else {
-                                errorCount++;
-                            }
+                            if (result.success) successCount++;
+                            else errorCount++;
                         }
                     }
                     
                     updateProgress(processed, total, successCount, errorCount);
                     
-                    // Add details for newly processed items
-                    if (processed > lastProcessed && status.results && Array.isArray(status.results)) {
-                        for (let i = lastProcessed; i < Math.min(processed, status.results.length); i++) {
-                            const result = status.results[i];
-                            if (result) {
-                                addProgressDetail(result.item, result.success, result.error);
-                            }
-                        }
-                        lastProcessed = processed;
+                    // Check if job is already complete
+                    if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
+                        console.log(`[JOB ${jobId}] Job already finished with status: ${status.status}`);
+                        // Let SSE handler deal with completion
+                        return;
                     }
-                    
-                    // Check if completed
-                    if (status.status === 'completed') {
-                        console.log(`[JOB ${jobId}] Job completed: ${successCount}/${total} files succeeded`);
-                        completeProgress();
-                        showMessage(`Processed ${successCount} of ${total} files successfully!`, 'success');
-                        // Refresh file list (force refresh to clear cache)
-                        await loadFiles(1, true);
-                        // Clear active job from server and local state
-                        await clearActiveJobOnServer();
-                        hasActiveJob = false;
-                        currentJobId = null;
-                        break;
-                    } else if (status.status === 'failed') {
-                        console.error(`[JOB ${jobId}] Job failed: ${status.error}`);
-                        closeProgressModal();
-                        showMessage(`Job failed: ${status.error}`, 'error');
-                        // Clear active job from server and local state
-                        await clearActiveJobOnServer();
-                        hasActiveJob = false;
-                        currentJobId = null;
-                        break;
-                    } else if (status.status === 'cancelled') {
-                        console.log(`[JOB ${jobId}] Job was cancelled`);
-                        closeProgressModal();
-                        showMessage('Job was cancelled', 'warning');
-                        // Clear active job from server and local state
-                        await clearActiveJobOnServer();
-                        hasActiveJob = false;
-                        currentJobId = null;
-                        break;
-                    }
-                    
-                    // Wait before next poll
-                    await new Promise(resolve => setTimeout(resolve, pollInterval));
-                    
-                } catch (error) {
-                    // Network error or other exception
-                    consecutiveErrors++;
-                    console.warn(`[JOB ${jobId}] Error during polling: ${error.message}, retry ${consecutiveErrors}/${maxConsecutiveErrors}`);
-                    
-                    if (consecutiveErrors >= maxConsecutiveErrors) {
-                        // Too many errors - give up
-                        console.error(`[JOB ${jobId}] Giving up after ${maxConsecutiveErrors} consecutive errors`);
-                        showMessage('Lost connection to server. Job may still be running. Refresh to check status.', 'error');
-                        closeProgressModal();
-                        // DON'T clear active job from server - it might still be running
-                        // The user can refresh to check if it's still active
-                        hasActiveJob = false;
-                        currentJobId = null;
-                        break;
-                    }
-                    
-                    // Exponential backoff: wait longer after each error
-                    const backoffDelay = pollInterval * Math.pow(2, consecutiveErrors - 1);
-                    await new Promise(resolve => setTimeout(resolve, backoffDelay));
+                } else {
+                    console.warn(`[JOB ${jobId}] Could not fetch initial job status: ${response.status}`);
                 }
+            } catch (error) {
+                console.error(`[JOB ${jobId}] Error fetching initial job status:`, error);
+                // Continue anyway, SSE events will update the status
             }
+            
+            // From this point on, all updates come from SSE events via handleJobUpdatedEvent
+            // No polling loop - we rely entirely on the SSE connection
+            console.log(`[JOB ${jobId}] Waiting for SSE updates...`);
         }
         
         async function cancelCurrentJob() {
@@ -3788,7 +3630,7 @@
                     hasActiveJob = true;
                     showProgressModal(activeJobTitle || 'Resuming Job...');
                     showMessage('Resuming active job...', 'info');
-                    await pollJobStatus(activeJobId, activeJobTitle || 'Processing...');
+                    await trackJobStatus(activeJobId, activeJobTitle || 'Processing...');
                 } else if (status.status === 'completed') {
                     // Job completed while we were away - show results
                     console.log(`[JOB RESUME] Job ${activeJobId} already completed`);
@@ -3968,7 +3810,7 @@
                 showMessage(`Started processing ${totalItems} unmarked files in background`, 'info');
                 
                 // Poll for status
-                await pollJobStatus(jobId, 'Processing Unmarked Files...');
+                await trackJobStatus(jobId, 'Processing Unmarked Files...');
                 
             } catch (error) {
                 console.error('[BATCH] Error starting process unmarked files:', error);
@@ -4004,7 +3846,7 @@
                 showMessage(`Started renaming ${totalItems} unmarked files in background`, 'info');
                 
                 // Poll for status
-                await pollJobStatus(jobId, 'Renaming Unmarked Files...');
+                await trackJobStatus(jobId, 'Renaming Unmarked Files...');
                 
             } catch (error) {
                 console.error('[BATCH] Error starting rename unmarked files:', error);
@@ -4040,7 +3882,7 @@
                 showMessage(`Started normalizing ${totalItems} unmarked files in background`, 'info');
                 
                 // Poll for status
-                await pollJobStatus(jobId, 'Normalizing Unmarked Files...');
+                await trackJobStatus(jobId, 'Normalizing Unmarked Files...');
                 
             } catch (error) {
                 console.error('[BATCH] Error starting normalize unmarked files:', error);
@@ -4827,70 +4669,51 @@
             await loadFiles(1, true);
         }
         
-        // Watcher status polling
-        let watcherStatusInterval;
-        
+        // Watcher status management - no polling, using SSE events only
         async function updateWatcherStatus() {
+            // Fetch initial status on page load only, then rely on SSE for updates
             try {
                 const response = await fetch('/api/watcher/status');
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const data = await response.json();
-                
-                const statusIndicator = document.getElementById('watcherStatus');
-                const iconElement = statusIndicator.querySelector('.watcher-icon');
-                const textElement = statusIndicator.querySelector('.watcher-text');
-                
-                // Remove previous status classes
-                statusIndicator.classList.remove('running', 'stopped');
-                
-                if (data.running) {
-                    statusIndicator.classList.add('running');
-                    iconElement.textContent = '✅';
-                    textElement.textContent = 'Watcher Running';
-                    statusIndicator.title = 'File watcher is running and monitoring for changes';
-                } else {
-                    statusIndicator.classList.add('stopped');
-                    iconElement.textContent = '⛔';
-                    textElement.textContent = 'Watcher Stopped';
-                    if (data.enabled) {
-                        statusIndicator.title = 'File watcher is enabled but not running';
-                    } else {
-                        statusIndicator.title = 'File watcher is disabled';
-                    }
-                }
+                updateWatcherStatusDisplay(data.running, data.enabled);
             } catch (error) {
-                console.error('Error fetching watcher status:', error);
-                const statusIndicator = document.getElementById('watcherStatus');
-                const iconElement = statusIndicator.querySelector('.watcher-icon');
-                const textElement = statusIndicator.querySelector('.watcher-text');
-                
-                statusIndicator.classList.remove('running', 'stopped');
+                console.error('Error fetching initial watcher status:', error);
+                updateWatcherStatusDisplay(null, null);
+            }
+        }
+        
+        function updateWatcherStatusDisplay(running, enabled) {
+            const statusIndicator = document.getElementById('watcherStatus');
+            const iconElement = statusIndicator.querySelector('.watcher-icon');
+            const textElement = statusIndicator.querySelector('.watcher-text');
+            
+            // Remove previous status classes
+            statusIndicator.classList.remove('running', 'stopped');
+            
+            if (running === null || enabled === null) {
+                // Unknown status
                 iconElement.textContent = '❓';
                 textElement.textContent = 'Status Unknown';
                 statusIndicator.title = 'Unable to determine watcher status';
+            } else if (running) {
+                statusIndicator.classList.add('running');
+                iconElement.textContent = '✅';
+                textElement.textContent = 'Watcher Running';
+                statusIndicator.title = 'File watcher is running and monitoring for changes';
+            } else {
+                statusIndicator.classList.add('stopped');
+                iconElement.textContent = '⛔';
+                textElement.textContent = 'Watcher Stopped';
+                if (enabled) {
+                    statusIndicator.title = 'File watcher is enabled but not running';
+                } else {
+                    statusIndicator.title = 'File watcher is disabled';
+                }
             }
         }
-        
-        // Start polling watcher status every 10 seconds
-        function startWatcherStatusPolling() {
-            // Update immediately
-            updateWatcherStatus();
-            
-            // Then update every 10 seconds
-            if (watcherStatusInterval) {
-                clearInterval(watcherStatusInterval);
-            }
-            watcherStatusInterval = setInterval(updateWatcherStatus, 10000);
-        }
-        
-        // Stop polling on page unload
-        window.addEventListener('beforeunload', () => {
-            if (watcherStatusInterval) {
-                clearInterval(watcherStatusInterval);
-            }
-        });
     </script>
 </body>
 </html>

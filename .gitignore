@@ -54,6 +54,18 @@ jobs.db-shm
 preferences.db
 preferences.db-wal
 preferences.db-shm
+comicmaintainer.db
+comicmaintainer.db-wal
+comicmaintainer.db-shm
+files.db
+files.db-wal
+files.db-shm
+markers.db
+markers.db-wal
+markers.db-shm
+
+# Database migration backups
+*.migrated.*
 
 # Marker file backups and temp files
 *.corrupt.*

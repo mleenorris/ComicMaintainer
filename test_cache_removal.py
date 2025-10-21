@@ -28,6 +28,17 @@ def test_get_comic_files_without_cache():
         unified_store.STORE_DIR = os.path.join(temp_config, 'store')
         unified_store.DB_PATH = os.path.join(unified_store.STORE_DIR, 'comicmaintainer.db')
         
+        # Create the store directory
+        os.makedirs(unified_store.STORE_DIR, exist_ok=True)
+        
+        # Clear thread-local connection to force new connection
+        if hasattr(unified_store._thread_local, 'connection') and unified_store._thread_local.connection:
+            try:
+                unified_store._thread_local.connection.close()
+            except:
+                pass
+            unified_store._thread_local.connection = None
+        
         # Initialize database
         unified_store.init_db()
         

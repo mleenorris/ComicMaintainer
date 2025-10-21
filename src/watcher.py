@@ -19,7 +19,6 @@ WATCHED_DIR = os.environ.get('WATCHED_DIR')
 CONFIG_DIR = '/Config'
 LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
 PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
-CACHE_UPDATE_MARKER = '.cache_update'
 
 # Initialize file store on startup
 file_store.init_db()
@@ -85,29 +84,7 @@ def record_file_change(change_type, old_path=None, new_path=None):
         )
         logging.error(f"Error recording file change: {e}")
 
-def update_watcher_timestamp():
-    """Update the watcher cache invalidation timestamp"""
-    log_function_entry("update_watcher_timestamp")
-    
-    # Ensure config directory exists
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    
-    marker_path = os.path.join(CONFIG_DIR, CACHE_UPDATE_MARKER)
-    try:
-        timestamp = str(time.time())
-        log_debug("Updating watcher timestamp", marker_path=marker_path, timestamp=timestamp)
-        
-        with open(marker_path, 'w') as f:
-            f.write(timestamp)
-        
-        log_function_exit("update_watcher_timestamp", result="success")
-    except Exception as e:
-        log_error_with_context(
-            e,
-            context="Updating watcher timestamp",
-            additional_info={"marker_path": marker_path}
-        )
-        logging.error(f"Error updating watcher timestamp: {e}")
+
 
 def is_web_modified(filepath):
     """Check if a file was recently modified by the web interface"""
@@ -296,7 +273,6 @@ class ChangeHandler(FileSystemEventHandler):
                 # Record the deletion in file store
                 log_debug("Recording file change for deletion", path=event.src_path)
                 record_file_change('remove', old_path=event.src_path)
-                update_watcher_timestamp()
 
 if __name__ == "__main__":
     log_debug("Watcher starting", watched_dir=WATCHED_DIR)
@@ -316,9 +292,6 @@ if __name__ == "__main__":
     added, removed, updated = file_store.sync_with_filesystem(WATCHED_DIR)
     logging.info(f"Initial sync complete: +{added} new files, -{removed} deleted files, ~{updated} updated files")
     log_debug("Filesystem sync complete", added=added, removed=removed, updated=updated)
-    
-    # Update watcher timestamp after initial sync
-    update_watcher_timestamp()
     
     event_handler = ChangeHandler()
     observer = Observer()

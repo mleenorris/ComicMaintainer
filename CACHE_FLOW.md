@@ -1,6 +1,6 @@
 # Filter Cache Flow Diagram
 
-> **⚠️ NOTE (2025-10-21):** This document is partially outdated. The `file_list_cache` layer has been removed as SQLite is extremely fast (<3ms for 5000 files). The database itself acts as the cache with OS-level caching. Only the `enriched_file_cache` and `filtered_results_cache` layers remain, which cache expensive operations (marker enrichment and filter/search/sort), not database reads.
+> **⚠️ OBSOLETE (2025-10-21):** This document is no longer relevant. All caching layers have been removed from the application. Data is now fetched directly from the SQLite database on every request, which provides excellent performance (<3ms for 5000 files) without the complexity of cache management.
 
 ## Request Flow with Cache
 

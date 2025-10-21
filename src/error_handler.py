@@ -23,9 +23,7 @@ GITHUB_REPO = os.environ.get('GITHUB_REPOSITORY', 'mleenorris/ComicMaintainer')
 GITHUB_ISSUE_ASSIGNEE = os.environ.get('GITHUB_ISSUE_ASSIGNEE', 'copilot')
 GITHUB_API_URL = os.environ.get('GITHUB_API_URL', 'https://api.github.com')
 
-# Track errors to avoid creating duplicate issues
-_error_cache = set()
-_cache_max_size = 100
+
 
 
 def setup_debug_logging(logger_name: str = None) -> logging.Logger:
@@ -104,8 +102,8 @@ def log_error_with_context(
     if DEBUG_MODE:
         logging.debug(f"Error details - ID: {error_id}, Type: {error_type}, Context: {context}")
     
-    # Create GitHub issue if configured and not a duplicate
-    if create_github_issue and GITHUB_TOKEN and error_id not in _error_cache:
+    # Create GitHub issue if configured
+    if create_github_issue and GITHUB_TOKEN:
         try:
             _create_github_issue(
                 error_type=error_type,
@@ -115,8 +113,6 @@ def log_error_with_context(
                 additional_info=additional_info,
                 error_id=error_id
             )
-            # Add to cache to avoid duplicates
-            _add_to_error_cache(error_id)
         except Exception as issue_error:
             logging.warning(f"Failed to create GitHub issue for error {error_id}: {issue_error}")
 
@@ -216,23 +212,7 @@ def _create_github_issue(
         log_debug(f"GitHub API error details", error=str(req_error), status_code=getattr(req_error.response, 'status_code', None))
 
 
-def _add_to_error_cache(error_id: str):
-    """
-    Add an error ID to the cache to prevent duplicate issue creation.
-    
-    Args:
-        error_id: Error identifier to cache
-    """
-    global _error_cache
-    
-    # Simple LRU: if cache is full, remove oldest entries
-    if len(_error_cache) >= _cache_max_size:
-        # Convert to list, remove first half, convert back
-        cache_list = list(_error_cache)
-        _error_cache = set(cache_list[_cache_max_size // 2:])
-    
-    _error_cache.add(error_id)
-    log_debug(f"Added error {error_id} to cache", cache_size=len(_error_cache))
+
 
 
 def log_function_entry(func_name: str, **kwargs):

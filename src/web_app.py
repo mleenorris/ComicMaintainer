@@ -587,17 +587,36 @@ def rebuild_enriched_cache_async(files, file_list_hash):
         processed_files = marker_data.get('processed', set())
         duplicate_files = marker_data.get('duplicate', set())
         
+        # Get all file metadata from database in a single query (much faster than os.path calls)
+        file_metadata_list = file_store.get_all_files_with_metadata()
+        file_metadata = {item['filepath']: item for item in file_metadata_list}
+        
         # Build file list with metadata
         all_files = []
         for f in files:
             abs_path = os.path.abspath(f)
             rel_path = os.path.relpath(f, WATCHED_DIR) if WATCHED_DIR else f
+            
+            # Get metadata from database (fast) or fall back to os.path (slow)
+            metadata = file_metadata.get(f)
+            if metadata:
+                file_size = metadata['file_size'] or 0
+                file_mtime = metadata['last_modified']
+            else:
+                # Fallback to os.path if not in database (shouldn't happen often)
+                try:
+                    file_size = os.path.getsize(f)
+                    file_mtime = os.path.getmtime(f)
+                except OSError:
+                    file_size = 0
+                    file_mtime = 0
+            
             all_files.append({
                 'path': f,
                 'name': os.path.basename(f),
                 'relative_path': rel_path,
-                'size': os.path.getsize(f),
-                'modified': os.path.getmtime(f),
+                'size': file_size,
+                'modified': file_mtime,
                 'processed': abs_path in processed_files,
                 'duplicate': abs_path in duplicate_files
             })

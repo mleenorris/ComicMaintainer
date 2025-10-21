@@ -1343,6 +1343,10 @@
                 justify-content: center;
             }
             
+            .action-dropdown-toggle span {
+                display: none;
+            }
+            
             .action-dropdown-toggle::after {
                 display: none;
             }
@@ -1696,7 +1700,7 @@
                     <!-- Process Dropdown -->
                     <div class="action-dropdown">
                         <button class="action-dropdown-toggle process" onclick="toggleActionDropdown(event, 'processDropdown')">
-                            🚀 Process
+                            🚀<span> Process</span>
                         </button>
                         <div class="action-dropdown-menu" id="processDropdown">
                             <button class="action-dropdown-item" onclick="processAllFilesAsync(); closeAllActionDropdowns();">
@@ -1714,7 +1718,7 @@
                     <!-- Rename Dropdown -->
                     <div class="action-dropdown">
                         <button class="action-dropdown-toggle rename" onclick="toggleActionDropdown(event, 'renameDropdown')">
-                            📝 Rename
+                            📝<span> Rename</span>
                         </button>
                         <div class="action-dropdown-menu" id="renameDropdown">
                             <button class="action-dropdown-item" onclick="renameAllFiles(); closeAllActionDropdowns();">
@@ -1732,7 +1736,7 @@
                     <!-- Normalize Dropdown -->
                     <div class="action-dropdown">
                         <button class="action-dropdown-toggle normalize" onclick="toggleActionDropdown(event, 'normalizeDropdown')">
-                            🔧 Normalize
+                            🔧<span> Normalize</span>
                         </button>
                         <div class="action-dropdown-menu" id="normalizeDropdown">
                             <button class="action-dropdown-item" onclick="normalizeAllFiles(); closeAllActionDropdowns();">

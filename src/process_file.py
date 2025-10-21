@@ -34,33 +34,6 @@ log_debug("process_file module initialized")
 # Initialize file store
 file_store.init_db()
 
-CACHE_UPDATE_MARKER = '.cache_update'
-
-def update_watcher_timestamp():
-    """Update the watcher cache invalidation timestamp"""
-    log_function_entry("update_watcher_timestamp")
-    
-    # Ensure config directory exists
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    
-    marker_path = os.path.join(CONFIG_DIR, CACHE_UPDATE_MARKER)
-    try:
-        import time
-        timestamp = str(time.time())
-        log_debug("Updating watcher timestamp", marker_path=marker_path, timestamp=timestamp)
-        
-        with open(marker_path, 'w') as f:
-            f.write(timestamp)
-        
-        log_function_exit("update_watcher_timestamp", result="success")
-    except Exception as e:
-        log_error_with_context(
-            e,
-            context="Updating watcher timestamp in process_file",
-            additional_info={"marker_path": marker_path}
-        )
-        logging.error(f"Error updating watcher timestamp: {e}")
-
 def record_file_change(change_type, old_path=None, new_path=None):
     """Record a file change directly in the file store
     
@@ -516,10 +489,6 @@ if __name__ == "__main__":
         # Mark as processed using the final filepath (after any rename)
         log_debug("Marking file as processed", final_path=final_filepath, original_path=original_filepath)
         mark_file_processed(final_filepath, original_filepath=original_filepath)
-        
-        # Update watcher timestamp to invalidate web app cache
-        log_debug("Updating watcher timestamp")
-        update_watcher_timestamp()
         
         log_debug("process_file script completed successfully", final_filepath=final_filepath)
     except Exception as e:

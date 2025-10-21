@@ -25,7 +25,7 @@ from preferences_store import (
 )
 from event_broadcaster import (
     get_broadcaster, event_stream_generator,
-    broadcast_cache_updated, broadcast_watcher_status,
+    broadcast_watcher_status,
     broadcast_file_processed, broadcast_job_updated
 )
 from watchdog.observers import Observer
@@ -66,126 +66,26 @@ logging.getLogger().addHandler(log_handler)
 app = Flask(__name__)
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
-CACHE_UPDATE_MARKER = '.cache_update'
-CACHE_REBUILD_LOCK = '.cache_rebuild_lock'
 
 # Initialize file store on startup
 file_store.init_db()
 
-# Cache for enriched file list (files with metadata) to speed up filtering
-enriched_file_cache = {
-    'files': None,  # List of file dicts with metadata
-    'timestamp': 0,
-    'file_list_hash': None,  # Hash of raw file list to detect changes
-    'rebuild_in_progress': False,  # Track if async rebuild is running
-    'rebuild_thread': None,  # Reference to rebuild thread
-    'watcher_update_time': 0  # Track last watcher update time for invalidation
-}
-enriched_file_cache_lock = threading.Lock()
 
-# Cache for filtered and sorted results to speed up filter switching
-filtered_results_cache = {
-    # Key: (filter_mode, search_query, sort_mode, file_list_hash)
-    # Value: {'filtered_files': [...], 'timestamp': ...}
-}
-filtered_results_cache_lock = threading.Lock()
-MAX_FILTERED_CACHE_SIZE = 20  # Keep up to 20 different filter combinations
 
-def try_acquire_cache_rebuild_lock(timeout=0.1):
-    """Try to acquire a file-based lock for cache rebuilding across processes
-    
-    Args:
-        timeout: Maximum time to wait for lock in seconds (default: 0.1)
-        
-    Returns:
-        File handle if lock acquired, None if lock could not be acquired
-    """
-    # Ensure config directory exists
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    
-    lock_file_path = os.path.join(CONFIG_DIR, CACHE_REBUILD_LOCK)
-    
-    try:
-        # Open lock file (create if doesn't exist)
-        lock_fd = open(lock_file_path, 'w')
-        
-        # Try to acquire lock with timeout
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            try:
-                # Try non-blocking lock
-                fcntl.flock(lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                # Lock acquired successfully
-                logging.debug("Cache rebuild lock acquired")
-                return lock_fd
-            except IOError:
-                # Lock is held by another process, wait a bit
-                time.sleep(0.01)
-        
-        # Timeout - could not acquire lock
-        lock_fd.close()
-        logging.debug("Cache rebuild lock timeout - another worker is rebuilding")
-        return None
-    except Exception as e:
-        logging.error(f"Error acquiring cache rebuild lock: {e}")
-        return None
-
-def release_cache_rebuild_lock(lock_fd):
-    """Release the cache rebuild lock
-    
-    Args:
-        lock_fd: File handle returned by try_acquire_cache_rebuild_lock
-    """
-    if lock_fd:
-        try:
-            fcntl.flock(lock_fd.fileno(), fcntl.LOCK_UN)
-            lock_fd.close()
-            logging.debug("Cache rebuild lock released")
-        except Exception as e:
-            logging.error(f"Error releasing cache rebuild lock: {e}")
-
-# Wrapper functions for marker operations with cache invalidation
+# Wrapper functions for marker operations
 def mark_file_processed_wrapper(filepath, original_filepath=None):
-    """Mark a file as processed and invalidate relevant caches"""
+    """Mark a file as processed"""
     mark_file_processed(filepath, original_filepath=original_filepath)
     
-    # Update watcher timestamp to invalidate caches
-    update_watcher_timestamp()
-    
-    # Invalidate enriched file cache
-    with enriched_file_cache_lock:
-        enriched_file_cache['files'] = None
-        enriched_file_cache['file_list_hash'] = None
-        enriched_file_cache['watcher_update_time'] = 0  # Reset to force rebuild
-    
-    # Invalidate filtered results cache (since processed status changed)
-    with filtered_results_cache_lock:
-        filtered_results_cache.clear()
-    
     # Broadcast event to connected clients
     broadcast_file_processed(filepath, success=True)
-    broadcast_cache_updated(rebuild_complete=False)
 
 def mark_file_duplicate_wrapper(filepath):
-    """Mark a file as duplicate and invalidate relevant caches"""
+    """Mark a file as duplicate"""
     mark_file_duplicate(filepath)
-    
-    # Update watcher timestamp to invalidate caches
-    update_watcher_timestamp()
-    
-    # Invalidate enriched file cache
-    with enriched_file_cache_lock:
-        enriched_file_cache['files'] = None
-        enriched_file_cache['file_list_hash'] = None
-        enriched_file_cache['watcher_update_time'] = 0  # Reset to force rebuild
-    
-    # Invalidate filtered results cache (since duplicate status changed)
-    with filtered_results_cache_lock:
-        filtered_results_cache.clear()
     
     # Broadcast event to connected clients
     broadcast_file_processed(filepath, success=True)
-    broadcast_cache_updated(rebuild_complete=False)
 
 def cleanup_web_markers_scheduled():
     """Clean up old web modified markers and reschedule"""
@@ -205,65 +105,7 @@ cleanup_timer.daemon = True
 cleanup_timer.start()
 logging.info("Web markers cleanup scheduled (every 5 minutes)")
 
-def get_watcher_update_time():
-    """Get the last time the watcher updated files"""
-    # Ensure config directory exists
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    
-    marker_path = os.path.join(CONFIG_DIR, CACHE_UPDATE_MARKER)
-    if os.path.exists(marker_path):
-        try:
-            with open(marker_path, 'r') as f:
-                return float(f.read().strip())
-        except:
-            return 0
-    return 0
 
-def update_watcher_timestamp():
-    """Update the watcher cache invalidation timestamp"""
-    # Ensure config directory exists
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    
-    marker_path = os.path.join(CONFIG_DIR, CACHE_UPDATE_MARKER)
-    try:
-        with open(marker_path, 'w') as f:
-            f.write(str(time.time()))
-    except Exception as e:
-        logging.error(f"Error updating watcher timestamp: {e}")
-
-class WatcherMonitorHandler(FileSystemEventHandler):
-    """File system event handler to monitor watcher activity marker file"""
-    
-    def on_modified(self, event):
-        if not event.is_directory and event.src_path.endswith(CACHE_UPDATE_MARKER):
-            logging.info(f"Watcher activity detected via file system event, broadcasting cache update")
-            broadcast_cache_updated(rebuild_complete=False)
-    
-    def on_created(self, event):
-        if not event.is_directory and event.src_path.endswith(CACHE_UPDATE_MARKER):
-            logging.info(f"Watcher activity detected via file system event, broadcasting cache update")
-            broadcast_cache_updated(rebuild_complete=False)
-
-def setup_watcher_monitor():
-    """Setup file system watcher to monitor watcher activity marker file"""
-    try:
-        # Ensure config directory exists
-        os.makedirs(CONFIG_DIR, exist_ok=True)
-        
-        event_handler = WatcherMonitorHandler()
-        observer = Observer()
-        observer.schedule(event_handler, CONFIG_DIR, recursive=False)
-        observer.start()
-        logging.info(f"Watcher monitor started using file system events on {CONFIG_DIR}")
-        
-        # Return observer so it's not garbage collected
-        return observer
-    except Exception as e:
-        logging.error(f"Error setting up watcher monitor: {e}")
-        return None
-
-# Start watcher monitor using file system events instead of polling
-watcher_monitor_observer = setup_watcher_monitor()
 
 def record_file_change(change_type, old_path=None, new_path=None):
     """Record a file change directly in the file store
@@ -329,26 +171,10 @@ def get_comic_files():
     # Load from file store database (extremely fast with SQLite + OS caching)
     return load_files_from_store()
 
-def clear_file_cache():
-    """Clear the filtered results cache
-    
-    Note: File list cache removed - database reads are already extremely fast.
-    This function now only clears the filtered results cache which caches
-    the expensive filtering/sorting/searching operations.
-    """
-    # Clear filtered results cache
-    with filtered_results_cache_lock:
-        filtered_results_cache.clear()
-
 def handle_file_rename_in_cache(original_path, final_path):
     """Handle file rename in file store - record change if file was actually renamed"""
     if original_path != final_path:
         record_file_change('rename', old_path=original_path, new_path=final_path)
-        update_watcher_timestamp()
-        
-        # Clear filtered results cache since file list changed
-        with filtered_results_cache_lock:
-            filtered_results_cache.clear()
 
 def get_credits_by_role(credits_list, role_synonyms):
     """Extract credits for a specific role from credits list"""
@@ -539,189 +365,60 @@ def preload_metadata_for_directories(files):
     # since markers are now stored centrally, not per-directory
     pass
 
-def rebuild_enriched_cache_async(files, file_list_hash):
-    """Background thread function to rebuild enriched cache asynchronously
+def get_enriched_file_list(files):
+    """Get file list enriched with metadata
     
     Args:
         files: List of file paths
-        file_list_hash: Hash of the file list to detect if it changed
-    """
-    lock_fd = None
-    try:
-        # Try to acquire file-based lock for cache rebuild
-        lock_fd = try_acquire_cache_rebuild_lock(timeout=0.5)
-        
-        if lock_fd is None:
-            logging.info("Async cache rebuild: Another worker is already rebuilding, aborting")
-            with enriched_file_cache_lock:
-                enriched_file_cache['rebuild_in_progress'] = False
-                enriched_file_cache['rebuild_thread'] = None
-            return
-        
-        # Check if cache was already rebuilt by another thread
-        with enriched_file_cache_lock:
-            if (enriched_file_cache['files'] is not None and 
-                enriched_file_cache['file_list_hash'] == file_list_hash):
-                logging.info("Async cache rebuild: Cache already updated, aborting")
-                enriched_file_cache['rebuild_in_progress'] = False
-                enriched_file_cache['rebuild_thread'] = None
-                return
-        
-        logging.info("Async cache rebuild: Starting background rebuild")
-        
-        # Preload metadata for all directories (batch operation)
-        preload_metadata_for_directories(files)
-        
-        # Get all marker data in one batch query (much faster than individual queries)
-        marker_data = get_all_marker_data()
-        processed_files = marker_data.get('processed', set())
-        duplicate_files = marker_data.get('duplicate', set())
-        
-        # Get all file metadata from database in a single query (much faster than os.path calls)
-        file_metadata = load_files_with_metadata_from_store()
-        
-        # Build file list with metadata
-        all_files = []
-        for f in files:
-            abs_path = os.path.abspath(f)
-            rel_path = os.path.relpath(f, WATCHED_DIR) if WATCHED_DIR else f
-            
-            # Get metadata from database (fast) or fall back to os.path (slow)
-            metadata = file_metadata.get(f)
-            if metadata:
-                file_size = metadata['file_size'] or 0
-                file_mtime = metadata['last_modified']
-            else:
-                # Fallback to os.path if not in database (shouldn't happen often)
-                try:
-                    file_size = os.path.getsize(f)
-                    file_mtime = os.path.getmtime(f)
-                except OSError:
-                    file_size = 0
-                    file_mtime = 0
-            
-            all_files.append({
-                'path': f,
-                'name': os.path.basename(f),
-                'relative_path': rel_path,
-                'size': file_size,
-                'modified': file_mtime,
-                'processed': abs_path in processed_files,
-                'duplicate': abs_path in duplicate_files
-            })
-        
-        # Update cache
-        with enriched_file_cache_lock:
-            enriched_file_cache['files'] = all_files
-            enriched_file_cache['timestamp'] = time.time()
-            enriched_file_cache['file_list_hash'] = file_list_hash
-            enriched_file_cache['watcher_update_time'] = get_watcher_update_time()
-            enriched_file_cache['rebuild_in_progress'] = False
-            enriched_file_cache['rebuild_thread'] = None
-        
-        # Broadcast cache update event
-        broadcast_cache_updated(rebuild_complete=True)
-        
-        logging.info(f"Async cache rebuild: Complete ({len(all_files)} files)")
-    except Exception as e:
-        logging.error(f"Async cache rebuild: Error - {e}")
-        with enriched_file_cache_lock:
-            enriched_file_cache['rebuild_in_progress'] = False
-            enriched_file_cache['rebuild_thread'] = None
-    finally:
-        # Always release the lock if we acquired it
-        if lock_fd is not None:
-            release_cache_rebuild_lock(lock_fd)
-
-def get_enriched_file_list(files, force_rebuild=False):
-    """Get file list enriched with metadata, using cache when possible
-    
-    Args:
-        files: List of file paths
-        force_rebuild: Force rebuilding the cache even if valid
         
     Returns:
         List of file dictionaries with metadata
     """
-    # Create a simple hash of the file list to detect changes
-    file_list_hash = hash(tuple(files))
+    # Preload metadata for all directories (batch operation)
+    preload_metadata_for_directories(files)
     
-    # Check if watcher has updated files since cache was built
-    watcher_update_time = get_watcher_update_time()
+    # Get all marker data in one batch query
+    marker_data = get_all_marker_data()
+    processed_files = marker_data.get('processed', set())
+    duplicate_files = marker_data.get('duplicate', set())
     
-    # Check if cache is valid (without holding lock)
-    with enriched_file_cache_lock:
-        # Invalidate cache if watcher has processed files since cache was built
-        if (enriched_file_cache['files'] is not None and 
-            watcher_update_time > enriched_file_cache['watcher_update_time']):
-            logging.info(f"Invalidating enriched cache: watcher has processed files (watcher time: {watcher_update_time}, cache time: {enriched_file_cache['watcher_update_time']})")
-            enriched_file_cache['files'] = None
-            enriched_file_cache['file_list_hash'] = None
-            
-            # Also clear filtered results cache since enriched data changed
-            with filtered_results_cache_lock:
-                filtered_results_cache.clear()
+    # Get all file metadata from database in a single query
+    file_metadata = load_files_with_metadata_from_store()
+    
+    # Build file list with metadata
+    all_files = []
+    for f in files:
+        abs_path = os.path.abspath(f)
+        rel_path = os.path.relpath(f, WATCHED_DIR) if WATCHED_DIR else f
         
-        if (not force_rebuild and 
-            enriched_file_cache['files'] is not None and 
-            enriched_file_cache['file_list_hash'] == file_list_hash):
-            
-            logging.debug("Using enriched file cache")
-            return enriched_file_cache['files']
-        
-        # Check if we have stale cache that can be returned
-        stale_cache = enriched_file_cache['files']
-        rebuild_in_progress = enriched_file_cache['rebuild_in_progress']
-    
-    # If rebuild is already in progress, return stale cache if available
-    if rebuild_in_progress:
-        if stale_cache is not None:
-            logging.info("Async cache rebuild in progress, returning stale cache")
-            return stale_cache
+        # Get metadata from database or fall back to os.path
+        metadata = file_metadata.get(f)
+        if metadata:
+            file_size = metadata['file_size'] or 0
+            file_mtime = metadata['last_modified']
         else:
-            logging.info("Async cache rebuild in progress, but no stale cache available")
-            # Fall through to trigger rebuild if no stale cache
-    
-    # If force_rebuild or no rebuild in progress, trigger async rebuild
-    with enriched_file_cache_lock:
-        # Double-check if cache was updated while we were checking
-        if (not force_rebuild and 
-            enriched_file_cache['files'] is not None and 
-            enriched_file_cache['file_list_hash'] == file_list_hash):
-            logging.debug("Cache was updated by another thread")
-            return enriched_file_cache['files']
+            # Fallback to os.path if not in database
+            try:
+                file_size = os.path.getsize(f)
+                file_mtime = os.path.getmtime(f)
+            except OSError:
+                file_size = 0
+                file_mtime = 0
         
-        # Check if we should start async rebuild
-        if not enriched_file_cache['rebuild_in_progress']:
-            logging.info("Triggering async cache rebuild")
-            enriched_file_cache['rebuild_in_progress'] = True
-            
-            # Start background rebuild thread
-            rebuild_thread = threading.Thread(
-                target=rebuild_enriched_cache_async,
-                args=(files, file_list_hash),
-                daemon=True
-            )
-            enriched_file_cache['rebuild_thread'] = rebuild_thread
-            rebuild_thread.start()
-        
-        # Return stale cache if available, otherwise return empty list
-        if stale_cache is not None:
-            logging.info("Returning stale cache while async rebuild runs")
-            return stale_cache
-        else:
-            # No stale cache - need to build synchronously for first request
-            logging.info("No stale cache available, building synchronously for first request")
+        all_files.append({
+            'path': f,
+            'name': os.path.basename(f),
+            'relative_path': rel_path,
+            'size': file_size,
+            'modified': file_mtime,
+            'processed': abs_path in processed_files,
+            'duplicate': abs_path in duplicate_files
+        })
     
-    # First-time cache build or another worker is building
-    # Return empty list immediately to avoid blocking the worker
-    # The async rebuild will populate the cache for subsequent requests
-    logging.info("No cache available, async rebuild in progress - returning empty list for now")
-    logging.info("Cache will be available on next request after rebuild completes")
-    return []
+    return all_files
 
-def get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, sort_direction, file_list_hash):
-    """Get filtered and sorted files with caching
+def get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, sort_direction):
+    """Get filtered and sorted files
     
     Args:
         all_files: List of all enriched files
@@ -729,23 +426,10 @@ def get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, s
         search_query: Search query string
         sort_mode: Sort mode ('name', 'date', 'size')
         sort_direction: Sort direction ('asc', 'desc')
-        file_list_hash: Hash of the file list to detect changes
         
     Returns:
         List of filtered and sorted files
     """
-    # Create cache key
-    cache_key = (filter_mode, search_query, sort_mode, sort_direction, file_list_hash)
-    
-    # Check cache
-    with filtered_results_cache_lock:
-        if cache_key in filtered_results_cache:
-            logging.debug(f"Using filtered results cache for filter={filter_mode}, search='{search_query}', sort={sort_mode}, direction={sort_direction}")
-            return filtered_results_cache[cache_key]['filtered_files']
-    
-    # Cache miss - compute filtered and sorted results
-    logging.info(f"Computing filtered results for filter={filter_mode}, search='{search_query}', sort={sort_mode}, direction={sort_direction}")
-    
     # Apply filters
     filtered_files = all_files
     
@@ -774,22 +458,6 @@ def get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, s
     else:  # Default to 'name'
         filtered_files = sorted(filtered_files, key=lambda f: f['name'].lower(), reverse=reverse)
     
-    # Store in cache (with LRU eviction if needed)
-    with filtered_results_cache_lock:
-        # Evict oldest cache entries if cache is full
-        if len(filtered_results_cache) >= MAX_FILTERED_CACHE_SIZE:
-            # Remove entries with oldest timestamp
-            oldest_key = min(filtered_results_cache.keys(), 
-                           key=lambda k: filtered_results_cache[k]['timestamp'])
-            del filtered_results_cache[oldest_key]
-            logging.debug(f"Evicted oldest filtered results cache entry")
-        
-        # Add new entry
-        filtered_results_cache[cache_key] = {
-            'filtered_files': filtered_files,
-            'timestamp': time.time()
-        }
-    
     return filtered_files
 
 
@@ -799,7 +467,6 @@ def list_files():
     # Get pagination parameters
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 100, type=int)
-    refresh = request.args.get('refresh', 'false').lower() == 'true'
     
     # Get filter parameters
     search_query = request.args.get('search', '', type=str).strip()
@@ -807,38 +474,17 @@ def list_files():
     sort_mode = request.args.get('sort', 'name', type=str)  # 'name', 'date', 'size'
     sort_direction = request.args.get('direction', 'asc', type=str)  # 'asc', 'desc'
     
-    # Get files from database (always fresh, database is extremely fast)
+    # Get files from database
     files = get_comic_files()
     
-    # Get enriched file list with metadata (cached)
-    all_files = get_enriched_file_list(files, force_rebuild=refresh)
-    
-    # Check if cache rebuild is in progress
-    with enriched_file_cache_lock:
-        cache_rebuilding = enriched_file_cache['rebuild_in_progress']
-    
-    # If cache is empty and rebuild is in progress, return minimal response
-    # This prevents worker timeout while cache is being built
-    if not all_files and cache_rebuilding:
-        logging.debug("Cache is rebuilding, returning empty response")
-        return jsonify({
-            'files': [],
-            'page': 1,
-            'per_page': per_page,
-            'total_files': 0,
-            'total_pages': 1,
-            'unmarked_count': 0,
-            'cache_rebuilding': True
-        })
+    # Get enriched file list with metadata
+    all_files = get_enriched_file_list(files)
     
     # Calculate unmarked count from all files (before filtering)
     unmarked_count = sum(1 for f in all_files if not f['processed'])
     
-    # Create a hash of the file list to detect changes
-    file_list_hash = hash(tuple(f['path'] for f in all_files))
-    
-    # Get filtered and sorted files (with caching)
-    filtered_files = get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, sort_direction, file_list_hash)
+    # Get filtered and sorted files
+    filtered_files = get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, sort_direction)
     
     total_filtered = len(filtered_files)
     
@@ -867,8 +513,7 @@ def list_files():
         'per_page': per_page,
         'total_files': total_filtered,
         'total_pages': total_pages,
-        'unmarked_count': unmarked_count,
-        'cache_rebuilding': cache_rebuilding
+        'unmarked_count': unmarked_count
     })
 
 @app.route('/api/file/<path:filepath>/tags')
@@ -2414,71 +2059,7 @@ def clear_active_job_endpoint():
         logging.error(f"Error clearing active job: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/cache/prewarm', methods=['POST'])
-def prewarm_cache_endpoint():
-    """API endpoint to manually prewarm the metadata cache"""
-    try:
-        prewarm_metadata_cache()
-        return jsonify({
-            'success': True,
-            'message': 'Metadata cache prewarmed successfully'
-        })
-    except Exception as e:
-        logging.error(f"Error prewarming cache via API: {e}")
-        return jsonify({'error': str(e)}), 500
 
-@app.route('/api/cache/stats', methods=['GET'])
-def cache_stats_endpoint():
-    """API endpoint to get cache statistics
-    
-    Note: file_list_cache removed as SQLite is extremely fast (<3ms for 5000 files).
-    Only enriched_file_cache and filtered_results_cache remain for caching expensive operations.
-    """
-    try:
-        # Get database file count directly (fast operation)
-        file_count = len(get_comic_files())
-        
-        with enriched_file_cache_lock:
-            enriched_count = len(enriched_file_cache['files']) if enriched_file_cache['files'] else 0
-            enriched_age = time.time() - enriched_file_cache['timestamp'] if enriched_file_cache['timestamp'] else 0
-            rebuild_in_progress = enriched_file_cache['rebuild_in_progress']
-        
-        with filtered_results_cache_lock:
-            filtered_cache_count = len(filtered_results_cache)
-        
-        # Get marker counts from centralized storage
-        from markers import MARKER_TYPE_PROCESSED, MARKER_TYPE_DUPLICATE, MARKER_TYPE_WEB_MODIFIED
-        from marker_store import get_markers
-        processed_count = len(get_markers(MARKER_TYPE_PROCESSED))
-        duplicate_count = len(get_markers(MARKER_TYPE_DUPLICATE))
-        web_modified_count = len(get_markers(MARKER_TYPE_WEB_MODIFIED))
-        
-        return jsonify({
-            'database': {
-                'file_count': file_count,
-                'note': 'File list read directly from SQLite (extremely fast, <3ms for 5000 files)'
-            },
-            'enriched_file_cache': {
-                'file_count': enriched_count,
-                'age_seconds': enriched_age,
-                'is_populated': enriched_file_cache['files'] is not None,
-                'rebuild_in_progress': rebuild_in_progress,
-                'note': 'Caches expensive marker enrichment operations'
-            },
-            'filtered_results_cache': {
-                'entry_count': filtered_cache_count,
-                'note': 'Caches expensive filter/search/sort operations'
-            },
-            'markers': {
-                'processed_files': processed_count,
-                'duplicate_files': duplicate_count,
-                'web_modified_files': web_modified_count,
-                'storage_location': '/Config/markers/'
-            }
-        })
-    except Exception as e:
-        logging.error(f"Error getting cache stats: {e}")
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/events/stream', methods=['GET'])
 def events_stream():
@@ -2486,7 +2067,6 @@ def events_stream():
     Server-Sent Events (SSE) endpoint for real-time updates
     
     Clients can subscribe to receive real-time events:
-    - cache_updated: File cache has been rebuilt
     - watcher_status: Watcher service status changed
     - file_processed: File has been processed
     - job_updated: Batch job status changed
@@ -2531,71 +2111,24 @@ def events_stats():
         'total_events_broadcast': broadcaster.get_event_count()
     })
 
-def prewarm_metadata_cache():
-    """Prewarm metadata cache by ensuring marker files are loaded"""
-    # Note: With centralized markers in /Config/markers/, markers are already
-    # loaded efficiently when first accessed. This function is kept for 
-    # backward compatibility but no longer needs to scan directories.
-    # The markers.py module handles loading on first access.
-    logging.info("Metadata markers are stored centrally and loaded on-demand")
-
-def initialize_cache():
-    """Initialize enriched file cache on startup
-    
-    Note: file_list_cache removed - SQLite reads are extremely fast (<3ms for 5000 files).
-    We only initialize the enriched_file_cache which caches expensive marker enrichment.
-    """
-    if not WATCHED_DIR:
-        return
-    
-    # Try to acquire lock to coordinate cache initialization across workers
-    lock_fd = try_acquire_cache_rebuild_lock(timeout=0.1)
-    
-    if lock_fd is None:
-        logging.info("Another worker is already initializing caches, skipping")
-        return
-    
-    try:
-        logging.info("Initializing enriched cache on startup...")
-        
-        # Sync file store with filesystem if not recently synced
-        last_sync = file_store.get_last_sync_timestamp()
-        current_time = time.time()
-        # Sync if never synced or last sync was more than 5 minutes ago
-        if last_sync is None or (current_time - last_sync) > 300:
-            logging.info("Syncing file store with filesystem...")
-            added, removed, updated = file_store.sync_with_filesystem(WATCHED_DIR)
-            logging.info(f"File store sync complete: +{added} new files, -{removed} deleted files, ~{updated} updated files")
-        else:
-            logging.info(f"File store was recently synced ({int(current_time - last_sync)}s ago), skipping sync")
-        
-        # Get file list from database (fast - no caching needed)
-        logging.info("Reading file list from database...")
-        files = get_comic_files()
-        logging.info(f"Loaded {len(files)} files from database")
-        
-        # Prewarm the metadata cache (markers) - this is fast as it's centralized
-        prewarm_metadata_cache()
-        
-        # Trigger async enriched file cache rebuild instead of building synchronously
-        # This prevents worker timeouts during startup
-        logging.info("Triggering async enriched file cache rebuild...")
-        get_enriched_file_list(files, force_rebuild=True)
-        logging.info("Async cache rebuild triggered - cache will be available shortly")
-        
-        logging.info("Cache initialization complete")
-    finally:
-        if lock_fd is not None:
-            release_cache_rebuild_lock(lock_fd)
-
 def init_app():
     """Initialize the application on startup"""
     if not WATCHED_DIR:
         logging.error("WATCHED_DIR environment variable is not set. Exiting.")
         sys.exit(1)
     
-    # Initialize cache on startup
-    initialize_cache()
+    # Sync file store with filesystem if not recently synced
+    last_sync = file_store.get_last_sync_timestamp()
+    current_time = time.time()
+    # Sync if never synced or last sync was more than 5 minutes ago
+    if last_sync is None or (current_time - last_sync) > 300:
+        logging.info("Syncing file store with filesystem...")
+        added, removed, updated = file_store.sync_with_filesystem(WATCHED_DIR)
+        logging.info(f"File store sync complete: +{added} new files, -{removed} deleted files, ~{updated} updated files")
+    else:
+        logging.info(f"File store was recently synced ({int(current_time - last_sync)}s ago), skipping sync")
+    
+    logging.info("Application initialization complete")
 
 if __name__ == '__main__':
     # This block is only for development/testing purposes

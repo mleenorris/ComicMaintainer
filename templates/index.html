@@ -2198,8 +2198,6 @@
         let perPage = 100; // Default value, will be loaded from server
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
         let searchDebounceTimer = null;
-        // Cache rebuild polling removed - using SSE events only
-        let isCacheRebuilding = false;
         
         // Server-Sent Events connection for real-time updates
         let eventSource = null;
@@ -2261,9 +2259,6 @@
             console.log('SSE Event:', eventType, eventData);
             
             switch(eventType) {
-                case 'cache_updated':
-                    handleCacheUpdatedEvent(eventData);
-                    break;
                 case 'watcher_status':
                     handleWatcherStatusEvent(eventData);
                     break;
@@ -2279,18 +2274,6 @@
             }
         }
         
-        // Handle cache update events
-        function handleCacheUpdatedEvent(data) {
-            if (data.rebuild_complete) {
-                console.log('SSE: Cache rebuild completed, refreshing file list');
-                isCacheRebuilding = false;
-                loadFiles(currentPage, false);
-            } else {
-                console.log('SSE: Cache rebuild in progress');
-                isCacheRebuilding = true;
-            }
-        }
-        
         // Handle watcher status events
         function handleWatcherStatusEvent(data) {
             console.log('SSE: Watcher status updated:', data);
@@ -2300,7 +2283,8 @@
         // Handle file processed events
         function handleFileProcessedEvent(data) {
             console.log('SSE: File processed:', data.filename, 'Success:', data.success);
-            // File list will be updated by cache_updated event
+            // Refresh file list to show updated status
+            loadFiles(currentPage, false);
         }
         
         // Handle job update events (real-time via SSE)
@@ -2669,10 +2653,6 @@
                 totalFiles = data.total_files;
                 unmarkedCount = data.unmarked_count || 0;
                 
-                // Check if cache is rebuilding
-                const cacheRebuilding = data.cache_rebuilding || false;
-                handleCacheRebuildStatus(cacheRebuilding);
-                
                 renderFileList();
                 updatePagination();
                 updateButtonVisibility();
@@ -2680,22 +2660,6 @@
                 showMessage('Failed to load files: ' + error.message, 'error');
             }
         }
-        
-        function handleCacheRebuildStatus(isRebuilding) {
-            if (isRebuilding && !isCacheRebuilding) {
-                // Cache rebuild just started
-                console.log('Cache rebuild started, will refresh when complete via SSE events');
-                isCacheRebuilding = true;
-            } else if (!isRebuilding && isCacheRebuilding) {
-                // Cache rebuild just completed
-                console.log('Cache rebuild completed, refreshing file list');
-                isCacheRebuilding = false;
-                // Auto-refresh the file list to show updated data
-                loadFiles(currentPage, false);
-            }
-        }
-        
-        // Cache rebuild polling removed - using SSE events only
         
         function updatePagination() {
             const paginationDiv = document.getElementById('pagination');
@@ -3461,7 +3425,7 @@
                                 totalFiles = data.results.length;
                                 completeProgress();
                                 showMessage(`Processed ${successCount} of ${totalFiles} files successfully!`, 'success');
-                                // Refresh file list (force refresh to clear cache)
+                                // Refresh file list
                                 await loadFiles(1, true);
                             } else {
                                 if (data.success) {
@@ -3835,7 +3799,7 @@
                                 totalFiles = data.results.length;
                                 completeProgress();
                                 showMessage(`Renamed ${successCount} of ${totalFiles} files successfully!`, 'success');
-                                // Refresh file list (force refresh to clear cache)
+                                // Refresh file list
                                 await loadFiles(1, true);
                             } else {
                                 if (data.success) {
@@ -3889,7 +3853,7 @@
                                 totalFiles = data.results.length;
                                 completeProgress();
                                 showMessage(`Normalized metadata for ${successCount} of ${totalFiles} files successfully!`, 'success');
-                                // Refresh file list (force refresh to clear cache)
+                                // Refresh file list
                                 await loadFiles(1, true);
                             } else {
                                 if (data.success) {
@@ -4061,7 +4025,7 @@
                             if (data.done) {
                                 completeProgress();
                                 showMessage(`Processed ${successCount} of ${files.length} files successfully!`, 'success');
-                                // Refresh file list (force refresh to clear cache)
+                                // Refresh file list
                                 await loadFiles(1, true);
                             } else {
                                 if (data.success) {
@@ -4125,7 +4089,7 @@
                             if (data.done) {
                                 completeProgress();
                                 showMessage(`Renamed ${successCount} of ${files.length} files successfully!`, 'success');
-                                // Refresh file list (force refresh to clear cache)
+                                // Refresh file list
                                 await loadFiles(1, true);
                             } else {
                                 if (data.success) {
@@ -4189,7 +4153,7 @@
                             if (data.done) {
                                 completeProgress();
                                 showMessage(`Normalized metadata for ${successCount} of ${files.length} files successfully!`, 'success');
-                                // Refresh file list (force refresh to clear cache)
+                                // Refresh file list
                                 await loadFiles(1, true);
                             } else {
                                 if (data.success) {

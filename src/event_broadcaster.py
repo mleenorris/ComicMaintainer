@@ -5,7 +5,6 @@ This module provides a unified Server-Sent Events (SSE) broadcasting system
 to replace polling mechanisms with real-time push notifications.
 
 Event Types:
-- cache_updated: File list cache has been rebuilt
 - watcher_status: Watcher service status changed
 - file_processed: File has been processed by watcher or web interface
 - job_updated: Batch job status changed
@@ -177,17 +176,7 @@ def get_broadcaster() -> EventBroadcaster:
     return _broadcaster
 
 
-def broadcast_cache_updated(rebuild_complete: bool = True):
-    """
-    Broadcast that the file cache has been updated
-    
-    Args:
-        rebuild_complete: True if rebuild is complete, False if in progress
-    """
-    get_broadcaster().broadcast('cache_updated', {
-        'rebuild_complete': rebuild_complete,
-        'message': 'File cache has been updated' if rebuild_complete else 'Cache rebuild in progress'
-    })
+
 
 
 def broadcast_watcher_status(running: bool, enabled: bool):

@@ -118,7 +118,14 @@ class EventBroadcaster:
         event = Event(type=event_type, data=data)
         
         # Store as last event of this type
-        self._last_events[event_type] = event
+        # For job_updated events, use a composite key (event_type, job_id) to track
+        # each job separately. This prevents multiple jobs from overwriting each other's status.
+        if event_type == 'job_updated' and 'job_id' in data:
+            storage_key = (event_type, data['job_id'])
+        else:
+            storage_key = event_type
+        
+        self._last_events[storage_key] = event
         
         with self._clients_lock:
             dead_clients = set()

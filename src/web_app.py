@@ -1979,7 +1979,6 @@ def delete_single_file(filepath):
         
         # Update file store
         record_file_change('remove', old_path=full_path)
-        update_watcher_timestamp()
         
         logging.info(f"Deleted file via web interface: {full_path}")
         return jsonify({'success': True})

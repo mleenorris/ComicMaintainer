@@ -300,6 +300,35 @@ def get_all_files() -> List[str]:
         return []
 
 
+def get_all_files_with_metadata() -> List[Dict]:
+    """
+    Get all files from the file store with their metadata.
+    
+    Returns:
+        List of dictionaries containing filepath, last_modified, and file_size
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT filepath, last_modified, file_size, added_timestamp
+                FROM files 
+                ORDER BY filepath
+            ''')
+            results = []
+            for row in cursor.fetchall():
+                results.append({
+                    'filepath': row['filepath'],
+                    'last_modified': row['last_modified'],
+                    'file_size': row['file_size'],
+                    'added_timestamp': row['added_timestamp']
+                })
+            return results
+    except Exception as e:
+        logging.error(f"Error getting all files with metadata from store: {e}")
+        return []
+
+
 def get_file_count() -> int:
     """
     Get the total number of files in the store.

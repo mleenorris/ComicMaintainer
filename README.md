@@ -24,6 +24,10 @@ This service automatically watches a directory for new or changed comic archive 
   - **Visual status indicators**: Each file shows ✅ (processed), ⚠️ (unprocessed), or 🔁 (duplicate) icon
   - **Server-side preferences**: Theme and pagination settings persist across browsers and devices
   - **Job resumption**: Batch processing jobs automatically resume after page refresh or browser restart
+  - **Robust batch processing**: Three-layer defense system ensures progress updates are never stuck
+    - Real-time SSE updates for instant feedback
+    - Automatic reconnection and status sync when connection drops
+    - Watchdog timer detects stuck jobs and auto-polls status after 60 seconds of inactivity
 - Logs all actions to `ComicMaintainer.log`
 - Containerized with Docker for easy deployment
 - **Supports custom user and group IDs (PUID/PGID) for proper file permissions**

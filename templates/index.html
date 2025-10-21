@@ -2218,6 +2218,13 @@
                 
                 eventSource.onopen = () => {
                     console.log('SSE: Connected to event stream');
+                    
+                    // When SSE reconnects and we have an active job, poll for its current status
+                    // This ensures we don't miss updates that occurred while disconnected
+                    if (hasActiveJob && currentJobId) {
+                        console.log(`SSE: Reconnected with active job ${currentJobId}, fetching current status...`);
+                        pollJobStatusOnce(currentJobId);
+                    }
                 };
                 
                 eventSource.onmessage = (event) => {
@@ -2310,6 +2317,11 @@
                 return;
             }
             
+            // Reset watchdog timer on each update
+            if (window.resetJobWatchdog) {
+                window.resetJobWatchdog();
+            }
+            
             // Update progress UI in real-time
             const processed = progress.processed || 0;
             const total = progress.total || 0;
@@ -2321,6 +2333,12 @@
             // Handle job completion
             if (status === 'completed' || status === 'failed' || status === 'cancelled') {
                 console.log(`SSE: Job ${jobId} finished with status: ${status}`);
+                
+                // Clear watchdog timer on completion
+                if (window.currentJobWatchdog) {
+                    clearInterval(window.currentJobWatchdog);
+                    window.currentJobWatchdog = null;
+                }
                 
                 // Allow a brief moment for final updates, then finalize
                 setTimeout(async () => {
@@ -3548,6 +3566,58 @@
             }
         }
         
+        async function pollJobStatusOnce(jobId) {
+            // Poll job status once to catch up after SSE reconnection or to handle stuck jobs
+            console.log(`[JOB ${jobId}] Polling job status once...`);
+            
+            try {
+                const response = await fetch(`/api/jobs/${jobId}`);
+                if (!response.ok) {
+                    console.warn(`[JOB ${jobId}] Could not fetch job status: ${response.status}`);
+                    return;
+                }
+                
+                const status = await response.json();
+                const processed = status.processed_items || 0;
+                const total = status.total_items || 0;
+                
+                // Count successes and errors from results
+                let successCount = 0;
+                let errorCount = 0;
+                if (status.results && Array.isArray(status.results)) {
+                    for (const result of status.results) {
+                        if (result.success) successCount++;
+                        else errorCount++;
+                    }
+                }
+                
+                console.log(`[JOB ${jobId}] Current status: ${status.status}, ${processed}/${total} (${successCount} success, ${errorCount} errors)`);
+                
+                // Update progress UI
+                updateProgress(processed, total, successCount, errorCount);
+                
+                // Handle completion states
+                if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
+                    console.log(`[JOB ${jobId}] Job is ${status.status}, triggering completion handler`);
+                    
+                    // Simulate an SSE event to trigger completion logic
+                    handleJobUpdatedEvent({
+                        job_id: jobId,
+                        status: status.status,
+                        progress: {
+                            processed: processed,
+                            total: total,
+                            success: successCount,
+                            errors: errorCount,
+                            percentage: (processed / total * 100) || 0
+                        }
+                    });
+                }
+            } catch (error) {
+                console.error(`[JOB ${jobId}] Error polling job status:`, error);
+            }
+        }
+        
         async function trackJobStatus(jobId, title) {
             // Job progress updates via SSE only - no polling
             // SSE provides real-time updates, polling has been completely removed
@@ -3563,42 +3633,40 @@
             await setActiveJobOnServer(jobId, title);
             
             // Fetch initial job state to display immediately
-            try {
-                const response = await fetch(`/api/jobs/${jobId}`);
-                if (response.ok) {
-                    const status = await response.json();
-                    const processed = status.processed_items || 0;
-                    const total = status.total_items || 0;
-                    
-                    // Count successes and errors
-                    let successCount = 0;
-                    let errorCount = 0;
-                    if (status.results && Array.isArray(status.results)) {
-                        for (const result of status.results) {
-                            if (result.success) successCount++;
-                            else errorCount++;
-                        }
-                    }
-                    
-                    updateProgress(processed, total, successCount, errorCount);
-                    
-                    // Check if job is already complete
-                    if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
-                        console.log(`[JOB ${jobId}] Job already finished with status: ${status.status}`);
-                        // Let SSE handler deal with completion
-                        return;
-                    }
-                } else {
-                    console.warn(`[JOB ${jobId}] Could not fetch initial job status: ${response.status}`);
-                }
-            } catch (error) {
-                console.error(`[JOB ${jobId}] Error fetching initial job status:`, error);
-                // Continue anyway, SSE events will update the status
-            }
+            await pollJobStatusOnce(jobId);
             
             // From this point on, all updates come from SSE events via handleJobUpdatedEvent
             // No polling loop - we rely entirely on the SSE connection
             console.log(`[JOB ${jobId}] Waiting for SSE updates...`);
+            
+            // Set up a watchdog timer to detect stuck jobs (no updates for 60 seconds)
+            // This catches cases where SSE silently fails or the backend stops sending updates
+            let lastUpdateTime = Date.now();
+            
+            const watchdogInterval = setInterval(async () => {
+                const timeSinceLastUpdate = Date.now() - lastUpdateTime;
+                
+                // If no update for 60 seconds and job is still active, poll status
+                if (hasActiveJob && currentJobId === jobId && timeSinceLastUpdate > 60000) {
+                    console.warn(`[JOB ${jobId}] No updates for ${Math.round(timeSinceLastUpdate / 1000)}s, polling status...`);
+                    await pollJobStatusOnce(jobId);
+                    lastUpdateTime = Date.now(); // Reset timer after manual poll
+                }
+                
+                // Clear interval if job is no longer active
+                if (!hasActiveJob || currentJobId !== jobId) {
+                    console.log(`[JOB ${jobId}] Watchdog timer cleared (job no longer active)`);
+                    clearInterval(watchdogInterval);
+                }
+            }, 15000); // Check every 15 seconds
+            
+            // Store watchdog interval so it can be cleared on job completion
+            window.currentJobWatchdog = watchdogInterval;
+            
+            // Create a progress update callback that resets the watchdog timer
+            window.resetJobWatchdog = () => {
+                lastUpdateTime = Date.now();
+            };
         }
         
         async function cancelCurrentJob() {

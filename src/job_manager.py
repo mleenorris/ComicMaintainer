@@ -169,8 +169,12 @@ class JobManager:
             )
             log_debug("Broadcast job progress", job_id=job_id, processed=processed, total=total)
         except Exception as e:
-            # Don't fail job processing if broadcast fails
-            logging.warning(f"[JOB {job_id}] Failed to broadcast progress: {e}")
+            # Don't fail job processing if broadcast fails, but log prominently
+            # This helps diagnose cases where the frontend appears stuck
+            logging.error(f"[JOB {job_id}] CRITICAL: Failed to broadcast progress update - frontend may appear stuck! Error: {e}")
+            # Try to log stack trace for debugging
+            import traceback
+            logging.error(f"[JOB {job_id}] Broadcast failure stack trace:\n{traceback.format_exc()}")
     
     def _clear_active_job_if_current(self, job_id: str):
         """
@@ -288,15 +292,24 @@ class JobManager:
             job_store.update_job_status(job_id, JobStatus.COMPLETED.value, completed_at=completed_at)
             logging.info(f"[JOB {job_id}] Completed: {success_count} succeeded, {error_count} failed out of {len(items)} items")
             
-            # Broadcast final completion status
-            self._broadcast_job_progress(
-                job_id=job_id,
-                status=JobStatus.COMPLETED.value,
-                processed=len(items),
-                total=len(items),
-                success=success_count,
-                errors=error_count
-            )
+            # Broadcast final completion status - retry multiple times to ensure frontend receives it
+            for attempt in range(3):
+                try:
+                    self._broadcast_job_progress(
+                        job_id=job_id,
+                        status=JobStatus.COMPLETED.value,
+                        processed=len(items),
+                        total=len(items),
+                        success=success_count,
+                        errors=error_count
+                    )
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    if attempt < 2:
+                        logging.warning(f"[JOB {job_id}] Completion broadcast attempt {attempt+1} failed, retrying... Error: {e}")
+                        time.sleep(0.5)  # Brief delay before retry
+                    else:
+                        logging.error(f"[JOB {job_id}] All completion broadcast attempts failed! Frontend may not detect completion.")
             
             # Clear active job from preferences if this job is the active one
             # This ensures stale job references don't persist after completion

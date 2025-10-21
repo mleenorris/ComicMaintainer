@@ -1319,7 +1319,7 @@
                 padding: 12px 10px;
                 gap: 6px;
                 flex-wrap: wrap;
-                overflow-x: hidden;
+                overflow: visible;
                 margin-left: 0;
                 margin-right: 0;
                 max-width: 100%;
@@ -1357,6 +1357,13 @@
             
             .action-dropdown-toggle::after {
                 display: none;
+            }
+            
+            /* Fix action dropdown menu positioning on mobile */
+            .action-dropdown-menu {
+                right: 0;
+                left: auto;
+                min-width: max-content;
             }
             
             .button-group {

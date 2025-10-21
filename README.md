@@ -193,10 +193,10 @@ The service includes a web-based interface for managing your comic files:
 - Cache does not expire based on time, providing instant page navigation
 - Pagination controls allow easy navigation through large libraries
 - Search and filters are applied server-side before pagination for efficient handling of large libraries
-- **Incremental cache updates**: Instead of invalidating the entire cache when files change, individual file changes (add, remove, rename) are applied incrementally, significantly improving performance for large libraries
+- **SQLite-based file store**: File list is managed in a SQLite database for atomic operations, better concurrency, and excellent performance (160k+ lookups/sec). Adding and removing files is seamless and instant.
 - **Smart cache invalidation**: Cache is only invalidated when the watcher processes files, ensuring the cache stays fresh while maximizing performance
 - **Manual cache control**: API endpoints available to manually trigger cache warming (`POST /api/cache/prewarm`) or check cache statistics (`GET /api/cache/stats`)
-- See [PERFORMANCE_IMPROVEMENTS.md](PERFORMANCE_IMPROVEMENTS.md), [ASYNC_CACHE_REBUILD.md](ASYNC_CACHE_REBUILD.md), [docs/EVENT_BROADCASTING_SYSTEM.md](docs/EVENT_BROADCASTING_SYSTEM.md), and [docs/PROGRESS_CALLBACKS.md](docs/PROGRESS_CALLBACKS.md) for detailed performance metrics and architecture
+- See [FILE_LIST_IMPROVEMENTS.md](FILE_LIST_IMPROVEMENTS.md), [PERFORMANCE_IMPROVEMENTS.md](PERFORMANCE_IMPROVEMENTS.md), [ASYNC_CACHE_REBUILD.md](ASYNC_CACHE_REBUILD.md), [docs/EVENT_BROADCASTING_SYSTEM.md](docs/EVENT_BROADCASTING_SYSTEM.md), and [docs/PROGRESS_CALLBACKS.md](docs/PROGRESS_CALLBACKS.md) for detailed performance metrics and architecture
 
 ### Filename Format Configuration
 The filename format can be customized through the web interface Settings modal. The format uses placeholders that are replaced with actual metadata values:
@@ -326,21 +326,26 @@ The application stores all persistent data in `/Config`. **To preserve your data
 
 When you mount `/Config`, the following data is preserved:
 
-1. **Marker Database** - Track which files have been processed, duplicates, and web modifications
+1. **File Store Database** - Tracks all comic files in the watched directory
+   - Located in `/Config/file_store/files.db` (SQLite database)
+   - Provides atomic operations for file list management
+   - Automatically syncs with filesystem on startup
+
+2. **Marker Database** - Track which files have been processed, duplicates, and web modifications
    - Located in `/Config/markers/markers.db` (SQLite database)
    - Automatically migrates from legacy JSON files on first startup
    - More efficient and reliable than JSON files
 
-2. **Configuration Settings** - Saved via the web interface Settings menu
+3. **Configuration Settings** - Saved via the web interface Settings menu
    - Located at `/Config/config.json`
    - Includes: filename format template, watcher state, log rotation settings
 
-3. **Log Files** - Application logs
+4. **Log Files** - Application logs
    - Located in `/Config/Log/`
    - `ComicMaintainer.log` with automatic rotation
 
-4. **Cache Files** - Performance optimization data
-   - File list cache, cache update markers
+5. **Cache Files** - Performance optimization data
+   - In-memory caches backed by SQLite databases for reliability
 
 ### Example with Persistence
 

@@ -2355,6 +2355,7 @@
                         completeProgress();
                         await clearActiveJobOnServer();
                         hasActiveJob = false;
+                        currentJobTitle = null;
                         setTimeout(() => {
                             closeProgressModal();
                             loadFiles(currentPage, true);
@@ -2364,12 +2365,14 @@
                         completeProgress();
                         await clearActiveJobOnServer();
                         hasActiveJob = false;
+                        currentJobTitle = null;
                         setTimeout(closeProgressModal, 3000);
                     } else if (status === 'cancelled') {
                         document.getElementById('progressTitle').textContent = 'Cancelled - Job was cancelled';
                         completeProgress();
                         await clearActiveJobOnServer();
                         hasActiveJob = false;
+                        currentJobTitle = null;
                         setTimeout(closeProgressModal, 2000);
                     }
                 }, 500);
@@ -2632,6 +2635,7 @@
         // Note: We can't use async in beforeunload, so we track the active job in a variable
         let hasActiveJob = false;
         let currentJobId = null;  // Track current job ID for cancellation
+        let currentJobTitle = null;  // Track current job title for progress updates
         window.addEventListener('beforeunload', function(event) {
             // Clean up SSE connection
             cleanupEventSource();
@@ -3615,6 +3619,7 @@
             // miss any events that arrive while setActiveJobOnServer is in flight.
             hasActiveJob = true;
             currentJobId = jobId;  // Track for cancellation
+            currentJobTitle = title;  // Track title for progress updates
             
             // Store active job ID on server (async, but job tracking already enabled)
             await setActiveJobOnServer(jobId, title);
@@ -4428,10 +4433,11 @@
             document.getElementById('progressText').textContent = `${current} / ${total} files`;
             document.getElementById('progressPercent').textContent = percent + '%';
             
-            // Update title with success/error counts if any errors
-            let title = 'Processing Files...';
+            // Update title with success/error counts if any errors, preserving the original job title
+            let baseTitle = currentJobTitle || 'Processing Files...';
+            let title = baseTitle;
             if (errorCount > 0) {
-                title = `Processing Files - ${successCount} succeeded, ${errorCount} failed`;
+                title = `${baseTitle} - ${successCount} succeeded, ${errorCount} failed`;
             }
             document.getElementById('progressTitle').textContent = title;
             

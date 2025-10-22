@@ -2602,6 +2602,60 @@
             }
         }
         
+        // Check file sync status
+        async function checkSyncStatus() {
+            try {
+                const response = await fetch('/api/sync/status');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                return data;
+            } catch (error) {
+                console.error('Error checking sync status:', error);
+                return null;
+            }
+        }
+        
+        // Wait for file sync to complete before loading files
+        async function waitForSyncCompletion() {
+            const status = await checkSyncStatus();
+            if (!status) {
+                return; // Error checking status, proceed anyway
+            }
+            
+            if (status.completed) {
+                // Sync already completed
+                if (status.error) {
+                    console.warn('File sync completed with error:', status.error);
+                } else {
+                    console.log('File sync completed:', status.added, 'added,', status.removed, 'removed,', status.updated, 'updated');
+                }
+                return;
+            }
+            
+            if (status.in_progress) {
+                // Show loading indicator
+                console.log('File sync in progress, waiting for completion...');
+                showMessage('Loading file list...', 'info');
+                
+                // Poll for completion
+                while (true) {
+                    await new Promise(resolve => setTimeout(resolve, 500)); // Poll every 500ms
+                    const newStatus = await checkSyncStatus();
+                    if (!newStatus || newStatus.completed) {
+                        if (newStatus && newStatus.error) {
+                            console.warn('File sync completed with error:', newStatus.error);
+                            showMessage('File sync completed with errors', 'warning');
+                        } else if (newStatus) {
+                            console.log('File sync completed:', newStatus.added, 'added,', newStatus.removed, 'removed,', newStatus.updated, 'updated');
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        
         // Load files on page load
         document.addEventListener('DOMContentLoaded', async function() {
             // Load preferences from server
@@ -2627,7 +2681,10 @@
             // This ensures the progress modal appears immediately on page load
             await checkAndResumeActiveJob();
             
-            // Then load files (don't await so file list loads in background)
+            // Wait for file sync to complete before loading files
+            await waitForSyncCompletion();
+            
+            // Then load files
             loadFiles();
         });
         

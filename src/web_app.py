@@ -2103,21 +2103,96 @@ def events_stats():
         'total_events_broadcast': broadcaster.get_event_count()
     })
 
+@app.route('/api/sync/status', methods=['GET'])
+def get_sync_status_api():
+    """API endpoint to get the file sync status"""
+    status = _get_sync_status()
+    
+    # Calculate duration if available
+    if status['start_time'] and status['end_time']:
+        status['duration'] = status['end_time'] - status['start_time']
+    elif status['start_time']:
+        status['duration'] = time.time() - status['start_time']
+    else:
+        status['duration'] = None
+    
+    return jsonify(status)
+
+# Global state for async sync
+_sync_thread = None
+_sync_status = {
+    'in_progress': False,
+    'completed': False,
+    'error': None,
+    'added': 0,
+    'removed': 0,
+    'updated': 0,
+    'start_time': None,
+    'end_time': None
+}
+_sync_status_lock = threading.Lock()
+
+
+def _update_sync_status(**kwargs):
+    """Thread-safe update of sync status"""
+    with _sync_status_lock:
+        _sync_status.update(kwargs)
+
+
+def _get_sync_status():
+    """Thread-safe read of sync status"""
+    with _sync_status_lock:
+        return _sync_status.copy()
+
+
+def _async_sync_filesystem():
+    """Background task to sync file store with filesystem"""
+    try:
+        _update_sync_status(in_progress=True, start_time=time.time())
+        logging.info("Starting asynchronous file store sync...")
+        
+        added, removed, updated = file_store.sync_with_filesystem(WATCHED_DIR)
+        
+        _update_sync_status(
+            in_progress=False,
+            completed=True,
+            added=added,
+            removed=removed,
+            updated=updated,
+            end_time=time.time()
+        )
+        logging.info(f"File store sync complete: +{added} new files, -{removed} deleted files, ~{updated} updated files")
+    except Exception as e:
+        _update_sync_status(
+            in_progress=False,
+            completed=True,
+            error=str(e),
+            end_time=time.time()
+        )
+        logging.error(f"Error during async file store sync: {e}")
+
+
 def init_app():
     """Initialize the application on startup"""
+    global _sync_thread
+    
     if not WATCHED_DIR:
         logging.error("WATCHED_DIR environment variable is not set. Exiting.")
         sys.exit(1)
     
-    # Sync file store with filesystem if not recently synced
+    # Check if sync is needed
     last_sync = file_store.get_last_sync_timestamp()
     current_time = time.time()
+    
     # Sync if never synced or last sync was more than 5 minutes ago
     if last_sync is None or (current_time - last_sync) > 300:
-        logging.info("Syncing file store with filesystem...")
-        added, removed, updated = file_store.sync_with_filesystem(WATCHED_DIR)
-        logging.info(f"File store sync complete: +{added} new files, -{removed} deleted files, ~{updated} updated files")
+        # Start async sync in background thread
+        logging.info("Starting file store sync in background...")
+        _sync_thread = threading.Thread(target=_async_sync_filesystem, daemon=True)
+        _sync_thread.start()
     else:
+        # Mark as completed since no sync needed
+        _update_sync_status(completed=True)
         logging.info(f"File store was recently synced ({int(current_time - last_sync)}s ago), skipping sync")
     
     logging.info("Application initialization complete")

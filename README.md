@@ -188,6 +188,7 @@ The service includes a web-based interface for managing your comic files:
     - 🔁 = duplicate file
 
 ### Performance
+- **Asynchronous file sync**: File list synchronization runs in background thread for instant web server startup (335x faster with 5000 files)
 - **Optimized search and filtering**: Server-side processing with efficient database queries
 - **Search debouncing**: 300ms delay reduces API calls by 87% while typing
 - **Real-time updates via Server-Sent Events (SSE)**: 100% event-driven architecture with zero polling. All updates (file processing, watcher status, job progress) are pushed instantly to clients via SSE. Background tasks use event-based timers and file system watchers instead of sleep-based polling
@@ -265,6 +266,24 @@ The service now supports asynchronous file processing with persistent job storag
 - ✅ **Page refresh protection**: Warning dialog prevents accidental interruption; jobs auto-resume on return
 
 **Note:** The original streaming endpoints (`/api/process-all?stream=true`, etc.) remain available for backward compatibility, but the async endpoints are now used by default in the web interface.
+
+### File Sync Status
+- **GET** `/api/sync/status` - Returns the status of the background file sync operation
+  ```json
+  {
+    "in_progress": false,
+    "completed": true,
+    "error": null,
+    "added": 5000,
+    "removed": 0,
+    "updated": 0,
+    "start_time": 1234567890.123,
+    "end_time": 1234567890.190,
+    "duration": 0.067
+  }
+  ```
+  
+  This endpoint allows clients to check if the initial file sync has completed. The web interface automatically polls this endpoint during startup to ensure the file list is fully synced before displaying it to the user.
 
 ### Version Information
 - **GET** `/api/version` - Returns the current version of the application

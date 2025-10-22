@@ -113,7 +113,7 @@ class EventBroadcaster:
         Broadcast an event to all subscribed clients
         
         Args:
-            event_type: Type of event (e.g., 'cache_updated', 'watcher_status')
+            event_type: Type of event (e.g., 'watcher_status', 'file_processed', 'job_updated')
             data: Event data dictionary
         """
         event = Event(type=event_type, data=data)

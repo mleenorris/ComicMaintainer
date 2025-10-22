@@ -698,7 +698,7 @@ def rename_all_files():
             try:
                 mark_file_web_modified(filepath)
                 final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
-                mark_file_processed_wrapper(final_filepath)
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 handle_file_rename_in_cache(filepath, final_filepath)
                 results.append({
                     'file': os.path.basename(final_filepath),
@@ -725,7 +725,7 @@ def rename_all_files():
             try:
                 mark_file_web_modified(filepath)
                 final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
-                mark_file_processed_wrapper(final_filepath)
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 handle_file_rename_in_cache(filepath, final_filepath)
                 result['success'] = True
                 logging.info(f"Renamed file via web interface: {filepath} -> {final_filepath}")
@@ -767,7 +767,7 @@ def normalize_all_files():
             try:
                 mark_file_web_modified(filepath)
                 final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
-                mark_file_processed_wrapper(final_filepath)
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 results.append({
                     'file': os.path.basename(final_filepath),
                     'success': True
@@ -793,7 +793,7 @@ def normalize_all_files():
             try:
                 mark_file_web_modified(filepath)
                 final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
-                mark_file_processed_wrapper(final_filepath)
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 result['success'] = True
                 logging.info(f"Normalized metadata for file via web interface: {filepath}")
             except Exception as e:
@@ -865,8 +865,8 @@ def rename_single_file(filepath):
         # Only rename the file
         final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
         
-        # Mark as processed using the final filepath
-        mark_file_processed_wrapper(final_filepath)
+        # Mark as processed using the final filepath, cleanup old filename if renamed
+        mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
         
         # Update cache incrementally if file was renamed
         handle_file_rename_in_cache(full_path, final_filepath)
@@ -894,8 +894,8 @@ def normalize_single_file(filepath):
         # Only normalize metadata
         final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
         
-        # Mark as processed using the final filepath
-        mark_file_processed_wrapper(final_filepath)
+        # Mark as processed using the final filepath, cleanup old filename if renamed
+        mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
         
         logging.info(f"Normalized metadata for file via web interface: {full_path}")
         return jsonify({'success': True})
@@ -1020,7 +1020,7 @@ def rename_selected_files():
             try:
                 mark_file_web_modified(full_path)
                 final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
-                mark_file_processed_wrapper(final_filepath)
+                mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
                 handle_file_rename_in_cache(full_path, final_filepath)
                 results.append({
                     'file': os.path.basename(final_filepath),
@@ -1052,7 +1052,7 @@ def rename_selected_files():
                 try:
                     mark_file_web_modified(full_path)
                     final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
-                    mark_file_processed_wrapper(final_filepath)
+                    mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
                     handle_file_rename_in_cache(full_path, final_filepath)
                     result['success'] = True
                     logging.info(f"Renamed file via web interface: {full_path} -> {final_filepath}")
@@ -1108,7 +1108,7 @@ def normalize_selected_files():
             try:
                 mark_file_web_modified(full_path)
                 final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
-                mark_file_processed_wrapper(final_filepath)
+                mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
                 results.append({
                     'file': os.path.basename(final_filepath),
                     'success': True
@@ -1139,7 +1139,7 @@ def normalize_selected_files():
                 try:
                     mark_file_web_modified(full_path)
                     final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
-                    mark_file_processed_wrapper(final_filepath)
+                    mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
                     result['success'] = True
                     logging.info(f"Normalized metadata for file via web interface: {full_path}")
                 except Exception as e:
@@ -1428,7 +1428,7 @@ def async_rename_unmarked_files():
         try:
             mark_file_web_modified(filepath)
             final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
-            mark_file_processed_wrapper(final_filepath)
+            mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
             handle_file_rename_in_cache(filepath, final_filepath)
             logging.info(f"[BATCH] Renamed unmarked file: {filepath} -> {final_filepath}")
             return JobResult(
@@ -1488,7 +1488,7 @@ def async_normalize_unmarked_files():
         try:
             mark_file_web_modified(filepath)
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
-            mark_file_processed_wrapper(final_filepath)
+            mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
             logging.info(f"[BATCH] Normalized unmarked file: {filepath}")
             return JobResult(
                 item=os.path.basename(filepath),
@@ -1822,8 +1822,8 @@ def rename_unmarked_files():
                 # Only rename the file
                 final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
                 
-                # Mark as processed using the final filepath
-                mark_file_processed_wrapper(final_filepath)
+                # Mark as processed using the final filepath, cleanup old filename if renamed
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 
                 # Update cache incrementally if file was renamed
                 handle_file_rename_in_cache(filepath, final_filepath)
@@ -1853,7 +1853,7 @@ def rename_unmarked_files():
             try:
                 mark_file_web_modified(filepath)
                 final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
-                mark_file_processed_wrapper(final_filepath)
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 handle_file_rename_in_cache(filepath, final_filepath)
                 result['success'] = True
                 logging.info(f"Renamed unmarked file via web interface: {filepath} -> {final_filepath}")
@@ -1905,8 +1905,8 @@ def normalize_unmarked_files():
                 # Only normalize metadata
                 final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
                 
-                # Mark as processed using the final filepath
-                mark_file_processed_wrapper(final_filepath)
+                # Mark as processed using the final filepath, cleanup old filename if renamed
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 
                 results.append({
                     'file': os.path.basename(final_filepath),
@@ -1933,7 +1933,7 @@ def normalize_unmarked_files():
             try:
                 mark_file_web_modified(filepath)
                 final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
-                mark_file_processed_wrapper(final_filepath)
+                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 result['success'] = True
                 logging.info(f"Normalized metadata for unmarked file via web interface: {filepath}")
             except Exception as e:

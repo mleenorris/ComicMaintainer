@@ -2608,6 +2608,30 @@
             const prefs = await getPreferences();
             perPage = prefs.perPage || 100;
             
+            // Restore filter mode from preferences
+            if (prefs.filterMode) {
+                filterMode = prefs.filterMode;
+                
+                // Update the filter button to show the saved filter
+                const filterLabels = {
+                    'all': '📚 All',
+                    'unmarked': '⚠️ Unmarked',
+                    'marked': '✅ Marked',
+                    'duplicates': '🔁 Duplicates'
+                };
+                
+                document.getElementById('headerFilterLabel').textContent = filterLabels[filterMode];
+                
+                // Update active class on dropdown items
+                document.querySelectorAll('#headerFilterMenu .header-dropdown-item').forEach(item => {
+                    if (item.dataset.filter === filterMode) {
+                        item.classList.add('active');
+                    } else {
+                        item.classList.remove('active');
+                    }
+                });
+            }
+            
             initTheme();
             loadVersion();
             
@@ -2791,6 +2815,9 @@
             
             // Close the dropdown
             document.getElementById('headerFilterMenu').classList.remove('show');
+            
+            // Save filter mode to preferences
+            setPreferences({ filterMode: mode });
             
             // Reload from page 1 with new filter
             loadFiles(1);

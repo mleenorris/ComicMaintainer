@@ -670,6 +670,11 @@
             font-size: 13px;
             flex: 1 1 0;
             min-width: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            white-space: nowrap;
         }
         
         .button-group .action-dropdown {
@@ -1800,12 +1805,8 @@
                         </div>
                     </div>
                     
-                    <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>
-                        ✏️<span> Update Selected</span>
-                    </button>
-                    <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteSelectedBtn" disabled>
-                        🗑️<span> Delete Selected</span>
-                    </button>
+                    <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>✏️<span> Update Selected</span></button>
+                    <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteSelectedBtn" disabled>🗑️<span> Delete Selected</span></button>
                 </div>
                 <span class="select-info" id="selectInfo">No files selected</span>
             </div>

@@ -62,7 +62,7 @@ def record_file_change(change_type, old_path=None, new_path=None):
             context=f"Recording file change in process_file: {change_type}",
             additional_info={"old_path": old_path, "new_path": new_path}
         )
-        logging.error(f"Error recording cache change: {e}")
+        logging.error(f"Error recording file change: {e}")
 
 # mark_file_duplicate is now imported from markers module
 

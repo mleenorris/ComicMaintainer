@@ -19,7 +19,7 @@ DB_PATH = os.path.join(CONFIG_DIR, 'jobs.db')
 _thread_local = threading.local()
 
 
-def _ensure_cache_dir():
+def _ensure_config_dir():
     """Ensure config directory exists"""
     os.makedirs(CONFIG_DIR, exist_ok=True)
 
@@ -83,7 +83,7 @@ def get_db_connection():
     """
     # Check if connection exists in thread-local storage
     if not hasattr(_thread_local, 'connection') or _thread_local.connection is None:
-        _ensure_cache_dir()
+        _ensure_config_dir()
         _thread_local.connection = sqlite3.connect(DB_PATH, timeout=30.0)
         _thread_local.connection.row_factory = sqlite3.Row
         # Enable WAL mode for better concurrent access
@@ -100,7 +100,7 @@ def get_db_connection():
 
 def init_db():
     """Initialize database schema (called on module import)"""
-    _ensure_cache_dir()
+    _ensure_config_dir()
     
     # Create a temporary connection to initialize the database
     conn = sqlite3.connect(DB_PATH, timeout=30.0)

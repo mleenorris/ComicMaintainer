@@ -250,7 +250,6 @@ class ChangeHandler(FileSystemEventHandler):
                     )
                 
                 # Note: process_file.py now marks files as processed itself
-                # process_file.py will record cache changes (add or rename as appropriate)
                 self.last_processed[event.src_path] = time.time()
             else:
                 logging.info(f"File not stable yet: {event.src_path}")
@@ -263,10 +262,10 @@ class ChangeHandler(FileSystemEventHandler):
             if event.src_path in self.last_processed:
                 del self.last_processed[event.src_path]
             
-            # Skip cache update if file was deleted via web interface
+            # Skip store update if file was deleted via web interface
             if self._allowed_extension(event.src_path):
                 if is_web_modified(event.src_path):
-                    logging.info(f"Skipping cache update for {event.src_path} - deleted by web interface")
+                    logging.info(f"Skipping file store update for {event.src_path} - deleted by web interface")
                     clear_file_web_modified(event.src_path)
                     return
                 

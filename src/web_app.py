@@ -126,7 +126,6 @@ def record_file_change(change_type, old_path=None, new_path=None):
             file_store.rename_file(old_path, new_path)
             logging.info(f"Renamed file in store: {old_path} -> {new_path}")
         
-        # Note: No cache invalidation needed - database is queried directly
     except Exception as e:
         logging.error(f"Error recording file change: {e}")
 
@@ -162,16 +161,14 @@ def load_files_with_metadata_from_store():
 def get_comic_files():
     """Get all comic files directly from the file store database
     
-    Note: In-memory caching removed as SQLite is extremely fast (<3ms for 5000 files).
-    The database itself acts as the cache, with OS-level caching providing additional speed.
+    SQLite provides extremely fast reads (<3ms for 5000 files) with OS-level caching.
     """
     if not WATCHED_DIR:
         return []
     
-    # Load from file store database (extremely fast with SQLite + OS caching)
     return load_files_from_store()
 
-def handle_file_rename_in_cache(original_path, final_path):
+def handle_file_rename_in_store(original_path, final_path):
     """Handle file rename in file store - record change if file was actually renamed"""
     if original_path != final_path:
         record_file_change('rename', old_path=original_path, new_path=final_path)
@@ -630,7 +627,7 @@ def process_all_files():
                 mark_file_web_modified(filepath)
                 final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-                handle_file_rename_in_cache(filepath, final_filepath)
+                handle_file_rename_in_store(filepath, final_filepath)
                 results.append({
                     'file': os.path.basename(final_filepath),
                     'success': True
@@ -657,7 +654,7 @@ def process_all_files():
                 mark_file_web_modified(filepath)
                 final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-                handle_file_rename_in_cache(filepath, final_filepath)
+                handle_file_rename_in_store(filepath, final_filepath)
                 result['success'] = True
                 logging.info(f"Processed file via web interface: {filepath} -> {final_filepath}")
             except Exception as e:
@@ -699,7 +696,7 @@ def rename_all_files():
                 mark_file_web_modified(filepath)
                 final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-                handle_file_rename_in_cache(filepath, final_filepath)
+                handle_file_rename_in_store(filepath, final_filepath)
                 results.append({
                     'file': os.path.basename(final_filepath),
                     'success': True
@@ -726,7 +723,7 @@ def rename_all_files():
                 mark_file_web_modified(filepath)
                 final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-                handle_file_rename_in_cache(filepath, final_filepath)
+                handle_file_rename_in_store(filepath, final_filepath)
                 result['success'] = True
                 logging.info(f"Renamed file via web interface: {filepath} -> {final_filepath}")
             except Exception as e:
@@ -839,8 +836,7 @@ def process_single_file(filepath):
         # Mark as processed using the final filepath, cleanup old filename if renamed
         mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
         
-        # Update cache incrementally if file was renamed
-        handle_file_rename_in_cache(full_path, final_filepath)
+        handle_file_rename_in_store(full_path, final_filepath)
         
         logging.info(f"Processed file via web interface: {full_path} -> {final_filepath}")
         return jsonify({'success': True})
@@ -868,8 +864,7 @@ def rename_single_file(filepath):
         # Mark as processed using the final filepath, cleanup old filename if renamed
         mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
         
-        # Update cache incrementally if file was renamed
-        handle_file_rename_in_cache(full_path, final_filepath)
+        handle_file_rename_in_store(full_path, final_filepath)
         
         logging.info(f"Renamed file via web interface: {full_path} -> {final_filepath}")
         return jsonify({'success': True})
@@ -933,7 +928,7 @@ def process_selected_files():
                 mark_file_web_modified(full_path)
                 final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
-                handle_file_rename_in_cache(full_path, final_filepath)
+                handle_file_rename_in_store(full_path, final_filepath)
                 results.append({
                     'file': os.path.basename(final_filepath),
                     'success': True
@@ -965,7 +960,7 @@ def process_selected_files():
                     mark_file_web_modified(full_path)
                     final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
                     mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
-                    handle_file_rename_in_cache(full_path, final_filepath)
+                    handle_file_rename_in_store(full_path, final_filepath)
                     result['success'] = True
                     logging.info(f"Processed file via web interface: {full_path} -> {final_filepath}")
                 except Exception as e:
@@ -1021,7 +1016,7 @@ def rename_selected_files():
                 mark_file_web_modified(full_path)
                 final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
-                handle_file_rename_in_cache(full_path, final_filepath)
+                handle_file_rename_in_store(full_path, final_filepath)
                 results.append({
                     'file': os.path.basename(final_filepath),
                     'success': True
@@ -1053,7 +1048,7 @@ def rename_selected_files():
                     mark_file_web_modified(full_path)
                     final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
                     mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
-                    handle_file_rename_in_cache(full_path, final_filepath)
+                    handle_file_rename_in_store(full_path, final_filepath)
                     result['success'] = True
                     logging.info(f"Renamed file via web interface: {full_path} -> {final_filepath}")
                 except Exception as e:
@@ -1194,7 +1189,7 @@ def async_process_all_files():
             mark_file_web_modified(filepath)
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-            handle_file_rename_in_cache(filepath, final_filepath)
+            handle_file_rename_in_store(filepath, final_filepath)
             logging.info(f"[BATCH] Processed file: {filepath} -> {final_filepath}")
             return JobResult(
                 item=os.path.basename(filepath),
@@ -1261,7 +1256,7 @@ def async_process_selected_files():
             mark_file_web_modified(filepath)
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-            handle_file_rename_in_cache(filepath, final_filepath)
+            handle_file_rename_in_store(filepath, final_filepath)
             logging.info(f"[BATCH] Processed file: {filepath} -> {final_filepath}")
             return JobResult(
                 item=os.path.basename(filepath),
@@ -1369,7 +1364,7 @@ def async_process_unmarked_files():
             mark_file_web_modified(filepath)
             final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-            handle_file_rename_in_cache(filepath, final_filepath)
+            handle_file_rename_in_store(filepath, final_filepath)
             logging.info(f"[BATCH] Processed unmarked file: {filepath} -> {final_filepath}")
             return JobResult(
                 item=os.path.basename(filepath),
@@ -1429,7 +1424,7 @@ def async_rename_unmarked_files():
             mark_file_web_modified(filepath)
             final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
             mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-            handle_file_rename_in_cache(filepath, final_filepath)
+            handle_file_rename_in_store(filepath, final_filepath)
             logging.info(f"[BATCH] Renamed unmarked file: {filepath} -> {final_filepath}")
             return JobResult(
                 item=os.path.basename(filepath),
@@ -1742,8 +1737,7 @@ def process_unmarked_files():
                 # Mark as processed using the final filepath, cleanup old filename if renamed
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 
-                # Update cache incrementally if file was renamed
-                handle_file_rename_in_cache(filepath, final_filepath)
+                handle_file_rename_in_store(filepath, final_filepath)
                 
                 results.append({
                     'file': os.path.basename(final_filepath),
@@ -1771,7 +1765,7 @@ def process_unmarked_files():
                 mark_file_web_modified(filepath)
                 final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-                handle_file_rename_in_cache(filepath, final_filepath)
+                handle_file_rename_in_store(filepath, final_filepath)
                 result['success'] = True
                 logging.info(f"Processed unmarked file via web interface: {filepath} -> {final_filepath}")
             except Exception as e:
@@ -1825,8 +1819,7 @@ def rename_unmarked_files():
                 # Mark as processed using the final filepath, cleanup old filename if renamed
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 
-                # Update cache incrementally if file was renamed
-                handle_file_rename_in_cache(filepath, final_filepath)
+                handle_file_rename_in_store(filepath, final_filepath)
                 
                 results.append({
                     'file': os.path.basename(final_filepath),
@@ -1854,7 +1847,7 @@ def rename_unmarked_files():
                 mark_file_web_modified(filepath)
                 final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-                handle_file_rename_in_cache(filepath, final_filepath)
+                handle_file_rename_in_store(filepath, final_filepath)
                 result['success'] = True
                 logging.info(f"Renamed unmarked file via web interface: {filepath} -> {final_filepath}")
             except Exception as e:

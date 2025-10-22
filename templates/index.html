@@ -1274,17 +1274,13 @@
                 justify-content: center;
             }
             
+            /* Show only the emoji (first 2 characters to account for emoji length) in mobile */
             .header-filter-toggle span,
             .header-sort-toggle span {
-                display: none;
-            }
-            
-            .header-filter-toggle::before {
-                content: '📚';
-            }
-            
-            .header-sort-toggle::before {
-                content: '🔤';
+                display: inline-block;
+                max-width: 1.2em;
+                overflow: hidden;
+                white-space: nowrap;
             }
             
             .header-filter-toggle::after,

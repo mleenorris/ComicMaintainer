@@ -561,7 +561,7 @@
         /* Action dropdown styles */
         .action-dropdown {
             position: relative;
-            display: inline-block;
+            display: flex;
         }
         
         .action-dropdown-toggle {
@@ -575,8 +575,11 @@
             color: white;
             display: flex;
             align-items: center;
+            justify-content: center;
             gap: 5px;
             width: 100%;
+            min-height: 37px;
+            box-sizing: border-box;
         }
         
         .action-dropdown-toggle::after {
@@ -658,28 +661,29 @@
         }
         
         .button-group {
-            display: flex;
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
             gap: 8px;
-            flex-wrap: wrap;
-            align-items: center;
+            align-items: stretch;
             flex: 1;
         }
         
         .button-group .btn {
             padding: 8px 12px;
             font-size: 13px;
-            flex: 1 1 0;
             min-width: 0;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 5px;
             white-space: nowrap;
+            min-height: 37px;
+            box-sizing: border-box;
         }
         
         .button-group .action-dropdown {
-            flex: 1 1 0;
             min-width: 0;
+            display: flex;
         }
         
         .progress-indicator-btn {
@@ -1349,6 +1353,7 @@
                 display: flex;
                 align-items: center;
                 justify-content: center;
+                box-sizing: border-box;
             }
             
             .btn span {
@@ -1362,6 +1367,7 @@
                 min-width: 40px;
                 height: 40px;
                 justify-content: center;
+                box-sizing: border-box;
             }
             
             .action-dropdown-toggle span {
@@ -1380,19 +1386,17 @@
             }
             
             .button-group {
-                display: flex;
+                display: grid;
+                grid-template-columns: repeat(5, 1fr);
                 gap: 6px;
-                flex-wrap: nowrap;
                 flex: 1;
             }
             
             .button-group .btn {
-                flex: 1 1 0;
                 min-width: 0;
             }
             
             .button-group .action-dropdown {
-                flex: 1 1 0;
                 min-width: 0;
             }
             

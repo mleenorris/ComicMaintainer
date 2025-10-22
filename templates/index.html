@@ -2617,6 +2617,29 @@
                 perPageSelect.value = perPage;
             }
             
+            // Restore filter mode from preferences
+            if (prefs.filterMode) {
+                filterMode = prefs.filterMode;
+                
+                // Update button label
+                const filterLabels = {
+                    'all': '📚 All',
+                    'unmarked': '⚠️ Unmarked',
+                    'marked': '✅ Marked',
+                    'duplicates': '🔁 Duplicates'
+                };
+                document.getElementById('headerFilterLabel').textContent = filterLabels[filterMode];
+                
+                // Update active class on dropdown items
+                document.querySelectorAll('#headerFilterMenu .header-dropdown-item').forEach(item => {
+                    if (item.dataset.filter === filterMode) {
+                        item.classList.add('active');
+                    } else {
+                        item.classList.remove('active');
+                    }
+                });
+            }
+            
             // Initialize SSE connection for real-time updates
             initEventSource();
             
@@ -2767,7 +2790,7 @@
         let sortMode = 'name'; // 'name', 'date', 'size'
         let sortDirection = 'asc'; // 'asc', 'desc'
         
-        function setHeaderFilter(mode) {
+        async function setHeaderFilter(mode) {
             filterMode = mode;
             
             // Update dropdown label and active state
@@ -2791,6 +2814,9 @@
             
             // Close the dropdown
             document.getElementById('headerFilterMenu').classList.remove('show');
+            
+            // Save filter mode to preferences
+            await setPreferences({ filterMode: mode });
             
             // Reload from page 1 with new filter
             loadFiles(1);

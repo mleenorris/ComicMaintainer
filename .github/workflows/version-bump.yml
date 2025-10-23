@@ -1,0 +1,119 @@
+name: Automatic Version Bump
+
+on:
+  push:
+    branches: [ master ]
+    # Only run on merge commits, not on version bump commits
+    paths-ignore:
+      - '.github/workflows/version-bump.yml'
+
+jobs:
+  bump-version:
+    # Skip if commit message contains [skip-version-bump] or is a version bump commit
+    if: "!contains(github.event.head_commit.message, '[skip-version-bump]') && !contains(github.event.head_commit.message, 'Bump version to')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Get current version
+        id: current_version
+        run: |
+          # Extract version from src/version.py
+          VERSION=$(python -c "import sys; sys.path.insert(0, 'src'); from version import __version__; print(__version__)")
+          echo "Current version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Bump version
+        id: bump_version
+        run: |
+          # Parse current version
+          CURRENT_VERSION="${{ steps.current_version.outputs.version }}"
+          
+          # Split version into major.minor.patch
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT_VERSION"
+          
+          # Increment patch version
+          PATCH=$((PATCH + 1))
+          
+          # Create new version
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          echo "New version: $NEW_VERSION"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Update version.py
+        run: |
+          NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
+          sed -i "s/__version__ = \".*\"/__version__ = \"$NEW_VERSION\"/" src/version.py
+          
+          # Verify the change
+          echo "Updated version.py:"
+          cat src/version.py
+      
+      - name: Update CHANGELOG.md
+        run: |
+          NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
+          DATE=$(date +%Y-%m-%d)
+          
+          # Create a temporary file with the new version entry
+          cat > /tmp/changelog_entry.md << EOF
+          
+## [${NEW_VERSION}] - ${DATE}
+
+### Changed
+- Automatic version bump on merge to master
+
+EOF
+          
+          # Insert the new entry after the [Unreleased] section
+          awk '/^## \[Unreleased\]/{print; getline; print; while(getline && !/^## \[/){print} print ""; system("cat /tmp/changelog_entry.md"); print; next}1' CHANGELOG.md > /tmp/CHANGELOG.md.new
+          mv /tmp/CHANGELOG.md.new CHANGELOG.md
+          
+          echo "Updated CHANGELOG.md"
+      
+      - name: Commit version bump
+        run: |
+          NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
+          
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          git add src/version.py CHANGELOG.md
+          git commit -m "Bump version to $NEW_VERSION [skip-version-bump]"
+          git push
+      
+      - name: Create Git tag
+        run: |
+          NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
+          
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          git tag -a "v${NEW_VERSION}" -m "Release version ${NEW_VERSION}"
+          git push origin "v${NEW_VERSION}"
+      
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.bump_version.outputs.new_version }}
+          release_name: Release v${{ steps.bump_version.outputs.new_version }}
+          body: |
+            ## What's Changed
+            Automatic release for version ${{ steps.bump_version.outputs.new_version }}
+            
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/master/CHANGELOG.md) for details.
+          draft: false
+          prerelease: false

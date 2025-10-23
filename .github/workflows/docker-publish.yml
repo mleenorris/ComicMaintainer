@@ -12,6 +12,19 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Get version
+        id: get_version
+        run: |
+          # Extract version from src/version.py
+          VERSION=$(python -c "import sys; sys.path.insert(0, 'src'); from version import __version__; print(__version__)")
+          echo "Version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
         
       - name: Cache Docker layers
         uses: actions/cache@v4
@@ -34,7 +47,9 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
-          tags: iceburn1/comictagger-watcher:latest
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            iceburn1/comictagger-watcher:latest
+            iceburn1/comictagger-watcher:${{ steps.get_version.outputs.version }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache

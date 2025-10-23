@@ -170,6 +170,152 @@ def test_optional_vars_get_defaults():
                     os.environ.pop(var, None)
 
 
+def test_github_issue_creation_invalid_repo_format():
+    """Test that invalid GITHUB_REPOSITORY format is detected"""
+    print("\n" + "=" * 60)
+    print("TEST: Invalid GitHub Repository Format")
+    print("=" * 60)
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.environ['WATCHED_DIR'] = tmpdir
+        
+        # Save original values
+        original_token = os.environ.get('GITHUB_TOKEN')
+        original_repo = os.environ.get('GITHUB_REPOSITORY')
+        
+        try:
+            # Set GITHUB_TOKEN with invalid repository format
+            os.environ['GITHUB_TOKEN'] = 'ghp_testtoken123456789'
+            os.environ['GITHUB_REPOSITORY'] = 'invalid-format'
+            
+            is_valid, errors = validate_env_vars()
+            
+            assert not is_valid, "Validation should fail for invalid repository format"
+            assert any('owner/repo' in error for error in errors), \
+                f"Error should mention 'owner/repo' format. Got errors: {errors}"
+            
+            print("✓ Invalid repository format detected")
+        finally:
+            # Restore original values
+            if original_token:
+                os.environ['GITHUB_TOKEN'] = original_token
+            else:
+                os.environ.pop('GITHUB_TOKEN', None)
+            
+            if original_repo:
+                os.environ['GITHUB_REPOSITORY'] = original_repo
+            else:
+                os.environ.pop('GITHUB_REPOSITORY', None)
+
+
+def test_github_issue_creation_valid_config():
+    """Test that valid GitHub issue creation configuration passes"""
+    print("\n" + "=" * 60)
+    print("TEST: Valid GitHub Issue Creation Configuration")
+    print("=" * 60)
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.environ['WATCHED_DIR'] = tmpdir
+        
+        # Save original values
+        original_token = os.environ.get('GITHUB_TOKEN')
+        original_repo = os.environ.get('GITHUB_REPOSITORY')
+        original_assignee = os.environ.get('GITHUB_ISSUE_ASSIGNEE')
+        
+        try:
+            # Set valid GitHub configuration
+            os.environ['GITHUB_TOKEN'] = 'ghp_testtoken123456789'
+            os.environ['GITHUB_REPOSITORY'] = 'mleenorris/ComicMaintainer'
+            os.environ['GITHUB_ISSUE_ASSIGNEE'] = 'testuser'
+            
+            is_valid, errors = validate_env_vars()
+            
+            assert is_valid, f"Validation should pass with valid GitHub config. Errors: {errors}"
+            assert len(errors) == 0, "No errors should be present"
+            
+            print("✓ Valid GitHub configuration accepted")
+        finally:
+            # Restore original values
+            if original_token:
+                os.environ['GITHUB_TOKEN'] = original_token
+            else:
+                os.environ.pop('GITHUB_TOKEN', None)
+            
+            if original_repo:
+                os.environ['GITHUB_REPOSITORY'] = original_repo
+            else:
+                os.environ.pop('GITHUB_REPOSITORY', None)
+                
+            if original_assignee:
+                os.environ['GITHUB_ISSUE_ASSIGNEE'] = original_assignee
+            else:
+                os.environ.pop('GITHUB_ISSUE_ASSIGNEE', None)
+
+
+def test_github_issue_creation_without_token():
+    """Test that validation passes when GITHUB_TOKEN is not set"""
+    print("\n" + "=" * 60)
+    print("TEST: GitHub Issue Creation Without Token")
+    print("=" * 60)
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.environ['WATCHED_DIR'] = tmpdir
+        
+        # Save and remove GITHUB_TOKEN
+        original_token = os.environ.pop('GITHUB_TOKEN', None)
+        
+        try:
+            is_valid, errors = validate_env_vars()
+            
+            assert is_valid, "Validation should pass without GITHUB_TOKEN"
+            
+            print("✓ Validation passes without GitHub token")
+        finally:
+            # Restore original value
+            if original_token:
+                os.environ['GITHUB_TOKEN'] = original_token
+
+
+def test_github_repo_empty_owner_or_repo():
+    """Test that empty owner or repo name is detected"""
+    print("\n" + "=" * 60)
+    print("TEST: Empty GitHub Owner or Repo Name")
+    print("=" * 60)
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.environ['WATCHED_DIR'] = tmpdir
+        
+        # Save original values
+        original_token = os.environ.get('GITHUB_TOKEN')
+        original_repo = os.environ.get('GITHUB_REPOSITORY')
+        
+        try:
+            os.environ['GITHUB_TOKEN'] = 'ghp_testtoken123456789'
+            
+            # Test empty owner
+            os.environ['GITHUB_REPOSITORY'] = '/repo'
+            is_valid, errors = validate_env_vars()
+            assert not is_valid, "Validation should fail for empty owner"
+            
+            # Test empty repo
+            os.environ['GITHUB_REPOSITORY'] = 'owner/'
+            is_valid, errors = validate_env_vars()
+            assert not is_valid, "Validation should fail for empty repo"
+            
+            print("✓ Empty owner/repo detected")
+        finally:
+            # Restore original values
+            if original_token:
+                os.environ['GITHUB_TOKEN'] = original_token
+            else:
+                os.environ.pop('GITHUB_TOKEN', None)
+            
+            if original_repo:
+                os.environ['GITHUB_REPOSITORY'] = original_repo
+            else:
+                os.environ.pop('GITHUB_REPOSITORY', None)
+
+
 if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("Environment Validator Test Suite")
@@ -185,6 +331,10 @@ if __name__ == "__main__":
         test_valid_config()
         test_numeric_validation()
         test_optional_vars_get_defaults()
+        test_github_issue_creation_invalid_repo_format()
+        test_github_issue_creation_valid_config()
+        test_github_issue_creation_without_token()
+        test_github_repo_empty_owner_or_repo()
         
         print("\n" + "=" * 60)
         print("✓ All tests passed!")

@@ -481,6 +481,7 @@ The application is 100% event-driven with zero polling:
 ## Documentation
 
 - **[API Documentation](docs/API.md)** - Complete REST API reference
+- **[Automated Versioning](docs/AUTOMATED_VERSIONING.md)** - How automatic version bumping works
 - **[Contributing Guide](CONTRIBUTING.md)** - How to contribute to the project
 - **[Debug Logging Guide](DEBUG_LOGGING_GUIDE.md)** - Debug logging and error reporting
 - **[Security Policy](SECURITY.md)** - Security guidelines and vulnerability reporting

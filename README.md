@@ -404,6 +404,8 @@ If upgrading from a version where configuration and logs were stored in `/app` o
 
 ## GitHub Actions / CI
 - The repository includes a GitHub Actions workflow to automatically build and push the Docker image to Docker Hub on every push or pull request to `master`.
+- **Automatic Version Bumping**: Every merge to `master` automatically increments the patch version (e.g., 1.0.0 → 1.0.1), updates `CHANGELOG.md`, creates a Git tag, and publishes a GitHub release
+- Docker images are tagged with both `latest` and the specific version number (e.g., `1.0.1`)
 - Automated security scanning runs on every push, pull request, and weekly schedule
 
 ## Security

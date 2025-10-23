@@ -2235,6 +2235,41 @@
                         <strong>Note:</strong> This only affects the <code>{issue}</code> placeholder. Use <code>{issue_no_pad}</code> for unpadded issue numbers regardless of this setting.
                     </small>
                 </div>
+                
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">GitHub Integration</h3>
+                <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
+                    Configure GitHub integration for automatic error reporting. When configured, errors will automatically create GitHub issues.
+                </p>
+                <div class="form-group">
+                    <label for="githubToken">GitHub Personal Access Token</label>
+                    <input type="password" id="githubToken" placeholder="ghp_..." style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Personal Access Token with <code>repo</code> scope for creating issues. Leave empty to disable GitHub integration.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>GITHUB_TOKEN</code> environment variable.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="githubRepository">GitHub Repository</label>
+                    <input type="text" id="githubRepository" placeholder="owner/repo" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Repository in format <code>owner/repo</code> where issues should be created.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>GITHUB_REPOSITORY</code> environment variable.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="githubIssueAssignee">GitHub Issue Assignee (Optional)</label>
+                    <input type="text" id="githubIssueAssignee" placeholder="username" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        GitHub username to assign auto-generated issues to. Leave empty for no assignment.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>GITHUB_ISSUE_ASSIGNEE</code> environment variable.
+                    </small>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn" onclick="closeSettings()">Cancel</button>
@@ -4465,6 +4500,32 @@
                 const paddingData = await paddingResponse.json();
                 document.getElementById('issueNumberPadding').value = paddingData.padding;
                 
+                // Load GitHub token (masked)
+                const tokenResponse = await fetch('/api/settings/github-token');
+                if (!tokenResponse.ok) {
+                    throw new Error(`HTTP error! status: ${tokenResponse.status}`);
+                }
+                const tokenData = await tokenResponse.json();
+                // Show placeholder if token exists, otherwise empty
+                document.getElementById('githubToken').placeholder = tokenData.has_token ? tokenData.token : 'ghp_...';
+                document.getElementById('githubToken').value = ''; // Don't populate actual value for security
+                
+                // Load GitHub repository
+                const repoResponse = await fetch('/api/settings/github-repository');
+                if (!repoResponse.ok) {
+                    throw new Error(`HTTP error! status: ${repoResponse.status}`);
+                }
+                const repoData = await repoResponse.json();
+                document.getElementById('githubRepository').value = repoData.repository;
+                
+                // Load GitHub issue assignee
+                const assigneeResponse = await fetch('/api/settings/github-issue-assignee');
+                if (!assigneeResponse.ok) {
+                    throw new Error(`HTTP error! status: ${assigneeResponse.status}`);
+                }
+                const assigneeData = await assigneeResponse.json();
+                document.getElementById('githubIssueAssignee').value = assigneeData.assignee;
+                
                 document.getElementById('settingsModal').classList.add('active');
             } catch (error) {
                 showMessage('Failed to load settings: ' + error.message, 'error');
@@ -4709,6 +4770,72 @@
                 
                 if (!paddingResult.success) {
                     showMessage(paddingResult.error || 'Failed to save issue number padding', 'error');
+                    return;
+                }
+                
+                // Save GitHub settings
+                const githubToken = document.getElementById('githubToken').value.trim();
+                const githubRepository = document.getElementById('githubRepository').value.trim();
+                const githubIssueAssignee = document.getElementById('githubIssueAssignee').value.trim();
+                
+                // Only save token if it was entered (not empty)
+                if (githubToken) {
+                    const tokenResponse = await fetch('/api/settings/github-token', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ token: githubToken })
+                    });
+                    
+                    if (!tokenResponse.ok) {
+                        throw new Error(`HTTP error! status: ${tokenResponse.status}`);
+                    }
+                    const tokenResult = await tokenResponse.json();
+                    
+                    if (!tokenResult.success) {
+                        showMessage(tokenResult.error || 'Failed to save GitHub token', 'error');
+                        return;
+                    }
+                }
+                
+                // Save GitHub repository (validate if not empty)
+                if (githubRepository) {
+                    const repoResponse = await fetch('/api/settings/github-repository', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ repository: githubRepository })
+                    });
+                    
+                    if (!repoResponse.ok) {
+                        throw new Error(`HTTP error! status: ${repoResponse.status}`);
+                    }
+                    const repoResult = await repoResponse.json();
+                    
+                    if (!repoResult.success) {
+                        showMessage(repoResult.error || 'Failed to save GitHub repository', 'error');
+                        return;
+                    }
+                }
+                
+                // Save GitHub issue assignee (can be empty)
+                const assigneeResponse = await fetch('/api/settings/github-issue-assignee', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ assignee: githubIssueAssignee })
+                });
+                
+                if (!assigneeResponse.ok) {
+                    throw new Error(`HTTP error! status: ${assigneeResponse.status}`);
+                }
+                const assigneeResult = await assigneeResponse.json();
+                
+                if (!assigneeResult.success) {
+                    showMessage(assigneeResult.error || 'Failed to save GitHub issue assignee', 'error');
                     return;
                 }
                 

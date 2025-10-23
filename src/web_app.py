@@ -9,7 +9,16 @@ from comicapi.comicarchive import ComicArchive
 import glob
 import threading
 import time
-from config import get_filename_format, set_filename_format, DEFAULT_FILENAME_FORMAT, get_watcher_enabled, set_watcher_enabled, get_log_max_bytes, set_log_max_bytes, get_max_workers, get_issue_number_padding, set_issue_number_padding, DEFAULT_ISSUE_NUMBER_PADDING
+from config import (
+    get_filename_format, set_filename_format, DEFAULT_FILENAME_FORMAT,
+    get_watcher_enabled, set_watcher_enabled,
+    get_log_max_bytes, set_log_max_bytes,
+    get_max_workers,
+    get_issue_number_padding, set_issue_number_padding, DEFAULT_ISSUE_NUMBER_PADDING,
+    get_github_token, set_github_token, DEFAULT_GITHUB_TOKEN,
+    get_github_repository, set_github_repository, DEFAULT_GITHUB_REPOSITORY,
+    get_github_issue_assignee, set_github_issue_assignee, DEFAULT_GITHUB_ISSUE_ASSIGNEE
+)
 from version import __version__
 from markers import (
     is_file_processed, mark_file_processed, unmark_file_processed,
@@ -1670,6 +1679,96 @@ def set_issue_number_padding_api():
             return jsonify({'error': 'Failed to save issue number padding setting'}), 500
     except (ValueError, TypeError):
         return jsonify({'error': 'Invalid padding value'}), 400
+
+@app.route('/api/settings/github-token', methods=['GET'])
+def get_github_token_api():
+    """API endpoint to get the GitHub token setting (masked for security)"""
+    from config import get_github_token, DEFAULT_GITHUB_TOKEN
+    token = get_github_token()
+    # Mask the token for security - show only first 4 and last 4 characters
+    masked_token = ''
+    if token and len(token) > 8:
+        masked_token = token[:4] + '...' + token[-4:]
+    elif token:
+        masked_token = '***'
+    
+    return jsonify({
+        'token': masked_token,
+        'has_token': bool(token),
+        'default': DEFAULT_GITHUB_TOKEN
+    })
+
+@app.route('/api/settings/github-token', methods=['POST'])
+def set_github_token_api():
+    """API endpoint to set the GitHub token setting"""
+    from config import set_github_token
+    data = request.json
+    token = data.get('token', '').strip()
+    
+    # Allow empty string to clear the token
+    success = set_github_token(token)
+    
+    if success:
+        logging.info("GitHub token updated")
+        return jsonify({'success': True, 'has_token': bool(token)})
+    else:
+        return jsonify({'error': 'Failed to save GitHub token setting'}), 500
+
+@app.route('/api/settings/github-repository', methods=['GET'])
+def get_github_repository_api():
+    """API endpoint to get the GitHub repository setting"""
+    from config import get_github_repository, DEFAULT_GITHUB_REPOSITORY
+    return jsonify({
+        'repository': get_github_repository(),
+        'default': DEFAULT_GITHUB_REPOSITORY
+    })
+
+@app.route('/api/settings/github-repository', methods=['POST'])
+def set_github_repository_api():
+    """API endpoint to set the GitHub repository setting"""
+    from config import set_github_repository
+    data = request.json
+    repository = data.get('repository', '').strip()
+    
+    if not repository:
+        return jsonify({'error': 'Repository value is required'}), 400
+    
+    # Basic validation for repository format (owner/repo)
+    if '/' not in repository or repository.count('/') != 1:
+        return jsonify({'error': 'Repository must be in format owner/repo'}), 400
+    
+    success = set_github_repository(repository)
+    
+    if success:
+        logging.info(f"GitHub repository updated to: {repository}")
+        return jsonify({'success': True, 'repository': repository})
+    else:
+        return jsonify({'error': 'Failed to save GitHub repository setting'}), 500
+
+@app.route('/api/settings/github-issue-assignee', methods=['GET'])
+def get_github_issue_assignee_api():
+    """API endpoint to get the GitHub issue assignee setting"""
+    from config import get_github_issue_assignee, DEFAULT_GITHUB_ISSUE_ASSIGNEE
+    return jsonify({
+        'assignee': get_github_issue_assignee(),
+        'default': DEFAULT_GITHUB_ISSUE_ASSIGNEE
+    })
+
+@app.route('/api/settings/github-issue-assignee', methods=['POST'])
+def set_github_issue_assignee_api():
+    """API endpoint to set the GitHub issue assignee setting"""
+    from config import set_github_issue_assignee
+    data = request.json
+    assignee = data.get('assignee', '').strip()
+    
+    # Allow empty string for no assignee
+    success = set_github_issue_assignee(assignee)
+    
+    if success:
+        logging.info(f"GitHub issue assignee updated to: {assignee}")
+        return jsonify({'success': True, 'assignee': assignee})
+    else:
+        return jsonify({'error': 'Failed to save GitHub issue assignee setting'}), 500
 
 @app.route('/api/version', methods=['GET'])
 def get_version():

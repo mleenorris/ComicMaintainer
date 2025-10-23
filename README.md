@@ -476,5 +476,29 @@ The application is 100% event-driven with zero polling:
 - Docker
 - (Optional) Docker Hub account for pushing images
 
+## Documentation
+
+- **[API Documentation](docs/API.md)** - Complete REST API reference
+- **[Contributing Guide](CONTRIBUTING.md)** - How to contribute to the project
+- **[Debug Logging Guide](DEBUG_LOGGING_GUIDE.md)** - Debug logging and error reporting
+- **[Security Policy](SECURITY.md)** - Security guidelines and vulnerability reporting
+- **[Changelog](CHANGELOG.md)** - Version history and changes
+
+## Quick Start with Docker Compose
+
+Use the provided `docker-compose.yml` for easy setup:
+
+```bash
+# Edit docker-compose.yml to set your paths
+# Then start the service
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop the service
+docker-compose down
+```
+
 ## License
 MIT

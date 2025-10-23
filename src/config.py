@@ -10,6 +10,9 @@ DEFAULT_WATCHER_ENABLED = True
 DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5MB default
 DEFAULT_MAX_WORKERS = 4  # Default number of concurrent workers
 DEFAULT_ISSUE_NUMBER_PADDING = 4  # Default padding for issue numbers
+DEFAULT_GITHUB_TOKEN = ''  # Default GitHub token
+DEFAULT_GITHUB_REPOSITORY = 'mleenorris/ComicMaintainer'  # Default GitHub repository
+DEFAULT_GITHUB_ISSUE_ASSIGNEE = 'copilot'  # Default GitHub issue assignee
 
 def get_config():
     """Get the current configuration"""
@@ -117,3 +120,54 @@ def set_issue_number_padding(padding):
         return save_config(config)
     except (ValueError, TypeError):
         return False
+
+def get_github_token():
+    """Get the GitHub token setting"""
+    # Check environment variable first
+    env_value = os.environ.get('GITHUB_TOKEN')
+    if env_value:
+        return env_value
+    
+    # Fall back to config file
+    config = get_config()
+    return config.get('github_token', DEFAULT_GITHUB_TOKEN)
+
+def set_github_token(token):
+    """Set the GitHub token setting"""
+    config = get_config()
+    config['github_token'] = token
+    return save_config(config)
+
+def get_github_repository():
+    """Get the GitHub repository setting"""
+    # Check environment variable first
+    env_value = os.environ.get('GITHUB_REPOSITORY')
+    if env_value:
+        return env_value
+    
+    # Fall back to config file
+    config = get_config()
+    return config.get('github_repository', DEFAULT_GITHUB_REPOSITORY)
+
+def set_github_repository(repository):
+    """Set the GitHub repository setting"""
+    config = get_config()
+    config['github_repository'] = repository
+    return save_config(config)
+
+def get_github_issue_assignee():
+    """Get the GitHub issue assignee setting"""
+    # Check environment variable first
+    env_value = os.environ.get('GITHUB_ISSUE_ASSIGNEE')
+    if env_value:
+        return env_value
+    
+    # Fall back to config file
+    config = get_config()
+    return config.get('github_issue_assignee', DEFAULT_GITHUB_ISSUE_ASSIGNEE)
+
+def set_github_issue_assignee(assignee):
+    """Set the GitHub issue assignee setting"""
+    config = get_config()
+    config['github_issue_assignee'] = assignee
+    return save_config(config)

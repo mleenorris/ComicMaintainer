@@ -9,11 +9,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Health check endpoint at `/health` and `/api/health` for Docker and Kubernetes orchestration
-- Docker Compose configuration file for easier setup and deployment
-- Changelog to track version history and changes
+  - Returns 200 OK when healthy, 503 when unhealthy
+  - Checks watched directory, database connectivity, and watcher process status
+  - Includes version information and file count
+- Docker Compose configuration file (`docker-compose.yml`) for easier setup and deployment
+  - Pre-configured with sensible defaults
+  - Includes health checks and volume mappings
+  - Easy customization for user/group IDs
+- Kubernetes deployment manifests (`docs/kubernetes-deployment.yaml`)
+  - Complete deployment with PVCs, services, and ingress
+  - Health checks (liveness, readiness, startup probes)
+  - Resource limits and security context
+  - Horizontal Pod Autoscaler example (commented)
+- Comprehensive API documentation (`docs/API.md`)
+  - Complete REST API reference with examples
+  - Request/response formats for all endpoints
+  - Examples in curl, Python, and JavaScript
+  - SSE event documentation
+- Contributing guide (`CONTRIBUTING.md`)
+  - Development setup instructions
+  - Code quality standards
+  - Testing guidelines
+  - Pull request process
+- Environment variable validation module (`src/env_validator.py`)
+  - Validates required and optional environment variables
+  - Checks numeric ranges and directory accessibility
+  - Provides helpful error messages
+  - Sets default values for optional variables
+  - Integrated into container startup
+- Changelog (`CHANGELOG.md`) to track version history and changes
+- `.pylintrc` configuration for consistent code quality
+- Organized historical documentation into `docs/archive/`
+- Test suite for environment validator (`test_env_validator.py`)
+
+### Changed
+- Reorganized documentation structure
+  - Moved 19 historical documentation files to `docs/archive/`
+  - Created `docs/archive/README.md` to explain archived documents
+  - Updated main README with better organization and documentation links
+- Enhanced README.md
+  - Added documentation section with links to all guides
+  - Added quick start section for Docker Compose
+  - Improved readability and organization
+- Updated `start.sh` to validate environment variables before starting services
 
 ### Fixed
-- Fixed Bandit security scanner configuration file format (YAML syntax)
+- Fixed Bandit security scanner configuration file format (YAML syntax error)
+- Fixed test warnings about return values in pytest
+  - Updated `test_job_specific_events.py` - 3 tests fixed
+  - Updated `test_progress_callbacks.py` - 2 tests fixed
+  - All tests now use assertions instead of return values
+
+### Documentation
+- Consolidated 19 historical summary files into organized archive
+- Added comprehensive API documentation with examples
+- Added Kubernetes deployment guide
+- Added development contribution guidelines
+- Improved README structure and navigation
 
 ## [1.0.0] - 2024
 

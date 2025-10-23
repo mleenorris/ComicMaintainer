@@ -135,8 +135,11 @@ class ChangeHandler(FileSystemEventHandler):
             else:
                 logging.info(f"Moved file not stable yet: {event.dest_path}")
                 log_debug("File not stable or wrong extension", dest=event.dest_path)
-    def _is_file_stable(self, path, wait_time=2, checks=3):
+    def _is_file_stable(self, path, wait_time=2, checks=2):
         """Return True if file size is unchanged for wait_time*checks seconds.
+        
+        Optimized to use 2 checks instead of 3, reducing wait time from 6s to 4s
+        while still ensuring files are stable before processing.
         
         Note: The time.sleep() calls here are NOT polling - they are intentional
         debouncing delays to ensure files have finished copying/writing before
@@ -145,23 +148,28 @@ class ChangeHandler(FileSystemEventHandler):
         log_debug("Checking file stability", path=path, wait_time=wait_time, checks=checks)
         
         try:
-            prev_size = None
-            for check_num in range(checks):
+            # First check - get initial file size
+            if not os.path.exists(path):
+                log_debug("File does not exist during stability check", path=path)
+                return False
+            
+            prev_size = os.path.getsize(path)
+            log_debug("File size check", path=path, check=0, size=prev_size, prev_size=None)
+            
+            # Wait and check again
+            for check_num in range(1, checks + 1):
+                time.sleep(wait_time)
+                
                 if not os.path.exists(path):
-                    log_debug("File does not exist during stability check", path=path)
+                    log_debug("File disappeared during stability check", path=path)
                     return False
                 
                 size = os.path.getsize(path)
                 log_debug("File size check", path=path, check=check_num, size=size, prev_size=prev_size)
                 
-                if prev_size is not None and size != prev_size:
-                    log_debug("File size changed, continuing checks", path=path, old_size=prev_size, new_size=size)
-                    prev_size = size
-                    time.sleep(wait_time)
-                    continue
-                
-                prev_size = size
-                time.sleep(wait_time)
+                if size != prev_size:
+                    log_debug("File size changed, not stable", path=path, old_size=prev_size, new_size=size)
+                    return False
             
             log_debug("File is stable", path=path, final_size=prev_size)
             return True
@@ -176,11 +184,26 @@ class ChangeHandler(FileSystemEventHandler):
     def __init__(self):
         super().__init__()
         self.last_processed = {}  # {filepath: timestamp}
+        self._extension_cache = {}  # Cache for file extension checks
+        
     def _allowed_extension(self, path):
-        if not (path.lower().endswith('.cbr') or path.lower().endswith('.cbz')):
-            return False
-        else:
-            return True
+        """Check if file has allowed extension (.cbr or .cbz) with caching"""
+        # Check cache first
+        if path in self._extension_cache:
+            return self._extension_cache[path]
+        
+        # Compute and cache result
+        result = path.lower().endswith('.cbr') or path.lower().endswith('.cbz')
+        self._extension_cache[path] = result
+        
+        # Limit cache size to prevent memory growth (keep last 1000 entries)
+        if len(self._extension_cache) > 1000:
+            # Remove oldest 200 entries (simple FIFO-like cleanup)
+            keys_to_remove = list(self._extension_cache.keys())[:200]
+            for key in keys_to_remove:
+                del self._extension_cache[key]
+        
+        return result
     def _should_process(self, path):
         now = time.time()
         last = self.last_processed.get(path, 0)

@@ -10,6 +10,7 @@ DEFAULT_WATCHER_ENABLED = True
 DEFAULT_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5MB default
 DEFAULT_MAX_WORKERS = 4  # Default number of concurrent workers
 DEFAULT_ISSUE_NUMBER_PADDING = 4  # Default padding for issue numbers
+DEFAULT_DB_CACHE_SIZE_MB = 64  # Default SQLite cache size in MB
 
 def get_config():
     """Get the current configuration"""
@@ -117,3 +118,16 @@ def set_issue_number_padding(padding):
         return save_config(config)
     except (ValueError, TypeError):
         return False
+
+def get_db_cache_size_mb():
+    """Get the database cache size setting in MB"""
+    # Check environment variable first
+    env_value = os.environ.get('DB_CACHE_SIZE_MB')
+    if env_value:
+        try:
+            return int(env_value)
+        except ValueError:
+            logging.warning(f"Invalid DB_CACHE_SIZE_MB environment variable: {env_value}")
+    
+    # Fall back to default
+    return DEFAULT_DB_CACHE_SIZE_MB

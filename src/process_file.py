@@ -66,24 +66,30 @@ def record_file_change(change_type, old_path=None, new_path=None):
 
 # mark_file_duplicate is now imported from markers module
 
+# Compile regex patterns once for better performance
+_CHAPTER_KEYWORD_PATTERN = re.compile(r'(?i)ch(?:apter)?[-._\s]*([0-9]+(?:\.[0-9]+)?)')
+_NUMBER_PATTERN = re.compile(r'(?<![\(\[])[0-9]+(?:\.[0-9]+)?(?![\)\]])')
+_BRACKET_START_PATTERN = re.compile(r'[\(\[]$')
+_BRACKET_END_PATTERN = re.compile(r'^[\)\]]')
+
 def parse_chapter_number(filename):
     log_function_entry("parse_chapter_number", filename=filename)
     
-    match = re.search(r'(?i)ch(?:apter)?[-._\s]*([0-9]+(?:\.[0-9]+)?)', filename)
+    match = _CHAPTER_KEYWORD_PATTERN.search(filename)
     if match:
         chapter_num = match.group(1)
         log_debug("Found chapter number via chapter keyword", filename=filename, chapter=chapter_num)
         log_function_exit("parse_chapter_number", result=chapter_num)
         return chapter_num
     
-    matches = list(re.finditer(r'(?<![\(\[])[0-9]+(?:\.[0-9]+)?(?![\)\]])', filename))
+    matches = list(_NUMBER_PATTERN.finditer(filename))
     log_debug("Searching for chapter number in filename", filename=filename, matches_count=len(matches))
     
     for m in matches:
         start, end = m.start(), m.end()
         before = filename[:start]
         after = filename[end:]
-        if (not re.search(r'[\(\[]$', before)) and (not re.search(r'^[\)\]]', after)):
+        if (not _BRACKET_START_PATTERN.search(before)) and (not _BRACKET_END_PATTERN.search(after)):
             chapter_num = m.group()
             log_debug("Found chapter number via number pattern", filename=filename, chapter=chapter_num)
             log_function_exit("parse_chapter_number", result=chapter_num)

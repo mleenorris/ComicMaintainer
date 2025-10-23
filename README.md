@@ -217,8 +217,10 @@ The web interface can be installed as a standalone application on your device, p
 
 **Mobile Installation (Android Chrome):**
 1. Open the web interface in Chrome
-2. Tap the three-dot menu
-3. Tap "Install app" or "Add to Home Screen"
+2. Look for the automatic install prompt that appears at the bottom of the screen
+   - Alternatively, tap the three-dot menu (⋮) and select "Install app" or "Add to Home Screen"
+   - Or use the custom **"📱 Install App"** button in the web interface settings menu
+3. Tap "Install" to confirm
 4. The app will be installed and available in your app drawer
 
 **Benefits of Installing:**

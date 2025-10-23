@@ -2200,7 +2200,7 @@ def get_processing_history_endpoint():
         })
     except Exception as e:
         logging.error(f"Error getting processing history: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'Failed to retrieve processing history'}), 500
 
 
 @app.route('/api/events/stream', methods=['GET'])

@@ -10,6 +10,7 @@ from error_handler import (
     log_function_entry, log_function_exit
 )
 import file_store
+from unified_store import add_processing_history
 
 CONFIG_DIR = '/Config'
 LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
@@ -277,11 +278,29 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
     
     log_debug("File needs normalization, proceeding with processing", filepath=filepath)
     
+    # Capture "before" state for history tracking
+    before_filename = os.path.basename(filepath)
+    before_title = None
+    before_series = None
+    before_issue = None
+    before_publisher = None
+    before_year = None
+    before_volume = None
+    
     try:
         ca = ComicArchive(filepath)
         tags = ca.read_tags('cr')
         tagschanged = False
         log_debug("Read comic tags", filepath=filepath, has_tags=tags is not None)
+        
+        # Capture before state
+        if tags:
+            before_title = tags.title
+            before_series = tags.series
+            before_issue = tags.issue
+            before_publisher = tags.publisher
+            before_year = str(tags.year) if tags.year else None
+            before_volume = str(tags.volume) if tags.volume else None
     except Exception as e:
         log_error_with_context(
             e,
@@ -464,6 +483,56 @@ def process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True, comi
                 additional_info={"filepath": filepath, "fixfilename": fixfilename}
             )
             logging.info(f"Could not format filename for {os.path.basename(filepath)}. Skipping rename... {e}")
+    
+    # Record processing history if any changes were made
+    try:
+        ca_final = ComicArchive(final_filepath)
+        tags_final = ca_final.read_tags('cr')
+        
+        # Capture "after" state
+        after_filename = os.path.basename(final_filepath)
+        after_title = tags_final.title if tags_final else None
+        after_series = tags_final.series if tags_final else None
+        after_issue = tags_final.issue if tags_final else None
+        after_publisher = tags_final.publisher if tags_final else None
+        after_year = str(tags_final.year) if tags_final and tags_final.year else None
+        after_volume = str(tags_final.volume) if tags_final and tags_final.volume else None
+        
+        # Only record if something changed
+        if (before_filename != after_filename or 
+            before_title != after_title or 
+            before_series != after_series or 
+            before_issue != after_issue or
+            before_publisher != after_publisher or
+            before_year != after_year or
+            before_volume != after_volume):
+            
+            add_processing_history(
+                filepath=final_filepath,
+                operation_type='process',
+                before_filename=before_filename,
+                after_filename=after_filename,
+                before_title=before_title,
+                after_title=after_title,
+                before_series=before_series,
+                after_series=after_series,
+                before_issue=before_issue,
+                after_issue=after_issue,
+                before_publisher=before_publisher,
+                after_publisher=after_publisher,
+                before_year=before_year,
+                after_year=after_year,
+                before_volume=before_volume,
+                after_volume=after_volume
+            )
+            log_debug("Processing history recorded", filepath=final_filepath)
+    except Exception as e:
+        log_error_with_context(
+            e,
+            context=f"Recording processing history for: {final_filepath}",
+            additional_info={"filepath": final_filepath}
+        )
+        logging.warning(f"Could not record processing history: {e}")
     
     log_debug("File processing complete", final_path=final_filepath)
     log_function_exit("process_file", result=final_filepath)

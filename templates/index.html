@@ -1756,6 +1756,9 @@
                         <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
                             ⚙️ Settings
                         </button>
+                        <button class="settings-dropdown-item" onclick="openProcessingHistoryModal(); closeSettingsMenu();">
+                            📜 Processing History
+                        </button>
                         <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
                             📋 View Logs
                         </button>
@@ -2310,6 +2313,34 @@
         </div>
     </div>
     
+    <div class="modal" id="processingHistoryModal">
+        <div class="modal-content" style="max-width: 1200px; height: 85vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h2>Processing History</h2>
+                <button class="close-btn" onclick="closeProcessingHistoryModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                <div style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
+                    Shows all file processing changes with before and after values
+                </div>
+                <div id="historyLoadingIndicator" style="display: none; padding: 20px; text-align: center; color: var(--text-muted);">
+                    Loading history...
+                </div>
+                <div id="historyContent" style="flex: 1; overflow: auto;">
+                    <!-- History items will be loaded here -->
+                </div>
+                <div id="historyPagination" style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-primary);">
+                    <button class="btn" id="historyPrevBtn" onclick="loadPreviousHistoryPage()" disabled>← Previous</button>
+                    <span id="historyPageInfo" style="color: var(--text-secondary); font-size: 14px;">Page 1</span>
+                    <button class="btn" id="historyNextBtn" onclick="loadNextHistoryPage()" disabled>Next →</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeProcessingHistoryModal()">Close</button>
+            </div>
+        </div>
+    </div>
+    
     <script>
         let files = [];
         let selectedFiles = new Set();
@@ -2324,6 +2355,9 @@
         let perPage = 100; // Default value, will be loaded from server
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
         let searchDebounceTimer = null;
+        let historyCurrentPage = 1;
+        let historyPerPage = 50;
+        let historyTotal = 0;
         
         // Server-Sent Events connection for real-time updates
         let eventSource = null;
@@ -4543,6 +4577,139 @@
         
         function closeLogsModal() {
             document.getElementById('logsModal').classList.remove('active');
+        }
+        
+        async function openProcessingHistoryModal() {
+            document.getElementById('processingHistoryModal').classList.add('active');
+            historyCurrentPage = 1;
+            await loadProcessingHistory();
+        }
+        
+        function closeProcessingHistoryModal() {
+            document.getElementById('processingHistoryModal').classList.remove('active');
+        }
+        
+        async function loadProcessingHistory() {
+            const loadingIndicator = document.getElementById('historyLoadingIndicator');
+            const contentDiv = document.getElementById('historyContent');
+            const pageInfo = document.getElementById('historyPageInfo');
+            const prevBtn = document.getElementById('historyPrevBtn');
+            const nextBtn = document.getElementById('historyNextBtn');
+            
+            try {
+                loadingIndicator.style.display = 'block';
+                contentDiv.innerHTML = '';
+                
+                const offset = (historyCurrentPage - 1) * historyPerPage;
+                const response = await fetch(`/api/processing-history?limit=${historyPerPage}&offset=${offset}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                historyTotal = data.total;
+                const totalPages = Math.ceil(historyTotal / historyPerPage);
+                
+                loadingIndicator.style.display = 'none';
+                
+                if (data.history.length === 0) {
+                    contentDiv.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">No processing history found</div>';
+                    pageInfo.textContent = 'No results';
+                    prevBtn.disabled = true;
+                    nextBtn.disabled = true;
+                    return;
+                }
+                
+                // Render history items
+                let html = '<div style="display: flex; flex-direction: column; gap: 15px;">';
+                data.history.forEach(item => {
+                    html += renderHistoryItem(item);
+                });
+                html += '</div>';
+                
+                contentDiv.innerHTML = html;
+                
+                // Update pagination controls
+                pageInfo.textContent = `Page ${historyCurrentPage} of ${totalPages} (${historyTotal} total)`;
+                prevBtn.disabled = historyCurrentPage <= 1;
+                nextBtn.disabled = historyCurrentPage >= totalPages;
+                
+            } catch (error) {
+                loadingIndicator.style.display = 'none';
+                contentDiv.innerHTML = `<div style="padding: 20px; color: red;">Error loading history: ${error.message}</div>`;
+            }
+        }
+        
+        function renderHistoryItem(item) {
+            const timestamp = new Date(item.timestamp * 1000).toLocaleString();
+            const filepath = item.after_filename || item.before_filename || item.filepath;
+            
+            let html = `
+                <div style="border: 1px solid var(--border-secondary); border-radius: 8px; padding: 15px; background: var(--bg-secondary);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-primary); padding-bottom: 10px;">
+                        <div>
+                            <strong style="font-size: 15px; color: var(--text-primary);">${escapeHtml(filepath)}</strong>
+                            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">${timestamp}</div>
+                        </div>
+                        <span style="background: var(--bg-hover); padding: 4px 12px; border-radius: 4px; font-size: 12px; color: var(--text-secondary);">${item.operation_type}</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px;">
+            `;
+            
+            // Show changes
+            const fields = [
+                { label: 'Filename', before: item.before_filename, after: item.after_filename },
+                { label: 'Title', before: item.before_title, after: item.after_title },
+                { label: 'Series', before: item.before_series, after: item.after_series },
+                { label: 'Issue', before: item.before_issue, after: item.after_issue },
+                { label: 'Publisher', before: item.before_publisher, after: item.after_publisher },
+                { label: 'Year', before: item.before_year, after: item.after_year },
+                { label: 'Volume', before: item.before_volume, after: item.after_volume }
+            ];
+            
+            fields.forEach(field => {
+                if (field.before !== field.after && (field.before || field.after)) {
+                    html += `
+                        <div style="grid-column: 1 / -1; border-left: 3px solid var(--border-secondary); padding-left: 10px; margin: 5px 0;">
+                            <div style="font-weight: 500; color: var(--text-secondary); margin-bottom: 5px;">${field.label}</div>
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <div style="flex: 1; padding: 6px 10px; background: var(--bg-hover); border-radius: 4px; color: var(--text-muted);">
+                                    <span style="font-size: 11px; text-transform: uppercase; opacity: 0.7;">Before:</span>
+                                    <div style="margin-top: 3px; color: var(--text-primary);">${field.before || '<em style="opacity: 0.5;">(empty)</em>'}</div>
+                                </div>
+                                <span style="color: var(--text-muted);">→</span>
+                                <div style="flex: 1; padding: 6px 10px; background: var(--bg-hover); border-radius: 4px; color: var(--text-muted);">
+                                    <span style="font-size: 11px; text-transform: uppercase; opacity: 0.7;">After:</span>
+                                    <div style="margin-top: 3px; color: var(--text-primary);">${field.after || '<em style="opacity: 0.5;">(empty)</em>'}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+            
+            html += `
+                    </div>
+                </div>
+            `;
+            
+            return html;
+        }
+        
+        async function loadPreviousHistoryPage() {
+            if (historyCurrentPage > 1) {
+                historyCurrentPage--;
+                await loadProcessingHistory();
+            }
+        }
+        
+        async function loadNextHistoryPage() {
+            const totalPages = Math.ceil(historyTotal / historyPerPage);
+            if (historyCurrentPage < totalPages) {
+                historyCurrentPage++;
+                await loadProcessingHistory();
+            }
         }
         
         async function openAboutModal() {

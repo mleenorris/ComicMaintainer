@@ -2173,6 +2173,35 @@ def clear_active_job_endpoint():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/processing-history', methods=['GET'])
+def get_processing_history_endpoint():
+    """API endpoint to get processing history"""
+    try:
+        from unified_store import get_processing_history, get_processing_history_count
+        
+        # Get pagination parameters
+        limit = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+        
+        # Validate parameters
+        if limit < 1 or limit > 1000:
+            limit = 100
+        if offset < 0:
+            offset = 0
+        
+        history = get_processing_history(limit=limit, offset=offset)
+        total_count = get_processing_history_count()
+        
+        return jsonify({
+            'history': history,
+            'total': total_count,
+            'limit': limit,
+            'offset': offset
+        })
+    except Exception as e:
+        logging.error(f"Error getting processing history: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/events/stream', methods=['GET'])
 def events_stream():

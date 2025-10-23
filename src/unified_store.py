@@ -56,6 +56,30 @@ def _init_db_schema(conn):
         )
     ''')
     
+    # Processing history table - tracks before/after changes for each file processing
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS processing_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filepath TEXT NOT NULL,
+            timestamp REAL NOT NULL,
+            before_filename TEXT,
+            after_filename TEXT,
+            before_title TEXT,
+            after_title TEXT,
+            before_series TEXT,
+            after_series TEXT,
+            before_issue TEXT,
+            after_issue TEXT,
+            before_publisher TEXT,
+            after_publisher TEXT,
+            before_year TEXT,
+            after_year TEXT,
+            before_volume TEXT,
+            after_volume TEXT,
+            operation_type TEXT NOT NULL
+        )
+    ''')
+    
     # Create indexes for faster queries
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_files_last_modified 
@@ -75,6 +99,16 @@ def _init_db_schema(conn):
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_markers_type 
         ON markers(marker_type)
+    ''')
+    
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_processing_history_filepath 
+        ON processing_history(filepath)
+    ''')
+    
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_processing_history_timestamp 
+        ON processing_history(timestamp DESC)
     ''')
     
     conn.commit()
@@ -907,3 +941,154 @@ def migrate_from_old_databases():
         set_metadata('migration_completed', str(time.time()))
     
     return migrated_markers, migrated_files
+
+
+# ============================================================================
+# Processing History Management
+# ============================================================================
+
+def add_processing_history(
+    filepath: str,
+    operation_type: str,
+    before_filename: str = None,
+    after_filename: str = None,
+    before_title: str = None,
+    after_title: str = None,
+    before_series: str = None,
+    after_series: str = None,
+    before_issue: str = None,
+    after_issue: str = None,
+    before_publisher: str = None,
+    after_publisher: str = None,
+    before_year: str = None,
+    after_year: str = None,
+    before_volume: str = None,
+    after_volume: str = None
+) -> bool:
+    """
+    Add a processing history entry.
+    
+    Args:
+        filepath: Path to the file being processed
+        operation_type: Type of operation (e.g., 'process', 'rename', 'normalize')
+        before_*/after_*: Before and after values for various fields
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO processing_history (
+                    filepath, timestamp, before_filename, after_filename,
+                    before_title, after_title, before_series, after_series,
+                    before_issue, after_issue, before_publisher, after_publisher,
+                    before_year, after_year, before_volume, after_volume,
+                    operation_type
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                filepath, time.time(), before_filename, after_filename,
+                before_title, after_title, before_series, after_series,
+                before_issue, after_issue, before_publisher, after_publisher,
+                before_year, after_year, before_volume, after_volume,
+                operation_type
+            ))
+            conn.commit()
+            logging.debug(f"Added processing history entry for {filepath}")
+            return True
+    except Exception as e:
+        logging.error(f"Error adding processing history: {e}")
+        return False
+
+
+def get_processing_history(limit: int = 100, offset: int = 0) -> List[Dict]:
+    """
+    Get processing history entries, ordered by timestamp (newest first).
+    
+    Args:
+        limit: Maximum number of entries to return
+        offset: Number of entries to skip (for pagination)
+    
+    Returns:
+        List of history entries as dictionaries
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT 
+                    id, filepath, timestamp, before_filename, after_filename,
+                    before_title, after_title, before_series, after_series,
+                    before_issue, after_issue, before_publisher, after_publisher,
+                    before_year, after_year, before_volume, after_volume,
+                    operation_type
+                FROM processing_history
+                ORDER BY timestamp DESC
+                LIMIT ? OFFSET ?
+            ''', (limit, offset))
+            
+            rows = cursor.fetchall()
+            history = []
+            for row in rows:
+                history.append({
+                    'id': row[0],
+                    'filepath': row[1],
+                    'timestamp': row[2],
+                    'before_filename': row[3],
+                    'after_filename': row[4],
+                    'before_title': row[5],
+                    'after_title': row[6],
+                    'before_series': row[7],
+                    'after_series': row[8],
+                    'before_issue': row[9],
+                    'after_issue': row[10],
+                    'before_publisher': row[11],
+                    'after_publisher': row[12],
+                    'before_year': row[13],
+                    'after_year': row[14],
+                    'before_volume': row[15],
+                    'after_volume': row[16],
+                    'operation_type': row[17]
+                })
+            return history
+    except Exception as e:
+        logging.error(f"Error getting processing history: {e}")
+        return []
+
+
+def get_processing_history_count() -> int:
+    """
+    Get total count of processing history entries.
+    
+    Returns:
+        Number of history entries
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM processing_history')
+            return cursor.fetchone()[0]
+    except Exception as e:
+        logging.error(f"Error getting processing history count: {e}")
+        return 0
+
+
+def clear_processing_history() -> int:
+    """
+    Clear all processing history entries.
+    
+    Returns:
+        Number of entries deleted
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM processing_history')
+            deleted = cursor.rowcount
+            conn.commit()
+            logging.info(f"Cleared {deleted} processing history entries")
+            return deleted
+    except Exception as e:
+        logging.error(f"Error clearing processing history: {e}")
+        return 0

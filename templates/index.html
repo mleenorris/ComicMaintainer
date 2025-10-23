@@ -731,7 +731,7 @@
             padding: 15px;
             font-weight: 600;
             display: grid;
-            grid-template-columns: 30px 40px 1fr 150px 180px 240px;
+            grid-template-columns: 30px 40px 1fr minmax(100px, auto) minmax(150px, auto) minmax(200px, auto);
             gap: 10px;
             border-bottom: 2px solid var(--border-secondary);
             align-items: center;
@@ -772,7 +772,7 @@
         .directory-header-clickable {
             cursor: pointer;
             display: grid;
-            grid-template-columns: 16px 16px 1fr 150px;
+            grid-template-columns: 16px 16px 1fr minmax(100px, auto);
             gap: 8px;
             align-items: center;
         }
@@ -829,7 +829,7 @@
             padding: 15px;
             padding-left: 45px;
             display: grid;
-            grid-template-columns: 40px 1fr 150px 180px 240px;
+            grid-template-columns: 40px 1fr minmax(100px, auto) minmax(150px, auto) minmax(200px, auto);
             gap: 10px;
             border-bottom: 1px solid var(--border-primary);
             align-items: center;
@@ -1197,11 +1197,11 @@
             }
             
             .file-list-header {
-                grid-template-columns: 30px 40px 1fr 120px 150px 200px;
+                grid-template-columns: 30px 40px 1fr minmax(80px, auto) minmax(120px, auto) minmax(150px, auto);
             }
             
             .file-item {
-                grid-template-columns: 40px 1fr 120px 150px 200px;
+                grid-template-columns: 40px 1fr minmax(80px, auto) minmax(120px, auto) minmax(150px, auto);
                 margin-left: 30px;
             }
             
@@ -1210,7 +1210,7 @@
             }
             
             .directory-header-clickable {
-                grid-template-columns: 16px 16px 1fr 120px;
+                grid-template-columns: 16px 16px 1fr minmax(80px, auto);
             }
         }
         

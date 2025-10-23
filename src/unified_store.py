@@ -695,6 +695,68 @@ def cleanup_markers(marker_type: str, max_files: int) -> int:
         return 0
 
 
+def batch_add_markers(filepaths: List[str], marker_type: str) -> int:
+    """
+    Add markers for multiple files in a single transaction.
+    Much faster than calling add_marker() multiple times.
+    
+    Args:
+        filepaths: List of file paths
+        marker_type: Type of marker to add
+        
+    Returns:
+        Number of markers added
+    """
+    if not filepaths:
+        return 0
+    
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            # Use executemany for batch insert
+            cursor.executemany('''
+                INSERT OR IGNORE INTO markers (filepath, marker_type)
+                VALUES (?, ?)
+            ''', [(filepath, marker_type) for filepath in filepaths])
+            added = cursor.rowcount
+            conn.commit()
+            return added
+    except Exception as e:
+        logging.error(f"Error batch adding markers of type {marker_type}: {e}")
+        return 0
+
+
+def batch_remove_markers(filepaths: List[str], marker_type: str) -> int:
+    """
+    Remove markers for multiple files in a single transaction.
+    Much faster than calling remove_marker() multiple times.
+    
+    Args:
+        filepaths: List of file paths
+        marker_type: Type of marker to remove
+        
+    Returns:
+        Number of markers removed
+    """
+    if not filepaths:
+        return 0
+    
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            # Use executemany for batch delete
+            cursor.executemany('''
+                DELETE FROM markers 
+                WHERE filepath = ? AND marker_type = ?
+            ''', [(filepath, marker_type) for filepath in filepaths])
+            removed = cursor.rowcount
+            conn.commit()
+            return removed
+    except Exception as e:
+        logging.error(f"Error batch removing markers of type {marker_type}: {e}")
+        return 0
+
+
 # ==============================================================================
 # METADATA FUNCTIONS
 # ==============================================================================

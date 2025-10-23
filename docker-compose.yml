@@ -28,6 +28,10 @@ services:
       # Optional: Number of concurrent processing threads (default: 4)
       - MAX_WORKERS=4
       
+      # Optional: SQLite database cache size in MB (default: 64)
+      # Increase for large libraries (128-256MB), decrease for small libraries (32MB)
+      - DB_CACHE_SIZE_MB=64
+      
       # Optional: Log file size limit in bytes (default: 5242880 = 5MB)
       - LOG_MAX_BYTES=5242880
       

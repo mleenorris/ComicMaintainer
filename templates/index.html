@@ -4,6 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Comic Maintainer - Web Interface</title>
+    
+    <!-- PWA Meta Tags -->
+    <meta name="description" content="Manage and process your comic archive files with ComicTagger">
+    <meta name="theme-color" content="#2c3e50">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ComicMaintainer">
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json">
+    
+    <!-- Favicons and Icons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/icons/favicon-16x16.png">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    
     <!-- Production optimization: Consider minifying this template and serving compressed -->
     <style>
         :root {
@@ -1771,6 +1788,9 @@
                         <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
                             🔍 Scan Unmarked
                         </button>
+                        <button class="settings-dropdown-item" id="installAppButton" onclick="installApp(); closeSettingsMenu();" style="display: none;">
+                            📱 Install App
+                        </button>
                     </div>
                 </div>
                 <div class="header-controls">
@@ -2740,6 +2760,55 @@
         }
         
         // Load files on page load
+        // PWA Installation support
+        let deferredPrompt = null;
+        
+        // Listen for the beforeinstallprompt event
+        window.addEventListener('beforeinstallprompt', (e) => {
+            console.log('PWA: beforeinstallprompt event fired');
+            // Prevent the mini-infobar from appearing on mobile
+            e.preventDefault();
+            // Stash the event so it can be triggered later
+            deferredPrompt = e;
+            // Show the install button
+            const installButton = document.getElementById('installAppButton');
+            if (installButton) {
+                installButton.style.display = 'block';
+            }
+        });
+        
+        // Handle successful installation
+        window.addEventListener('appinstalled', (evt) => {
+            console.log('PWA: App successfully installed');
+            // Hide the install button after installation
+            const installButton = document.getElementById('installAppButton');
+            if (installButton) {
+                installButton.style.display = 'none';
+            }
+            deferredPrompt = null;
+        });
+        
+        // Function to trigger installation
+        function installApp() {
+            if (!deferredPrompt) {
+                alert('App is already installed or installation is not available.');
+                return;
+            }
+            
+            // Show the install prompt
+            deferredPrompt.prompt();
+            
+            // Wait for the user to respond to the prompt
+            deferredPrompt.userChoice.then((choiceResult) => {
+                if (choiceResult.outcome === 'accepted') {
+                    console.log('PWA: User accepted the install prompt');
+                } else {
+                    console.log('PWA: User dismissed the install prompt');
+                }
+                deferredPrompt = null;
+            });
+        }
+        
         document.addEventListener('DOMContentLoaded', async function() {
             // Load preferences from server
             const prefs = await getPreferences();

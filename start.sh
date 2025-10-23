@@ -3,6 +3,14 @@
 # Change to app directory
 cd /app
 
+# Validate environment variables before starting services
+echo "Validating environment configuration..."
+python /app/env_validator.py
+if [ $? -ne 0 ]; then
+    echo "Environment validation failed. Exiting."
+    exit 1
+fi
+
 # Start the watcher in the background
 python /app/watcher.py &
 WATCHER_PID=$!

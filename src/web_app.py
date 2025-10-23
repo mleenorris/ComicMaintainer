@@ -387,6 +387,16 @@ def index():
     # Add cache control for static HTML (short cache for dynamic content)
     return response
 
+@app.route('/manifest.json')
+def serve_manifest():
+    """Serve the web app manifest for PWA installation"""
+    return send_from_directory('../static', 'manifest.json', mimetype='application/manifest+json')
+
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    """Serve static files (icons, etc.) for PWA"""
+    return send_from_directory('../static', filename)
+
 def preload_metadata_for_directories(files):
     """No longer needed - markers are now centralized in /Config"""
     # This function is kept for backward compatibility but does nothing

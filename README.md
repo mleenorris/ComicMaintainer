@@ -31,6 +31,12 @@ This service automatically watches a directory for new or changed comic archive 
 - Logs all actions to `ComicMaintainer.log`
 - Containerized with Docker for easy deployment
 - **Supports custom user and group IDs (PUID/PGID) for proper file permissions**
+- **Installable Web App (PWA)**: Install the web interface as a standalone app on your device
+  - Works on desktop (Windows, macOS, Linux) and mobile (iOS, Android)
+  - App-like experience with dedicated window
+  - Add to home screen on mobile devices
+  - Offline-ready with cached assets
+  - Easy access from your app drawer or desktop
 
 ## How It Works
 1. The watcher service monitors a specified directory for new or changed `.cbz`/`.cbr` files.
@@ -191,6 +197,36 @@ The service includes a web-based interface for managing your comic files:
     - ✅ = processed
     - ⚠️ = not processed yet
     - 🔁 = duplicate file
+
+### Installing as an App (PWA)
+
+The web interface can be installed as a standalone application on your device, providing an app-like experience:
+
+**Desktop Installation (Chrome, Edge, Brave):**
+1. Open the web interface in your browser (`http://localhost:5000`)
+2. Look for the install button in the browser's address bar (usually a ⊕ or ⬇️ icon)
+3. Click "Install" or use the **three-dot menu (⋮)** in the header and select **"📱 Install App"**
+4. The app will be installed and can be launched from your applications menu or desktop
+
+**Mobile Installation (iOS Safari):**
+1. Open the web interface in Safari
+2. Tap the Share button (□ with arrow)
+3. Scroll down and tap "Add to Home Screen"
+4. Tap "Add" to confirm
+5. The app icon will appear on your home screen
+
+**Mobile Installation (Android Chrome):**
+1. Open the web interface in Chrome
+2. Tap the three-dot menu
+3. Tap "Install app" or "Add to Home Screen"
+4. The app will be installed and available in your app drawer
+
+**Benefits of Installing:**
+- Dedicated app window without browser UI
+- Faster access from home screen or app drawer
+- Works offline with cached assets
+- Full-screen experience on mobile devices
+- Feels like a native app
 
 ### Performance
 - **Optimized search and filtering**: Server-side processing with efficient database queries

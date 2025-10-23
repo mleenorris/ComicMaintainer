@@ -93,6 +93,28 @@ def validate_env_vars() -> Tuple[bool, List[str]]:
     if debug_mode not in ['true', 'false', '1', '0', 'yes', 'no']:
         warnings.append(f"DEBUG_MODE has invalid value '{debug_mode}', should be true/false")
     
+    # Check GitHub issue creation settings
+    github_token = os.environ.get('GITHUB_TOKEN', '')
+    github_repo = os.environ.get('GITHUB_REPOSITORY', 'mleenorris/ComicMaintainer')
+    github_assignee = os.environ.get('GITHUB_ISSUE_ASSIGNEE', 'copilot')
+    
+    if github_token:
+        # If GITHUB_TOKEN is set, validate the repository format
+        if '/' not in github_repo:
+            errors.append(f"GITHUB_REPOSITORY must be in 'owner/repo' format, got '{github_repo}'")
+        else:
+            repo_parts = github_repo.split('/')
+            if len(repo_parts) != 2 or not repo_parts[0] or not repo_parts[1]:
+                errors.append(f"GITHUB_REPOSITORY must be in 'owner/repo' format with non-empty owner and repo, got '{github_repo}'")
+        
+        # Validate token format (basic check)
+        if not github_token.startswith('ghp_') and not github_token.startswith('github_pat_'):
+            warnings.append(f"GITHUB_TOKEN doesn't match expected format (should start with 'ghp_' or 'github_pat_')")
+        
+        # Validate assignee is not empty
+        if not github_assignee:
+            warnings.append("GITHUB_ISSUE_ASSIGNEE is empty - issues will be created without assignee")
+    
     # Log warnings
     for warning in warnings:
         logging.warning(warning)
@@ -122,6 +144,16 @@ def print_env_summary():
     
     for key, value in config.items():
         print(f"  {key:20} = {value}")
+    
+    # Show GitHub issue creation configuration if enabled
+    github_token = os.environ.get('GITHUB_TOKEN', '')
+    if github_token:
+        print("\n  GitHub Issue Creation: ENABLED")
+        print(f"    Repository:        {os.environ.get('GITHUB_REPOSITORY', 'mleenorris/ComicMaintainer')}")
+        print(f"    Assignee:          {os.environ.get('GITHUB_ISSUE_ASSIGNEE', 'copilot')}")
+        print(f"    Token:             {'*' * 8}...{github_token[-4:] if len(github_token) >= 4 else '***'}")
+    else:
+        print("\n  GitHub Issue Creation: DISABLED (GITHUB_TOKEN not set)")
     
     print("=" * 70 + "\n")
 

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mobile Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f5f5;
+        }
+        .container {
+            padding: 0;
+            max-width: 100vw;
+        }
+        .actions-bar {
+            background: white;
+            padding: 12px 10px;
+            margin-bottom: 10px;
+            border-radius: 0;
+        }
+        .file-list {
+            background: white;
+            border-radius: 0;
+            margin: 0;
+        }
+        .file-list-header {
+            background: #ecf0f1;
+            padding: 10px;
+            font-weight: 600;
+            border-bottom: 2px solid #bdc3c7;
+        }
+        .file-item {
+            padding: 10px;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        .file-name {
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #95a5a6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="actions-bar">
+            <div style="text-align: center; color: #666;">Action Bar - Full Width</div>
+        </div>
+        <div class="file-list">
+            <div class="file-list-header">File List Header - Full Width</div>
+            <div class="file-item">
+                <div class="file-name">Comic Book 001.cbz</div>
+                <div style="font-size: 12px; color: #7f8c8d;">Sample file path</div>
+            </div>
+            <div class="file-item">
+                <div class="file-name">Comic Book 002.cbz</div>
+                <div style="font-size: 12px; color: #7f8c8d;">Sample file path</div>
+            </div>
+            <div class="file-item">
+                <div class="file-name">Comic Book 003.cbz</div>
+                <div style="font-size: 12px; color: #7f8c8d;">Sample file path</div>
+            </div>
+            <div class="empty-state">
+                <div style="font-size: 64px; margin-bottom: 20px;">🔍</div>
+                <div>No matching files found</div>
+                <div style="font-size: 12px; margin-top: 10px;">Try a different search term or filter</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

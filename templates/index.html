@@ -1222,17 +1222,17 @@
             }
             
             .container {
-                padding: 10px;
+                padding: 0;
                 max-width: 100vw;
                 overflow-x: hidden;
             }
             
             .header {
-                padding: 15px 0;
+                padding: 10px;
             }
             
             .header .container {
-                padding: 0 10px;
+                padding: 0;
                 max-width: none;
             }
             
@@ -1336,8 +1336,10 @@
                 overflow: visible;
                 margin-left: 0;
                 margin-right: 0;
+                margin-bottom: 10px;
                 max-width: 100%;
                 display: flex;
+                border-radius: 0;
             }
             
             .btn {
@@ -1411,12 +1413,19 @@
                 margin-top: 8px;
                 font-size: 13px;
                 order: 10;
+                padding: 0 10px;
+            }
+            
+            .controls-wrapper {
+                padding: 0 10px;
             }
             
             .file-list {
                 overflow-x: hidden;
                 max-width: 100%;
                 width: 100%;
+                border-radius: 0;
+                margin: 0;
             }
             
             .file-list-header {
@@ -1590,6 +1599,8 @@
             .pagination {
                 flex-wrap: wrap;
                 gap: 10px;
+                border-radius: 0;
+                margin: 10px 0 0 0;
             }
             
             .pagination > div {

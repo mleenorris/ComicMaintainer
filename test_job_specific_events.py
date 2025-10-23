@@ -101,15 +101,15 @@ def test_multiple_jobs_dont_overwrite():
         if job1_progress == 5 and job2_progress == 2:
             print("✓ Both jobs retain their correct progress")
             print("✓ Jobs did NOT overwrite each other")
-            return True
+            assert True
         else:
             print("✗ FAILED: Job progress values are incorrect")
-            return False
+            assert False, "Job progress values are incorrect"
     else:
         print(f"✗ FAILED: Not all jobs found in _last_events")
         print(f"  Job 1 found: {job1_key_found}")
         print(f"  Job 2 found: {job2_key_found}")
-        return False
+        assert False, "Not all jobs found in _last_events"
 
 
 def test_new_subscriber_gets_job_specific_status():
@@ -183,16 +183,16 @@ def test_new_subscriber_gets_job_specific_status():
             if job1_received == 7 and job2_received == 3:
                 print("✓ Received correct progress for both jobs")
                 print("✓ New subscribers get complete job status")
-                return True
+                assert True
             else:
                 print("✗ FAILED: Received incorrect progress")
-                return False
+                assert False, "Received incorrect progress"
         else:
             print("✗ FAILED: Not all jobs received")
-            return False
+            assert False, "Not all jobs received"
     else:
         print(f"✗ FAILED: Expected 2 jobs, received {len(received_events)}")
-        return False
+        assert False, f"Expected 2 jobs, received {len(received_events)}"
 
 
 def test_single_job_multiple_updates():
@@ -236,13 +236,13 @@ def test_single_job_multiple_updates():
         if processed == 10:
             print(f"✓ Entry contains the latest update: {processed}/10 files")
             print("✓ Previous updates were properly overwritten")
-            return True
+            assert True
         else:
             print(f"✗ FAILED: Expected 10/10, got {processed}/10")
-            return False
+            assert False, f"Expected 10/10, got {processed}/10"
     else:
         print(f"✗ FAILED: Expected 1 entry, found {len(job_entries)}")
-        return False
+        assert False, f"Expected 1 entry, found {len(job_entries)}"
 
 
 if __name__ == "__main__":

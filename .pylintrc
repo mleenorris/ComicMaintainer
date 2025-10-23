@@ -1,0 +1,78 @@
+# Pylint configuration for ComicMaintainer project
+
+[MAIN]
+# Python code to execute, usually for sys.path manipulation
+init-hook='import sys; sys.path.append("src")'
+
+# Files or directories to be skipped
+ignore=CVS,.git,__pycache__,venv,.venv,env
+
+# Use multiple processes to speed up Pylint
+jobs=0
+
+[MESSAGES CONTROL]
+# Disable specific warnings that are not applicable or too strict
+disable=
+    # Trailing whitespace - handled by pre-commit hooks
+    trailing-whitespace,
+    # Docstrings - we'll add these gradually
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    # Logging - f-strings are fine for logging
+    logging-fstring-interpolation,
+    # Too strict for small project
+    too-few-public-methods,
+    # Allow broad exception catching for error handlers
+    broad-exception-caught,
+    # File encoding - Python 3 defaults to UTF-8
+    unspecified-encoding,
+    # Line length - allow some flexibility
+    line-too-long
+
+[FORMAT]
+# Maximum number of characters on a single line
+max-line-length=120
+
+# Maximum number of lines in a module
+max-module-lines=2500
+
+[DESIGN]
+# Maximum number of arguments for function / method
+max-args=8
+
+# Maximum number of locals for function / method body
+max-locals=20
+
+# Maximum number of return / yield for function / method body
+max-returns=6
+
+# Maximum number of branch for function / method body
+max-branches=15
+
+# Maximum number of statements in function / method body
+max-statements=60
+
+[BASIC]
+# Good variable names which should always be accepted
+good-names=i,j,k,ex,Run,_,id,db,fd,op,f,e
+
+# Regular expression matching correct function names
+function-rgx=[a-z_][a-z0-9_]{2,40}$
+
+# Regular expression matching correct variable names
+variable-rgx=[a-z_][a-z0-9_]{1,30}$
+
+# Regular expression matching correct constant names
+const-rgx=(([A-Z_][A-Z0-9_]*)|(__.*__))$
+
+[IMPORTS]
+# Allow wildcard imports from typing module
+allow-wildcard-with-all=no
+
+[SIMILARITIES]
+# Minimum lines number of a similarity
+min-similarity-lines=6
+
+# Ignore imports when computing similarities
+ignore-imports=yes

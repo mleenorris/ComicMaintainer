@@ -2103,6 +2103,60 @@ def events_stats():
         'total_events_broadcast': broadcaster.get_event_count()
     })
 
+@app.route('/health', methods=['GET'])
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint for container orchestration (Docker, Kubernetes, etc.)
+    
+    Returns:
+        200 OK - Service is healthy and operational
+        503 Service Unavailable - Service is unhealthy
+    """
+    health_status = {
+        'status': 'healthy',
+        'version': __version__,
+        'checks': {}
+    }
+    
+    # Check if watched directory is accessible
+    try:
+        if WATCHED_DIR and os.path.exists(WATCHED_DIR) and os.path.isdir(WATCHED_DIR):
+            health_status['checks']['watched_dir'] = 'ok'
+        else:
+            health_status['checks']['watched_dir'] = 'error'
+            health_status['status'] = 'unhealthy'
+    except Exception as e:
+        health_status['checks']['watched_dir'] = f'error: {str(e)}'
+        health_status['status'] = 'unhealthy'
+    
+    # Check database connectivity
+    try:
+        # Simple database check - get file count
+        file_count = file_store.get_file_count()
+        health_status['checks']['database'] = 'ok'
+        health_status['file_count'] = file_count
+    except Exception as e:
+        health_status['checks']['database'] = f'error: {str(e)}'
+        health_status['status'] = 'unhealthy'
+    
+    # Check watcher process status
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['pgrep', '-f', 'python.*watcher.py'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        is_running = result.returncode == 0 and len(result.stdout.strip()) > 0
+        health_status['checks']['watcher'] = 'running' if is_running else 'not_running'
+        # Note: watcher not running is not necessarily unhealthy if it's disabled
+    except Exception as e:
+        health_status['checks']['watcher'] = f'unknown: {str(e)}'
+    
+    status_code = 200 if health_status['status'] == 'healthy' else 503
+    return jsonify(health_status), status_code
+
 def init_app():
     """Initialize the application on startup"""
     if not WATCHED_DIR:

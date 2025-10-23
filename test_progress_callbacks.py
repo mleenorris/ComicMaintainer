@@ -106,9 +106,7 @@ def test_broadcast_mechanism():
     print(f"Total events received: {len(events_received)}")
     print(f"Job-specific events: {len(job_events)}")
     
-    if len(job_events) == 0:
-        print("✗ FAILED: No job events received!")
-        return False
+    assert len(job_events) > 0, "No job events received!"
     
     # Verify we got progress updates
     processing_events = [e for e in job_events if e.data.get('status') == 'processing']
@@ -129,13 +127,8 @@ def test_broadcast_mechanism():
             print(f"  ... and {len(job_events) - 5} more events")
     
     # Verify we got at least some processing events and the completion
-    if len(processing_events) == 0:
-        print("✗ FAILED: No processing events received!")
-        return False
-    
-    if len(completion_events) == 0:
-        print("✗ FAILED: No completion event received!")
-        return False
+    assert len(processing_events) > 0, "No processing events received!"
+    assert len(completion_events) > 0, "No completion event received!"
     
     print("\n" + "=" * 60)
     print("✓ TEST PASSED")
@@ -144,8 +137,6 @@ def test_broadcast_mechanism():
     print("  • Job progress updates are broadcast via SSE")
     print("  • Clients receive real-time callbacks")
     print("  • Progress updates include detailed information")
-    
-    return True
 
 
 def test_multiple_subscribers():
@@ -195,12 +186,8 @@ def test_multiple_subscribers():
         broadcaster.unsubscribe(client)
     
     # Verify all clients received the event
-    if all(count > 0 for count in received_counts):
-        print("✓ All clients received the broadcast")
-        return True
-    else:
-        print("✗ FAILED: Not all clients received the broadcast")
-        return False
+    assert all(count > 0 for count in received_counts), "Not all clients received the broadcast"
+    print("✓ All clients received the broadcast")
 
 
 if __name__ == "__main__":

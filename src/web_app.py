@@ -74,6 +74,10 @@ logging.getLogger().addHandler(log_handler)
 
 app = Flask(__name__)
 
+# Configure Flask for better performance
+app.config['JSON_SORT_KEYS'] = False  # Don't sort JSON keys (faster)
+app.config['JSONIFY_PRETTYPRINT_REGULAR'] = False  # Disable pretty-print (smaller responses)
+
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
 
 # Initialize file store on startup
@@ -114,6 +118,22 @@ cleanup_timer.daemon = True
 cleanup_timer.start()
 logging.info("Web markers cleanup scheduled (every 5 minutes)")
 
+
+@app.after_request
+def add_performance_headers(response):
+    """Add performance-related headers to responses"""
+    # Add cache control for API responses
+    if request.path.startswith('/api/'):
+        # API responses should not be cached by default (dynamic data)
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    
+    # Add Vary header for better caching
+    if 'Vary' not in response.headers:
+        response.headers['Vary'] = 'Accept-Encoding'
+    
+    return response
 
 
 def record_file_change(change_type, old_path=None, new_path=None):
@@ -363,7 +383,9 @@ def update_file_tags(filepath, tag_updates):
 @app.route('/')
 def index():
     """Serve the main page"""
-    return render_template('index.html')
+    response = render_template('index.html')
+    # Add cache control for static HTML (short cache for dynamic content)
+    return response
 
 def preload_metadata_for_directories(files):
     """No longer needed - markers are now centralized in /Config"""

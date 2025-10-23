@@ -9,6 +9,7 @@ import os
 import time
 from typing import List, Optional, Set, Tuple, Dict
 from contextlib import contextmanager
+from config import get_db_cache_size_mb
 
 # Database configuration
 CONFIG_DIR = '/Config'
@@ -95,6 +96,13 @@ def get_db_connection():
         _thread_local.connection.row_factory = sqlite3.Row
         # Enable WAL mode for better concurrent access
         _thread_local.connection.execute('PRAGMA journal_mode=WAL')
+        # Performance optimizations
+        _thread_local.connection.execute('PRAGMA synchronous=NORMAL')  # Faster than FULL, safe with WAL
+        cache_size_mb = get_db_cache_size_mb()
+        cache_size_kb = cache_size_mb * 1024
+        _thread_local.connection.execute(f'PRAGMA cache_size=-{cache_size_kb}')  # Negative value = KB
+        _thread_local.connection.execute('PRAGMA temp_store=MEMORY')  # Use memory for temp tables
+        _thread_local.connection.execute('PRAGMA mmap_size=268435456')  # 256MB memory-mapped I/O
         # Ensure database is initialized in this process/thread
         _init_db_schema(_thread_local.connection)
     
@@ -684,6 +692,68 @@ def cleanup_markers(marker_type: str, max_files: int) -> int:
             return deleted
     except Exception as e:
         logging.error(f"Error cleaning up markers of type {marker_type}: {e}")
+        return 0
+
+
+def batch_add_markers(filepaths: List[str], marker_type: str) -> int:
+    """
+    Add markers for multiple files in a single transaction.
+    Much faster than calling add_marker() multiple times.
+    
+    Args:
+        filepaths: List of file paths
+        marker_type: Type of marker to add
+        
+    Returns:
+        Number of markers added
+    """
+    if not filepaths:
+        return 0
+    
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            # Use executemany for batch insert
+            cursor.executemany('''
+                INSERT OR IGNORE INTO markers (filepath, marker_type)
+                VALUES (?, ?)
+            ''', [(filepath, marker_type) for filepath in filepaths])
+            added = cursor.rowcount
+            conn.commit()
+            return added
+    except Exception as e:
+        logging.error(f"Error batch adding markers of type {marker_type}: {e}")
+        return 0
+
+
+def batch_remove_markers(filepaths: List[str], marker_type: str) -> int:
+    """
+    Remove markers for multiple files in a single transaction.
+    Much faster than calling remove_marker() multiple times.
+    
+    Args:
+        filepaths: List of file paths
+        marker_type: Type of marker to remove
+        
+    Returns:
+        Number of markers removed
+    """
+    if not filepaths:
+        return 0
+    
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            # Use executemany for batch delete
+            cursor.executemany('''
+                DELETE FROM markers 
+                WHERE filepath = ? AND marker_type = ?
+            ''', [(filepath, marker_type) for filepath in filepaths])
+            removed = cursor.rowcount
+            conn.commit()
+            return removed
+    except Exception as e:
+        logging.error(f"Error batch removing markers of type {marker_type}: {e}")
         return 0
 
 

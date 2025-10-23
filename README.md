@@ -109,6 +109,11 @@ docker run -d \
   - For CPU-bound systems: 2-4 workers
   - For systems with fast storage: 4-8 workers
   - For systems with slow storage: 2-4 workers
+- `DB_CACHE_SIZE_MB`: SQLite database cache size in megabytes (default: `64`). Higher values improve read performance but use more RAM. Recommendations:
+  - Small libraries (<1000 files): 32MB
+  - Medium libraries (1000-5000 files): 64MB (default)
+  - Large libraries (>5000 files): 128-256MB
+  - See [Performance Tuning Guide](docs/PERFORMANCE_TUNING.md) for detailed recommendations
 
 #### Debug Logging and Error Reporting (Optional)
 - `DEBUG_MODE`: Enable extensive debug logging throughout the application (default: `false`). Set to `true` to enable detailed debug output including function entry/exit, parameter values, and operation details.
@@ -481,6 +486,7 @@ The application is 100% event-driven with zero polling:
 ## Documentation
 
 - **[API Documentation](docs/API.md)** - Complete REST API reference
+- **[Performance Tuning Guide](docs/PERFORMANCE_TUNING.md)** - Optimize performance for your system
 - **[Automated Versioning](docs/AUTOMATED_VERSIONING.md)** - How automatic version bumping works
 - **[Contributing Guide](CONTRIBUTING.md)** - How to contribute to the project
 - **[Debug Logging Guide](DEBUG_LOGGING_GUIDE.md)** - Debug logging and error reporting

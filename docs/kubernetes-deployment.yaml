@@ -1,0 +1,237 @@
+---
+# Kubernetes Deployment for ComicMaintainer
+# This example shows how to deploy ComicMaintainer on Kubernetes
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: comicmaintainer
+
+---
+# ConfigMap for environment variables
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: comicmaintainer-config
+  namespace: comicmaintainer
+data:
+  WATCHED_DIR: "/watched_dir"
+  DUPLICATE_DIR: "/duplicates"
+  WEB_PORT: "5000"
+  GUNICORN_WORKERS: "2"
+  MAX_WORKERS: "4"
+  PUID: "1000"
+  PGID: "1000"
+
+---
+# PersistentVolumeClaim for config storage
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: comicmaintainer-config-pvc
+  namespace: comicmaintainer
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  # Optional: Specify storage class
+  # storageClassName: standard
+
+---
+# PersistentVolumeClaim for comics storage
+# This should ideally be a ReadWriteMany volume or use NFS/Ceph
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: comicmaintainer-comics-pvc
+  namespace: comicmaintainer
+spec:
+  accessModes:
+    - ReadWriteMany  # Allow multiple pods if needed
+  resources:
+    requests:
+      storage: 100Gi
+  # Optional: Specify storage class
+  # storageClassName: nfs-client
+
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: comicmaintainer
+  namespace: comicmaintainer
+  labels:
+    app: comicmaintainer
+spec:
+  replicas: 1  # Single replica recommended due to file watcher
+  selector:
+    matchLabels:
+      app: comicmaintainer
+  template:
+    metadata:
+      labels:
+        app: comicmaintainer
+    spec:
+      containers:
+      - name: comicmaintainer
+        image: iceburn1/comictagger-watcher:latest
+        imagePullPolicy: Always
+        
+        # Environment variables from ConfigMap
+        envFrom:
+        - configMapRef:
+            name: comicmaintainer-config
+        
+        # Ports
+        ports:
+        - name: web
+          containerPort: 5000
+          protocol: TCP
+        
+        # Volume mounts
+        volumeMounts:
+        - name: config
+          mountPath: /Config
+        - name: comics
+          mountPath: /watched_dir
+        # Optional: Mount duplicates directory
+        # - name: duplicates
+        #   mountPath: /duplicates
+        
+        # Resource limits and requests
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+        
+        # Liveness probe
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        
+        # Readiness probe
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        # Startup probe (for slow startup)
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 12  # 2 minutes total
+      
+      # Volumes
+      volumes:
+      - name: config
+        persistentVolumeClaim:
+          claimName: comicmaintainer-config-pvc
+      - name: comics
+        persistentVolumeClaim:
+          claimName: comicmaintainer-comics-pvc
+      # Optional: Duplicates volume
+      # - name: duplicates
+      #   persistentVolumeClaim:
+      #     claimName: comicmaintainer-duplicates-pvc
+      
+      # Security context
+      securityContext:
+        fsGroup: 1000  # Match PGID
+
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: comicmaintainer
+  namespace: comicmaintainer
+  labels:
+    app: comicmaintainer
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5000
+    targetPort: 5000
+    protocol: TCP
+    name: web
+  selector:
+    app: comicmaintainer
+
+---
+# Ingress (optional - configure for your ingress controller)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: comicmaintainer
+  namespace: comicmaintainer
+  annotations:
+    # Example for nginx ingress controller
+    # nginx.ingress.kubernetes.io/rewrite-target: /
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  labels:
+    app: comicmaintainer
+spec:
+  # Optional: TLS configuration
+  # tls:
+  # - hosts:
+  #   - comicmaintainer.example.com
+  #   secretName: comicmaintainer-tls
+  rules:
+  - host: comicmaintainer.example.com  # Change to your domain
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: comicmaintainer
+            port:
+              number: 5000
+
+---
+# HorizontalPodAutoscaler (optional)
+# Note: Be careful with file watcher - may need coordination
+# apiVersion: autoscaling/v2
+# kind: HorizontalPodAutoscaler
+# metadata:
+#   name: comicmaintainer
+#   namespace: comicmaintainer
+# spec:
+#   scaleTargetRef:
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     name: comicmaintainer
+#   minReplicas: 1
+#   maxReplicas: 3
+#   metrics:
+#   - type: Resource
+#     resource:
+#       name: cpu
+#       target:
+#         type: Utilization
+#         averageUtilization: 70
+#   - type: Resource
+#     resource:
+#       name: memory
+#       target:
+#         type: Utilization
+#         averageUtilization: 80

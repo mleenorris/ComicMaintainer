@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  comictagger-watcher:
+    image: iceburn1/comictagger-watcher:latest
+    container_name: comictagger-watcher
+    restart: unless-stopped
+    
+    # Environment variables
+    environment:
+      # Required: Directory to watch for comics
+      - WATCHED_DIR=/watched_dir
+      
+      # Optional: Directory for duplicate files
+      - DUPLICATE_DIR=/duplicates
+      
+      # Optional: Custom user/group IDs for file permissions (recommended)
+      # Use your host user ID: run `id -u` and `id -g` on Linux/macOS
+      - PUID=99
+      - PGID=100
+      
+      # Optional: Web interface port (default: 5000)
+      - WEB_PORT=5000
+      
+      # Optional: Number of Gunicorn workers (default: 2)
+      - GUNICORN_WORKERS=2
+      
+      # Optional: Number of concurrent processing threads (default: 4)
+      - MAX_WORKERS=4
+      
+      # Optional: Log file size limit in bytes (default: 5242880 = 5MB)
+      - LOG_MAX_BYTES=5242880
+      
+      # Optional: Enable debug logging (default: false)
+      # - DEBUG_MODE=true
+      
+      # Optional: GitHub integration for automatic issue creation on errors
+      # - GITHUB_TOKEN=your_github_token_here
+      # - GITHUB_REPOSITORY=mleenorris/ComicMaintainer
+      # - GITHUB_ISSUE_ASSIGNEE=your_username
+    
+    # Volumes
+    volumes:
+      # Required: Mount your comics directory
+      - /path/to/your/comics:/watched_dir
+      
+      # Required: Mount config directory for persistent data
+      - /path/to/your/config:/Config
+      
+      # Optional: Mount duplicates directory
+      - /path/to/your/duplicates:/duplicates
+    
+    # Ports
+    ports:
+      - "5000:5000"
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # Labels for organization
+    labels:
+      - "com.example.description=ComicTagger Watcher Service"
+      - "com.example.version=1.0.0"

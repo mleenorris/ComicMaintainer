@@ -73,7 +73,13 @@ log_handler.setFormatter(logging.Formatter('%(asctime)s [WEBPAGE] %(levelname)s 
 # Add the file handler to the root logger
 logging.getLogger().addHandler(log_handler)
 
-app = Flask(__name__)
+# Get the parent directory (project root) for templates and static files
+# web_app.py is in src/, templates and static are in parent directory
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+template_folder = os.path.join(project_root, 'templates')
+static_folder = os.path.join(project_root, 'static')
+
+app = Flask(__name__, template_folder=template_folder, static_folder=static_folder)
 
 # Configure reverse proxy support
 # ProxyFix middleware handles X-Forwarded-* headers from reverse proxies

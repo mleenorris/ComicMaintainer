@@ -2,7 +2,7 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: [ master, stable ]
+    branches: [ master, stable, test ]
   pull_request:
     branches: [ master ]
 
@@ -35,6 +35,9 @@ jobs:
           if [ "$BRANCH_NAME" = "stable" ]; then
             # For stable branch, tag as stable
             TAGS="iceburn1/comictagger-watcher:stable"
+          elif [ "$BRANCH_NAME" = "test" ]; then
+            # For test branch, tag as test
+            TAGS="iceburn1/comictagger-watcher:test"
           else
             # For master branch, tag as latest and with version number
             TAGS="iceburn1/comictagger-watcher:latest

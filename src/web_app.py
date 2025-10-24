@@ -483,7 +483,7 @@ def serve_service_worker():
         base_path = ''
     
     # Read the service worker template
-    sw_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'sw.js')
+    sw_path = os.path.join(static_folder, 'sw.js')
     with open(sw_path, 'r') as f:
         sw_content = f.read()
     
@@ -511,7 +511,7 @@ const BASE_PATH = '{base_path}';
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     """Serve static files (icons, etc.) for PWA"""
-    return send_from_directory('../static', filename)
+    return send_from_directory(static_folder, filename)
 
 def preload_metadata_for_directories(files):
     """No longer needed - markers are now centralized in /Config"""

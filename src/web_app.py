@@ -471,12 +471,14 @@ def serve_manifest():
     manifest = {
         "name": "Comic Maintainer",
         "short_name": "ComicMaintainer",
+        "id": f"{base_path}/",
         "description": "Manage and process your comic archive files with ComicTagger",
         "start_url": f"{base_path}/",
         "display": "standalone",
         "background_color": "#2c3e50",
         "theme_color": "#2c3e50",
         "orientation": "any",
+        "prefer_related_applications": False,
         "icons": [
             {
                 "src": f"{base_path}/static/icons/icon-192x192.png",

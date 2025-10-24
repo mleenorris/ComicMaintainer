@@ -113,21 +113,26 @@ class JobManager:
             job_id: Job ID
             process_func: Function to process each item (must accept item and return JobResult)
             items: List of items to process
+            
+        Raises:
+            RuntimeError: If job cannot be started (not found or not in QUEUED status)
         """
         log_function_entry("start_job", job_id=job_id, items_count=len(items))
         
         job = job_store.get_job(job_id)
         if not job:
-            logging.error(f"[JOB {job_id}] Cannot start job - not found in database")
+            error_msg = f"Cannot start job - not found in database"
+            logging.error(f"[JOB {job_id}] {error_msg}")
             log_debug("Job not found in database", job_id=job_id)
-            return
+            raise RuntimeError(error_msg)
         
         log_debug("Retrieved job from database", job_id=job_id, status=job.get('status'))
         
         if job['status'] != JobStatus.QUEUED.value:
-            logging.warning(f"[JOB {job_id}] Cannot start job - already {job['status']} (not queued)")
+            error_msg = f"Cannot start job - already {job['status']} (not queued)"
+            logging.warning(f"[JOB {job_id}] {error_msg}")
             log_debug("Job not in QUEUED status", job_id=job_id, current_status=job['status'])
-            return
+            raise RuntimeError(error_msg)
         
         started_at = time.time()
         log_debug("Updating job status to PROCESSING", job_id=job_id, started_at=started_at)

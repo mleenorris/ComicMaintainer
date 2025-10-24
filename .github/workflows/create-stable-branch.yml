@@ -1,0 +1,51 @@
+name: Create Stable Branch
+
+on:
+  workflow_dispatch:
+  # Automatically run when this PR is merged
+  pull_request:
+    types: [closed]
+    branches: [master]
+
+jobs:
+  create-stable-branch:
+    # Only run if this is the PR that creates the stable branch or if manually triggered
+    if: |
+      github.event_name == 'workflow_dispatch' || 
+      (github.event.pull_request.merged == true && 
+       contains(github.event.pull_request.title, 'Create stable branch'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Configure Git
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+      
+      - name: Create and push stable branch
+        run: |
+          # The merge commit SHA from PR 344
+          PR_344_MERGE_COMMIT="da2b65cee64849458ded38203c6ca13b9267bf8a"
+          
+          # Check if stable branch already exists
+          if git ls-remote --heads origin stable | grep stable; then
+            echo "Stable branch already exists on remote"
+            exit 0
+          fi
+          
+          # Create stable branch from PR 344 merge commit
+          git branch stable $PR_344_MERGE_COMMIT
+          
+          # Push the stable branch to origin
+          git push origin stable
+          
+          echo "Successfully created and pushed stable branch from PR 344 merge commit"
+          echo "Branch stable now points to: $PR_344_MERGE_COMMIT"

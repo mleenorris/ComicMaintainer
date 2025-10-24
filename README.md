@@ -637,6 +637,13 @@ The application is 100% event-driven with zero polling:
 - Docker
 - (Optional) Docker Hub account for pushing images
 
+## Branches
+
+- **`master`** - Main development branch with the latest features and updates
+- **`stable`** - Stable branch based on PR #344 (mobile action bar fix), providing a tested baseline for production deployments
+
+See [STABLE_BRANCH_CREATION.md](STABLE_BRANCH_CREATION.md) for details about the stable branch.
+
 ## Documentation
 
 - **[API Documentation](docs/API.md)** - Complete REST API reference

@@ -770,7 +770,7 @@ def batch_update_tags():
             # Critical error in streaming - log and send error completion
             logging.error(f"CRITICAL: Streaming error in update_multiple_tags: {e}")
             logging.error(f"Traceback: {traceback.format_exc()}")
-            error_response = {'done': True, 'error': f'Streaming error: {str(e)}', 'results': results}
+            error_response = {'done': True, 'error': 'An unexpected error occurred. Please check the logs for details.', 'results': results}
             yield f"data: {json.dumps(error_response)}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
@@ -848,7 +848,7 @@ def process_all_files():
             # Critical error in streaming - log and send error completion
             logging.error(f"CRITICAL: Streaming error in process_all_files: {e}")
             logging.error(f"Traceback: {traceback.format_exc()}")
-            error_response = {'done': True, 'error': f'Streaming error: {str(e)}', 'results': results}
+            error_response = {'done': True, 'error': 'An unexpected error occurred. Please check the logs for details.', 'results': results}
             yield f"data: {json.dumps(error_response)}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
@@ -926,7 +926,7 @@ def rename_all_files():
             # Critical error in streaming - log and send error completion
             logging.error(f"CRITICAL: Streaming error in rename_all_files: {e}")
             logging.error(f"Traceback: {traceback.format_exc()}")
-            error_response = {'done': True, 'error': f'Streaming error: {str(e)}', 'results': results}
+            error_response = {'done': True, 'error': 'An unexpected error occurred. Please check the logs for details.', 'results': results}
             yield f"data: {json.dumps(error_response)}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
@@ -1002,7 +1002,7 @@ def normalize_all_files():
             # Critical error in streaming - log and send error completion
             logging.error(f"CRITICAL: Streaming error in normalize_all_files: {e}")
             logging.error(f"Traceback: {traceback.format_exc()}")
-            error_response = {'done': True, 'error': f'Streaming error: {str(e)}', 'results': results}
+            error_response = {'done': True, 'error': 'An unexpected error occurred. Please check the logs for details.', 'results': results}
             yield f"data: {json.dumps(error_response)}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
@@ -1181,7 +1181,7 @@ def process_selected_files():
             # Critical error in streaming - log and send error completion
             logging.error(f"CRITICAL: Streaming error in process_selected_files: {e}")
             logging.error(f"Traceback: {traceback.format_exc()}")
-            error_response = {'done': True, 'error': f'Streaming error: {str(e)}', 'results': results}
+            error_response = {'done': True, 'error': 'An unexpected error occurred. Please check the logs for details.', 'results': results}
             yield f"data: {json.dumps(error_response)}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
@@ -1278,7 +1278,7 @@ def rename_selected_files():
             # Critical error in streaming - log and send error completion
             logging.error(f"CRITICAL: Streaming error in rename_selected_files: {e}")
             logging.error(f"Traceback: {traceback.format_exc()}")
-            error_response = {'done': True, 'error': f'Streaming error: {str(e)}', 'results': results}
+            error_response = {'done': True, 'error': 'An unexpected error occurred. Please check the logs for details.', 'results': results}
             yield f"data: {json.dumps(error_response)}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
@@ -1373,7 +1373,7 @@ def normalize_selected_files():
             # Critical error in streaming - log and send error completion
             logging.error(f"CRITICAL: Streaming error in normalize_selected_files: {e}")
             logging.error(f"Traceback: {traceback.format_exc()}")
-            error_response = {'done': True, 'error': f'Streaming error: {str(e)}', 'results': results}
+            error_response = {'done': True, 'error': 'An unexpected error occurred. Please check the logs for details.', 'results': results}
             yield f"data: {json.dumps(error_response)}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
@@ -2186,7 +2186,7 @@ def process_unmarked_files():
             # Critical error in streaming - log and send error completion
             logging.error(f"CRITICAL: Streaming error in process_unmarked_files: {e}")
             logging.error(f"Traceback: {traceback.format_exc()}")
-            error_response = {'done': True, 'error': f'Streaming error: {str(e)}', 'results': results}
+            error_response = {'done': True, 'error': 'An unexpected error occurred. Please check the logs for details.', 'results': results}
             yield f"data: {json.dumps(error_response)}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
@@ -2277,7 +2277,7 @@ def rename_unmarked_files():
             # Critical error in streaming - log and send error completion
             logging.error(f"CRITICAL: Streaming error in rename_unmarked_files: {e}")
             logging.error(f"Traceback: {traceback.format_exc()}")
-            error_response = {'done': True, 'error': f'Streaming error: {str(e)}', 'results': results}
+            error_response = {'done': True, 'error': 'An unexpected error occurred. Please check the logs for details.', 'results': results}
             yield f"data: {json.dumps(error_response)}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
@@ -2365,7 +2365,7 @@ def normalize_unmarked_files():
             # Critical error in streaming - log and send error completion
             logging.error(f"CRITICAL: Streaming error in normalize_unmarked_files: {e}")
             logging.error(f"Traceback: {traceback.format_exc()}")
-            error_response = {'done': True, 'error': f'Streaming error: {str(e)}', 'results': results}
+            error_response = {'done': True, 'error': 'An unexpected error occurred. Please check the logs for details.', 'results': results}
             yield f"data: {json.dumps(error_response)}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')

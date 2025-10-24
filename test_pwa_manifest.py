@@ -32,7 +32,7 @@ def test_manifest_required_fields(manifest):
         assert field in manifest, f"Required field '{field}' missing from manifest"
     
     # Verify prefer_related_applications is false (required for Android PWA installation)
-    assert manifest['prefer_related_applications'] == False, \
+    assert manifest['prefer_related_applications'] is False, \
         "prefer_related_applications must be false for Android PWA installation"
     
     # Verify id field is present (required for Chrome Android)

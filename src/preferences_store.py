@@ -11,7 +11,7 @@ from typing import Optional, Dict, Any
 from contextlib import contextmanager
 
 # Database configuration
-CONFIG_DIR = '/Config'
+CONFIG_DIR = os.environ.get('CONFIG_DIR', '/Config')
 DB_PATH = os.path.join(CONFIG_DIR, 'preferences.db')
 
 # Thread-local storage for database connections
@@ -197,11 +197,23 @@ def set_active_job(job_id: str, job_title: str):
     Set the currently active job.
     
     Args:
-        job_id: Job ID
+        job_id: Job ID (must be a valid UUID)
         job_title: Job title/description
+    
+    Raises:
+        ValueError: If job_id is not a valid UUID format
     """
+    import uuid
+    import time
+    
+    # Validate job_id format (must be a UUID)
     try:
-        import time
+        uuid.UUID(job_id)
+    except ValueError:
+        logger.error(f"Invalid job_id format: {job_id} (expected UUID)")
+        raise ValueError(f"job_id must be a valid UUID, got: {job_id}")
+    
+    try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''

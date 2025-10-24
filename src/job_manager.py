@@ -110,7 +110,7 @@ class JobManager:
         Start processing a job in the background.
         
         Args:
-            job_id: Job ID
+            job_id: Job ID (must be a valid UUID)
             process_func: Function to process each item (must accept item and return JobResult)
             items: List of items to process
             
@@ -118,6 +118,14 @@ class JobManager:
             RuntimeError: If job cannot be started (not found or not in QUEUED status)
         """
         log_function_entry("start_job", job_id=job_id, items_count=len(items))
+        
+        # Validate job_id format (should be a UUID)
+        try:
+            uuid.UUID(job_id)
+        except ValueError:
+            logging.error(f"[JOB {job_id}] Cannot start job - invalid job_id format (expected UUID)")
+            log_debug("Invalid job_id format (expected UUID)", job_id=job_id)
+            return
         
         job = job_store.get_job(job_id)
         if not job:

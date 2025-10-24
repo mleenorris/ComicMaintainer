@@ -12,7 +12,7 @@ from typing import Optional, List, Dict, Any
 from contextlib import contextmanager
 
 # Database configuration
-CONFIG_DIR = '/Config'
+CONFIG_DIR = os.environ.get('CONFIG_DIR', '/Config')
 DB_PATH = os.path.join(CONFIG_DIR, 'jobs.db')
 
 # Thread-local storage for database connections
@@ -111,8 +111,41 @@ def init_db():
         conn.close()
 
 
+def _validate_job_id(job_id: str) -> bool:
+    """
+    Validate that job_id is a valid UUID format.
+    
+    Args:
+        job_id: Job ID to validate
+        
+    Returns:
+        True if valid UUID, False otherwise
+    """
+    import uuid
+    try:
+        uuid.UUID(job_id)
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
 def create_job(job_id: str, total_items: int, created_at: float) -> bool:
-    """Create a new job in the database"""
+    """
+    Create a new job in the database.
+    
+    Args:
+        job_id: Job ID (must be a valid UUID)
+        total_items: Total number of items to process
+        created_at: Timestamp when job was created
+        
+    Returns:
+        True if job was created successfully, False otherwise
+    """
+    # Validate job_id format (must be a UUID)
+    if not _validate_job_id(job_id):
+        logging.error(f"Cannot create job with invalid job_id format: {job_id} (expected UUID)")
+        return False
+    
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -129,7 +162,24 @@ def create_job(job_id: str, total_items: int, created_at: float) -> bool:
 
 def update_job_status(job_id: str, status: str, started_at: Optional[float] = None, 
                      completed_at: Optional[float] = None, error: Optional[str] = None) -> bool:
-    """Update job status and timestamps"""
+    """
+    Update job status and timestamps.
+    
+    Args:
+        job_id: Job ID (must be a valid UUID)
+        status: New job status
+        started_at: Optional timestamp when job started
+        completed_at: Optional timestamp when job completed
+        error: Optional error message
+        
+    Returns:
+        True if update was successful, False otherwise
+    """
+    # Validate job_id format (must be a UUID)
+    if not _validate_job_id(job_id):
+        logging.error(f"Cannot update job with invalid job_id format: {job_id} (expected UUID)")
+        return False
+    
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -165,7 +215,24 @@ def update_job_status(job_id: str, status: str, started_at: Optional[float] = No
 
 def add_job_result(job_id: str, item: str, success: bool, error: Optional[str] = None,
                   details: Optional[Dict[str, Any]] = None) -> bool:
-    """Add a result for a job item"""
+    """
+    Add a result for a job item.
+    
+    Args:
+        job_id: Job ID (must be a valid UUID)
+        item: Item that was processed
+        success: Whether processing was successful
+        error: Optional error message
+        details: Optional additional details
+        
+    Returns:
+        True if result was added successfully, False otherwise
+    """
+    # Validate job_id format (must be a UUID)
+    if not _validate_job_id(job_id):
+        logging.error(f"Cannot add result for job with invalid job_id format: {job_id} (expected UUID)")
+        return False
+    
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -194,7 +261,20 @@ def add_job_result(job_id: str, item: str, success: bool, error: Optional[str] =
 
 
 def get_job(job_id: str) -> Optional[Dict[str, Any]]:
-    """Get job details with all results"""
+    """
+    Get job details with all results.
+    
+    Args:
+        job_id: Job ID (must be a valid UUID)
+        
+    Returns:
+        Job details dictionary or None if not found or invalid job_id
+    """
+    # Validate job_id format (must be a UUID)
+    if not _validate_job_id(job_id):
+        logging.debug(f"Cannot get job with invalid job_id format: {job_id} (expected UUID)")
+        return None
+    
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -274,7 +354,20 @@ def list_jobs() -> List[Dict[str, Any]]:
 
 
 def delete_job(job_id: str) -> bool:
-    """Delete a job and its results"""
+    """
+    Delete a job and its results.
+    
+    Args:
+        job_id: Job ID (must be a valid UUID)
+        
+    Returns:
+        True if job was deleted, False otherwise
+    """
+    # Validate job_id format (must be a UUID)
+    if not _validate_job_id(job_id):
+        logging.error(f"Cannot delete job with invalid job_id format: {job_id} (expected UUID)")
+        return False
+    
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()

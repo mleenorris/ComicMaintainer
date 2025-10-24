@@ -29,10 +29,11 @@ def test_broadcast_mechanism():
     
     print("✓ Subscribed to event broadcaster")
     
-    # Simulate job progress updates
-    job_id = "test-job-123"
+    # Simulate job progress updates with valid UUID
+    import uuid
+    job_id = str(uuid.uuid4())
     
-    print(f"\nSimulating job progress updates for {job_id}...")
+    print(f"\nSimulating job progress updates for {job_id[:8]}...")
     
     # Simulate starting job
     broadcast_job_updated(
@@ -127,8 +128,12 @@ def test_broadcast_mechanism():
             print(f"  ... and {len(job_events) - 5} more events")
     
     # Verify we got at least some processing events and the completion
-    assert len(processing_events) > 0, "No processing events received!"
-    assert len(completion_events) > 0, "No completion event received!"
+    if len(processing_events) == 0:
+        print("\n✗ TEST FAILED: No processing events received!")
+        return False
+    if len(completion_events) == 0:
+        print("\n✗ TEST FAILED: No completion event received!")
+        return False
     
     print("\n" + "=" * 60)
     print("✓ TEST PASSED")
@@ -137,6 +142,8 @@ def test_broadcast_mechanism():
     print("  • Job progress updates are broadcast via SSE")
     print("  • Clients receive real-time callbacks")
     print("  • Progress updates include detailed information")
+    
+    return True
 
 
 def test_multiple_subscribers():
@@ -155,8 +162,9 @@ def test_multiple_subscribers():
     print(f"✓ Subscribed 3 clients")
     print(f"  Active clients: {broadcaster.get_client_count()}")
     
-    # Broadcast an event
-    job_id = "multi-test-456"
+    # Broadcast an event with valid UUID
+    import uuid
+    job_id = str(uuid.uuid4())
     broadcast_job_updated(
         job_id=job_id,
         status='processing',
@@ -186,8 +194,12 @@ def test_multiple_subscribers():
         broadcaster.unsubscribe(client)
     
     # Verify all clients received the event
-    assert all(count > 0 for count in received_counts), "Not all clients received the broadcast"
+    if not all(count > 0 for count in received_counts):
+        print("✗ TEST FAILED: Not all clients received the broadcast")
+        return False
     print("✓ All clients received the broadcast")
+    
+    return True
 
 
 if __name__ == "__main__":

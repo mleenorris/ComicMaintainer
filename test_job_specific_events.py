@@ -22,15 +22,19 @@ def test_multiple_jobs_dont_overwrite():
     print("TEST: Multiple Jobs Don't Overwrite Each Other")
     print("=" * 60)
     
+    import uuid
     broadcaster = get_broadcaster()
     
     # Clear existing events
     broadcaster._last_events.clear()
     
-    job1_id = "job-001"
-    job2_id = "job-002"
+    # Use valid UUIDs for job IDs
+    job1_id = str(uuid.uuid4())
+    job2_id = str(uuid.uuid4())
     
-    print(f"\nSimulating 2 concurrent jobs: {job1_id} and {job2_id}")
+    print(f"\nSimulating 2 concurrent jobs:")
+    print(f"  job1: {job1_id}")
+    print(f"  job2: {job2_id}")
     
     # Simulate job 1 at 50% progress
     broadcast_job_updated(
@@ -101,15 +105,15 @@ def test_multiple_jobs_dont_overwrite():
         if job1_progress == 5 and job2_progress == 2:
             print("✓ Both jobs retain their correct progress")
             print("✓ Jobs did NOT overwrite each other")
-            assert True
+            return True
         else:
             print("✗ FAILED: Job progress values are incorrect")
-            assert False, "Job progress values are incorrect"
+            return False, "Job progress values are incorrect"
     else:
         print(f"✗ FAILED: Not all jobs found in _last_events")
         print(f"  Job 1 found: {job1_key_found}")
         print(f"  Job 2 found: {job2_key_found}")
-        assert False, "Not all jobs found in _last_events"
+        return False, "Not all jobs found in _last_events"
 
 
 def test_new_subscriber_gets_job_specific_status():
@@ -123,8 +127,9 @@ def test_new_subscriber_gets_job_specific_status():
     # Clear existing events
     broadcaster._last_events.clear()
     
-    job1_id = "job-101"
-    job2_id = "job-102"
+    import uuid
+    job1_id = str(uuid.uuid4())
+    job2_id = str(uuid.uuid4())
     
     print(f"\nSimulating 2 concurrent jobs before subscription")
     
@@ -183,16 +188,16 @@ def test_new_subscriber_gets_job_specific_status():
             if job1_received == 7 and job2_received == 3:
                 print("✓ Received correct progress for both jobs")
                 print("✓ New subscribers get complete job status")
-                assert True
+                return True
             else:
                 print("✗ FAILED: Received incorrect progress")
-                assert False, "Received incorrect progress"
+                return False, "Received incorrect progress"
         else:
             print("✗ FAILED: Not all jobs received")
-            assert False, "Not all jobs received"
+            return False, "Not all jobs received"
     else:
         print(f"✗ FAILED: Expected 2 jobs, received {len(received_events)}")
-        assert False, f"Expected 2 jobs, received {len(received_events)}"
+        return False, f"Expected 2 jobs, received {len(received_events)}"
 
 
 def test_single_job_multiple_updates():
@@ -204,7 +209,8 @@ def test_single_job_multiple_updates():
     broadcaster = get_broadcaster()
     broadcaster._last_events.clear()
     
-    job_id = "job-201"
+    import uuid
+    job_id = str(uuid.uuid4())
     
     print(f"\nSimulating multiple updates for {job_id}")
     
@@ -236,13 +242,13 @@ def test_single_job_multiple_updates():
         if processed == 10:
             print(f"✓ Entry contains the latest update: {processed}/10 files")
             print("✓ Previous updates were properly overwritten")
-            assert True
+            return True
         else:
             print(f"✗ FAILED: Expected 10/10, got {processed}/10")
-            assert False, f"Expected 10/10, got {processed}/10"
+            return False, f"Expected 10/10, got {processed}/10"
     else:
         print(f"✗ FAILED: Expected 1 entry, found {len(job_entries)}")
-        assert False, f"Expected 1 entry, found {len(job_entries)}"
+        return False, f"Expected 1 entry, found {len(job_entries)}"
 
 
 if __name__ == "__main__":

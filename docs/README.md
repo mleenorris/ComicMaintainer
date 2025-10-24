@@ -2,6 +2,11 @@
 
 This directory contains detailed documentation about the ComicMaintainer project, including:
 
+## Deployment
+- [REVERSE_PROXY.md](REVERSE_PROXY.md) - Reverse proxy deployment guide (nginx, Apache, Traefik)
+- [nginx-reverse-proxy-example.conf](nginx-reverse-proxy-example.conf) - Complete nginx configuration examples
+- [kubernetes-deployment.yaml](kubernetes-deployment.yaml) - Kubernetes deployment example
+
 ## Architecture and Design
 - [ARCHITECTURE_CHANGE.md](ARCHITECTURE_CHANGE.md) - Major architectural changes
 - [ASYNC_PROCESSING.md](ASYNC_PROCESSING.md) - Asynchronous processing design

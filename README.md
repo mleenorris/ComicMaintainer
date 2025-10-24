@@ -451,6 +451,45 @@ If upgrading from a version where configuration and logs were stored in `/app` o
 - Docker images are tagged with both `latest` and the specific version number (e.g., `1.0.1`)
 - Automated security scanning runs on every push, pull request, and weekly schedule
 
+## Reverse Proxy Support
+
+ComicMaintainer is fully compatible with reverse proxies (nginx, Apache, Traefik, etc.) and supports:
+
+- **X-Forwarded-* Headers**: Properly handles proxy headers for correct URL generation
+- **Path Prefix Deployments**: Can be deployed at subpaths (e.g., `/comics/`)
+- **Server-Sent Events**: Real-time updates work correctly through proxies
+- **Long-Running Operations**: Handles batch processing without timeouts
+
+### Quick nginx Example
+
+```nginx
+server {
+    listen 80;
+    server_name comicmaintainer.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        
+        # Required proxy headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        
+        # SSE support
+        proxy_buffering off;
+        proxy_cache off;
+        
+        # Long-running operations
+        proxy_read_timeout 600s;
+    }
+}
+```
+
+For complete configuration examples and detailed deployment guides, see:
+- [Reverse Proxy Deployment Guide](docs/REVERSE_PROXY.md)
+- [nginx Configuration Examples](docs/nginx-reverse-proxy-example.conf)
+
 ## Security
 
 This project implements automated security vulnerability scanning to ensure code and dependency safety.
@@ -492,7 +531,7 @@ For more information, see [SECURITY.md](SECURITY.md).
 
 - Use custom PUID/PGID for proper file permissions
 - Expose only necessary ports
-- Use reverse proxy with HTTPS for external access
+- Use reverse proxy with HTTPS for external access (see [Reverse Proxy Guide](docs/REVERSE_PROXY.md))
 - Keep the Docker image updated regularly
 - Review [SECURITY.md](SECURITY.md) for detailed security guidelines
 

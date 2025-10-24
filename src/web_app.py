@@ -5,6 +5,7 @@ from logging.handlers import RotatingFileHandler
 import json
 import fcntl
 from flask import Flask, render_template, jsonify, request, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
 from comicapi.comicarchive import ComicArchive
 import glob
 import threading
@@ -73,6 +74,20 @@ log_handler.setFormatter(logging.Formatter('%(asctime)s [WEBPAGE] %(levelname)s 
 logging.getLogger().addHandler(log_handler)
 
 app = Flask(__name__)
+
+# Configure ProxyFix middleware for reverse proxy support
+# This allows the app to correctly handle X-Forwarded-* headers from reverse proxies
+# x_for: Number of X-Forwarded-For proxies to trust
+# x_proto: Number of X-Forwarded-Proto proxies to trust
+# x_host: Number of X-Forwarded-Host proxies to trust
+# x_prefix: Number of X-Forwarded-Prefix proxies to trust
+app.wsgi_app = ProxyFix(
+    app.wsgi_app,
+    x_for=1,
+    x_proto=1,
+    x_host=1,
+    x_prefix=1
+)
 
 # Configure Flask for better performance
 app.config['JSON_SORT_KEYS'] = False  # Don't sort JSON keys (faster)

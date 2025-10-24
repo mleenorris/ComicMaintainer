@@ -1906,7 +1906,14 @@ def get_version():
 @app.route('/api/logs', methods=['GET'])
 def get_logs():
     """API endpoint to get the log file contents"""
-    log_file = os.path.join(LOG_DIR, "ComicMaintainer.log")
+    # Get log type parameter (default: basic)
+    log_type = request.args.get('type', default='basic', type=str)
+    
+    # Determine which log file to read
+    if log_type == 'debug':
+        log_file = os.path.join(LOG_DIR, "ComicMaintainer_debug.log")
+    else:
+        log_file = os.path.join(LOG_DIR, "ComicMaintainer.log")
     
     if not os.path.exists(log_file):
         return jsonify({'error': 'Log file not found'}), 404
@@ -1930,7 +1937,8 @@ def get_logs():
         return jsonify({
             'logs': log_content,
             'total_lines': len(all_lines),
-            'returned_lines': returned_lines
+            'returned_lines': returned_lines,
+            'log_type': log_type
         })
     except Exception as e:
         logging.error(f"Error reading log file: {e}")

@@ -2311,8 +2311,13 @@
                 <button class="close-btn" onclick="closeLogsModal()">&times;</button>
             </div>
             <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
-                <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center;">
-                    <label for="logLines" style="color: var(--text-secondary); font-weight: 500;">Lines to display:</label>
+                <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center; flex-wrap: wrap;">
+                    <label for="logType" style="color: var(--text-secondary); font-weight: 500;">Log Type:</label>
+                    <select id="logType" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                        <option value="basic" selected>Basic Logs</option>
+                        <option value="debug">Debug Logs</option>
+                    </select>
+                    <label for="logLines" style="color: var(--text-secondary); font-weight: 500; margin-left: 10px;">Lines to display:</label>
                     <select id="logLines" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
                         <option value="100">Last 100 lines</option>
                         <option value="500" selected>Last 500 lines</option>
@@ -4932,13 +4937,14 @@
             const logsLoadingIndicator = document.getElementById('logsLoadingIndicator');
             const logStats = document.getElementById('logStats');
             const lines = document.getElementById('logLines').value;
+            const logType = document.getElementById('logType').value;
             
             try {
                 logsLoadingIndicator.style.display = 'block';
                 logsContent.textContent = '';
                 logStats.textContent = '';
                 
-                const response = await fetch(`/api/logs?lines=${lines}`);
+                const response = await fetch(`/api/logs?lines=${lines}&type=${logType}`);
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -4948,7 +4954,8 @@
                     logsContent.textContent = 'Error: ' + data.error;
                 } else {
                     logsContent.textContent = data.logs || 'No logs available';
-                    logStats.textContent = `Showing ${data.returned_lines} of ${data.total_lines} total lines`;
+                    const logTypeLabel = data.log_type === 'debug' ? 'Debug Logs' : 'Basic Logs';
+                    logStats.textContent = `${logTypeLabel} - Showing ${data.returned_lines} of ${data.total_lines} total lines`;
                 }
             } catch (error) {
                 logsContent.textContent = 'Failed to load logs: ' + error.message;

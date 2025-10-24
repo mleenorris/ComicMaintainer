@@ -17,22 +17,21 @@ from job_manager import get_job_manager
 
 
 def test_stale_job_id_scenario():
-    """Simulate the scenario where a stale job_id is in preferences"""
+    """Test that invalid job_ids are prevented from being stored"""
     print("\n" + "=" * 60)
-    print("TEST: Stale Job ID Scenario")
+    print("TEST: Invalid Job ID Prevention")
     print("=" * 60)
     
-    print("\n1. Simulating stale job_id being stored in preferences...")
-    # Simulate an old/corrupted state where "process-selected" is stored
-    set_active_job("process-selected", "Processing Selected Files")
-    print("   Set active job: 'process-selected'")
+    print("\n1. Attempting to store invalid job_id in preferences...")
+    # Try to store an invalid job_id - this should now be prevented
+    try:
+        set_active_job("process-selected", "Processing Selected Files")
+        print("   ✗ Invalid job_id was incorrectly accepted")
+        return False
+    except ValueError as e:
+        print(f"   ✓ Invalid job_id correctly rejected: {e}")
     
-    print("\n2. Retrieving active job from preferences...")
-    active_job = get_active_job()
-    if active_job:
-        print(f"   Retrieved: job_id='{active_job['job_id']}', title='{active_job['job_title']}'")
-    
-    print("\n3. Attempting to get status for invalid job_id...")
+    print("\n2. Verifying that invalid job_ids are rejected by job_manager...")
     job_manager = get_job_manager()
     
     # This should NOT generate a WARNING log - it should silently return None
@@ -45,7 +44,25 @@ def test_stale_job_id_scenario():
         print(f"   ✗ Unexpectedly returned: {status}")
         return False
     
-    print("\n4. Cleaning up stale active job...")
+    print("\n3. Testing that valid UUIDs can be stored...")
+    import uuid
+    valid_job_id = str(uuid.uuid4())
+    try:
+        set_active_job(valid_job_id, "Test Job")
+        print(f"   ✓ Valid UUID correctly accepted: {valid_job_id}")
+    except Exception as e:
+        print(f"   ✗ Valid UUID incorrectly rejected: {e}")
+        return False
+    
+    print("\n4. Retrieving active job from preferences...")
+    active_job = get_active_job()
+    if active_job and active_job['job_id'] == valid_job_id:
+        print(f"   ✓ Retrieved correct job_id: '{active_job['job_id']}'")
+    else:
+        print(f"   ✗ Retrieved unexpected job_id: {active_job}")
+        return False
+    
+    print("\n5. Cleaning up active job...")
     clear_active_job()
     active_job = get_active_job()
     if active_job is None:
@@ -54,7 +71,7 @@ def test_stale_job_id_scenario():
         print(f"   ✗ Active job still present: {active_job}")
         return False
     
-    print("\n5. Verifying with a valid UUID that doesn't exist...")
+    print("\n6. Verifying with a valid UUID that doesn't exist...")
     # This SHOULD generate a WARNING since it's a valid UUID format
     status = job_manager.get_job_status("550e8400-e29b-41d4-a716-446655440000")
     if status is None:
@@ -104,16 +121,16 @@ def test_web_api_scenario():
 
 if __name__ == "__main__":
     print("\n" + "=" * 60)
-    print("Stale Job ID Scenario Test")
+    print("Invalid Job ID Prevention Test")
     print("=" * 60)
-    print("\nThis test simulates the scenario where an invalid job_id")
-    print("(like 'process-selected') is stored and then queried.")
+    print("\nThis test verifies that invalid job_ids (like 'process-selected')")
+    print("are prevented from being stored in the first place.")
     
     results = []
     
     # Run tests
     try:
-        results.append(("Stale Job ID Scenario", test_stale_job_id_scenario()))
+        results.append(("Invalid Job ID Prevention", test_stale_job_id_scenario()))
         results.append(("Web API Validation", test_web_api_scenario()))
     except Exception as e:
         print(f"\n✗ Test suite failed with exception: {e}")
@@ -134,11 +151,11 @@ if __name__ == "__main__":
     
     if all_passed:
         print("\n✓ All tests passed!")
-        print("\nThe fix successfully handles the stale job_id scenario:")
-        print("  • Invalid job_ids like 'process-selected' are silently rejected")
+        print("\nThe fix successfully prevents invalid job_ids:")
+        print("  • Invalid job_ids like 'process-selected' are rejected at storage time")
         print("  • No warnings are generated for invalid formats")
         print("  • Valid UUIDs are properly accepted")
-        print("  • Stale active jobs can be cleared properly")
+        print("  • Active jobs can only contain valid UUIDs")
         sys.exit(0)
     else:
         print("\n✗ Some tests failed!")

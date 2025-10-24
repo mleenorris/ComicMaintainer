@@ -51,12 +51,12 @@ if BASE_PATH:
 ```
 
 #### `start.sh`
-- **Gunicorn Configuration**: Added `--forwarded-allow-ips='*'` flag
+- **Gunicorn Configuration**: Added `--forwarded-allow-ips=*` flag
   - Enables Gunicorn to trust X-Forwarded-* headers from all proxies
   - Required for ProxyFix middleware to function correctly
   
 ```bash
-gunicorn --workers ${GUNICORN_WORKERS} --bind 0.0.0.0:${WEB_PORT} --timeout 600 --forwarded-allow-ips='*' web_app:app
+gunicorn --workers ${GUNICORN_WORKERS} --bind 0.0.0.0:${WEB_PORT} --timeout 600 --forwarded-allow-ips=* web_app:app
 ```
 
 ### 2. Docker Configuration

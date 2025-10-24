@@ -26,7 +26,7 @@ GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
 # Job state stored in SQLite database for cross-process sharing
 # Concurrency is provided by both multiple workers and ThreadPoolExecutor (default: 4 threads per worker, configurable via MAX_WORKERS)
 # Timeout increased to 600 seconds (10 minutes) to handle batch processing of large libraries
-# Reverse proxy support: --forwarded-allow-ips='*' trusts X-Forwarded-* headers from all proxies
+# Reverse proxy support: --forwarded-allow-ips=* trusts X-Forwarded-* headers from all proxies
 
 # Build gunicorn command with optional SSL support
 GUNICORN_CMD="gunicorn --workers ${GUNICORN_WORKERS} --bind 0.0.0.0:${WEB_PORT} --timeout 600 --forwarded-allow-ips=*"

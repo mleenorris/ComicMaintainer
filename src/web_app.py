@@ -405,7 +405,10 @@ def update_file_tags(filepath, tag_updates):
 @app.route('/')
 def index():
     """Serve the main page"""
+    # Get base_path, converting Flask's default '/' to empty string for root deployment
     base_path = app.config.get('APPLICATION_ROOT', '')
+    if base_path == '/':
+        base_path = ''
     response = render_template('index.html', base_path=base_path)
     # Add cache control for static HTML (short cache for dynamic content)
     return response
@@ -413,7 +416,10 @@ def index():
 @app.route('/manifest.json')
 def serve_manifest():
     """Serve the web app manifest for PWA installation with dynamic paths"""
+    # Get base_path, converting Flask's default '/' to empty string for root deployment
     base_path = app.config.get('APPLICATION_ROOT', '')
+    if base_path == '/':
+        base_path = ''
     
     manifest = {
         "name": "Comic Maintainer",
@@ -447,7 +453,10 @@ def serve_manifest():
 @app.route('/sw.js')
 def serve_service_worker():
     """Serve the service worker with BASE_PATH injected"""
+    # Get base_path, converting Flask's default '/' to empty string for root deployment
     base_path = app.config.get('APPLICATION_ROOT', '')
+    if base_path == '/':
+        base_path = ''
     
     # Read the service worker template
     sw_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'sw.js')

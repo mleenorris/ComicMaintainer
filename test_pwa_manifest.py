@@ -26,12 +26,21 @@ def test_static_manifest_exists():
 
 def test_manifest_required_fields(manifest):
     """Test that manifest has all required fields."""
-    required_fields = ['name', 'short_name', 'icons', 'start_url', 'display']
+    required_fields = ['name', 'short_name', 'id', 'icons', 'start_url', 'display', 'prefer_related_applications']
     
     for field in required_fields:
         assert field in manifest, f"Required field '{field}' missing from manifest"
     
+    # Verify prefer_related_applications is false (required for Android PWA installation)
+    assert manifest['prefer_related_applications'] is False, \
+        "prefer_related_applications must be false for Android PWA installation"
+    
+    # Verify id field is present (required for Chrome Android)
+    assert manifest['id'], "id field must be non-empty for Android PWA installation"
+    
     print(f"✓ All required manifest fields present: {', '.join(required_fields)}")
+    print(f"✓ prefer_related_applications is false (Android installation enabled)")
+    print(f"✓ id field is set to: {manifest['id']}")
 
 
 def test_manifest_icons(manifest):

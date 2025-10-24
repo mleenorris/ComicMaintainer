@@ -68,7 +68,11 @@ Now the path calculation works correctly in both scenarios:
 ## Changes Made
 
 1. **Dockerfile**: Added `COPY static /app/static` to copy the static folder to the Docker image
-2. **src/web_app.py**: Added conditional logic to detect whether the script is running in development or deployment mode and calculate paths accordingly
+
+2. **src/web_app.py**: Made three changes to fix path resolution:
+   - Added conditional logic to detect whether the script is running in development or deployment mode and calculate `template_folder` and `static_folder` accordingly
+   - Fixed `serve_service_worker()` function to use calculated `static_folder` instead of hardcoded `'../static'`
+   - Fixed `serve_static()` function to use calculated `static_folder` instead of hardcoded `'../static'`
 
 ## Testing
 

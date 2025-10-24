@@ -516,17 +516,22 @@ docker run -d \
 
 **Generating Self-Signed Certificates (for testing):**
 
-```sh
-# Create SSL directory
-mkdir -p /path/to/ssl
+You can use the provided script to generate self-signed certificates:
 
-# Generate self-signed certificate (valid for 365 days)
+```sh
+# Use the included certificate generation script
+./examples/generate-ssl-certs.sh ./ssl
+
+# Or generate manually
+mkdir -p /path/to/ssl
 openssl req -x509 -newkey rsa:4096 -nodes \
   -keyout /path/to/ssl/key.pem \
   -out /path/to/ssl/cert.pem \
   -days 365 \
   -subj "/CN=localhost"
 ```
+
+See [examples/README.md](examples/README.md) for more HTTPS configuration examples.
 
 **Using Let's Encrypt Certificates:**
 

@@ -35,12 +35,32 @@ The application automatically respects standard reverse proxy headers:
 - `X-Forwarded-Host`: Original hostname
 - `X-Forwarded-Prefix`: Path prefix for subdirectory deployments
 
+### Network Binding for Reverse Proxy
+When using a reverse proxy on the same host, you can improve security by binding to localhost only:
+
+```bash
+docker run -d \
+  -e BIND_ADDRESS=127.0.0.1 \
+  -e WATCHED_DIR=/watched_dir \
+  -v /path/to/comics:/watched_dir \
+  -v /path/to/config:/Config \
+  -p 5000:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+**Security Benefits:**
+- `BIND_ADDRESS=127.0.0.1`: Restricts access to localhost only (recommended with reverse proxy on same host)
+- `BIND_ADDRESS=0.0.0.0`: Allows access from all network interfaces (default, needed for Docker networking)
+
+With `127.0.0.1` binding, the application is only accessible through your reverse proxy, providing an additional security layer.
+
 ### Base Path Support
 You can deploy ComicMaintainer at a subdirectory path using the `BASE_PATH` environment variable:
 
 ```bash
 docker run -d \
   -e BASE_PATH=/comics \
+  -e BIND_ADDRESS=127.0.0.1 \
   -e WATCHED_DIR=/watched_dir \
   -v /path/to/comics:/watched_dir \
   -v /path/to/config:/Config \
@@ -127,12 +147,15 @@ Deploy at a subdirectory (e.g., `example.com/comics`):
 ```bash
 docker run -d \
   -e BASE_PATH=/comics \
+  -e BIND_ADDRESS=127.0.0.1 \
   -e WATCHED_DIR=/watched_dir \
   -v /path/to/comics:/watched_dir \
   -v /path/to/config:/Config \
   -p 5000:5000 \
   iceburn1/comictagger-watcher:latest
 ```
+
+**Note**: With `BIND_ADDRESS=127.0.0.1`, the container port is bound to localhost, ensuring the application is only accessible through your reverse proxy.
 
 **Nginx Configuration:**
 ```nginx

@@ -156,6 +156,31 @@ def test_security_md_bind_address():
     return all_passed
 
 
+def test_reverse_proxy_md_bind_address():
+    """Test that REVERSE_PROXY.md includes BIND_ADDRESS guidance"""
+    reverse_proxy_path = os.path.join(os.path.dirname(__file__), 'docs', 'REVERSE_PROXY.md')
+    
+    with open(reverse_proxy_path, 'r') as f:
+        content = f.read()
+    
+    checks = [
+        ('BIND_ADDRESS', 'BIND_ADDRESS environment variable'),
+        ('127.0.0.1', 'Localhost binding'),
+        ('Network Binding for Reverse Proxy', 'Network binding section'),
+        ('Security Benefits', 'Security benefits explanation'),
+    ]
+    
+    all_passed = True
+    for check, description in checks:
+        if check in content:
+            print(f"✓ {description} found in docs/REVERSE_PROXY.md")
+        else:
+            print(f"✗ {description} NOT found in docs/REVERSE_PROXY.md")
+            all_passed = False
+    
+    return all_passed
+
+
 def test_bind_address_validation():
     """Test that BIND_ADDRESS validation works correctly"""
     import sys
@@ -215,6 +240,7 @@ def main():
         ("docker-compose.yml BIND_ADDRESS", test_docker_compose_bind_address),
         ("README.md BIND_ADDRESS", test_readme_bind_address),
         ("SECURITY.md BIND_ADDRESS", test_security_md_bind_address),
+        ("docs/REVERSE_PROXY.md BIND_ADDRESS", test_reverse_proxy_md_bind_address),
         ("BIND_ADDRESS Validation", test_bind_address_validation),
     ]
     

@@ -7,14 +7,24 @@ RUN apt-get update && apt-get install -y \
     libqt5gui5 libqt5core5a libqt5widgets5 libqt5xml5 libicu-dev python3-pyqt5 pkg-config git g++ unrar-free make gosu && \
     rm -rf /var/lib/apt/lists/*
 
+# Configure pip to work with SSL certificate issues in build environment
+ENV PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org pypi.python.org" \
+    PIP_DEFAULT_TIMEOUT=100
+
 # Install Python dependencies
 RUN pip install --upgrade pip
 COPY requirements.txt /requirements.txt
 RUN pip install --no-cache-dir -r /requirements.txt
 
 # Install ComicTagger from develop branch
-RUN git clone --branch develop https://github.com/comictagger/comictagger.git /comictagger && \
-    pip3 install /comictagger[CBR,ICU,7Z]
+# Split into multiple steps to work around network timeout issues
+RUN git config --global http.sslVerify false && \
+    git clone --branch develop https://github.com/comictagger/comictagger.git /comictagger
+
+# Install ComicTagger with retries
+RUN pip3 install --default-timeout=100 --retries=10 /comictagger[CBR,ICU,7Z] || \
+    pip3 install --default-timeout=100 --retries=10 /comictagger[CBR,ICU,7Z] || \
+    pip3 install --default-timeout=100 --retries=10 /comictagger[CBR,ICU,7Z]
 
 # Create app directory for the application
 RUN mkdir -p /app && chmod 755 /app

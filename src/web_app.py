@@ -771,7 +771,7 @@ def batch_update_tags():
 @app.route('/api/process-all', methods=['POST'])
 def process_all_files():
     """API endpoint to process all files in the watched directory with streaming progress"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
@@ -782,7 +782,7 @@ def process_all_files():
         for filepath in files:
             try:
                 mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+                final_filepath = process_file_func(filepath, fixtitle=True, fixseries=True, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 handle_file_rename_in_store(filepath, final_filepath)
                 results.append({
@@ -809,7 +809,7 @@ def process_all_files():
             
             try:
                 mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+                final_filepath = process_file_func(filepath, fixtitle=True, fixseries=True, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 handle_file_rename_in_store(filepath, final_filepath)
                 result['success'] = True
@@ -840,7 +840,7 @@ def process_all_files():
 @app.route('/api/rename-all', methods=['POST'])
 def rename_all_files():
     """API endpoint to rename all files in the watched directory with streaming progress"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
@@ -851,7 +851,7 @@ def rename_all_files():
         for filepath in files:
             try:
                 mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+                final_filepath = process_file_func(filepath, fixtitle=False, fixseries=False, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 handle_file_rename_in_store(filepath, final_filepath)
                 results.append({
@@ -878,7 +878,7 @@ def rename_all_files():
             
             try:
                 mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+                final_filepath = process_file_func(filepath, fixtitle=False, fixseries=False, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 handle_file_rename_in_store(filepath, final_filepath)
                 result['success'] = True
@@ -909,7 +909,7 @@ def rename_all_files():
 @app.route('/api/normalize-all', methods=['POST'])
 def normalize_all_files():
     """API endpoint to normalize metadata for all files in the watched directory with streaming progress"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
@@ -920,7 +920,7 @@ def normalize_all_files():
         for filepath in files:
             try:
                 mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+                final_filepath = process_file_func(filepath, fixtitle=True, fixseries=True, fixfilename=False)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 results.append({
                     'file': os.path.basename(final_filepath),
@@ -946,7 +946,7 @@ def normalize_all_files():
             
             try:
                 mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+                final_filepath = process_file_func(filepath, fixtitle=True, fixseries=True, fixfilename=False)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 result['success'] = True
                 logging.info(f"Normalized metadata for file via web interface: {filepath}")
@@ -976,7 +976,7 @@ def normalize_all_files():
 @app.route('/api/process-file/<path:filepath>', methods=['POST'])
 def process_single_file(filepath):
     """API endpoint to process a single file"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
     
@@ -988,7 +988,7 @@ def process_single_file(filepath):
         mark_file_web_modified(full_path)
         
         # Process the file and get the final filepath (may be renamed)
-        final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+        final_filepath = process_file_func(full_path, fixtitle=True, fixseries=True, fixfilename=True)
         
         # Mark as processed using the final filepath, cleanup old filename if renamed
         mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
@@ -1004,7 +1004,7 @@ def process_single_file(filepath):
 @app.route('/api/rename-file/<path:filepath>', methods=['POST'])
 def rename_single_file(filepath):
     """API endpoint to rename a single file based on metadata"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
     
@@ -1016,7 +1016,7 @@ def rename_single_file(filepath):
         mark_file_web_modified(full_path)
         
         # Only rename the file
-        final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
+        final_filepath = process_file_func(full_path, fixtitle=False, fixseries=False, fixfilename=True)
         
         # Mark as processed using the final filepath, cleanup old filename if renamed
         mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
@@ -1032,7 +1032,7 @@ def rename_single_file(filepath):
 @app.route('/api/normalize-file/<path:filepath>', methods=['POST'])
 def normalize_single_file(filepath):
     """API endpoint to normalize metadata for a single file"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
     
@@ -1044,7 +1044,7 @@ def normalize_single_file(filepath):
         mark_file_web_modified(full_path)
         
         # Only normalize metadata
-        final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
+        final_filepath = process_file_func(full_path, fixtitle=True, fixseries=True, fixfilename=False)
         
         # Mark as processed using the final filepath, cleanup old filename if renamed
         mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
@@ -1058,7 +1058,7 @@ def normalize_single_file(filepath):
 @app.route('/api/process-selected', methods=['POST'])
 def process_selected_files():
     """API endpoint to process selected files with streaming progress"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     data = request.json
     file_list = data.get('files', [])
@@ -1083,7 +1083,7 @@ def process_selected_files():
             
             try:
                 mark_file_web_modified(full_path)
-                final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+                final_filepath = process_file_func(full_path, fixtitle=True, fixseries=True, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
                 handle_file_rename_in_store(full_path, final_filepath)
                 results.append({
@@ -1115,7 +1115,7 @@ def process_selected_files():
             else:
                 try:
                     mark_file_web_modified(full_path)
-                    final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+                    final_filepath = process_file_func(full_path, fixtitle=True, fixseries=True, fixfilename=True)
                     mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
                     handle_file_rename_in_store(full_path, final_filepath)
                     result['success'] = True
@@ -1146,7 +1146,7 @@ def process_selected_files():
 @app.route('/api/rename-selected', methods=['POST'])
 def rename_selected_files():
     """API endpoint to rename selected files with streaming progress"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     data = request.json
     file_list = data.get('files', [])
@@ -1171,7 +1171,7 @@ def rename_selected_files():
             
             try:
                 mark_file_web_modified(full_path)
-                final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
+                final_filepath = process_file_func(full_path, fixtitle=False, fixseries=False, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
                 handle_file_rename_in_store(full_path, final_filepath)
                 results.append({
@@ -1203,7 +1203,7 @@ def rename_selected_files():
             else:
                 try:
                     mark_file_web_modified(full_path)
-                    final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
+                    final_filepath = process_file_func(full_path, fixtitle=False, fixseries=False, fixfilename=True)
                     mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
                     handle_file_rename_in_store(full_path, final_filepath)
                     result['success'] = True
@@ -1234,7 +1234,7 @@ def rename_selected_files():
 @app.route('/api/normalize-selected', methods=['POST'])
 def normalize_selected_files():
     """API endpoint to normalize metadata for selected files with streaming progress"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     data = request.json
     file_list = data.get('files', [])
@@ -1259,7 +1259,7 @@ def normalize_selected_files():
             
             try:
                 mark_file_web_modified(full_path)
-                final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
+                final_filepath = process_file_func(full_path, fixtitle=True, fixseries=True, fixfilename=False)
                 mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
                 results.append({
                     'file': os.path.basename(final_filepath),
@@ -1290,7 +1290,7 @@ def normalize_selected_files():
             else:
                 try:
                     mark_file_web_modified(full_path)
-                    final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
+                    final_filepath = process_file_func(full_path, fixtitle=True, fixseries=True, fixfilename=False)
                     mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
                     result['success'] = True
                     logging.info(f"Normalized metadata for file via web interface: {full_path}")
@@ -1320,7 +1320,7 @@ def normalize_selected_files():
 @app.route('/api/jobs/process-all', methods=['POST'])
 def async_process_all_files():
     """API endpoint to start async processing of all files"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     logging.info("[API] Request to process all files (async)")
     files = get_comic_files()
@@ -1344,7 +1344,7 @@ def async_process_all_files():
     def process_item(filepath):
         try:
             mark_file_web_modified(filepath)
-            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+            final_filepath = process_file_func(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
             handle_file_rename_in_store(filepath, final_filepath)
             logging.info(f"[BATCH] Processed file: {filepath} -> {final_filepath}")
@@ -1381,7 +1381,7 @@ def async_process_all_files():
 @app.route('/api/jobs/process-selected', methods=['POST'])
 def async_process_selected_files():
     """API endpoint to start async processing of selected files"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     data = request.json
     file_list = data.get('files', [])
@@ -1418,7 +1418,7 @@ def async_process_selected_files():
     def process_item(filepath):
         try:
             mark_file_web_modified(filepath)
-            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+            final_filepath = process_file_func(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
             handle_file_rename_in_store(filepath, final_filepath)
             logging.info(f"[BATCH] Processed file: {filepath} -> {final_filepath}")
@@ -1532,7 +1532,7 @@ def cancel_job(job_id):
 @app.route('/api/jobs/process-unmarked', methods=['POST'])
 def async_process_unmarked_files():
     """API endpoint to start async processing of unmarked files"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     logging.info("[API] Request to process unmarked files (async)")
     
@@ -1563,7 +1563,7 @@ def async_process_unmarked_files():
     def process_item(filepath):
         try:
             mark_file_web_modified(filepath)
-            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+            final_filepath = process_file_func(filepath, fixtitle=True, fixseries=True, fixfilename=True)
             mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
             handle_file_rename_in_store(filepath, final_filepath)
             logging.info(f"[BATCH] Processed unmarked file: {filepath} -> {final_filepath}")
@@ -1600,7 +1600,7 @@ def async_process_unmarked_files():
 @app.route('/api/jobs/rename-unmarked', methods=['POST'])
 def async_rename_unmarked_files():
     """API endpoint to start async renaming of unmarked files"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     logging.info("[API] Request to rename unmarked files (async)")
     
@@ -1630,7 +1630,7 @@ def async_rename_unmarked_files():
     def process_item(filepath):
         try:
             mark_file_web_modified(filepath)
-            final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+            final_filepath = process_file_func(filepath, fixtitle=False, fixseries=False, fixfilename=True)
             mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
             handle_file_rename_in_store(filepath, final_filepath)
             logging.info(f"[BATCH] Renamed unmarked file: {filepath} -> {final_filepath}")
@@ -1667,7 +1667,7 @@ def async_rename_unmarked_files():
 @app.route('/api/jobs/normalize-unmarked', methods=['POST'])
 def async_normalize_unmarked_files():
     """API endpoint to start async normalizing of unmarked files"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     logging.info("[API] Request to normalize unmarked files (async)")
     
@@ -1697,7 +1697,7 @@ def async_normalize_unmarked_files():
     def process_item(filepath):
         try:
             mark_file_web_modified(filepath)
-            final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+            final_filepath = process_file_func(filepath, fixtitle=True, fixseries=True, fixfilename=False)
             mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
             logging.info(f"[BATCH] Normalized unmarked file: {filepath}")
             return JobResult(
@@ -2031,7 +2031,7 @@ def scan_unmarked_files():
 @app.route('/api/process-unmarked', methods=['POST'])
 def process_unmarked_files():
     """API endpoint to process only unmarked files with streaming progress"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
@@ -2052,7 +2052,7 @@ def process_unmarked_files():
                 mark_file_web_modified(filepath)
                 
                 # Process the file and get the final filepath (may be renamed)
-                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+                final_filepath = process_file_func(filepath, fixtitle=True, fixseries=True, fixfilename=True)
                 
                 # Mark as processed using the final filepath, cleanup old filename if renamed
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
@@ -2083,7 +2083,7 @@ def process_unmarked_files():
             
             try:
                 mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+                final_filepath = process_file_func(filepath, fixtitle=True, fixseries=True, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 handle_file_rename_in_store(filepath, final_filepath)
                 result['success'] = True
@@ -2113,7 +2113,7 @@ def process_unmarked_files():
 @app.route('/api/rename-unmarked', methods=['POST'])
 def rename_unmarked_files():
     """API endpoint to rename only unmarked files with streaming progress"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
@@ -2134,7 +2134,7 @@ def rename_unmarked_files():
                 mark_file_web_modified(filepath)
                 
                 # Only rename the file
-                final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+                final_filepath = process_file_func(filepath, fixtitle=False, fixseries=False, fixfilename=True)
                 
                 # Mark as processed using the final filepath, cleanup old filename if renamed
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
@@ -2165,7 +2165,7 @@ def rename_unmarked_files():
             
             try:
                 mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+                final_filepath = process_file_func(filepath, fixtitle=False, fixseries=False, fixfilename=True)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 handle_file_rename_in_store(filepath, final_filepath)
                 result['success'] = True
@@ -2195,7 +2195,7 @@ def rename_unmarked_files():
 @app.route('/api/normalize-unmarked', methods=['POST'])
 def normalize_unmarked_files():
     """API endpoint to normalize metadata for only unmarked files with streaming progress"""
-    from process_file import process_file
+    from process_file import process_file as process_file_func
     
     stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
@@ -2216,7 +2216,7 @@ def normalize_unmarked_files():
                 mark_file_web_modified(filepath)
                 
                 # Only normalize metadata
-                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+                final_filepath = process_file_func(filepath, fixtitle=True, fixseries=True, fixfilename=False)
                 
                 # Mark as processed using the final filepath, cleanup old filename if renamed
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
@@ -2245,7 +2245,7 @@ def normalize_unmarked_files():
             
             try:
                 mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+                final_filepath = process_file_func(filepath, fixtitle=True, fixseries=True, fixfilename=False)
                 mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
                 result['success'] = True
                 logging.info(f"Normalized metadata for unmarked file via web interface: {filepath}")

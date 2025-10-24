@@ -2785,7 +2785,9 @@
         // Register service worker for offline support
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register(apiUrl('/sw.js'))
+                navigator.serviceWorker.register(apiUrl('/sw.js'), {
+                    scope: apiUrl('/')
+                })
                     .then((registration) => {
                         console.log('PWA: Service Worker registered successfully:', registration.scope);
                     })

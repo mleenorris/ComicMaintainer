@@ -3970,6 +3970,14 @@
             const activeJobId = activeJob.job_id;
             const activeJobTitle = activeJob.job_title;
             
+            // Validate job_id format (should be a UUID)
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (!uuidRegex.test(activeJobId)) {
+                console.warn(`[JOB RESUME] Invalid job_id format: ${activeJobId} (expected UUID) - clearing stale job`);
+                await clearActiveJobOnServer();
+                return;
+            }
+            
             console.log(`[JOB RESUME] Found active job ${activeJobId} on server, checking status...`);
             
             try {

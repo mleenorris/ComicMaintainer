@@ -1441,6 +1441,16 @@ def async_process_selected_files():
 @app.route('/api/jobs/<job_id>', methods=['GET'])
 def get_job_status(job_id):
     """API endpoint to get job status"""
+    import uuid
+    
+    # Validate job_id format (should be a UUID)
+    try:
+        uuid.UUID(job_id)
+    except ValueError:
+        # Invalid job_id format - likely stale data or incorrect usage
+        logging.debug(f"[API] Invalid job_id format: {job_id} (expected UUID)")
+        return jsonify({'error': 'Job not found'}), 404
+    
     logging.debug(f"[API] Status request for job {job_id}")
     job_manager = get_job_manager(max_workers=get_max_workers())
     status = job_manager.get_job_status(job_id)

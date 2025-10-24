@@ -363,6 +363,15 @@ class JobManager:
         Returns:
             Job status dictionary or None if not found
         """
+        # Validate job_id format (should be a UUID)
+        try:
+            import uuid
+            uuid.UUID(job_id)
+        except ValueError:
+            # Invalid job_id format - likely stale data or incorrect usage
+            log_debug("Invalid job_id format (expected UUID)", job_id=job_id)
+            return None
+        
         status = job_store.get_job(job_id)
         if status:
             logging.debug(f"[JOB {job_id}] Status check: {status['status']} - {status['processed_items']}/{status['total_items']} items")

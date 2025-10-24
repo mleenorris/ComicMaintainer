@@ -8,8 +8,9 @@ import sys
 import os
 import json
 
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+# Minimum file size for icons and favicons (in bytes)
+MIN_ICON_SIZE_BYTES = 100
+
 
 def test_static_manifest_exists():
     """Test that static manifest.json exists and is valid JSON."""
@@ -82,7 +83,7 @@ def test_icon_files_exist(manifest):
         
         # Check file size is reasonable (not empty)
         file_size = os.path.getsize(file_path)
-        assert file_size > 100, f"Icon file too small ({file_size} bytes): {file_path}"
+        assert file_size > MIN_ICON_SIZE_BYTES, f"Icon file too small ({file_size} bytes): {file_path}"
     
     print(f"✓ All {len(icons)} icon files exist and are non-empty")
 
@@ -116,7 +117,7 @@ def test_favicon_files():
     for favicon in favicons:
         assert os.path.exists(favicon), f"Favicon not found: {favicon}"
         file_size = os.path.getsize(favicon)
-        assert file_size > 100, f"Favicon too small ({file_size} bytes): {favicon}"
+        assert file_size > MIN_ICON_SIZE_BYTES, f"Favicon too small ({file_size} bytes): {favicon}"
     
     print(f"✓ All {len(favicons)} favicon files exist")
 

@@ -446,6 +446,44 @@ docker exec comictagger-watcher cat /Config/Log/ComicMaintainer.log | grep "X-Fo
 
 ## Troubleshooting
 
+### Issue: "Connection Not Secure" or "Not Secure" in Chrome
+**Symptoms:**
+- Chrome shows "Not Secure" in the address bar when accessing via reverse proxy
+- HTTPS is configured on the reverse proxy but connection shows as insecure
+- PWA (Progressive Web App) features not working
+
+**Solution:**
+1. **Ensure HTTPS is properly configured on your reverse proxy** - Check that SSL/TLS certificates are valid and not expired
+2. **Verify X-Forwarded-Proto header is being sent** - The application needs this header to detect HTTPS:
+   ```nginx
+   # Nginx
+   proxy_set_header X-Forwarded-Proto $scheme;
+   ```
+   ```apache
+   # Apache
+   RequestHeader set X-Forwarded-Proto "https"
+   ```
+   ```caddy
+   # Caddy (automatic)
+   reverse_proxy localhost:5000
+   ```
+3. **Check that HTTP to HTTPS redirect is configured** - Users accessing via HTTP should be redirected:
+   ```nginx
+   # Nginx
+   server {
+       listen 80;
+       server_name comics.example.com;
+       return 301 https://$server_name$request_uri;
+   }
+   ```
+4. **Clear browser cache and restart browser** - HSTS and security policies may be cached
+5. **Verify the application is receiving HTTPS headers** - Check container logs:
+   ```bash
+   docker logs comictagger-watcher 2>&1 | grep -i "x-forwarded"
+   ```
+
+**Note:** The application automatically enables security headers (HSTS, CSP) when it detects HTTPS via the X-Forwarded-Proto header. This ensures browsers treat the connection as secure.
+
 ### Issue: 404 Not Found or 502 Bad Gateway
 **Solution:**
 - Verify ComicMaintainer is running: `docker ps | grep comictagger`

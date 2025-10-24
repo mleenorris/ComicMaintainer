@@ -155,6 +155,16 @@ def add_performance_headers(response):
     if 'Vary' not in response.headers:
         response.headers['Vary'] = 'Accept-Encoding'
     
+    # Add security headers when behind HTTPS proxy
+    # Check if request came through HTTPS (via X-Forwarded-Proto header)
+    if request.headers.get('X-Forwarded-Proto') == 'https' or request.scheme == 'https':
+        # HSTS: Tell browsers to always use HTTPS for this domain
+        # max-age=31536000 = 1 year
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+        
+        # Upgrade insecure requests: Tell browser to upgrade HTTP requests to HTTPS
+        response.headers['Content-Security-Policy'] = "upgrade-insecure-requests"
+    
     return response
 
 

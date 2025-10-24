@@ -130,7 +130,7 @@ For direct HTTPS support without a reverse proxy:
 **Note**: For production deployments, use certificates from a trusted Certificate Authority (e.g., Let's Encrypt). For development/testing, you can generate a self-signed certificate using the included script. See the [HTTPS Configuration](#https-configuration) section below for detailed setup instructions.
 
 #### Reverse Proxy Support (Optional)
-- `BASE_PATH`: Path prefix for subdirectory deployments (default: empty). Set to serve the application from a subdirectory, e.g., `/comics` to access at `example.com/comics`. Must start with a forward slash. The application automatically handles reverse proxy headers (`X-Forwarded-*`) for proper URL generation. See [Reverse Proxy Guide](docs/REVERSE_PROXY.md) for detailed configuration examples (Nginx, Traefik, Apache, Caddy).
+- `BASE_PATH`: Path prefix for subdirectory deployments (default: empty). Set to serve the application from a subdirectory, e.g., `/comics` to access at `example.com/comics`. Must start with a forward slash. The application automatically handles reverse proxy headers (`X-Forwarded-*`) for proper URL generation and **automatically enables security headers (HSTS, CSP) when accessed via HTTPS**. See [Reverse Proxy Guide](docs/REVERSE_PROXY.md) for detailed configuration examples (Nginx, Traefik, Apache, Caddy).
 
 #### Debug Logging and Error Reporting (Optional)
 - `DEBUG_MODE`: Enable extensive debug logging throughout the application (default: `false`). Set to `true` to enable detailed debug output including function entry/exit, parameter values, and operation details.

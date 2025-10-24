@@ -74,8 +74,16 @@ log_handler.setFormatter(logging.Formatter('%(asctime)s [WEBPAGE] %(levelname)s 
 logging.getLogger().addHandler(log_handler)
 
 # Get the parent directory (project root) for templates and static files
-# web_app.py is in src/, templates and static are in parent directory
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# web_app.py is in src/ during development, but in /app/ when deployed in Docker
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# Check if we're in the src/ directory or deployed directly in /app/
+if os.path.basename(script_dir) == 'src':
+    # Development mode: web_app.py is in src/, templates and static are in parent directory
+    project_root = os.path.dirname(script_dir)
+else:
+    # Deployed mode: web_app.py is in /app/, templates and static are in /app/templates and /app/static
+    project_root = script_dir
+
 template_folder = os.path.join(project_root, 'templates')
 static_folder = os.path.join(project_root, 'static')
 

@@ -28,8 +28,9 @@ WORKDIR /app
 # Copy all Python scripts to /app
 COPY src/*.py /app/
 
-# Copy templates directory
+# Copy templates and static directories
 COPY templates /app/templates
+COPY static /app/static
 
 # Copy shell scripts to root
 COPY *.sh /

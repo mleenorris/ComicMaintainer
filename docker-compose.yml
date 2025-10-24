@@ -47,6 +47,14 @@ services:
       # - GITHUB_TOKEN=your_github_token_here
       # - GITHUB_REPOSITORY=mleenorris/ComicMaintainer
       # - GITHUB_ISSUE_ASSIGNEE=your_username
+      
+      # Optional: HTTPS/SSL Configuration
+      # Mount certificate and key files, then set these environment variables
+      # For production: Use certificates from a trusted CA (e.g., Let's Encrypt)
+      # For development: Generate self-signed cert with /generate_self_signed_cert.sh
+      # - SSL_CERTFILE=/Config/ssl/cert.crt
+      # - SSL_KEYFILE=/Config/ssl/cert.key
+      # - SSL_CA_CERTS=/Config/ssl/ca-bundle.crt  # Optional: CA certificate chain
     
     # Volumes
     volumes:

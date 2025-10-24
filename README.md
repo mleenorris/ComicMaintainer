@@ -121,6 +121,14 @@ docker run -d \
   - Large libraries (>5000 files): 128-256MB
   - See [Performance Tuning Guide](docs/PERFORMANCE_TUNING.md) for detailed recommendations
 
+#### HTTPS/SSL Configuration (Optional)
+For direct HTTPS support without a reverse proxy:
+- `SSL_CERTFILE`: Path to SSL certificate file (e.g., `/Config/ssl/cert.crt`)
+- `SSL_KEYFILE`: Path to SSL private key file (e.g., `/Config/ssl/cert.key`)
+- `SSL_CA_CERTS`: Path to CA certificate bundle (optional, for certificate chains)
+
+**Note**: For production deployments, use certificates from a trusted Certificate Authority (e.g., Let's Encrypt). For development/testing, you can generate a self-signed certificate using the included script. See the [HTTPS Configuration](#https-configuration) section below for detailed setup instructions.
+
 #### Reverse Proxy Support (Optional)
 - `BASE_PATH`: Path prefix for subdirectory deployments (default: empty). Set to serve the application from a subdirectory, e.g., `/comics` to access at `example.com/comics`. Must start with a forward slash. The application automatically handles reverse proxy headers (`X-Forwarded-*`) for proper URL generation. See [Reverse Proxy Guide](docs/REVERSE_PROXY.md) for detailed configuration examples (Nginx, Traefik, Apache, Caddy).
 
@@ -417,6 +425,100 @@ If upgrading from a version where configuration and logs were stored in `/app` o
 - To preserve settings: manually copy configuration files from the old container to `/Config` in the new setup
 - **Note**: The `CACHE_DIR` environment variable has been removed. All persistent data is now stored in `/Config` by default.
 
+## HTTPS Configuration
+
+The application supports HTTPS in two ways:
+
+### Option 1: Direct HTTPS Support (Native)
+Run the application with HTTPS directly without a reverse proxy:
+
+#### Using Your Own Certificates (Production)
+
+For production use, obtain certificates from a trusted Certificate Authority (e.g., Let's Encrypt):
+
+```sh
+docker run -d \
+  -v /path/to/comics:/watched_dir \
+  -v /path/to/config:/Config \
+  -v /path/to/certs:/certs \
+  -e WATCHED_DIR=/watched_dir \
+  -e SSL_CERTFILE=/certs/fullchain.pem \
+  -e SSL_KEYFILE=/certs/privkey.pem \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -p 5000:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+Access the application at `https://your-domain:5000`
+
+#### Using Self-Signed Certificates (Development/Testing)
+
+For development or testing, generate a self-signed certificate:
+
+**Step 1: Generate the certificate**
+```sh
+docker run --rm \
+  -v /path/to/config:/Config \
+  iceburn1/comictagger-watcher:latest \
+  /generate_self_signed_cert.sh /Config/ssl 365 localhost
+```
+
+**Step 2: Run with HTTPS**
+```sh
+docker run -d \
+  -v /path/to/comics:/watched_dir \
+  -v /path/to/config:/Config \
+  -e WATCHED_DIR=/watched_dir \
+  -e SSL_CERTFILE=/Config/ssl/selfsigned.crt \
+  -e SSL_KEYFILE=/Config/ssl/selfsigned.key \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -p 5000:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+Access the application at `https://localhost:5000` (you'll need to accept the browser security warning for self-signed certificates)
+
+**Docker Compose Example with Self-Signed Cert:**
+```yaml
+version: '3.8'
+services:
+  comictagger-watcher:
+    image: iceburn1/comictagger-watcher:latest
+    environment:
+      - WATCHED_DIR=/watched_dir
+      - SSL_CERTFILE=/Config/ssl/selfsigned.crt
+      - SSL_KEYFILE=/Config/ssl/selfsigned.key
+    volumes:
+      - /path/to/comics:/watched_dir
+      - /path/to/config:/Config
+    ports:
+      - "5000:5000"
+```
+
+### Option 2: HTTPS via Reverse Proxy (Recommended for Production)
+
+For production deployments, using a reverse proxy is recommended as it provides:
+- Better security and SSL/TLS configuration options
+- Built-in certificate management (e.g., automatic Let's Encrypt renewal)
+- Additional features like caching, load balancing, and access control
+
+See the [Reverse Proxy Setup Guide](docs/REVERSE_PROXY.md) for detailed configuration examples with Nginx, Traefik, Apache, and Caddy.
+
+**Benefits of Reverse Proxy:**
+- ✅ Automatic certificate renewal (Let's Encrypt)
+- ✅ Advanced security features (rate limiting, WAF)
+- ✅ Better performance (caching, compression)
+- ✅ Centralized SSL/TLS management for multiple services
+- ✅ Additional authentication layers
+
+**Benefits of Direct HTTPS:**
+- ✅ Simpler setup for single-service deployments
+- ✅ No additional software required
+- ✅ Good for development and testing
+- ✅ Works well for private networks
+
 ## Logging
 - All actions and errors are logged to `ComicMaintainer.log` (located in `/Config/Log/ComicMaintainer.log`).
 - **Log Rotation**: Log files are automatically rotated when they reach a configurable size limit (default: 5MB)
@@ -527,6 +629,7 @@ The application is 100% event-driven with zero polling:
 ## Documentation
 
 - **[API Documentation](docs/API.md)** - Complete REST API reference
+- **[HTTPS Setup Guide](docs/HTTPS_SETUP.md)** - Configure HTTPS with native support or reverse proxy
 - **[Reverse Proxy Setup Guide](docs/REVERSE_PROXY.md)** - Deploy behind Nginx, Traefik, Apache, or Caddy
 - **[Performance Tuning Guide](docs/PERFORMANCE_TUNING.md)** - Optimize performance for your system
 - **[Automated Versioning](docs/AUTOMATED_VERSIONING.md)** - How automatic version bumping works

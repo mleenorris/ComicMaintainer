@@ -736,34 +736,41 @@ def batch_update_tags():
     # Streaming mode - send progress updates
     def generate():
         import json
+        import traceback
         results = []
-        for i, filepath in enumerate(files):
-            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
-            result = {'file': filepath}
+        try:
+            for i, filepath in enumerate(files):
+                full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+                result = {'file': filepath}
+                
+                if os.path.exists(full_path):
+                    success = update_file_tags(full_path, tag_updates)
+                    result['success'] = success
+                    if not success:
+                        result['error'] = 'Failed to update tags'
+                else:
+                    result['success'] = False
+                    result['error'] = 'File not found'
+                
+                results.append(result)
+                
+                # Send progress update
+                progress = {
+                    'current': i + 1,
+                    'total': len(files),
+                    'file': os.path.basename(filepath),
+                    'success': result['success'],
+                    'error': result.get('error')
+                }
+                yield f"data: {json.dumps(progress)}\n\n"
             
-            if os.path.exists(full_path):
-                success = update_file_tags(full_path, tag_updates)
-                result['success'] = success
-                if not success:
-                    result['error'] = 'Failed to update tags'
-            else:
-                result['success'] = False
-                result['error'] = 'File not found'
-            
-            results.append(result)
-            
-            # Send progress update
-            progress = {
-                'current': i + 1,
-                'total': len(files),
-                'file': os.path.basename(filepath),
-                'success': result['success'],
-                'error': result.get('error')
-            }
-            yield f"data: {json.dumps(progress)}\n\n"
-        
-        # Send final results
-        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+            # Send final results
+            yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+        except Exception as e:
+            # Critical error in streaming - log and send error completion
+            logging.error(f"CRITICAL: Streaming error in update_multiple_tags: {e}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
+            yield f"data: {json.dumps({{'done': True, 'error': 'Streaming error: {str(e)}', 'results': results}})}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
 
@@ -803,36 +810,44 @@ def process_all_files():
     # Streaming mode - send progress updates
     def generate():
         import json
+        import traceback
         results = []
-        for i, filepath in enumerate(files):
-            result = {'file': os.path.basename(filepath)}
+        try:
+            for i, filepath in enumerate(files):
+                result = {'file': os.path.basename(filepath)}
+                
+                try:
+                    mark_file_web_modified(filepath)
+                    final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+                    mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+                    handle_file_rename_in_store(filepath, final_filepath)
+                    result['success'] = True
+                    logging.info(f"Processed file via web interface: {filepath} -> {final_filepath}")
+                except Exception as e:
+                    result['success'] = False
+                    result['error'] = str(e)
+                    logging.error(f"Error processing file {filepath}: {e}")
+                    logging.error(f"Traceback: {traceback.format_exc()}")
+                
+                results.append(result)
+                
+                # Send progress update
+                progress = {
+                    'current': i + 1,
+                    'total': len(files),
+                    'file': result['file'],
+                    'success': result['success'],
+                    'error': result.get('error')
+                }
+                yield f"data: {json.dumps(progress)}\n\n"
             
-            try:
-                mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
-                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-                handle_file_rename_in_store(filepath, final_filepath)
-                result['success'] = True
-                logging.info(f"Processed file via web interface: {filepath} -> {final_filepath}")
-            except Exception as e:
-                result['success'] = False
-                result['error'] = str(e)
-                logging.error(f"Error processing file {filepath}: {e}")
-            
-            results.append(result)
-            
-            # Send progress update
-            progress = {
-                'current': i + 1,
-                'total': len(files),
-                'file': result['file'],
-                'success': result['success'],
-                'error': result.get('error')
-            }
-            yield f"data: {json.dumps(progress)}\n\n"
-        
-        # Send final results
-        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+            # Send final results
+            yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+        except Exception as e:
+            # Critical error in streaming - log and send error completion
+            logging.error(f"CRITICAL: Streaming error in process_all_files: {e}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
+            yield f"data: {json.dumps({{'done': True, 'error': 'Streaming error: {str(e)}', 'results': results}})}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
 
@@ -872,36 +887,44 @@ def rename_all_files():
     # Streaming mode - send progress updates
     def generate():
         import json
+        import traceback
         results = []
-        for i, filepath in enumerate(files):
-            result = {'file': os.path.basename(filepath)}
+        try:
+            for i, filepath in enumerate(files):
+                result = {'file': os.path.basename(filepath)}
+                
+                try:
+                    mark_file_web_modified(filepath)
+                    final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+                    mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+                    handle_file_rename_in_store(filepath, final_filepath)
+                    result['success'] = True
+                    logging.info(f"Renamed file via web interface: {filepath} -> {final_filepath}")
+                except Exception as e:
+                    result['success'] = False
+                    result['error'] = str(e)
+                    logging.error(f"Error renaming file {filepath}: {e}")
+                    logging.error(f"Traceback: {traceback.format_exc()}")
+                
+                results.append(result)
+                
+                # Send progress update
+                progress = {
+                    'current': i + 1,
+                    'total': len(files),
+                    'file': result['file'],
+                    'success': result['success'],
+                    'error': result.get('error')
+                }
+                yield f"data: {json.dumps(progress)}\n\n"
             
-            try:
-                mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
-                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-                handle_file_rename_in_store(filepath, final_filepath)
-                result['success'] = True
-                logging.info(f"Renamed file via web interface: {filepath} -> {final_filepath}")
-            except Exception as e:
-                result['success'] = False
-                result['error'] = str(e)
-                logging.error(f"Error renaming file {filepath}: {e}")
-            
-            results.append(result)
-            
-            # Send progress update
-            progress = {
-                'current': i + 1,
-                'total': len(files),
-                'file': result['file'],
-                'success': result['success'],
-                'error': result.get('error')
-            }
-            yield f"data: {json.dumps(progress)}\n\n"
-        
-        # Send final results
-        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+            # Send final results
+            yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+        except Exception as e:
+            # Critical error in streaming - log and send error completion
+            logging.error(f"CRITICAL: Streaming error in rename_all_files: {e}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
+            yield f"data: {json.dumps({{'done': True, 'error': 'Streaming error: {str(e)}', 'results': results}})}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
 
@@ -940,35 +963,43 @@ def normalize_all_files():
     # Streaming mode - send progress updates
     def generate():
         import json
+        import traceback
         results = []
-        for i, filepath in enumerate(files):
-            result = {'file': os.path.basename(filepath)}
+        try:
+            for i, filepath in enumerate(files):
+                result = {'file': os.path.basename(filepath)}
+                
+                try:
+                    mark_file_web_modified(filepath)
+                    final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+                    mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+                    result['success'] = True
+                    logging.info(f"Normalized metadata for file via web interface: {filepath}")
+                except Exception as e:
+                    result['success'] = False
+                    result['error'] = str(e)
+                    logging.error(f"Error normalizing metadata for file {filepath}: {e}")
+                    logging.error(f"Traceback: {traceback.format_exc()}")
+                
+                results.append(result)
+                
+                # Send progress update
+                progress = {
+                    'current': i + 1,
+                    'total': len(files),
+                    'file': result['file'],
+                    'success': result['success'],
+                    'error': result.get('error')
+                }
+                yield f"data: {json.dumps(progress)}\n\n"
             
-            try:
-                mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
-                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-                result['success'] = True
-                logging.info(f"Normalized metadata for file via web interface: {filepath}")
-            except Exception as e:
-                result['success'] = False
-                result['error'] = str(e)
-                logging.error(f"Error normalizing metadata for file {filepath}: {e}")
-            
-            results.append(result)
-            
-            # Send progress update
-            progress = {
-                'current': i + 1,
-                'total': len(files),
-                'file': result['file'],
-                'success': result['success'],
-                'error': result.get('error')
-            }
-            yield f"data: {json.dumps(progress)}\n\n"
-        
-        # Send final results
-        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+            # Send final results
+            yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+        except Exception as e:
+            # Critical error in streaming - log and send error completion
+            logging.error(f"CRITICAL: Streaming error in normalize_all_files: {e}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
+            yield f"data: {json.dumps({{'done': True, 'error': 'Streaming error: {str(e)}', 'results': results}})}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
 
@@ -1104,41 +1135,49 @@ def process_selected_files():
     # Streaming mode - send progress updates
     def generate():
         import json
+        import traceback
         results = []
-        for i, filepath in enumerate(file_list):
-            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
-            result = {'file': os.path.basename(filepath)}
-            
-            if not os.path.exists(full_path):
-                result['success'] = False
-                result['error'] = 'File not found'
-            else:
-                try:
-                    mark_file_web_modified(full_path)
-                    final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
-                    mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
-                    handle_file_rename_in_store(full_path, final_filepath)
-                    result['success'] = True
-                    logging.info(f"Processed file via web interface: {full_path} -> {final_filepath}")
-                except Exception as e:
+        try:
+            for i, filepath in enumerate(file_list):
+                full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+                result = {'file': os.path.basename(filepath)}
+                
+                if not os.path.exists(full_path):
                     result['success'] = False
-                    result['error'] = str(e)
-                    logging.error(f"Error processing file {full_path}: {e}")
+                    result['error'] = 'File not found'
+                else:
+                    try:
+                        mark_file_web_modified(full_path)
+                        final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=True)
+                        mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
+                        handle_file_rename_in_store(full_path, final_filepath)
+                        result['success'] = True
+                        logging.info(f"Processed file via web interface: {full_path} -> {final_filepath}")
+                    except Exception as e:
+                        result['success'] = False
+                        result['error'] = str(e)
+                        logging.error(f"Error processing file {full_path}: {e}")
+                        logging.error(f"Traceback: {traceback.format_exc()}")
+                
+                results.append(result)
+                
+                # Send progress update
+                progress = {
+                    'current': i + 1,
+                    'total': len(file_list),
+                    'file': result['file'],
+                    'success': result['success'],
+                    'error': result.get('error')
+                }
+                yield f"data: {json.dumps(progress)}\n\n"
             
-            results.append(result)
-            
-            # Send progress update
-            progress = {
-                'current': i + 1,
-                'total': len(file_list),
-                'file': result['file'],
-                'success': result['success'],
-                'error': result.get('error')
-            }
-            yield f"data: {json.dumps(progress)}\n\n"
-        
-        # Send final results
-        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+            # Send final results
+            yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+        except Exception as e:
+            # Critical error in streaming - log and send error completion
+            logging.error(f"CRITICAL: Streaming error in process_selected_files: {e}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
+            yield f"data: {json.dumps({{'done': True, 'error': 'Streaming error: {str(e)}', 'results': results}})}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
 
@@ -1192,41 +1231,49 @@ def rename_selected_files():
     # Streaming mode - send progress updates
     def generate():
         import json
+        import traceback
         results = []
-        for i, filepath in enumerate(file_list):
-            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
-            result = {'file': os.path.basename(filepath)}
-            
-            if not os.path.exists(full_path):
-                result['success'] = False
-                result['error'] = 'File not found'
-            else:
-                try:
-                    mark_file_web_modified(full_path)
-                    final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
-                    mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
-                    handle_file_rename_in_store(full_path, final_filepath)
-                    result['success'] = True
-                    logging.info(f"Renamed file via web interface: {full_path} -> {final_filepath}")
-                except Exception as e:
+        try:
+            for i, filepath in enumerate(file_list):
+                full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+                result = {'file': os.path.basename(filepath)}
+                
+                if not os.path.exists(full_path):
                     result['success'] = False
-                    result['error'] = str(e)
-                    logging.error(f"Error renaming file {full_path}: {e}")
+                    result['error'] = 'File not found'
+                else:
+                    try:
+                        mark_file_web_modified(full_path)
+                        final_filepath = process_file(full_path, fixtitle=False, fixseries=False, fixfilename=True)
+                        mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
+                        handle_file_rename_in_store(full_path, final_filepath)
+                        result['success'] = True
+                        logging.info(f"Renamed file via web interface: {full_path} -> {final_filepath}")
+                    except Exception as e:
+                        result['success'] = False
+                        result['error'] = str(e)
+                        logging.error(f"Error renaming file {full_path}: {e}")
+                        logging.error(f"Traceback: {traceback.format_exc()}")
+                
+                results.append(result)
+                
+                # Send progress update
+                progress = {
+                    'current': i + 1,
+                    'total': len(file_list),
+                    'file': result['file'],
+                    'success': result['success'],
+                    'error': result.get('error')
+                }
+                yield f"data: {json.dumps(progress)}\n\n"
             
-            results.append(result)
-            
-            # Send progress update
-            progress = {
-                'current': i + 1,
-                'total': len(file_list),
-                'file': result['file'],
-                'success': result['success'],
-                'error': result.get('error')
-            }
-            yield f"data: {json.dumps(progress)}\n\n"
-        
-        # Send final results
-        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+            # Send final results
+            yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+        except Exception as e:
+            # Critical error in streaming - log and send error completion
+            logging.error(f"CRITICAL: Streaming error in rename_selected_files: {e}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
+            yield f"data: {json.dumps({{'done': True, 'error': 'Streaming error: {str(e)}', 'results': results}})}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
 
@@ -1279,40 +1326,48 @@ def normalize_selected_files():
     # Streaming mode - send progress updates
     def generate():
         import json
+        import traceback
         results = []
-        for i, filepath in enumerate(file_list):
-            full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
-            result = {'file': os.path.basename(filepath)}
-            
-            if not os.path.exists(full_path):
-                result['success'] = False
-                result['error'] = 'File not found'
-            else:
-                try:
-                    mark_file_web_modified(full_path)
-                    final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
-                    mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
-                    result['success'] = True
-                    logging.info(f"Normalized metadata for file via web interface: {full_path}")
-                except Exception as e:
+        try:
+            for i, filepath in enumerate(file_list):
+                full_path = os.path.join(WATCHED_DIR, filepath) if WATCHED_DIR else filepath
+                result = {'file': os.path.basename(filepath)}
+                
+                if not os.path.exists(full_path):
                     result['success'] = False
-                    result['error'] = str(e)
-                    logging.error(f"Error normalizing metadata for file {full_path}: {e}")
+                    result['error'] = 'File not found'
+                else:
+                    try:
+                        mark_file_web_modified(full_path)
+                        final_filepath = process_file(full_path, fixtitle=True, fixseries=True, fixfilename=False)
+                        mark_file_processed_wrapper(final_filepath, original_filepath=full_path)
+                        result['success'] = True
+                        logging.info(f"Normalized metadata for file via web interface: {full_path}")
+                    except Exception as e:
+                        result['success'] = False
+                        result['error'] = str(e)
+                        logging.error(f"Error normalizing metadata for file {full_path}: {e}")
+                        logging.error(f"Traceback: {traceback.format_exc()}")
+                
+                results.append(result)
+                
+                # Send progress update
+                progress = {
+                    'current': i + 1,
+                    'total': len(file_list),
+                    'file': result['file'],
+                    'success': result['success'],
+                    'error': result.get('error')
+                }
+                yield f"data: {json.dumps(progress)}\n\n"
             
-            results.append(result)
-            
-            # Send progress update
-            progress = {
-                'current': i + 1,
-                'total': len(file_list),
-                'file': result['file'],
-                'success': result['success'],
-                'error': result.get('error')
-            }
-            yield f"data: {json.dumps(progress)}\n\n"
-        
-        # Send final results
-        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+            # Send final results
+            yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+        except Exception as e:
+            # Critical error in streaming - log and send error completion
+            logging.error(f"CRITICAL: Streaming error in normalize_selected_files: {e}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
+            yield f"data: {json.dumps({{'done': True, 'error': 'Streaming error: {str(e)}', 'results': results}})}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
 
@@ -1365,7 +1420,9 @@ def async_process_all_files():
     try:
         job_manager.start_job(job_id, process_item, files)
     except RuntimeError as e:
+        import traceback
         logging.error(f"[API] Failed to start job {job_id}: {e}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
         # Return generic error message to user (log contains details)
@@ -1439,7 +1496,9 @@ def async_process_selected_files():
     try:
         job_manager.start_job(job_id, process_item, full_paths)
     except RuntimeError as e:
+        import traceback
         logging.error(f"[API] Failed to start job {job_id}: {e}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
         # Return generic error message to user (log contains details)
@@ -1584,7 +1643,9 @@ def async_process_unmarked_files():
     try:
         job_manager.start_job(job_id, process_item, unmarked_files)
     except RuntimeError as e:
+        import traceback
         logging.error(f"[API] Failed to start job {job_id}: {e}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
         # Return generic error message to user (log contains details)
@@ -1651,7 +1712,9 @@ def async_rename_unmarked_files():
     try:
         job_manager.start_job(job_id, process_item, unmarked_files)
     except RuntimeError as e:
+        import traceback
         logging.error(f"[API] Failed to start job {job_id}: {e}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
         # Return generic error message to user (log contains details)
@@ -1717,7 +1780,9 @@ def async_normalize_unmarked_files():
     try:
         job_manager.start_job(job_id, process_item, unmarked_files)
     except RuntimeError as e:
+        import traceback
         logging.error(f"[API] Failed to start job {job_id}: {e}")
+        logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
         # Return generic error message to user (log contains details)
@@ -2077,36 +2142,44 @@ def process_unmarked_files():
     # Streaming mode - send progress updates
     def generate():
         import json
+        import traceback
         results = []
-        for i, filepath in enumerate(unmarked_files):
-            result = {'file': os.path.basename(filepath)}
+        try:
+            for i, filepath in enumerate(unmarked_files):
+                result = {'file': os.path.basename(filepath)}
+                
+                try:
+                    mark_file_web_modified(filepath)
+                    final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
+                    mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+                    handle_file_rename_in_store(filepath, final_filepath)
+                    result['success'] = True
+                    logging.info(f"Processed unmarked file via web interface: {filepath} -> {final_filepath}")
+                except Exception as e:
+                    result['success'] = False
+                    result['error'] = str(e)
+                    logging.error(f"Error processing unmarked file {filepath}: {e}")
+                    logging.error(f"Traceback: {traceback.format_exc()}")
+                
+                results.append(result)
+                
+                # Send progress update
+                progress = {
+                    'current': i + 1,
+                    'total': len(unmarked_files),
+                    'file': result['file'],
+                    'success': result['success'],
+                    'error': result.get('error')
+                }
+                yield f"data: {json.dumps(progress)}\n\n"
             
-            try:
-                mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=True)
-                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-                handle_file_rename_in_store(filepath, final_filepath)
-                result['success'] = True
-                logging.info(f"Processed unmarked file via web interface: {filepath} -> {final_filepath}")
-            except Exception as e:
-                result['success'] = False
-                result['error'] = str(e)
-                logging.error(f"Error processing unmarked file {filepath}: {e}")
-            
-            results.append(result)
-            
-            # Send progress update
-            progress = {
-                'current': i + 1,
-                'total': len(unmarked_files),
-                'file': result['file'],
-                'success': result['success'],
-                'error': result.get('error')
-            }
-            yield f"data: {json.dumps(progress)}\n\n"
-        
-        # Send final results
-        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+            # Send final results
+            yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+        except Exception as e:
+            # Critical error in streaming - log and send error completion
+            logging.error(f"CRITICAL: Streaming error in process_unmarked_files: {e}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
+            yield f"data: {json.dumps({{'done': True, 'error': 'Streaming error: {str(e)}', 'results': results}})}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
 
@@ -2159,36 +2232,44 @@ def rename_unmarked_files():
     # Streaming mode - send progress updates
     def generate():
         import json
+        import traceback
         results = []
-        for i, filepath in enumerate(unmarked_files):
-            result = {'file': os.path.basename(filepath)}
+        try:
+            for i, filepath in enumerate(unmarked_files):
+                result = {'file': os.path.basename(filepath)}
+                
+                try:
+                    mark_file_web_modified(filepath)
+                    final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
+                    mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+                    handle_file_rename_in_store(filepath, final_filepath)
+                    result['success'] = True
+                    logging.info(f"Renamed unmarked file via web interface: {filepath} -> {final_filepath}")
+                except Exception as e:
+                    result['success'] = False
+                    result['error'] = str(e)
+                    logging.error(f"Error renaming unmarked file {filepath}: {e}")
+                    logging.error(f"Traceback: {traceback.format_exc()}")
+                
+                results.append(result)
+                
+                # Send progress update
+                progress = {
+                    'current': i + 1,
+                    'total': len(unmarked_files),
+                    'file': result['file'],
+                    'success': result['success'],
+                    'error': result.get('error')
+                }
+                yield f"data: {json.dumps(progress)}\n\n"
             
-            try:
-                mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=False, fixseries=False, fixfilename=True)
-                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-                handle_file_rename_in_store(filepath, final_filepath)
-                result['success'] = True
-                logging.info(f"Renamed unmarked file via web interface: {filepath} -> {final_filepath}")
-            except Exception as e:
-                result['success'] = False
-                result['error'] = str(e)
-                logging.error(f"Error renaming unmarked file {filepath}: {e}")
-            
-            results.append(result)
-            
-            # Send progress update
-            progress = {
-                'current': i + 1,
-                'total': len(unmarked_files),
-                'file': result['file'],
-                'success': result['success'],
-                'error': result.get('error')
-            }
-            yield f"data: {json.dumps(progress)}\n\n"
-        
-        # Send final results
-        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+            # Send final results
+            yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+        except Exception as e:
+            # Critical error in streaming - log and send error completion
+            logging.error(f"CRITICAL: Streaming error in rename_unmarked_files: {e}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
+            yield f"data: {json.dumps({{'done': True, 'error': 'Streaming error: {str(e)}', 'results': results}})}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
 
@@ -2239,35 +2320,43 @@ def normalize_unmarked_files():
     # Streaming mode - send progress updates
     def generate():
         import json
+        import traceback
         results = []
-        for i, filepath in enumerate(unmarked_files):
-            result = {'file': os.path.basename(filepath)}
+        try:
+            for i, filepath in enumerate(unmarked_files):
+                result = {'file': os.path.basename(filepath)}
+                
+                try:
+                    mark_file_web_modified(filepath)
+                    final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
+                    mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
+                    result['success'] = True
+                    logging.info(f"Normalized metadata for unmarked file via web interface: {filepath}")
+                except Exception as e:
+                    result['success'] = False
+                    result['error'] = str(e)
+                    logging.error(f"Error normalizing metadata for unmarked file {filepath}: {e}")
+                    logging.error(f"Traceback: {traceback.format_exc()}")
+                
+                results.append(result)
+                
+                # Send progress update
+                progress = {
+                    'current': i + 1,
+                    'total': len(unmarked_files),
+                    'file': result['file'],
+                    'success': result['success'],
+                    'error': result.get('error')
+                }
+                yield f"data: {json.dumps(progress)}\n\n"
             
-            try:
-                mark_file_web_modified(filepath)
-                final_filepath = process_file(filepath, fixtitle=True, fixseries=True, fixfilename=False)
-                mark_file_processed_wrapper(final_filepath, original_filepath=filepath)
-                result['success'] = True
-                logging.info(f"Normalized metadata for unmarked file via web interface: {filepath}")
-            except Exception as e:
-                result['success'] = False
-                result['error'] = str(e)
-                logging.error(f"Error normalizing metadata for unmarked file {filepath}: {e}")
-            
-            results.append(result)
-            
-            # Send progress update
-            progress = {
-                'current': i + 1,
-                'total': len(unmarked_files),
-                'file': result['file'],
-                'success': result['success'],
-                'error': result.get('error')
-            }
-            yield f"data: {json.dumps(progress)}\n\n"
-        
-        # Send final results
-        yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+            # Send final results
+            yield f"data: {json.dumps({'done': True, 'results': results})}\n\n"
+        except Exception as e:
+            # Critical error in streaming - log and send error completion
+            logging.error(f"CRITICAL: Streaming error in normalize_unmarked_files: {e}")
+            logging.error(f"Traceback: {traceback.format_exc()}")
+            yield f"data: {json.dumps({{'done': True, 'error': 'Streaming error: {str(e)}', 'results': results}})}\n\n"
     
     return app.response_class(generate(), mimetype='text/event-stream')
 

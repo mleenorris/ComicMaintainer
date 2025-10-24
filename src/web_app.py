@@ -1541,8 +1541,14 @@ def async_process_unmarked_files():
     unmarked_files = []
     
     for filepath in files:
-        if not is_file_processed(filepath):
-            unmarked_files.append(filepath)
+        # Skip files that are already processed
+        if is_file_processed(filepath):
+            continue
+        # Validate file still exists before adding to job
+        if not os.path.exists(filepath):
+            logging.warning(f"[API] Skipping non-existent file: {filepath}")
+            continue
+        unmarked_files.append(filepath)
     
     if not unmarked_files:
         logging.warning("[API] No unmarked files found to process")
@@ -1609,8 +1615,14 @@ def async_rename_unmarked_files():
     unmarked_files = []
     
     for filepath in files:
-        if not is_file_processed(filepath):
-            unmarked_files.append(filepath)
+        # Skip files that are already processed
+        if is_file_processed(filepath):
+            continue
+        # Validate file still exists before adding to job
+        if not os.path.exists(filepath):
+            logging.warning(f"[API] Skipping non-existent file: {filepath}")
+            continue
+        unmarked_files.append(filepath)
     
     if not unmarked_files:
         logging.warning("[API] No unmarked files found to rename")
@@ -1676,8 +1688,14 @@ def async_normalize_unmarked_files():
     unmarked_files = []
     
     for filepath in files:
-        if not is_file_processed(filepath):
-            unmarked_files.append(filepath)
+        # Skip files that are already processed
+        if is_file_processed(filepath):
+            continue
+        # Validate file still exists before adding to job
+        if not os.path.exists(filepath):
+            logging.warning(f"[API] Skipping non-existent file: {filepath}")
+            continue
+        unmarked_files.append(filepath)
     
     if not unmarked_files:
         logging.warning("[API] No unmarked files found to normalize")
@@ -2037,10 +2055,13 @@ def process_unmarked_files():
     files = get_comic_files()
     unmarked_files = []
     
-    # Filter to only unmarked files
+    # Filter to only unmarked files that still exist
     for filepath in files:
         if not is_file_processed(filepath):
-            unmarked_files.append(filepath)
+            if os.path.exists(filepath):
+                unmarked_files.append(filepath)
+            else:
+                logging.warning(f"Skipping non-existent file: {filepath}")
     
     if not stream:
         # Non-streaming mode (backward compatible)
@@ -2119,10 +2140,13 @@ def rename_unmarked_files():
     files = get_comic_files()
     unmarked_files = []
     
-    # Filter to only unmarked files
+    # Filter to only unmarked files that still exist
     for filepath in files:
         if not is_file_processed(filepath):
-            unmarked_files.append(filepath)
+            if os.path.exists(filepath):
+                unmarked_files.append(filepath)
+            else:
+                logging.warning(f"Skipping non-existent file: {filepath}")
     
     if not stream:
         # Non-streaming mode (backward compatible)
@@ -2201,10 +2225,13 @@ def normalize_unmarked_files():
     files = get_comic_files()
     unmarked_files = []
     
-    # Filter to only unmarked files
+    # Filter to only unmarked files that still exist
     for filepath in files:
         if not is_file_processed(filepath):
-            unmarked_files.append(filepath)
+            if os.path.exists(filepath):
+                unmarked_files.append(filepath)
+            else:
+                logging.warning(f"Skipping non-existent file: {filepath}")
     
     if not stream:
         # Non-streaming mode (backward compatible)

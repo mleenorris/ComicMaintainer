@@ -2,6 +2,8 @@
 
 This guide explains how to deploy ComicMaintainer behind a reverse proxy for secure external access.
 
+> **Note**: ComicMaintainer also supports native HTTPS without a reverse proxy. See the [HTTPS Setup Guide](HTTPS_SETUP.md) for direct HTTPS configuration. This guide focuses on using reverse proxies, which is recommended for production deployments.
+
 ## Table of Contents
 - [Why Use a Reverse Proxy?](#why-use-a-reverse-proxy)
 - [Configuration Options](#configuration-options)

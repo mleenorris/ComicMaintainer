@@ -27,7 +27,28 @@ GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
 # Concurrency is provided by both multiple workers and ThreadPoolExecutor (default: 4 threads per worker, configurable via MAX_WORKERS)
 # Timeout increased to 600 seconds (10 minutes) to handle batch processing of large libraries
 # Reverse proxy support: --forwarded-allow-ips='*' trusts X-Forwarded-* headers from all proxies
-gunicorn --workers ${GUNICORN_WORKERS} --bind 0.0.0.0:${WEB_PORT} --timeout 600 --forwarded-allow-ips='*' web_app:app &
+
+# Build gunicorn command with optional SSL support
+GUNICORN_CMD="gunicorn --workers ${GUNICORN_WORKERS} --bind 0.0.0.0:${WEB_PORT} --timeout 600 --forwarded-allow-ips='*'"
+
+# Add SSL/TLS support if certificates are provided
+if [ -n "$SSL_CERTFILE" ] && [ -n "$SSL_KEYFILE" ]; then
+    if [ -f "$SSL_CERTFILE" ] && [ -f "$SSL_KEYFILE" ]; then
+        echo "Starting with HTTPS enabled (certificates found)"
+        GUNICORN_CMD="$GUNICORN_CMD --certfile $SSL_CERTFILE --keyfile $SSL_KEYFILE"
+        
+        # Add CA bundle if provided
+        if [ -n "$SSL_CA_CERTS" ] && [ -f "$SSL_CA_CERTS" ]; then
+            GUNICORN_CMD="$GUNICORN_CMD --ca-certs $SSL_CA_CERTS"
+        fi
+    else
+        echo "Warning: SSL_CERTFILE or SSL_KEYFILE not found, starting without HTTPS"
+    fi
+else
+    echo "Starting with HTTP only (no SSL certificates configured)"
+fi
+
+$GUNICORN_CMD web_app:app &
 WEB_PID=$!
 
 # Function to check if a process is running

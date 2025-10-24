@@ -142,7 +142,7 @@ def test_error_response_format():
         content = f.read()
     
     # Check that error handling returns proper JSON error with 500 status
-    if "return jsonify({'error': f'Failed to start processing job:" in content:
+    if "return jsonify({'error': 'Failed to start processing job" in content:
         print("   ✓ Error responses have correct format")
         if ", 500" in content:
             print("   ✓ Error responses return 500 status code")
@@ -151,6 +151,13 @@ def test_error_response_format():
             return False
     else:
         print("   ✗ Error responses don't have correct format")
+        return False
+    
+    # Check that error messages are generic (no exception details exposed)
+    if "'error': 'Failed to start processing job. Please try again.'" in content:
+        print("   ✓ Error messages are generic (no exception details exposed)")
+    else:
+        print("   ✗ Error messages may expose exception details")
         return False
     
     # Check that error handling clears active job

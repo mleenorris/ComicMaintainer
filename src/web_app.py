@@ -1368,7 +1368,8 @@ def async_process_all_files():
         logging.error(f"[API] Failed to start job {job_id}: {e}")
         # Clear active job since we failed to start
         clear_active_job()
-        return jsonify({'error': f'Failed to start processing job: {str(e)}'}), 500
+        # Return generic error message to user (log contains details)
+        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(files)} files")
     return jsonify({
@@ -1441,7 +1442,8 @@ def async_process_selected_files():
         logging.error(f"[API] Failed to start job {job_id}: {e}")
         # Clear active job since we failed to start
         clear_active_job()
-        return jsonify({'error': f'Failed to start processing job: {str(e)}'}), 500
+        # Return generic error message to user (log contains details)
+        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(full_paths)} files")
     return jsonify({
@@ -1565,7 +1567,8 @@ def async_process_unmarked_files():
         logging.error(f"[API] Failed to start job {job_id}: {e}")
         # Clear active job since we failed to start
         clear_active_job()
-        return jsonify({'error': f'Failed to start processing job: {str(e)}'}), 500
+        # Return generic error message to user (log contains details)
+        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
     return jsonify({
@@ -1631,7 +1634,8 @@ def async_rename_unmarked_files():
         logging.error(f"[API] Failed to start job {job_id}: {e}")
         # Clear active job since we failed to start
         clear_active_job()
-        return jsonify({'error': f'Failed to start processing job: {str(e)}'}), 500
+        # Return generic error message to user (log contains details)
+        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
     return jsonify({
@@ -1696,7 +1700,8 @@ def async_normalize_unmarked_files():
         logging.error(f"[API] Failed to start job {job_id}: {e}")
         # Clear active job since we failed to start
         clear_active_job()
-        return jsonify({'error': f'Failed to start processing job: {str(e)}'}), 500
+        # Return generic error message to user (log contains details)
+        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
     return jsonify({

@@ -50,6 +50,20 @@ docker run -d \
 
 **Important**: `BASE_PATH` must start with a forward slash (e.g., `/comics`, not `comics`).
 
+### PWA and Offline Support
+ComicMaintainer includes Progressive Web App (PWA) features that work seamlessly with reverse proxy deployments:
+
+- **Dynamic Asset Paths**: All static assets (icons, manifest, service worker) automatically adjust to your BASE_PATH
+- **Offline Caching**: Service worker caches static assets for offline access
+- **Installable**: Users can install the app on their devices from any reverse proxy URL
+
+The application automatically handles:
+- Manifest.json generation with correct paths for your deployment
+- Service worker registration with BASE_PATH awareness
+- All API and static asset URLs relative to your configured path
+
+No additional configuration is needed - PWA features work out of the box with both root path and subdirectory deployments.
+
 ## Nginx Configuration
 
 ### Root Path Deployment

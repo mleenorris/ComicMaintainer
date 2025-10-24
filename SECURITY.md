@@ -128,7 +128,9 @@ When deploying ComicMaintainer:
 
 3. **Network Security**
    - Expose only necessary ports
-   - Use reverse proxy with HTTPS for external access
+   - Enable HTTPS for external access (see [HTTPS Support](docs/HTTPS_SUPPORT.md))
+   - Use trusted SSL/TLS certificates in production
+   - Consider using a reverse proxy for additional security features
    - Consider using Docker networks for isolation
 
 4. **Keep Image Updated**

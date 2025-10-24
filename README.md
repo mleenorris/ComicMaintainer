@@ -630,6 +630,7 @@ The application is 100% event-driven with zero polling:
 ## Documentation
 
 - **[API Documentation](docs/API.md)** - Complete REST API reference
+- **[HTTPS Support](docs/HTTPS_SUPPORT.md)** - Comprehensive HTTPS configuration guide
 - **[Performance Tuning Guide](docs/PERFORMANCE_TUNING.md)** - Optimize performance for your system
 - **[Automated Versioning](docs/AUTOMATED_VERSIONING.md)** - How automatic version bumping works
 - **[Contributing Guide](CONTRIBUTING.md)** - How to contribute to the project

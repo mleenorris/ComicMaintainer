@@ -35,11 +35,6 @@ services:
       # Optional: Log file size limit in bytes (default: 5242880 = 5MB)
       - LOG_MAX_BYTES=5242880
       
-      # Optional: Base path for reverse proxy subdirectory deployment
-      # Set to serve from a subdirectory (e.g., /comics for example.com/comics)
-      # Must start with / and match your reverse proxy configuration
-      # - BASE_PATH=/comics
-      
       # Optional: Enable debug logging (default: false)
       # - DEBUG_MODE=true
       
@@ -52,9 +47,24 @@ services:
       # Mount certificate and key files, then set these environment variables
       # For production: Use certificates from a trusted CA (e.g., Let's Encrypt)
       # For development: Generate self-signed cert with /generate_self_signed_cert.sh
+      # Can also be configured via Settings UI or /Config/config.json
       # - SSL_CERTFILE=/Config/ssl/cert.crt
       # - SSL_KEYFILE=/Config/ssl/cert.key
       # - SSL_CA_CERTS=/Config/ssl/ca-bundle.crt  # Optional: CA certificate chain
+      
+      # Optional: Reverse Proxy Configuration
+      # Base path for subdirectory deployment (e.g., /comics for example.com/comics)
+      # Must start with / and match your reverse proxy configuration
+      # Can also be configured via Settings UI or /Config/config.json
+      # - BASE_PATH=/comics
+      
+      # Optional: Reverse proxy header trust levels (default: 1 for each)
+      # Set to 0 to disable, increase if you have multiple proxy layers
+      # Can also be configured via Settings UI or /Config/config.json
+      # - PROXY_X_FOR=1        # Trust X-Forwarded-For from 1 proxy
+      # - PROXY_X_PROTO=1      # Trust X-Forwarded-Proto from 1 proxy
+      # - PROXY_X_HOST=1       # Trust X-Forwarded-Host from 1 proxy
+      # - PROXY_X_PREFIX=1     # Trust X-Forwarded-Prefix from 1 proxy
     
     # Volumes
     volumes:

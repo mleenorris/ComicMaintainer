@@ -1,0 +1,17 @@
+{
+  "filename_format": "{series} - Chapter {issue}",
+  "watcher_enabled": true,
+  "log_max_bytes": 5242880,
+  "issue_number_padding": 4,
+  "github_token": "",
+  "github_repository": "mleenorris/ComicMaintainer",
+  "github_issue_assignee": "copilot",
+  "ssl_certfile": "",
+  "ssl_keyfile": "",
+  "ssl_ca_certs": "",
+  "base_path": "",
+  "proxy_x_for": 1,
+  "proxy_x_proto": 1,
+  "proxy_x_host": 1,
+  "proxy_x_prefix": 1
+}

@@ -10,6 +10,7 @@ Provides utilities for:
 import os
 import sys
 import logging
+from logging.handlers import RotatingFileHandler
 import traceback
 import json
 from datetime import datetime
@@ -23,12 +24,16 @@ GITHUB_REPO = os.environ.get('GITHUB_REPOSITORY', 'mleenorris/ComicMaintainer')
 GITHUB_ISSUE_ASSIGNEE = os.environ.get('GITHUB_ISSUE_ASSIGNEE', 'copilot')
 GITHUB_API_URL = os.environ.get('GITHUB_API_URL', 'https://api.github.com')
 
+# Track if debug file handler has been set up to avoid duplicates
+_debug_handler_setup = False
+
 
 
 
 def setup_debug_logging(logger_name: str = None) -> logging.Logger:
     """
     Setup debug logging configuration.
+    Creates a separate debug log file with rotation when DEBUG_MODE is enabled.
     
     Args:
         logger_name: Name of the logger (default: root logger)
@@ -36,12 +41,51 @@ def setup_debug_logging(logger_name: str = None) -> logging.Logger:
     Returns:
         Configured logger instance
     """
+    global _debug_handler_setup
+    
     logger = logging.getLogger(logger_name) if logger_name else logging.getLogger()
     
     # Set debug level if DEBUG_MODE is enabled
-    if DEBUG_MODE and logger.level > logging.DEBUG:
-        logger.setLevel(logging.DEBUG)
-        logging.info(f"Debug logging enabled for {logger_name or 'root logger'}")
+    if DEBUG_MODE:
+        if logger.level > logging.DEBUG:
+            logger.setLevel(logging.DEBUG)
+            logging.info(f"Debug logging enabled for {logger_name or 'root logger'}")
+        
+        # Set up debug-specific file handler (only once for root logger)
+        if not logger_name and not _debug_handler_setup:
+            try:
+                # Import config here to avoid circular imports
+                import config
+                from config import get_log_max_bytes
+                
+                # Get log directory from config module (allows test mocking)
+                CONFIG_DIR = getattr(config, 'CONFIG_DIR', '/Config')
+                LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
+                os.makedirs(LOG_DIR, exist_ok=True)
+                
+                # Get log rotation settings
+                log_max_bytes = get_log_max_bytes()
+                
+                # Create debug log file handler with rotation
+                debug_handler = RotatingFileHandler(
+                    os.path.join(LOG_DIR, "ComicMaintainer_debug.log"),
+                    maxBytes=log_max_bytes,
+                    backupCount=3
+                )
+                debug_handler.setLevel(logging.DEBUG)
+                debug_handler.setFormatter(
+                    logging.Formatter('%(asctime)s [%(name)s] %(levelname)s %(message)s')
+                )
+                
+                # Add debug handler to root logger
+                logger.addHandler(debug_handler)
+                _debug_handler_setup = True
+                
+                logging.info(f"Debug log file created: {os.path.join(LOG_DIR, 'ComicMaintainer_debug.log')}")
+                logging.debug("Debug file handler configured with rotation")
+                
+            except Exception as e:
+                logging.warning(f"Failed to setup debug log file: {e}")
     
     return logger
 

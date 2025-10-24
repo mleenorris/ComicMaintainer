@@ -1455,8 +1455,18 @@ def async_process_all_files():
         logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
-        # Return generic error message to user (log contains details)
-        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
+        # Return specific error message to help user understand the issue
+        error_msg = str(e)
+        # Make the message more user-friendly by providing context
+        if "not found in database" in error_msg:
+            user_msg = "Failed to start processing: job was not found. Please try again."
+        elif "already processing" in error_msg or "already completed" in error_msg:
+            user_msg = "Failed to start processing: job is already running or completed. Please refresh the page and try again."
+        elif "invalid job_id format" in error_msg:
+            user_msg = "Failed to start processing: internal error occurred. Please try again."
+        else:
+            user_msg = f"Failed to start processing: {error_msg}"
+        return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(files)} files")
     return jsonify({
@@ -1531,8 +1541,18 @@ def async_process_selected_files():
         logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
-        # Return generic error message to user (log contains details)
-        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
+        # Return specific error message to help user understand the issue
+        error_msg = str(e)
+        # Make the message more user-friendly by providing context
+        if "not found in database" in error_msg:
+            user_msg = "Failed to start processing: job was not found. Please try again."
+        elif "already processing" in error_msg or "already completed" in error_msg:
+            user_msg = "Failed to start processing: job is already running or completed. Please refresh the page and try again."
+        elif "invalid job_id format" in error_msg:
+            user_msg = "Failed to start processing: internal error occurred. Please try again."
+        else:
+            user_msg = f"Failed to start processing: {error_msg}"
+        return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(full_paths)} files")
     return jsonify({
@@ -1674,8 +1694,18 @@ def async_process_unmarked_files():
         logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
-        # Return generic error message to user (log contains details)
-        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
+        # Return specific error message to help user understand the issue
+        error_msg = str(e)
+        # Make the message more user-friendly by providing context
+        if "not found in database" in error_msg:
+            user_msg = "Failed to start processing: job was not found. Please try again."
+        elif "already processing" in error_msg or "already completed" in error_msg:
+            user_msg = "Failed to start processing: job is already running or completed. Please refresh the page and try again."
+        elif "invalid job_id format" in error_msg:
+            user_msg = "Failed to start processing: internal error occurred. Please try again."
+        else:
+            user_msg = f"Failed to start processing: {error_msg}"
+        return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
     return jsonify({
@@ -1739,8 +1769,18 @@ def async_rename_unmarked_files():
         logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
-        # Return generic error message to user (log contains details)
-        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
+        # Return specific error message to help user understand the issue
+        error_msg = str(e)
+        # Make the message more user-friendly by providing context
+        if "not found in database" in error_msg:
+            user_msg = "Failed to start renaming: job was not found. Please try again."
+        elif "already processing" in error_msg or "already completed" in error_msg:
+            user_msg = "Failed to start renaming: job is already running or completed. Please refresh the page and try again."
+        elif "invalid job_id format" in error_msg:
+            user_msg = "Failed to start renaming: internal error occurred. Please try again."
+        else:
+            user_msg = f"Failed to start renaming: {error_msg}"
+        return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
     return jsonify({
@@ -1803,8 +1843,18 @@ def async_normalize_unmarked_files():
         logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
-        # Return generic error message to user (log contains details)
-        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
+        # Return specific error message to help user understand the issue
+        error_msg = str(e)
+        # Make the message more user-friendly by providing context
+        if "not found in database" in error_msg:
+            user_msg = "Failed to start normalizing: job was not found. Please try again."
+        elif "already processing" in error_msg or "already completed" in error_msg:
+            user_msg = "Failed to start normalizing: job is already running or completed. Please refresh the page and try again."
+        elif "invalid job_id format" in error_msg:
+            user_msg = "Failed to start normalizing: internal error occurred. Please try again."
+        else:
+            user_msg = f"Failed to start normalizing: {error_msg}"
+        return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
     return jsonify({

@@ -75,8 +75,9 @@ for func_name in unmarked_functions:
     
     func_content = content[func_start:func_end]
     
-    # Check for file existence validation
-    has_validation = 'os.path.exists' in func_content
+    # Check for file existence validation (either direct or via helper function)
+    has_validation = ('os.path.exists' in func_content or 
+                     'filter_unmarked_existing_files' in func_content)
     
     if has_validation:
         print(f"   ✓ PASS: {func_name} validates file existence")

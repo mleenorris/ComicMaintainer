@@ -2593,7 +2593,7 @@
         // API helper functions for server-side preferences
         async function getPreferences() {
             try {
-                const response = await fetch(apiUrl('/api/preferences');
+                const response = await fetch(apiUrl('/api/preferences'));
                 if (!response.ok) {
                     console.error('Failed to get preferences:', response.status);
                     return {};
@@ -2613,7 +2613,7 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify(prefs)
-                });
+                }));
                 if (!response.ok) {
                     console.error('Failed to set preferences:', response.status);
                 }
@@ -2624,7 +2624,7 @@
         
         async function getActiveJobFromServer() {
             try {
-                const response = await fetch(apiUrl('/api/active-job');
+                const response = await fetch(apiUrl('/api/active-job'));
                 if (!response.ok) {
                     console.error('Failed to get active job:', response.status);
                     return null;
@@ -2645,7 +2645,7 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({ job_id: jobId, job_title: jobTitle })
-                });
+                }));
                 if (!response.ok) {
                     console.error('Failed to set active job:', response.status);
                 }
@@ -2658,7 +2658,7 @@
             try {
                 const response = await fetch(apiUrl('/api/active-job', {
                     method: 'DELETE'
-                });
+                }));
                 if (!response.ok) {
                     console.error('Failed to clear active job:', response.status);
                 }
@@ -2734,7 +2734,7 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({ enabled: enabled })
-                });
+                }));
                 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
@@ -2759,7 +2759,7 @@
         // Fetch and display version
         async function loadVersion() {
             try {
-                const response = await fetch(apiUrl('/api/version');
+                const response = await fetch(apiUrl('/api/version'));
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -3129,7 +3129,7 @@
         async function scanUnmarkedFiles() {
             try {
                 showMessage('Scanning for unmarked files...', 'info');
-                const response = await fetch(apiUrl('/api/scan-unmarked');
+                const response = await fetch(apiUrl('/api/scan-unmarked'));
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -3639,7 +3639,7 @@
                         files: files,
                         tags: tags
                     })
-                });
+                }));
                 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -3690,7 +3690,7 @@
             try {
                 const response = await fetch(apiUrl('/api/process-all?stream=true', {
                     method: 'POST'
-                });
+                }));
                 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -3742,7 +3742,7 @@
                 // Start the job
                 const response = await fetch(apiUrl('/api/jobs/process-all', {
                     method: 'POST'
-                });
+                }));
                 
                 if (!response.ok) {
                     console.error(`[BATCH] Failed to start processing (HTTP ${response.status})`);
@@ -3791,7 +3791,7 @@
                     body: JSON.stringify({
                         files: files
                     })
-                });
+                }));
                 
                 if (!response.ok) {
                     console.error(`[BATCH] Failed to start processing (HTTP ${response.status})`);
@@ -4065,7 +4065,7 @@
             try {
                 const response = await fetch(apiUrl('/api/rename-all?stream=true', {
                     method: 'POST'
-                });
+                }));
                 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -4119,7 +4119,7 @@
             try {
                 const response = await fetch(apiUrl('/api/normalize-all?stream=true', {
                     method: 'POST'
-                });
+                }));
                 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -4171,7 +4171,7 @@
                 // Start the job
                 const response = await fetch(apiUrl('/api/jobs/process-unmarked', {
                     method: 'POST'
-                });
+                }));
                 
                 if (!response.ok) {
                     console.error(`[BATCH] Failed to start processing unmarked files (HTTP ${response.status})`);
@@ -4207,7 +4207,7 @@
                 // Start the job
                 const response = await fetch(apiUrl('/api/jobs/rename-unmarked', {
                     method: 'POST'
-                });
+                }));
                 
                 if (!response.ok) {
                     console.error(`[BATCH] Failed to start renaming unmarked files (HTTP ${response.status})`);
@@ -4243,7 +4243,7 @@
                 // Start the job
                 const response = await fetch(apiUrl('/api/jobs/normalize-unmarked', {
                     method: 'POST'
-                });
+                }));
                 
                 if (!response.ok) {
                     console.error(`[BATCH] Failed to start normalizing unmarked files (HTTP ${response.status})`);
@@ -4292,7 +4292,7 @@
                     body: JSON.stringify({
                         files: files
                     })
-                });
+                }));
                 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -4356,7 +4356,7 @@
                     body: JSON.stringify({
                         files: files
                     })
-                });
+                }));
                 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -4420,7 +4420,7 @@
                     body: JSON.stringify({
                         files: files
                     })
-                });
+                }));
                 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
@@ -4592,7 +4592,7 @@
         async function openSettings() {
             try {
                 // Load filename format
-                const formatResponse = await fetch(apiUrl('/api/settings/filename-format');
+                const formatResponse = await fetch(apiUrl('/api/settings/filename-format'));
                 if (!formatResponse.ok) {
                     throw new Error(`HTTP error! status: ${formatResponse.status}`);
                 }
@@ -4606,7 +4606,7 @@
                 document.getElementById('themeSelect').value = currentTheme;
                 
                 // Load watcher status
-                const watcherResponse = await fetch(apiUrl('/api/settings/watcher-enabled');
+                const watcherResponse = await fetch(apiUrl('/api/settings/watcher-enabled'));
                 if (!watcherResponse.ok) {
                     throw new Error(`HTTP error! status: ${watcherResponse.status}`);
                 }
@@ -4614,7 +4614,7 @@
                 document.getElementById('watcherToggleCheckbox').checked = watcherData.enabled;
                 
                 // Load log max size
-                const logResponse = await fetch(apiUrl('/api/settings/log-max-bytes');
+                const logResponse = await fetch(apiUrl('/api/settings/log-max-bytes'));
                 if (!logResponse.ok) {
                     throw new Error(`HTTP error! status: ${logResponse.status}`);
                 }
@@ -4622,7 +4622,7 @@
                 document.getElementById('logMaxSize').value = Math.round(logData.maxMB);
                 
                 // Load issue number padding
-                const paddingResponse = await fetch(apiUrl('/api/settings/issue-number-padding');
+                const paddingResponse = await fetch(apiUrl('/api/settings/issue-number-padding'));
                 if (!paddingResponse.ok) {
                     throw new Error(`HTTP error! status: ${paddingResponse.status}`);
                 }
@@ -4630,7 +4630,7 @@
                 document.getElementById('issueNumberPadding').value = paddingData.padding;
                 
                 // Load GitHub token (masked)
-                const tokenResponse = await fetch(apiUrl('/api/settings/github-token');
+                const tokenResponse = await fetch(apiUrl('/api/settings/github-token'));
                 if (!tokenResponse.ok) {
                     throw new Error(`HTTP error! status: ${tokenResponse.status}`);
                 }
@@ -4640,7 +4640,7 @@
                 document.getElementById('githubToken').value = ''; // Don't populate actual value for security
                 
                 // Load GitHub repository
-                const repoResponse = await fetch(apiUrl('/api/settings/github-repository');
+                const repoResponse = await fetch(apiUrl('/api/settings/github-repository'));
                 if (!repoResponse.ok) {
                     throw new Error(`HTTP error! status: ${repoResponse.status}`);
                 }
@@ -4648,7 +4648,7 @@
                 document.getElementById('githubRepository').value = repoData.repository;
                 
                 // Load GitHub issue assignee
-                const assigneeResponse = await fetch(apiUrl('/api/settings/github-issue-assignee');
+                const assigneeResponse = await fetch(apiUrl('/api/settings/github-issue-assignee'));
                 if (!assigneeResponse.ok) {
                     throw new Error(`HTTP error! status: ${assigneeResponse.status}`);
                 }
@@ -4810,7 +4810,7 @@
         async function openAboutModal() {
             try {
                 // Load version
-                const response = await fetch(apiUrl('/api/version');
+                const response = await fetch(apiUrl('/api/version'));
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -4985,7 +4985,7 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({ format: format })
-                });
+                }));
                 
                 if (!formatResponse.ok) {
                     throw new Error(`HTTP error! status: ${formatResponse.status}`);
@@ -5004,7 +5004,7 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({ maxMB: logMaxSize })
-                });
+                }));
                 
                 if (!logResponse.ok) {
                     throw new Error(`HTTP error! status: ${logResponse.status}`);
@@ -5023,7 +5023,7 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({ padding: issueNumberPadding })
-                });
+                }));
                 
                 if (!paddingResponse.ok) {
                     throw new Error(`HTTP error! status: ${paddingResponse.status}`);
@@ -5048,7 +5048,7 @@
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({ token: githubToken })
-                    });
+                    }));
                     
                     if (!tokenResponse.ok) {
                         throw new Error(`HTTP error! status: ${tokenResponse.status}`);
@@ -5069,7 +5069,7 @@
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({ repository: githubRepository })
-                    });
+                    }));
                     
                     if (!repoResponse.ok) {
                         throw new Error(`HTTP error! status: ${repoResponse.status}`);
@@ -5089,7 +5089,7 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({ assignee: githubIssueAssignee })
-                });
+                }));
                 
                 if (!assigneeResponse.ok) {
                     throw new Error(`HTTP error! status: ${assigneeResponse.status}`);
@@ -5110,7 +5110,7 @@
         
         async function resetFilenameFormat() {
             try {
-                const response = await fetch(apiUrl('/api/settings/filename-format');
+                const response = await fetch(apiUrl('/api/settings/filename-format'));
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -5275,7 +5275,7 @@
         async function updateWatcherStatus() {
             // Fetch initial status on page load only, then rely on SSE for updates
             try {
-                const response = await fetch(apiUrl('/api/watcher/status');
+                const response = await fetch(apiUrl('/api/watcher/status'));
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }

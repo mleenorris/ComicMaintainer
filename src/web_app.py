@@ -243,6 +243,29 @@ def get_comic_files():
     
     return load_files_from_store()
 
+def filter_unmarked_existing_files(files):
+    """Filter files to only unmarked files that still exist on filesystem
+    
+    Args:
+        files: List of file paths to filter
+        
+    Returns:
+        List of unmarked files that exist on filesystem
+    """
+    unmarked_files = []
+    
+    for filepath in files:
+        # Skip files that are already processed
+        if is_file_processed(filepath):
+            continue
+        # Validate file still exists before adding to list
+        if not os.path.exists(filepath):
+            logging.warning(f"[API] Skipping non-existent file: {filepath}")
+            continue
+        unmarked_files.append(filepath)
+    
+    return unmarked_files
+
 def handle_file_rename_in_store(original_path, final_path):
     """Handle file rename in file store - record change if file was actually renamed"""
     if original_path != final_path:
@@ -1602,13 +1625,9 @@ def async_process_unmarked_files():
     
     logging.info("[API] Request to process unmarked files (async)")
     
-    # Get all files and filter to unmarked only
+    # Get all files and filter to unmarked only that exist
     files = get_comic_files()
-    unmarked_files = []
-    
-    for filepath in files:
-        if not is_file_processed(filepath):
-            unmarked_files.append(filepath)
+    unmarked_files = filter_unmarked_existing_files(files)
     
     if not unmarked_files:
         logging.warning("[API] No unmarked files found to process")
@@ -1672,13 +1691,9 @@ def async_rename_unmarked_files():
     
     logging.info("[API] Request to rename unmarked files (async)")
     
-    # Get all files and filter to unmarked only
+    # Get all files and filter to unmarked only that exist
     files = get_comic_files()
-    unmarked_files = []
-    
-    for filepath in files:
-        if not is_file_processed(filepath):
-            unmarked_files.append(filepath)
+    unmarked_files = filter_unmarked_existing_files(files)
     
     if not unmarked_files:
         logging.warning("[API] No unmarked files found to rename")
@@ -1741,13 +1756,9 @@ def async_normalize_unmarked_files():
     
     logging.info("[API] Request to normalize unmarked files (async)")
     
-    # Get all files and filter to unmarked only
+    # Get all files and filter to unmarked only that exist
     files = get_comic_files()
-    unmarked_files = []
-    
-    for filepath in files:
-        if not is_file_processed(filepath):
-            unmarked_files.append(filepath)
+    unmarked_files = filter_unmarked_existing_files(files)
     
     if not unmarked_files:
         logging.warning("[API] No unmarked files found to normalize")
@@ -2107,12 +2118,9 @@ def process_unmarked_files():
     
     stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
-    unmarked_files = []
     
-    # Filter to only unmarked files
-    for filepath in files:
-        if not is_file_processed(filepath):
-            unmarked_files.append(filepath)
+    # Filter to only unmarked files that still exist
+    unmarked_files = filter_unmarked_existing_files(files)
     
     if not stream:
         # Non-streaming mode (backward compatible)
@@ -2198,12 +2206,9 @@ def rename_unmarked_files():
     
     stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
-    unmarked_files = []
     
-    # Filter to only unmarked files
-    for filepath in files:
-        if not is_file_processed(filepath):
-            unmarked_files.append(filepath)
+    # Filter to only unmarked files that still exist
+    unmarked_files = filter_unmarked_existing_files(files)
     
     if not stream:
         # Non-streaming mode (backward compatible)
@@ -2289,12 +2294,9 @@ def normalize_unmarked_files():
     
     stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
-    unmarked_files = []
     
-    # Filter to only unmarked files
-    for filepath in files:
-        if not is_file_processed(filepath):
-            unmarked_files.append(filepath)
+    # Filter to only unmarked files that still exist
+    unmarked_files = filter_unmarked_existing_files(files)
     
     if not stream:
         # Non-streaming mode (backward compatible)

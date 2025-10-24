@@ -5,6 +5,7 @@ from logging.handlers import RotatingFileHandler
 import json
 import fcntl
 from flask import Flask, render_template, jsonify, request, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
 from comicapi.comicarchive import ComicArchive
 import glob
 import threading
@@ -73,6 +74,27 @@ log_handler.setFormatter(logging.Formatter('%(asctime)s [WEBPAGE] %(levelname)s 
 logging.getLogger().addHandler(log_handler)
 
 app = Flask(__name__)
+
+# Configure reverse proxy support
+# ProxyFix middleware handles X-Forwarded-* headers from reverse proxies
+# This ensures the application generates correct URLs when behind nginx, Traefik, Apache, etc.
+app.wsgi_app = ProxyFix(
+    app.wsgi_app,
+    x_for=1,      # Trust X-Forwarded-For
+    x_proto=1,    # Trust X-Forwarded-Proto (http/https)
+    x_host=1,     # Trust X-Forwarded-Host
+    x_prefix=1    # Trust X-Forwarded-Prefix (for subdirectory deployments)
+)
+
+# Optional: Support for serving from a subdirectory (e.g., /comics/)
+# Set BASE_PATH environment variable to the path prefix (must start with /)
+BASE_PATH = os.environ.get('BASE_PATH', '').rstrip('/')
+if BASE_PATH and not BASE_PATH.startswith('/'):
+    logging.warning(f"BASE_PATH must start with '/'. Ignoring invalid value: {BASE_PATH}")
+    BASE_PATH = ''
+if BASE_PATH:
+    logging.info(f"Application will be served from base path: {BASE_PATH}")
+    app.config['APPLICATION_ROOT'] = BASE_PATH
 
 # Configure Flask for better performance
 app.config['JSON_SORT_KEYS'] = False  # Don't sort JSON keys (faster)

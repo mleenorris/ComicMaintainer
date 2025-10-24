@@ -121,6 +121,9 @@ docker run -d \
   - Large libraries (>5000 files): 128-256MB
   - See [Performance Tuning Guide](docs/PERFORMANCE_TUNING.md) for detailed recommendations
 
+#### Reverse Proxy Support (Optional)
+- `BASE_PATH`: Path prefix for subdirectory deployments (default: empty). Set to serve the application from a subdirectory, e.g., `/comics` to access at `example.com/comics`. Must start with a forward slash. The application automatically handles reverse proxy headers (`X-Forwarded-*`) for proper URL generation. See [Reverse Proxy Guide](docs/REVERSE_PROXY.md) for detailed configuration examples (Nginx, Traefik, Apache, Caddy).
+
 #### Debug Logging and Error Reporting (Optional)
 - `DEBUG_MODE`: Enable extensive debug logging throughout the application (default: `false`). Set to `true` to enable detailed debug output including function entry/exit, parameter values, and operation details.
 - `GITHUB_TOKEN`: GitHub Personal Access Token for automatic issue creation on errors (optional). When set, errors will automatically create GitHub issues with full context and stack traces.
@@ -524,6 +527,7 @@ The application is 100% event-driven with zero polling:
 ## Documentation
 
 - **[API Documentation](docs/API.md)** - Complete REST API reference
+- **[Reverse Proxy Setup Guide](docs/REVERSE_PROXY.md)** - Deploy behind Nginx, Traefik, Apache, or Caddy
 - **[Performance Tuning Guide](docs/PERFORMANCE_TUNING.md)** - Optimize performance for your system
 - **[Automated Versioning](docs/AUTOMATED_VERSIONING.md)** - How automatic version bumping works
 - **[Contributing Guide](CONTRIBUTING.md)** - How to contribute to the project

@@ -35,6 +35,11 @@ services:
       # Optional: Log file size limit in bytes (default: 5242880 = 5MB)
       - LOG_MAX_BYTES=5242880
       
+      # Optional: Base path for reverse proxy subdirectory deployment
+      # Set to serve from a subdirectory (e.g., /comics for example.com/comics)
+      # Must start with / and match your reverse proxy configuration
+      # - BASE_PATH=/comics
+      
       # Optional: Enable debug logging (default: false)
       # - DEBUG_MODE=true
       

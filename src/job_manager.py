@@ -130,7 +130,7 @@ class JobManager:
         
         job = job_store.get_job(job_id)
         if not job:
-            error_msg = f"Cannot start job - not found in database"
+            error_msg = "Cannot start job - not found in database"
             logging.error(f"[JOB {job_id}] {error_msg}")
             log_debug("Job not found in database", job_id=job_id)
             raise RuntimeError(error_msg)

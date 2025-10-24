@@ -129,8 +129,34 @@ For direct HTTPS support without a reverse proxy:
 
 **Note**: For production deployments, use certificates from a trusted Certificate Authority (e.g., Let's Encrypt). For development/testing, you can generate a self-signed certificate using the included script. See the [HTTPS Configuration](#https-configuration) section below for detailed setup instructions.
 
+**Configuration Methods**: All HTTPS settings can be configured via:
+1. Environment variables (shown above)
+2. Settings UI (⚙️ Settings → HTTPS/SSL Configuration)
+3. Config file at `/Config/config.json` (manually edit `ssl_certfile`, `ssl_keyfile`, `ssl_ca_certs`)
+
+**Note**: Changes to HTTPS settings require application restart to take effect.
+
 #### Reverse Proxy Support (Optional)
-- `BASE_PATH`: Path prefix for subdirectory deployments (default: empty). Set to serve the application from a subdirectory, e.g., `/comics` to access at `example.com/comics`. Must start with a forward slash. The application automatically handles reverse proxy headers (`X-Forwarded-*`) for proper URL generation and **automatically enables security headers (HSTS, CSP) when accessed via HTTPS**. See [Reverse Proxy Guide](docs/REVERSE_PROXY.md) for detailed configuration examples (Nginx, Traefik, Apache, Caddy).
+The application automatically handles reverse proxy headers (`X-Forwarded-*`) for proper URL generation and **automatically enables security headers (HSTS, CSP) when accessed via HTTPS**. See [Reverse Proxy Guide](docs/REVERSE_PROXY.md) for detailed configuration examples (Nginx, Traefik, Apache, Caddy).
+
+**Base Path Configuration**:
+- `BASE_PATH`: Path prefix for subdirectory deployments (default: empty). Set to serve the application from a subdirectory, e.g., `/comics` to access at `example.com/comics`. Must start with a forward slash.
+
+**Proxy Trust Configuration** (Advanced):
+Configure how many reverse proxy servers to trust for forwarded headers:
+- `PROXY_X_FOR`: Trust level for X-Forwarded-For header (default: `1`)
+- `PROXY_X_PROTO`: Trust level for X-Forwarded-Proto header (default: `1`)
+- `PROXY_X_HOST`: Trust level for X-Forwarded-Host header (default: `1`)
+- `PROXY_X_PREFIX`: Trust level for X-Forwarded-Prefix header (default: `1`)
+
+Set to `0` to disable trusting that header, or increase if you have multiple proxy layers.
+
+**Configuration Methods**: All reverse proxy settings can be configured via:
+1. Environment variables (shown above)
+2. Settings UI (⚙️ Settings → Reverse Proxy Configuration)
+3. Config file at `/Config/config.json` (manually edit `base_path`, `proxy_x_for`, `proxy_x_proto`, `proxy_x_host`, `proxy_x_prefix`)
+
+**Note**: Changes to reverse proxy settings require application restart to take effect.
 
 #### Debug Logging and Error Reporting (Optional)
 - `DEBUG_MODE`: Enable extensive debug logging throughout the application (default: `false`). Set to `true` to enable detailed debug output including function entry/exit, parameter values, and operation details.

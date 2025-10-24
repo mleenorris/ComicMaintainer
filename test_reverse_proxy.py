@@ -46,11 +46,11 @@ def test_proxyfix_in_code():
     checks = [
         ('from werkzeug.middleware.proxy_fix import ProxyFix', 'ProxyFix import'),
         ('app.wsgi_app = ProxyFix', 'ProxyFix middleware applied'),
-        ('x_for=1', 'X-Forwarded-For configured'),
-        ('x_proto=1', 'X-Forwarded-Proto configured'),
-        ('x_host=1', 'X-Forwarded-Host configured'),
-        ('x_prefix=1', 'X-Forwarded-Prefix configured'),
-        ("BASE_PATH = os.environ.get('BASE_PATH'", 'BASE_PATH environment variable support'),
+        ('x_for=get_proxy_x_for()', 'X-Forwarded-For configured (dynamic)'),
+        ('x_proto=get_proxy_x_proto()', 'X-Forwarded-Proto configured (dynamic)'),
+        ('x_host=get_proxy_x_host()', 'X-Forwarded-Host configured (dynamic)'),
+        ('x_prefix=get_proxy_x_prefix()', 'X-Forwarded-Prefix configured (dynamic)'),
+        ('BASE_PATH = get_base_path()', 'BASE_PATH configured (dynamic)'),
     ]
     
     all_passed = True

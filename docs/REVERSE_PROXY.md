@@ -35,9 +35,25 @@ The application automatically respects standard reverse proxy headers:
 - `X-Forwarded-Host`: Original hostname
 - `X-Forwarded-Prefix`: Path prefix for subdirectory deployments
 
-### Base Path Support
-You can deploy ComicMaintainer at a subdirectory path using the `BASE_PATH` environment variable:
+**Trust Configuration**: You can configure how many proxy servers to trust for each header:
+- `PROXY_X_FOR`: Number of proxies to trust for X-Forwarded-For (default: 1)
+- `PROXY_X_PROTO`: Number of proxies to trust for X-Forwarded-Proto (default: 1)
+- `PROXY_X_HOST`: Number of proxies to trust for X-Forwarded-Host (default: 1)
+- `PROXY_X_PREFIX`: Number of proxies to trust for X-Forwarded-Prefix (default: 1)
 
+Set to `0` to disable trusting that header. Increase if you have multiple proxy layers (e.g., CloudFlare → Nginx → Application).
+
+**Configuration Methods**:
+1. Environment variables (e.g., `PROXY_X_FOR=2`)
+2. Settings UI (⚙️ Settings → Reverse Proxy Configuration)
+3. Config file at `/Config/config.json` (manually edit `proxy_x_for`, etc.)
+
+**Note**: Changes require application restart to take effect.
+
+### Base Path Support
+You can deploy ComicMaintainer at a subdirectory path using the `BASE_PATH` configuration:
+
+**Environment Variable:**
 ```bash
 docker run -d \
   -e BASE_PATH=/comics \
@@ -48,7 +64,11 @@ docker run -d \
   iceburn1/comictagger-watcher:latest
 ```
 
-**Important**: `BASE_PATH` must start with a forward slash (e.g., `/comics`, not `comics`).
+**Or via Settings UI**: Navigate to ⚙️ Settings → Reverse Proxy Configuration → Base Path
+
+**Or manually in config file**: Edit `/Config/config.json` and set `"base_path": "/comics"`
+
+**Important**: `BASE_PATH` must start with a forward slash (e.g., `/comics`, not `comics`). Changes require application restart.
 
 ### PWA and Offline Support
 ComicMaintainer includes Progressive Web App (PWA) features that work seamlessly with reverse proxy deployments:

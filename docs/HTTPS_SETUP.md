@@ -40,9 +40,11 @@ openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
   -addext "subjectAltName=DNS:localhost,DNS:*.localhost,IP:127.0.0.1"
 ```
 
-#### Step 2: Run with HTTPS
+#### Step 2: Configure HTTPS
 
-**Docker CLI:**
+HTTPS settings can be configured in three ways:
+
+**Option A: Environment Variables (Recommended for Docker)**
 ```bash
 docker run -d \
   --name comictagger-watcher \
@@ -81,6 +83,24 @@ services:
     ports:
       - "5000:5000"
 ```
+
+**Option B: Settings UI**
+1. Start the application without HTTPS
+2. Navigate to ⚙️ Settings → HTTPS/SSL Configuration
+3. Enter the certificate and key file paths
+4. Save settings
+5. Restart the application
+
+**Option C: Config File**
+Manually edit `/Config/config.json`:
+```json
+{
+  "ssl_certfile": "/Config/ssl/selfsigned.crt",
+  "ssl_keyfile": "/Config/ssl/selfsigned.key",
+  "ssl_ca_certs": ""
+}
+```
+Then restart the application.
 
 #### Step 3: Access the Application
 

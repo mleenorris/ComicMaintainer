@@ -29,7 +29,7 @@ GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
 # Reverse proxy support: --forwarded-allow-ips='*' trusts X-Forwarded-* headers from all proxies
 
 # Build gunicorn command with optional SSL support
-GUNICORN_CMD="gunicorn --workers ${GUNICORN_WORKERS} --bind 0.0.0.0:${WEB_PORT} --timeout 600 --forwarded-allow-ips='*'"
+GUNICORN_CMD="gunicorn --workers ${GUNICORN_WORKERS} --bind 0.0.0.0:${WEB_PORT} --timeout 600 --forwarded-allow-ips=*"
 
 # Add SSL/TLS support if certificates are provided
 if [ -n "$SSL_CERTFILE" ] && [ -n "$SSL_KEYFILE" ]; then

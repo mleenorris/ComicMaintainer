@@ -26,9 +26,15 @@ http://localhost:5000
 
 Replace `localhost:5000` with your actual host and port.
 
+**Note:** When deployed behind a reverse proxy, use the proxy's URL instead. For example:
+- Root path deployment: `https://comicmaintainer.example.com`
+- Path prefix deployment: `https://example.com/comics`
+
+See [Reverse Proxy Deployment Guide](REVERSE_PROXY.md) for configuration details.
+
 ## Authentication
 
-Currently, the API does not require authentication. Consider adding authentication if exposing the API to the internet.
+Currently, the API does not require authentication. Consider adding authentication if exposing the API to the internet. Authentication can be implemented at the reverse proxy level (e.g., nginx basic auth, OAuth2 proxy).
 
 ## Health Check
 

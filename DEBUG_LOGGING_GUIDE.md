@@ -15,6 +15,24 @@ The application now supports comprehensive debug logging that can be enabled via
 docker run -e DEBUG_MODE=true ...
 ```
 
+**Log Files:**
+
+When `DEBUG_MODE` is enabled, the application creates two separate log files:
+
+- **`ComicMaintainer.log`** - Regular application log (INFO, WARNING, ERROR levels)
+  - Location: `/Config/Log/ComicMaintainer.log`
+  - Contains standard operational messages
+  
+- **`ComicMaintainer_debug.log`** - Debug-specific log (all levels including DEBUG)
+  - Location: `/Config/Log/ComicMaintainer_debug.log`
+  - Contains detailed debug messages plus all regular messages
+  - Only created when `DEBUG_MODE=true`
+
+Both log files use **rotating file handlers** with the same configuration:
+- **Max Size:** Configurable via `LOG_MAX_BYTES` environment variable (default: 5MB)
+- **Backup Count:** 3 backup files (e.g., `.log.1`, `.log.2`, `.log.3`)
+- **Rotation:** Automatic when max size is reached
+
 **What gets logged in debug mode:**
 - Function entry and exit with parameters and return values
 - Detailed operation tracking (file checks, cache operations, metadata processing)
@@ -159,6 +177,7 @@ The following modules have been enhanced with debug logging:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DEBUG_MODE` | `false` | Enable extensive debug logging |
+| `LOG_MAX_BYTES` | `5242880` (5MB) | Maximum size of each log file before rotation |
 | `GITHUB_TOKEN` | - | GitHub Personal Access Token for issue creation |
 | `GITHUB_REPOSITORY` | `mleenorris/ComicMaintainer` | Repository for issue creation |
 | `GITHUB_ISSUE_ASSIGNEE` | `copilot` | Username to assign auto-generated issues |
@@ -179,7 +198,17 @@ docker run -d \
 
 View logs:
 ```bash
+# View container console output
 docker logs -f <container_id>
+
+# View regular application log
+docker exec <container_id> tail -f /Config/Log/ComicMaintainer.log
+
+# View debug log (only when DEBUG_MODE=true)
+docker exec <container_id> tail -f /Config/Log/ComicMaintainer_debug.log
+
+# View all debug log files (including rotated backups)
+docker exec <container_id> ls -lh /Config/Log/
 ```
 
 ### Example 2: Enable Debug Mode + GitHub Issues
@@ -210,8 +239,9 @@ docker run -d \
 
 ### Debug logs not appearing
 - Verify `DEBUG_MODE=true` is set (case-insensitive)
-- Check log level is set to DEBUG
-- View container logs: `docker logs <container_id>`
+- Check that `ComicMaintainer_debug.log` file exists in `/Config/Log/`
+- Verify the debug log file has content: `docker exec <container_id> cat /Config/Log/ComicMaintainer_debug.log`
+- View container console logs: `docker logs <container_id>`
 
 ### GitHub issues not being created
 - Verify `GITHUB_TOKEN` is set and valid
@@ -221,8 +251,10 @@ docker run -d \
 
 ### Too many debug logs
 - Debug mode is very verbose - use only for troubleshooting
-- Consider using log rotation settings (`LOG_MAX_BYTES`)
+- Adjust log rotation settings with `LOG_MAX_BYTES` environment variable (e.g., `-e LOG_MAX_BYTES=10485760` for 10MB)
+- Debug logs are automatically rotated to keep up to 3 backup files
 - Filter logs: `docker logs <container_id> | grep ERROR`
+- View only ERROR level messages: `docker exec <container_id> grep ERROR /Config/Log/ComicMaintainer.log`
 
 ### Duplicate issues being created
 - System caches up to 100 unique error IDs
@@ -233,11 +265,14 @@ docker run -d \
 ## Best Practices
 
 1. **Use debug mode selectively**: Only enable when troubleshooting issues
-2. **Monitor log file size**: Debug mode generates significantly more logs
-3. **Secure your GitHub token**: Store in Docker secrets or environment files
-4. **Review auto-generated issues**: They provide valuable diagnostic information
-5. **Disable GitHub issues in development**: Set `GITHUB_TOKEN` only in production
-6. **Use error IDs for tracking**: Reference the error ID when investigating issues
+2. **Monitor log file size**: Debug mode generates significantly more logs (stored in separate file)
+3. **Check debug log location**: Debug logs are written to `/Config/Log/ComicMaintainer_debug.log`
+4. **Leverage log rotation**: Both log files automatically rotate with configurable size limits
+5. **Secure your GitHub token**: Store in Docker secrets or environment files
+6. **Review auto-generated issues**: They provide valuable diagnostic information
+7. **Disable GitHub issues in development**: Set `GITHUB_TOKEN` only in production
+8. **Use error IDs for tracking**: Reference the error ID when investigating issues
+9. **Persist logs**: Mount `/Config` volume to preserve logs across container restarts
 
 ## Performance Impact
 

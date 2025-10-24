@@ -58,7 +58,7 @@ def test_template_base_path():
     fetch_count_single = content.count("fetch(apiUrl('/api")
     fetch_count_backtick = content.count("fetch(apiUrl(`/api")
     fetch_count = fetch_count_single + fetch_count_backtick
-    if fetch_count >= 40:  # We expect at least 40 API calls (36 with single quotes + ~13 with backticks)
+    if fetch_count >= 40:  # We expect at least 40 API calls (currently 36 with single quotes + 12 with backticks = 48)
         print(f"✓ Found {fetch_count} fetch calls using apiUrl helper ({fetch_count_single} with single quotes, {fetch_count_backtick} with backticks)")
         result5 = True
     else:

@@ -20,6 +20,16 @@ Implemented comprehensive reverse proxy support for ComicMaintainer, enabling se
   - Strips trailing slashes automatically
   - Sets Flask's `APPLICATION_ROOT` config when BASE_PATH is provided
 
+- **Security Headers for HTTPS**: Automatically enables security headers when HTTPS is detected
+  - **HSTS (HTTP Strict Transport Security)**: Tells browsers to always use HTTPS
+    - `max-age=31536000` (1 year)
+    - `includeSubDomains` to cover all subdomains
+  - **CSP (Content Security Policy)**: `upgrade-insecure-requests` directive
+    - Automatically upgrades HTTP requests to HTTPS
+    - Prevents mixed content warnings in browsers
+  - Headers are only added when `X-Forwarded-Proto: https` or `request.scheme == 'https'`
+  - Solves "Connection Not Secure" warnings in Chrome when using reverse proxy
+
 ```python
 # Configure reverse proxy support
 app.wsgi_app = ProxyFix(
@@ -202,28 +212,36 @@ Nginx config forwards `/comics/` to port 5000 with `X-Forwarded-Prefix` header.
 - ✓ Bandit security scan
 - ✓ Input validation testing
 - ✓ No new vulnerabilities
+- ✓ Security headers integration test
 
 ### Integration Testing
 - ✓ Flask app initialization
 - ✓ Environment variable handling
 - ✓ Gunicorn configuration
 - ✓ BASE_PATH validation
+- ✓ HTTPS detection and security headers
 
 ## Files Modified
 
 ```
-Modified (6 files):
+Original Implementation (6 files modified, 2 created):
 - Dockerfile              (+ 2 lines)
 - README.md               (+ 4 lines)
 - docker-compose.yml      (+ 5 lines)
 - src/web_app.py         (+22 lines)
 - start.sh               (+ 3 lines, -1 line)
+- docs/REVERSE_PROXY.md  (+488 lines, created)
+- test_reverse_proxy.py  (+143 lines, created)
 
-Created (2 files):
-- docs/REVERSE_PROXY.md  (+488 lines)
-- test_reverse_proxy.py  (+143 lines)
+Security Headers Update (4 files modified, 1 created):
+- src/web_app.py                     (+10 lines for security headers)
+- docs/REVERSE_PROXY.md              (+30 lines for troubleshooting)
+- README.md                          (+1 line for security mention)
+- test_reverse_proxy.py              (+3 lines for security test)
+- test_security_headers.py           (+97 lines, created)
+- REVERSE_PROXY_IMPLEMENTATION.md    (+15 lines, documentation update)
 
-Total Changes: +666 lines, -1 line
+Total Changes: +815 lines, -1 line
 ```
 
 ## Next Steps

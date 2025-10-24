@@ -1465,7 +1465,8 @@ def async_process_all_files():
         elif "invalid job_id format" in error_msg:
             user_msg = "Failed to start processing: internal error occurred. Please try again."
         else:
-            user_msg = f"Failed to start processing: {error_msg}"
+            # For any other error, use a generic message to avoid exposing internal details
+            user_msg = "Failed to start processing: an unexpected error occurred. Please try again."
         return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(files)} files")
@@ -1551,7 +1552,8 @@ def async_process_selected_files():
         elif "invalid job_id format" in error_msg:
             user_msg = "Failed to start processing: internal error occurred. Please try again."
         else:
-            user_msg = f"Failed to start processing: {error_msg}"
+            # For any other error, use a generic message to avoid exposing internal details
+            user_msg = "Failed to start processing: an unexpected error occurred. Please try again."
         return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(full_paths)} files")
@@ -1704,7 +1706,8 @@ def async_process_unmarked_files():
         elif "invalid job_id format" in error_msg:
             user_msg = "Failed to start processing: internal error occurred. Please try again."
         else:
-            user_msg = f"Failed to start processing: {error_msg}"
+            # For any other error, use a generic message to avoid exposing internal details
+            user_msg = "Failed to start processing: an unexpected error occurred. Please try again."
         return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
@@ -1779,7 +1782,8 @@ def async_rename_unmarked_files():
         elif "invalid job_id format" in error_msg:
             user_msg = "Failed to start renaming: internal error occurred. Please try again."
         else:
-            user_msg = f"Failed to start renaming: {error_msg}"
+            # For any other error, use a generic message to avoid exposing internal details
+            user_msg = "Failed to start renaming: an unexpected error occurred. Please try again."
         return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
@@ -1853,7 +1857,8 @@ def async_normalize_unmarked_files():
         elif "invalid job_id format" in error_msg:
             user_msg = "Failed to start normalizing: internal error occurred. Please try again."
         else:
-            user_msg = f"Failed to start normalizing: {error_msg}"
+            # For any other error, use a generic message to avoid exposing internal details
+            user_msg = "Failed to start normalizing: an unexpected error occurred. Please try again."
         return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")

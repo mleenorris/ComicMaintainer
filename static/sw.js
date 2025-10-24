@@ -1,12 +1,14 @@
 // Service Worker for Comic Maintainer PWA
 // Provides basic offline support and caching
 
-const CACHE_NAME = 'comic-maintainer-v1';
+const CACHE_NAME = 'comic-maintainer-v2';
 const urlsToCache = [
   '/',
   '/manifest.json',
   '/static/icons/icon-192x192.png',
   '/static/icons/icon-512x512.png',
+  '/static/icons/icon-192x192-maskable.png',
+  '/static/icons/icon-512x512-maskable.png',
   '/static/icons/apple-touch-icon.png',
   '/static/icons/favicon-32x32.png',
   '/static/icons/favicon-16x16.png'

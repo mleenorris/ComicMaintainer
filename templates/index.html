@@ -2295,6 +2295,96 @@
                         <strong>Note:</strong> Can also be configured via the <code>GITHUB_ISSUE_ASSIGNEE</code> environment variable.
                     </small>
                 </div>
+                
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">HTTPS/SSL Configuration</h3>
+                <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
+                    Configure HTTPS/SSL settings for direct HTTPS support. Changes require application restart.
+                </p>
+                <div class="form-group">
+                    <label for="sslCertfile">SSL Certificate File Path</label>
+                    <input type="text" id="sslCertfile" placeholder="/Config/ssl/cert.crt" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Path to SSL certificate file. Leave empty to disable direct HTTPS.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>SSL_CERTFILE</code> environment variable.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="sslKeyfile">SSL Key File Path</label>
+                    <input type="text" id="sslKeyfile" placeholder="/Config/ssl/cert.key" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Path to SSL private key file.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>SSL_KEYFILE</code> environment variable.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="sslCaCerts">SSL CA Certificates Path (Optional)</label>
+                    <input type="text" id="sslCaCerts" placeholder="/Config/ssl/ca-bundle.crt" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Path to CA certificate bundle for certificate chains. Leave empty if not needed.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>SSL_CA_CERTS</code> environment variable.
+                    </small>
+                </div>
+                
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Reverse Proxy Configuration</h3>
+                <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
+                    Configure reverse proxy settings for deployments behind nginx, Traefik, Apache, or Caddy. Changes require application restart.
+                </p>
+                <div class="form-group">
+                    <label for="basePath">Base Path (Subdirectory)</label>
+                    <input type="text" id="basePath" placeholder="/comics" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Path prefix for subdirectory deployments (e.g., <code>/comics</code> to access at example.com/comics). Must start with a forward slash. Leave empty for root path deployment.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>BASE_PATH</code> environment variable.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="proxyXFor">X-Forwarded-For Trust Level</label>
+                    <input type="number" id="proxyXFor" min="0" max="10" step="1" placeholder="1" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Number of reverse proxy servers to trust for X-Forwarded-For header (default: 1). Set to 0 to disable.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>PROXY_X_FOR</code> environment variable.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="proxyXProto">X-Forwarded-Proto Trust Level</label>
+                    <input type="number" id="proxyXProto" min="0" max="10" step="1" placeholder="1" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Number of reverse proxy servers to trust for X-Forwarded-Proto header (http/https) (default: 1). Set to 0 to disable.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>PROXY_X_PROTO</code> environment variable.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="proxyXHost">X-Forwarded-Host Trust Level</label>
+                    <input type="number" id="proxyXHost" min="0" max="10" step="1" placeholder="1" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Number of reverse proxy servers to trust for X-Forwarded-Host header (default: 1). Set to 0 to disable.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>PROXY_X_HOST</code> environment variable.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="proxyXPrefix">X-Forwarded-Prefix Trust Level</label>
+                    <input type="number" id="proxyXPrefix" min="0" max="10" step="1" placeholder="1" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Number of reverse proxy servers to trust for X-Forwarded-Prefix header (default: 1). Set to 0 to disable.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>PROXY_X_PREFIX</code> environment variable.
+                    </small>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn" onclick="closeSettings()">Cancel</button>
@@ -4655,6 +4745,62 @@
                 const assigneeData = await assigneeResponse.json();
                 document.getElementById('githubIssueAssignee').value = assigneeData.assignee;
                 
+                // Load SSL certificate file
+                const sslCertResponse = await fetch(apiUrl('/api/settings/ssl-certfile'));
+                if (sslCertResponse.ok) {
+                    const sslCertData = await sslCertResponse.json();
+                    document.getElementById('sslCertfile').value = sslCertData.certfile || '';
+                }
+                
+                // Load SSL key file
+                const sslKeyResponse = await fetch(apiUrl('/api/settings/ssl-keyfile'));
+                if (sslKeyResponse.ok) {
+                    const sslKeyData = await sslKeyResponse.json();
+                    document.getElementById('sslKeyfile').value = sslKeyData.keyfile || '';
+                }
+                
+                // Load SSL CA certificates
+                const sslCaResponse = await fetch(apiUrl('/api/settings/ssl-ca-certs'));
+                if (sslCaResponse.ok) {
+                    const sslCaData = await sslCaResponse.json();
+                    document.getElementById('sslCaCerts').value = sslCaData.ca_certs || '';
+                }
+                
+                // Load base path
+                const basePathResponse = await fetch(apiUrl('/api/settings/base-path'));
+                if (basePathResponse.ok) {
+                    const basePathData = await basePathResponse.json();
+                    document.getElementById('basePath').value = basePathData.base_path || '';
+                }
+                
+                // Load proxy X-Forwarded-For trust level
+                const proxyXForResponse = await fetch(apiUrl('/api/settings/proxy-x-for'));
+                if (proxyXForResponse.ok) {
+                    const proxyXForData = await proxyXForResponse.json();
+                    document.getElementById('proxyXFor').value = proxyXForData.x_for;
+                }
+                
+                // Load proxy X-Forwarded-Proto trust level
+                const proxyXProtoResponse = await fetch(apiUrl('/api/settings/proxy-x-proto'));
+                if (proxyXProtoResponse.ok) {
+                    const proxyXProtoData = await proxyXProtoResponse.json();
+                    document.getElementById('proxyXProto').value = proxyXProtoData.x_proto;
+                }
+                
+                // Load proxy X-Forwarded-Host trust level
+                const proxyXHostResponse = await fetch(apiUrl('/api/settings/proxy-x-host'));
+                if (proxyXHostResponse.ok) {
+                    const proxyXHostData = await proxyXHostResponse.json();
+                    document.getElementById('proxyXHost').value = proxyXHostData.x_host;
+                }
+                
+                // Load proxy X-Forwarded-Prefix trust level
+                const proxyXPrefixResponse = await fetch(apiUrl('/api/settings/proxy-x-prefix'));
+                if (proxyXPrefixResponse.ok) {
+                    const proxyXPrefixData = await proxyXPrefixResponse.json();
+                    document.getElementById('proxyXPrefix').value = proxyXPrefixData.x_prefix;
+                }
+                
                 document.getElementById('settingsModal').classList.add('active');
             } catch (error) {
                 showMessage('Failed to load settings: ' + error.message, 'error');
@@ -5101,7 +5247,147 @@
                     return;
                 }
                 
-                showMessage('Settings saved successfully! Log rotation will take effect on restart.', 'success');
+                // Save SSL settings
+                let restartRequired = false;
+                const sslCertfile = document.getElementById('sslCertfile').value.trim();
+                const sslKeyfile = document.getElementById('sslKeyfile').value.trim();
+                const sslCaCerts = document.getElementById('sslCaCerts').value.trim();
+                
+                const certResponse = await fetch(apiUrl('/api/settings/ssl-certfile'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ certfile: sslCertfile })
+                });
+                
+                if (certResponse.ok) {
+                    const certResult = await certResponse.json();
+                    if (certResult.restart_required) restartRequired = true;
+                }
+                
+                const keyResponse = await fetch(apiUrl('/api/settings/ssl-keyfile'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ keyfile: sslKeyfile })
+                });
+                
+                if (keyResponse.ok) {
+                    const keyResult = await keyResponse.json();
+                    if (keyResult.restart_required) restartRequired = true;
+                }
+                
+                const caResponse = await fetch(apiUrl('/api/settings/ssl-ca-certs'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ ca_certs: sslCaCerts })
+                });
+                
+                if (caResponse.ok) {
+                    const caResult = await caResponse.json();
+                    if (caResult.restart_required) restartRequired = true;
+                }
+                
+                // Save base path
+                const basePath = document.getElementById('basePath').value.trim();
+                
+                // Validate base path if not empty
+                if (basePath && !basePath.startsWith('/')) {
+                    showMessage('Base path must start with a forward slash (/)', 'error');
+                    return;
+                }
+                
+                const basePathResponse = await fetch(apiUrl('/api/settings/base-path'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ base_path: basePath })
+                });
+                
+                if (basePathResponse.ok) {
+                    const basePathResult = await basePathResponse.json();
+                    if (basePathResult.restart_required) restartRequired = true;
+                }
+                
+                // Save proxy settings
+                const proxyXFor = parseInt(document.getElementById('proxyXFor').value);
+                const proxyXProto = parseInt(document.getElementById('proxyXProto').value);
+                const proxyXHost = parseInt(document.getElementById('proxyXHost').value);
+                const proxyXPrefix = parseInt(document.getElementById('proxyXPrefix').value);
+                
+                if (!isNaN(proxyXFor)) {
+                    const xForResponse = await fetch(apiUrl('/api/settings/proxy-x-for'), {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ x_for: proxyXFor })
+                    });
+                    
+                    if (xForResponse.ok) {
+                        const xForResult = await xForResponse.json();
+                        if (xForResult.restart_required) restartRequired = true;
+                    }
+                }
+                
+                if (!isNaN(proxyXProto)) {
+                    const xProtoResponse = await fetch(apiUrl('/api/settings/proxy-x-proto'), {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ x_proto: proxyXProto })
+                    });
+                    
+                    if (xProtoResponse.ok) {
+                        const xProtoResult = await xProtoResponse.json();
+                        if (xProtoResult.restart_required) restartRequired = true;
+                    }
+                }
+                
+                if (!isNaN(proxyXHost)) {
+                    const xHostResponse = await fetch(apiUrl('/api/settings/proxy-x-host'), {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ x_host: proxyXHost })
+                    });
+                    
+                    if (xHostResponse.ok) {
+                        const xHostResult = await xHostResponse.json();
+                        if (xHostResult.restart_required) restartRequired = true;
+                    }
+                }
+                
+                if (!isNaN(proxyXPrefix)) {
+                    const xPrefixResponse = await fetch(apiUrl('/api/settings/proxy-x-prefix'), {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ x_prefix: proxyXPrefix })
+                    });
+                    
+                    if (xPrefixResponse.ok) {
+                        const xPrefixResult = await xPrefixResponse.json();
+                        if (xPrefixResult.restart_required) restartRequired = true;
+                    }
+                }
+                
+                let message = 'Settings saved successfully!';
+                if (restartRequired) {
+                    message += ' HTTPS and proxy settings changes require application restart to take effect.';
+                } else {
+                    message += ' Log rotation will take effect on restart.';
+                }
+                
+                showMessage(message, 'success');
                 closeSettings();
             } catch (error) {
                 showMessage('Failed to save settings: ' + error.message, 'error');

@@ -14,6 +14,14 @@ DEFAULT_DB_CACHE_SIZE_MB = 64  # Default SQLite cache size in MB
 DEFAULT_GITHUB_TOKEN = ''  # Default GitHub token
 DEFAULT_GITHUB_REPOSITORY = 'mleenorris/ComicMaintainer'  # Default GitHub repository
 DEFAULT_GITHUB_ISSUE_ASSIGNEE = 'copilot'  # Default GitHub issue assignee
+DEFAULT_SSL_CERTFILE = ''  # Default SSL certificate file path
+DEFAULT_SSL_KEYFILE = ''  # Default SSL key file path
+DEFAULT_SSL_CA_CERTS = ''  # Default SSL CA certificates file path
+DEFAULT_BASE_PATH = ''  # Default base path for subdirectory deployments
+DEFAULT_PROXY_X_FOR = 1  # Default number of proxies to trust for X-Forwarded-For
+DEFAULT_PROXY_X_PROTO = 1  # Default number of proxies to trust for X-Forwarded-Proto
+DEFAULT_PROXY_X_HOST = 1  # Default number of proxies to trust for X-Forwarded-Host
+DEFAULT_PROXY_X_PREFIX = 1  # Default number of proxies to trust for X-Forwarded-Prefix
 
 def get_config():
     """Get the current configuration"""
@@ -184,3 +192,176 @@ def set_github_issue_assignee(assignee):
     config = get_config()
     config['github_issue_assignee'] = assignee
     return save_config(config)
+
+def get_ssl_certfile():
+    """Get the SSL certificate file path"""
+    # Check environment variable first
+    env_value = os.environ.get('SSL_CERTFILE')
+    if env_value:
+        return env_value
+    
+    # Fall back to config file
+    config = get_config()
+    return config.get('ssl_certfile', DEFAULT_SSL_CERTFILE)
+
+def set_ssl_certfile(certfile):
+    """Set the SSL certificate file path"""
+    config = get_config()
+    config['ssl_certfile'] = certfile
+    return save_config(config)
+
+def get_ssl_keyfile():
+    """Get the SSL key file path"""
+    # Check environment variable first
+    env_value = os.environ.get('SSL_KEYFILE')
+    if env_value:
+        return env_value
+    
+    # Fall back to config file
+    config = get_config()
+    return config.get('ssl_keyfile', DEFAULT_SSL_KEYFILE)
+
+def set_ssl_keyfile(keyfile):
+    """Set the SSL key file path"""
+    config = get_config()
+    config['ssl_keyfile'] = keyfile
+    return save_config(config)
+
+def get_ssl_ca_certs():
+    """Get the SSL CA certificates file path"""
+    # Check environment variable first
+    env_value = os.environ.get('SSL_CA_CERTS')
+    if env_value:
+        return env_value
+    
+    # Fall back to config file
+    config = get_config()
+    return config.get('ssl_ca_certs', DEFAULT_SSL_CA_CERTS)
+
+def set_ssl_ca_certs(ca_certs):
+    """Set the SSL CA certificates file path"""
+    config = get_config()
+    config['ssl_ca_certs'] = ca_certs
+    return save_config(config)
+
+def get_base_path():
+    """Get the base path for subdirectory deployments"""
+    # Check environment variable first
+    env_value = os.environ.get('BASE_PATH')
+    if env_value:
+        return env_value.rstrip('/')
+    
+    # Fall back to config file
+    config = get_config()
+    base_path = config.get('base_path', DEFAULT_BASE_PATH)
+    return base_path.rstrip('/') if base_path else ''
+
+def set_base_path(base_path):
+    """Set the base path for subdirectory deployments"""
+    config = get_config()
+    config['base_path'] = base_path.rstrip('/') if base_path else ''
+    return save_config(config)
+
+def get_proxy_x_for():
+    """Get the number of proxies to trust for X-Forwarded-For"""
+    # Check environment variable first
+    env_value = os.environ.get('PROXY_X_FOR')
+    if env_value:
+        try:
+            return int(env_value)
+        except ValueError:
+            logging.warning(f"Invalid PROXY_X_FOR environment variable: {env_value}")
+    
+    # Fall back to config file
+    config = get_config()
+    return config.get('proxy_x_for', DEFAULT_PROXY_X_FOR)
+
+def set_proxy_x_for(x_for):
+    """Set the number of proxies to trust for X-Forwarded-For"""
+    try:
+        x_for = int(x_for)
+        if x_for < 0:
+            return False
+        config = get_config()
+        config['proxy_x_for'] = x_for
+        return save_config(config)
+    except (ValueError, TypeError):
+        return False
+
+def get_proxy_x_proto():
+    """Get the number of proxies to trust for X-Forwarded-Proto"""
+    # Check environment variable first
+    env_value = os.environ.get('PROXY_X_PROTO')
+    if env_value:
+        try:
+            return int(env_value)
+        except ValueError:
+            logging.warning(f"Invalid PROXY_X_PROTO environment variable: {env_value}")
+    
+    # Fall back to config file
+    config = get_config()
+    return config.get('proxy_x_proto', DEFAULT_PROXY_X_PROTO)
+
+def set_proxy_x_proto(x_proto):
+    """Set the number of proxies to trust for X-Forwarded-Proto"""
+    try:
+        x_proto = int(x_proto)
+        if x_proto < 0:
+            return False
+        config = get_config()
+        config['proxy_x_proto'] = x_proto
+        return save_config(config)
+    except (ValueError, TypeError):
+        return False
+
+def get_proxy_x_host():
+    """Get the number of proxies to trust for X-Forwarded-Host"""
+    # Check environment variable first
+    env_value = os.environ.get('PROXY_X_HOST')
+    if env_value:
+        try:
+            return int(env_value)
+        except ValueError:
+            logging.warning(f"Invalid PROXY_X_HOST environment variable: {env_value}")
+    
+    # Fall back to config file
+    config = get_config()
+    return config.get('proxy_x_host', DEFAULT_PROXY_X_HOST)
+
+def set_proxy_x_host(x_host):
+    """Set the number of proxies to trust for X-Forwarded-Host"""
+    try:
+        x_host = int(x_host)
+        if x_host < 0:
+            return False
+        config = get_config()
+        config['proxy_x_host'] = x_host
+        return save_config(config)
+    except (ValueError, TypeError):
+        return False
+
+def get_proxy_x_prefix():
+    """Get the number of proxies to trust for X-Forwarded-Prefix"""
+    # Check environment variable first
+    env_value = os.environ.get('PROXY_X_PREFIX')
+    if env_value:
+        try:
+            return int(env_value)
+        except ValueError:
+            logging.warning(f"Invalid PROXY_X_PREFIX environment variable: {env_value}")
+    
+    # Fall back to config file
+    config = get_config()
+    return config.get('proxy_x_prefix', DEFAULT_PROXY_X_PREFIX)
+
+def set_proxy_x_prefix(x_prefix):
+    """Set the number of proxies to trust for X-Forwarded-Prefix"""
+    try:
+        x_prefix = int(x_prefix)
+        if x_prefix < 0:
+            return False
+        config = get_config()
+        config['proxy_x_prefix'] = x_prefix
+        return save_config(config)
+    except (ValueError, TypeError):
+        return False

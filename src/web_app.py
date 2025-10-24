@@ -18,7 +18,15 @@ from config import (
     get_issue_number_padding, set_issue_number_padding, DEFAULT_ISSUE_NUMBER_PADDING,
     get_github_token, set_github_token, DEFAULT_GITHUB_TOKEN,
     get_github_repository, set_github_repository, DEFAULT_GITHUB_REPOSITORY,
-    get_github_issue_assignee, set_github_issue_assignee, DEFAULT_GITHUB_ISSUE_ASSIGNEE
+    get_github_issue_assignee, set_github_issue_assignee, DEFAULT_GITHUB_ISSUE_ASSIGNEE,
+    get_ssl_certfile, set_ssl_certfile, DEFAULT_SSL_CERTFILE,
+    get_ssl_keyfile, set_ssl_keyfile, DEFAULT_SSL_KEYFILE,
+    get_ssl_ca_certs, set_ssl_ca_certs, DEFAULT_SSL_CA_CERTS,
+    get_base_path, set_base_path, DEFAULT_BASE_PATH,
+    get_proxy_x_for, set_proxy_x_for, DEFAULT_PROXY_X_FOR,
+    get_proxy_x_proto, set_proxy_x_proto, DEFAULT_PROXY_X_PROTO,
+    get_proxy_x_host, set_proxy_x_host, DEFAULT_PROXY_X_HOST,
+    get_proxy_x_prefix, set_proxy_x_prefix, DEFAULT_PROXY_X_PREFIX
 )
 from version import __version__
 from markers import (
@@ -78,17 +86,18 @@ app = Flask(__name__)
 # Configure reverse proxy support
 # ProxyFix middleware handles X-Forwarded-* headers from reverse proxies
 # This ensures the application generates correct URLs when behind nginx, Traefik, Apache, etc.
+# Values can be configured via environment variables, config file, or settings UI
 app.wsgi_app = ProxyFix(
     app.wsgi_app,
-    x_for=1,      # Trust X-Forwarded-For
-    x_proto=1,    # Trust X-Forwarded-Proto (http/https)
-    x_host=1,     # Trust X-Forwarded-Host
-    x_prefix=1    # Trust X-Forwarded-Prefix (for subdirectory deployments)
+    x_for=get_proxy_x_for(),      # Trust X-Forwarded-For
+    x_proto=get_proxy_x_proto(),    # Trust X-Forwarded-Proto (http/https)
+    x_host=get_proxy_x_host(),     # Trust X-Forwarded-Host
+    x_prefix=get_proxy_x_prefix()    # Trust X-Forwarded-Prefix (for subdirectory deployments)
 )
 
 # Optional: Support for serving from a subdirectory (e.g., /comics/)
-# Set BASE_PATH environment variable to the path prefix (must start with /)
-BASE_PATH = os.environ.get('BASE_PATH', '').rstrip('/')
+# Can be configured via BASE_PATH environment variable, config file, or settings UI
+BASE_PATH = get_base_path()
 if BASE_PATH and not BASE_PATH.startswith('/'):
     logging.warning(f"BASE_PATH must start with '/'. Ignoring invalid value: {BASE_PATH}")
     BASE_PATH = ''
@@ -1881,6 +1890,234 @@ def set_github_issue_assignee_api():
         return jsonify({'success': True, 'assignee': assignee})
     else:
         return jsonify({'error': 'Failed to save GitHub issue assignee setting'}), 500
+
+@app.route('/api/settings/ssl-certfile', methods=['GET'])
+def get_ssl_certfile_api():
+    """API endpoint to get the SSL certificate file path"""
+    return jsonify({
+        'certfile': get_ssl_certfile(),
+        'default': DEFAULT_SSL_CERTFILE
+    })
+
+@app.route('/api/settings/ssl-certfile', methods=['POST'])
+def set_ssl_certfile_api():
+    """API endpoint to set the SSL certificate file path"""
+    data = request.json
+    certfile = data.get('certfile', '').strip()
+    
+    success = set_ssl_certfile(certfile)
+    
+    if success:
+        logging.info(f"SSL certificate file path updated to: {certfile}")
+        logging.warning("SSL certificate changes require application restart to take effect")
+        return jsonify({'success': True, 'certfile': certfile, 'restart_required': True})
+    else:
+        return jsonify({'error': 'Failed to save SSL certificate file path'}), 500
+
+@app.route('/api/settings/ssl-keyfile', methods=['GET'])
+def get_ssl_keyfile_api():
+    """API endpoint to get the SSL key file path"""
+    return jsonify({
+        'keyfile': get_ssl_keyfile(),
+        'default': DEFAULT_SSL_KEYFILE
+    })
+
+@app.route('/api/settings/ssl-keyfile', methods=['POST'])
+def set_ssl_keyfile_api():
+    """API endpoint to set the SSL key file path"""
+    data = request.json
+    keyfile = data.get('keyfile', '').strip()
+    
+    success = set_ssl_keyfile(keyfile)
+    
+    if success:
+        logging.info(f"SSL key file path updated to: {keyfile}")
+        logging.warning("SSL key file changes require application restart to take effect")
+        return jsonify({'success': True, 'keyfile': keyfile, 'restart_required': True})
+    else:
+        return jsonify({'error': 'Failed to save SSL key file path'}), 500
+
+@app.route('/api/settings/ssl-ca-certs', methods=['GET'])
+def get_ssl_ca_certs_api():
+    """API endpoint to get the SSL CA certificates file path"""
+    return jsonify({
+        'ca_certs': get_ssl_ca_certs(),
+        'default': DEFAULT_SSL_CA_CERTS
+    })
+
+@app.route('/api/settings/ssl-ca-certs', methods=['POST'])
+def set_ssl_ca_certs_api():
+    """API endpoint to set the SSL CA certificates file path"""
+    data = request.json
+    ca_certs = data.get('ca_certs', '').strip()
+    
+    success = set_ssl_ca_certs(ca_certs)
+    
+    if success:
+        logging.info(f"SSL CA certificates file path updated to: {ca_certs}")
+        logging.warning("SSL CA certificates changes require application restart to take effect")
+        return jsonify({'success': True, 'ca_certs': ca_certs, 'restart_required': True})
+    else:
+        return jsonify({'error': 'Failed to save SSL CA certificates file path'}), 500
+
+@app.route('/api/settings/base-path', methods=['GET'])
+def get_base_path_api():
+    """API endpoint to get the base path"""
+    return jsonify({
+        'base_path': get_base_path(),
+        'default': DEFAULT_BASE_PATH
+    })
+
+@app.route('/api/settings/base-path', methods=['POST'])
+def set_base_path_api():
+    """API endpoint to set the base path"""
+    data = request.json
+    base_path = data.get('base_path', '').strip()
+    
+    # Validate base path format
+    if base_path and not base_path.startswith('/'):
+        return jsonify({'error': 'BASE_PATH must start with a forward slash (/)'}), 400
+    
+    success = set_base_path(base_path)
+    
+    if success:
+        logging.info(f"Base path updated to: {base_path}")
+        logging.warning("Base path changes require application restart to take effect")
+        return jsonify({'success': True, 'base_path': base_path, 'restart_required': True})
+    else:
+        return jsonify({'error': 'Failed to save base path'}), 500
+
+@app.route('/api/settings/proxy-x-for', methods=['GET'])
+def get_proxy_x_for_api():
+    """API endpoint to get the X-Forwarded-For proxy trust level"""
+    return jsonify({
+        'x_for': get_proxy_x_for(),
+        'default': DEFAULT_PROXY_X_FOR
+    })
+
+@app.route('/api/settings/proxy-x-for', methods=['POST'])
+def set_proxy_x_for_api():
+    """API endpoint to set the X-Forwarded-For proxy trust level"""
+    data = request.json
+    x_for = data.get('x_for')
+    
+    if x_for is None:
+        return jsonify({'error': 'x_for value is required'}), 400
+    
+    try:
+        x_for = int(x_for)
+        if x_for < 0:
+            return jsonify({'error': 'x_for must be non-negative'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': 'x_for must be a valid integer'}), 400
+    
+    success = set_proxy_x_for(x_for)
+    
+    if success:
+        logging.info(f"Proxy X-Forwarded-For trust level updated to: {x_for}")
+        logging.warning("Proxy settings changes require application restart to take effect")
+        return jsonify({'success': True, 'x_for': x_for, 'restart_required': True})
+    else:
+        return jsonify({'error': 'Failed to save proxy X-Forwarded-For setting'}), 500
+
+@app.route('/api/settings/proxy-x-proto', methods=['GET'])
+def get_proxy_x_proto_api():
+    """API endpoint to get the X-Forwarded-Proto proxy trust level"""
+    return jsonify({
+        'x_proto': get_proxy_x_proto(),
+        'default': DEFAULT_PROXY_X_PROTO
+    })
+
+@app.route('/api/settings/proxy-x-proto', methods=['POST'])
+def set_proxy_x_proto_api():
+    """API endpoint to set the X-Forwarded-Proto proxy trust level"""
+    data = request.json
+    x_proto = data.get('x_proto')
+    
+    if x_proto is None:
+        return jsonify({'error': 'x_proto value is required'}), 400
+    
+    try:
+        x_proto = int(x_proto)
+        if x_proto < 0:
+            return jsonify({'error': 'x_proto must be non-negative'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': 'x_proto must be a valid integer'}), 400
+    
+    success = set_proxy_x_proto(x_proto)
+    
+    if success:
+        logging.info(f"Proxy X-Forwarded-Proto trust level updated to: {x_proto}")
+        logging.warning("Proxy settings changes require application restart to take effect")
+        return jsonify({'success': True, 'x_proto': x_proto, 'restart_required': True})
+    else:
+        return jsonify({'error': 'Failed to save proxy X-Forwarded-Proto setting'}), 500
+
+@app.route('/api/settings/proxy-x-host', methods=['GET'])
+def get_proxy_x_host_api():
+    """API endpoint to get the X-Forwarded-Host proxy trust level"""
+    return jsonify({
+        'x_host': get_proxy_x_host(),
+        'default': DEFAULT_PROXY_X_HOST
+    })
+
+@app.route('/api/settings/proxy-x-host', methods=['POST'])
+def set_proxy_x_host_api():
+    """API endpoint to set the X-Forwarded-Host proxy trust level"""
+    data = request.json
+    x_host = data.get('x_host')
+    
+    if x_host is None:
+        return jsonify({'error': 'x_host value is required'}), 400
+    
+    try:
+        x_host = int(x_host)
+        if x_host < 0:
+            return jsonify({'error': 'x_host must be non-negative'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': 'x_host must be a valid integer'}), 400
+    
+    success = set_proxy_x_host(x_host)
+    
+    if success:
+        logging.info(f"Proxy X-Forwarded-Host trust level updated to: {x_host}")
+        logging.warning("Proxy settings changes require application restart to take effect")
+        return jsonify({'success': True, 'x_host': x_host, 'restart_required': True})
+    else:
+        return jsonify({'error': 'Failed to save proxy X-Forwarded-Host setting'}), 500
+
+@app.route('/api/settings/proxy-x-prefix', methods=['GET'])
+def get_proxy_x_prefix_api():
+    """API endpoint to get the X-Forwarded-Prefix proxy trust level"""
+    return jsonify({
+        'x_prefix': get_proxy_x_prefix(),
+        'default': DEFAULT_PROXY_X_PREFIX
+    })
+
+@app.route('/api/settings/proxy-x-prefix', methods=['POST'])
+def set_proxy_x_prefix_api():
+    """API endpoint to set the X-Forwarded-Prefix proxy trust level"""
+    data = request.json
+    x_prefix = data.get('x_prefix')
+    
+    if x_prefix is None:
+        return jsonify({'error': 'x_prefix value is required'}), 400
+    
+    try:
+        x_prefix = int(x_prefix)
+        if x_prefix < 0:
+            return jsonify({'error': 'x_prefix must be non-negative'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': 'x_prefix must be a valid integer'}), 400
+    
+    success = set_proxy_x_prefix(x_prefix)
+    
+    if success:
+        logging.info(f"Proxy X-Forwarded-Prefix trust level updated to: {x_prefix}")
+        logging.warning("Proxy settings changes require application restart to take effect")
+        return jsonify({'success': True, 'x_prefix': x_prefix, 'restart_required': True})
+    else:
+        return jsonify({'error': 'Failed to save proxy X-Forwarded-Prefix setting'}), 500
 
 @app.route('/api/version', methods=['GET'])
 def get_version():

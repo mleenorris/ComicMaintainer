@@ -54,6 +54,16 @@ This service automatically watches a directory for new or changed comic archive 
 docker build -t iceburn1/comictagger-watcher:latest .
 ```
 
+### Docker Images
+
+Pre-built Docker images are available on Docker Hub:
+
+- **`iceburn1/comictagger-watcher:latest`** - Built from the `master` branch with the latest features and updates
+- **`iceburn1/comictagger-watcher:stable`** - Built from the `stable` branch, providing a tested baseline for production deployments
+- **`iceburn1/comictagger-watcher:<version>`** - Specific version tags (e.g., `1.0.23`) built from `master` branch releases
+
+For production environments, using the `stable` tag is recommended for a more reliable experience.
+
 **Permissions Note:** By default, the container runs as user `nobody` (UID 99) and group `users` (GID 100). You can customize these by setting the `PUID` and `PGID` environment variables to match your host user. This ensures that files created or modified by the container have the correct ownership on your host system.
 
 

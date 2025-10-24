@@ -1,3 +1,3 @@
 """Version information for ComicMaintainer"""
 
-__version__ = "1.0.24"
+__version__ = "1.0.25"

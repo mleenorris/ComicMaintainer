@@ -14,12 +14,12 @@
     <meta name="apple-mobile-web-app-title" content="ComicMaintainer">
     
     <!-- PWA Manifest -->
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" href="{{ base_path }}/manifest.json">
     
     <!-- Favicons and Icons -->
-    <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="/static/icons/favicon-16x16.png">
-    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ base_path }}/static/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ base_path }}/static/icons/favicon-16x16.png">
+    <link rel="apple-touch-icon" href="{{ base_path }}/static/icons/apple-touch-icon.png">
     
     <!-- Production optimization: Consider minifying this template and serving compressed -->
     <style>
@@ -2364,6 +2364,18 @@
     </div>
     
     <script>
+        // Base path for reverse proxy support (injected from Flask)
+        const BASE_PATH = '{{ base_path }}';
+        
+        // Helper function to build URLs with base path
+        function apiUrl(path) {
+            // Ensure path starts with /
+            if (!path.startsWith('/')) {
+                path = '/' + path;
+            }
+            return BASE_PATH + path;
+        }
+        
         let files = [];
         let selectedFiles = new Set();
         let currentEditFile = null;
@@ -2394,7 +2406,7 @@
             }
             
             try {
-                eventSource = new EventSource('/api/events/stream');
+                eventSource = new EventSource(apiUrl('/api/events/stream'));
                 
                 eventSource.onopen = () => {
                     console.log('SSE: Connected to event stream');
@@ -2581,7 +2593,7 @@
         // API helper functions for server-side preferences
         async function getPreferences() {
             try {
-                const response = await fetch('/api/preferences');
+                const response = await fetch(apiUrl('/api/preferences');
                 if (!response.ok) {
                     console.error('Failed to get preferences:', response.status);
                     return {};
@@ -2595,7 +2607,7 @@
         
         async function setPreferences(prefs) {
             try {
-                const response = await fetch('/api/preferences', {
+                const response = await fetch(apiUrl('/api/preferences', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -2612,7 +2624,7 @@
         
         async function getActiveJobFromServer() {
             try {
-                const response = await fetch('/api/active-job');
+                const response = await fetch(apiUrl('/api/active-job');
                 if (!response.ok) {
                     console.error('Failed to get active job:', response.status);
                     return null;
@@ -2627,7 +2639,7 @@
         
         async function setActiveJobOnServer(jobId, jobTitle) {
             try {
-                const response = await fetch('/api/active-job', {
+                const response = await fetch(apiUrl('/api/active-job', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -2644,7 +2656,7 @@
         
         async function clearActiveJobOnServer() {
             try {
-                const response = await fetch('/api/active-job', {
+                const response = await fetch(apiUrl('/api/active-job', {
                     method: 'DELETE'
                 });
                 if (!response.ok) {
@@ -2716,7 +2728,7 @@
             const enabled = document.getElementById('watcherToggleCheckbox').checked;
             
             try {
-                const response = await fetch('/api/settings/watcher-enabled', {
+                const response = await fetch(apiUrl('/api/settings/watcher-enabled', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -2747,7 +2759,7 @@
         // Fetch and display version
         async function loadVersion() {
             try {
-                const response = await fetch('/api/version');
+                const response = await fetch(apiUrl('/api/version');
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -2768,7 +2780,7 @@
         // Register service worker for offline support
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/static/sw.js')
+                navigator.serviceWorker.register(apiUrl('/sw.js'))
                     .then((registration) => {
                         console.log('PWA: Service Worker registered successfully:', registration.scope);
                     })
@@ -3117,7 +3129,7 @@
         async function scanUnmarkedFiles() {
             try {
                 showMessage('Scanning for unmarked files...', 'info');
-                const response = await fetch('/api/scan-unmarked');
+                const response = await fetch(apiUrl('/api/scan-unmarked');
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -3618,7 +3630,7 @@
             let errorCount = 0;
             
             try {
-                const response = await fetch('/api/files/tags?stream=true', {
+                const response = await fetch(apiUrl('/api/files/tags?stream=true', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -3676,7 +3688,7 @@
             let totalFiles = 0;
             
             try {
-                const response = await fetch('/api/process-all?stream=true', {
+                const response = await fetch(apiUrl('/api/process-all?stream=true', {
                     method: 'POST'
                 });
                 
@@ -3728,7 +3740,7 @@
             try {
                 console.log('[BATCH] Starting process all files request...');
                 // Start the job
-                const response = await fetch('/api/jobs/process-all', {
+                const response = await fetch(apiUrl('/api/jobs/process-all', {
                     method: 'POST'
                 });
                 
@@ -3771,7 +3783,7 @@
             try {
                 console.log(`[BATCH] Starting process selected files request (${files.length} files)...`);
                 // Start the job
-                const response = await fetch('/api/jobs/process-selected', {
+                const response = await fetch(apiUrl('/api/jobs/process-selected', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -4051,7 +4063,7 @@
             let totalFiles = 0;
             
             try {
-                const response = await fetch('/api/rename-all?stream=true', {
+                const response = await fetch(apiUrl('/api/rename-all?stream=true', {
                     method: 'POST'
                 });
                 
@@ -4105,7 +4117,7 @@
             let totalFiles = 0;
             
             try {
-                const response = await fetch('/api/normalize-all?stream=true', {
+                const response = await fetch(apiUrl('/api/normalize-all?stream=true', {
                     method: 'POST'
                 });
                 
@@ -4157,7 +4169,7 @@
             try {
                 console.log('[BATCH] Starting process unmarked files request...');
                 // Start the job
-                const response = await fetch('/api/jobs/process-unmarked', {
+                const response = await fetch(apiUrl('/api/jobs/process-unmarked', {
                     method: 'POST'
                 });
                 
@@ -4193,7 +4205,7 @@
             try {
                 console.log('[BATCH] Starting rename unmarked files request...');
                 // Start the job
-                const response = await fetch('/api/jobs/rename-unmarked', {
+                const response = await fetch(apiUrl('/api/jobs/rename-unmarked', {
                     method: 'POST'
                 });
                 
@@ -4229,7 +4241,7 @@
             try {
                 console.log('[BATCH] Starting normalize unmarked files request...');
                 // Start the job
-                const response = await fetch('/api/jobs/normalize-unmarked', {
+                const response = await fetch(apiUrl('/api/jobs/normalize-unmarked', {
                     method: 'POST'
                 });
                 
@@ -4272,7 +4284,7 @@
             let errorCount = 0;
             
             try {
-                const response = await fetch('/api/process-selected?stream=true', {
+                const response = await fetch(apiUrl('/api/process-selected?stream=true', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -4336,7 +4348,7 @@
             let errorCount = 0;
             
             try {
-                const response = await fetch('/api/rename-selected?stream=true', {
+                const response = await fetch(apiUrl('/api/rename-selected?stream=true', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -4400,7 +4412,7 @@
             let errorCount = 0;
             
             try {
-                const response = await fetch('/api/normalize-selected?stream=true', {
+                const response = await fetch(apiUrl('/api/normalize-selected?stream=true', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -4580,7 +4592,7 @@
         async function openSettings() {
             try {
                 // Load filename format
-                const formatResponse = await fetch('/api/settings/filename-format');
+                const formatResponse = await fetch(apiUrl('/api/settings/filename-format');
                 if (!formatResponse.ok) {
                     throw new Error(`HTTP error! status: ${formatResponse.status}`);
                 }
@@ -4594,7 +4606,7 @@
                 document.getElementById('themeSelect').value = currentTheme;
                 
                 // Load watcher status
-                const watcherResponse = await fetch('/api/settings/watcher-enabled');
+                const watcherResponse = await fetch(apiUrl('/api/settings/watcher-enabled');
                 if (!watcherResponse.ok) {
                     throw new Error(`HTTP error! status: ${watcherResponse.status}`);
                 }
@@ -4602,7 +4614,7 @@
                 document.getElementById('watcherToggleCheckbox').checked = watcherData.enabled;
                 
                 // Load log max size
-                const logResponse = await fetch('/api/settings/log-max-bytes');
+                const logResponse = await fetch(apiUrl('/api/settings/log-max-bytes');
                 if (!logResponse.ok) {
                     throw new Error(`HTTP error! status: ${logResponse.status}`);
                 }
@@ -4610,7 +4622,7 @@
                 document.getElementById('logMaxSize').value = Math.round(logData.maxMB);
                 
                 // Load issue number padding
-                const paddingResponse = await fetch('/api/settings/issue-number-padding');
+                const paddingResponse = await fetch(apiUrl('/api/settings/issue-number-padding');
                 if (!paddingResponse.ok) {
                     throw new Error(`HTTP error! status: ${paddingResponse.status}`);
                 }
@@ -4618,7 +4630,7 @@
                 document.getElementById('issueNumberPadding').value = paddingData.padding;
                 
                 // Load GitHub token (masked)
-                const tokenResponse = await fetch('/api/settings/github-token');
+                const tokenResponse = await fetch(apiUrl('/api/settings/github-token');
                 if (!tokenResponse.ok) {
                     throw new Error(`HTTP error! status: ${tokenResponse.status}`);
                 }
@@ -4628,7 +4640,7 @@
                 document.getElementById('githubToken').value = ''; // Don't populate actual value for security
                 
                 // Load GitHub repository
-                const repoResponse = await fetch('/api/settings/github-repository');
+                const repoResponse = await fetch(apiUrl('/api/settings/github-repository');
                 if (!repoResponse.ok) {
                     throw new Error(`HTTP error! status: ${repoResponse.status}`);
                 }
@@ -4636,7 +4648,7 @@
                 document.getElementById('githubRepository').value = repoData.repository;
                 
                 // Load GitHub issue assignee
-                const assigneeResponse = await fetch('/api/settings/github-issue-assignee');
+                const assigneeResponse = await fetch(apiUrl('/api/settings/github-issue-assignee');
                 if (!assigneeResponse.ok) {
                     throw new Error(`HTTP error! status: ${assigneeResponse.status}`);
                 }
@@ -4798,7 +4810,7 @@
         async function openAboutModal() {
             try {
                 // Load version
-                const response = await fetch('/api/version');
+                const response = await fetch(apiUrl('/api/version');
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -4967,7 +4979,7 @@
             
             try {
                 // Save filename format
-                const formatResponse = await fetch('/api/settings/filename-format', {
+                const formatResponse = await fetch(apiUrl('/api/settings/filename-format', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -4986,7 +4998,7 @@
                 }
                 
                 // Save log max size
-                const logResponse = await fetch('/api/settings/log-max-bytes', {
+                const logResponse = await fetch(apiUrl('/api/settings/log-max-bytes', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -5005,7 +5017,7 @@
                 }
                 
                 // Save issue number padding
-                const paddingResponse = await fetch('/api/settings/issue-number-padding', {
+                const paddingResponse = await fetch(apiUrl('/api/settings/issue-number-padding', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -5030,7 +5042,7 @@
                 
                 // Only save token if it was entered (not empty)
                 if (githubToken) {
-                    const tokenResponse = await fetch('/api/settings/github-token', {
+                    const tokenResponse = await fetch(apiUrl('/api/settings/github-token', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -5051,7 +5063,7 @@
                 
                 // Save GitHub repository (validate if not empty)
                 if (githubRepository) {
-                    const repoResponse = await fetch('/api/settings/github-repository', {
+                    const repoResponse = await fetch(apiUrl('/api/settings/github-repository', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -5071,7 +5083,7 @@
                 }
                 
                 // Save GitHub issue assignee (can be empty)
-                const assigneeResponse = await fetch('/api/settings/github-issue-assignee', {
+                const assigneeResponse = await fetch(apiUrl('/api/settings/github-issue-assignee', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -5098,7 +5110,7 @@
         
         async function resetFilenameFormat() {
             try {
-                const response = await fetch('/api/settings/filename-format');
+                const response = await fetch(apiUrl('/api/settings/filename-format');
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -5263,7 +5275,7 @@
         async function updateWatcherStatus() {
             // Fetch initial status on page load only, then rely on SSE for updates
             try {
-                const response = await fetch('/api/watcher/status');
+                const response = await fetch(apiUrl('/api/watcher/status');
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }

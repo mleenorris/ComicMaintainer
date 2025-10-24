@@ -405,14 +405,84 @@ def update_file_tags(filepath, tag_updates):
 @app.route('/')
 def index():
     """Serve the main page"""
-    response = render_template('index.html')
+    # Get base_path, converting Flask's default '/' to empty string for root deployment
+    base_path = app.config.get('APPLICATION_ROOT', '')
+    if base_path == '/':
+        base_path = ''
+    response = render_template('index.html', base_path=base_path)
     # Add cache control for static HTML (short cache for dynamic content)
     return response
 
 @app.route('/manifest.json')
 def serve_manifest():
-    """Serve the web app manifest for PWA installation"""
-    return send_from_directory('../static', 'manifest.json', mimetype='application/manifest+json')
+    """Serve the web app manifest for PWA installation with dynamic paths"""
+    # Get base_path, converting Flask's default '/' to empty string for root deployment
+    base_path = app.config.get('APPLICATION_ROOT', '')
+    if base_path == '/':
+        base_path = ''
+    
+    manifest = {
+        "name": "Comic Maintainer",
+        "short_name": "ComicMaintainer",
+        "description": "Manage and process your comic archive files with ComicTagger",
+        "start_url": f"{base_path}/",
+        "display": "standalone",
+        "background_color": "#2c3e50",
+        "theme_color": "#2c3e50",
+        "orientation": "any",
+        "icons": [
+            {
+                "src": f"{base_path}/static/icons/icon-192x192.png",
+                "sizes": "192x192",
+                "type": "image/png",
+                "purpose": "any maskable"
+            },
+            {
+                "src": f"{base_path}/static/icons/icon-512x512.png",
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "any maskable"
+            }
+        ],
+        "categories": ["utilities", "productivity"],
+        "screenshots": []
+    }
+    
+    return jsonify(manifest)
+
+@app.route('/sw.js')
+def serve_service_worker():
+    """Serve the service worker with BASE_PATH injected"""
+    # Get base_path, converting Flask's default '/' to empty string for root deployment
+    base_path = app.config.get('APPLICATION_ROOT', '')
+    if base_path == '/':
+        base_path = ''
+    
+    # Read the service worker template
+    sw_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'sw.js')
+    with open(sw_path, 'r') as f:
+        sw_content = f.read()
+    
+    # Inject BASE_PATH at the beginning
+    sw_with_base = f"""// Service Worker for Comic Maintainer PWA with reverse proxy support
+// BASE_PATH is injected dynamically based on deployment configuration
+const BASE_PATH = '{base_path}';
+
+{sw_content}"""
+    
+    # Replace hardcoded paths with BASE_PATH-aware versions
+    sw_with_base = sw_with_base.replace("'/'", "BASE_PATH + '/'")
+    sw_with_base = sw_with_base.replace("'/manifest.json'", "BASE_PATH + '/manifest.json'")
+    sw_with_base = sw_with_base.replace("'/static/", "BASE_PATH + '/static/")
+    sw_with_base = sw_with_base.replace("url.pathname.startsWith('/api/')", "url.pathname.startsWith(BASE_PATH + '/api/')")
+    sw_with_base = sw_with_base.replace("url.pathname.startsWith('/static/')", "url.pathname.startsWith(BASE_PATH + '/static/')")
+    sw_with_base = sw_with_base.replace("url.pathname === '/'", "url.pathname === BASE_PATH + '/'")
+    
+    return app.response_class(
+        response=sw_with_base,
+        status=200,
+        mimetype='application/javascript'
+    )
 
 @app.route('/static/<path:filename>')
 def serve_static(filename):

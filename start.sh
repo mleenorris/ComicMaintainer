@@ -26,8 +26,25 @@ GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
 # Job state stored in SQLite database for cross-process sharing
 # Concurrency is provided by both multiple workers and ThreadPoolExecutor (default: 4 threads per worker, configurable via MAX_WORKERS)
 # Timeout increased to 600 seconds (10 minutes) to handle batch processing of large libraries
-gunicorn --workers ${GUNICORN_WORKERS} --bind 0.0.0.0:${WEB_PORT} --timeout 600 web_app:app &
-WEB_PID=$!
+
+# Check if HTTPS is enabled and certificates are provided
+if [ "${HTTPS_ENABLED}" = "true" ] && [ -n "${SSL_CERT}" ] && [ -n "${SSL_KEY}" ]; then
+    echo "Starting Gunicorn with HTTPS enabled"
+    if [ ! -f "${SSL_CERT}" ]; then
+        echo "Error: SSL certificate file not found: ${SSL_CERT}"
+        exit 1
+    fi
+    if [ ! -f "${SSL_KEY}" ]; then
+        echo "Error: SSL key file not found: ${SSL_KEY}"
+        exit 1
+    fi
+    gunicorn --workers ${GUNICORN_WORKERS} --bind 0.0.0.0:${WEB_PORT} --timeout 600 --certfile=${SSL_CERT} --keyfile=${SSL_KEY} web_app:app &
+    WEB_PID=$!
+else
+    echo "Starting Gunicorn with HTTP (HTTPS not enabled)"
+    gunicorn --workers ${GUNICORN_WORKERS} --bind 0.0.0.0:${WEB_PORT} --timeout 600 web_app:app &
+    WEB_PID=$!
+fi
 
 # Function to check if a process is running
 is_running() {

@@ -107,6 +107,9 @@ docker run -d \
 - `PROCESS_SCRIPT`: Script to run for processing (default: `/app/process_file.py`)
 - `DUPLICATE_DIR`: Directory where duplicates are moved (required for duplicate handling)
 - `WEB_PORT`: Port for the web interface (default: `5000`)
+- `HTTPS_ENABLED`: Enable HTTPS for the web interface (default: `false`). Set to `true` to enable HTTPS.
+- `SSL_CERT`: Path to SSL certificate file (required when `HTTPS_ENABLED=true`). Example: `/ssl/cert.pem`
+- `SSL_KEY`: Path to SSL private key file (required when `HTTPS_ENABLED=true`). Example: `/ssl/key.pem`
 - `GUNICORN_WORKERS`: Number of Gunicorn worker processes (default: `2`). Job state is shared across workers via SQLite.
 - `PUID`: User ID to run the service as (default: `99` for user `nobody`)
 - `PGID`: Group ID to run the service as (default: `100` for group `users`)
@@ -488,11 +491,109 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
 
 For more information, see [SECURITY.md](SECURITY.md).
 
+### HTTPS Configuration
+
+The application supports HTTPS for secure communication. You can enable HTTPS in two ways:
+
+#### Option 1: Direct HTTPS (Built-in SSL/TLS Support)
+
+Enable HTTPS directly in the container by providing SSL certificates:
+
+```sh
+docker run -d \
+  -v <host_dir_to_watch>:/watched_dir \
+  -v <host_dir_for_config>:/Config \
+  -v <host_ssl_dir>:/ssl:ro \
+  -e WATCHED_DIR=/watched_dir \
+  -e HTTPS_ENABLED=true \
+  -e SSL_CERT=/ssl/cert.pem \
+  -e SSL_KEY=/ssl/key.pem \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -p 443:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+**Generating Self-Signed Certificates (for testing):**
+
+```sh
+# Create SSL directory
+mkdir -p /path/to/ssl
+
+# Generate self-signed certificate (valid for 365 days)
+openssl req -x509 -newkey rsa:4096 -nodes \
+  -keyout /path/to/ssl/key.pem \
+  -out /path/to/ssl/cert.pem \
+  -days 365 \
+  -subj "/CN=localhost"
+```
+
+**Using Let's Encrypt Certificates:**
+
+```sh
+# After obtaining Let's Encrypt certificates with certbot
+docker run -d \
+  -v <host_dir_to_watch>:/watched_dir \
+  -v <host_dir_for_config>:/Config \
+  -v /etc/letsencrypt/live/yourdomain.com:/ssl:ro \
+  -e WATCHED_DIR=/watched_dir \
+  -e HTTPS_ENABLED=true \
+  -e SSL_CERT=/ssl/fullchain.pem \
+  -e SSL_KEY=/ssl/privkey.pem \
+  -p 443:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+#### Option 2: Reverse Proxy (Recommended for Production)
+
+Use a reverse proxy like Nginx or Traefik to handle SSL/TLS termination. This approach is recommended for production environments as it provides more flexibility and easier certificate management.
+
+**Example with Nginx:**
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name comicmaintainer.example.com;
+    
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+    
+    location / {
+        proxy_pass http://localhost:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # WebSocket and SSE support
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 300s;
+        proxy_buffering off;
+    }
+}
+```
+
+**Example with Traefik (Docker Compose):**
+
+```yaml
+services:
+  comictagger-watcher:
+    image: iceburn1/comictagger-watcher:latest
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.comicmaintainer.rule=Host(`comicmaintainer.example.com`)"
+      - "traefik.http.routers.comicmaintainer.entrypoints=websecure"
+      - "traefik.http.routers.comicmaintainer.tls.certresolver=letsencrypt"
+```
+
 ### Security Best Practices
 
 - Use custom PUID/PGID for proper file permissions
 - Expose only necessary ports
-- Use reverse proxy with HTTPS for external access
+- Enable HTTPS for external access using built-in support or reverse proxy
+- Use valid SSL/TLS certificates from a trusted CA (Let's Encrypt, etc.)
 - Keep the Docker image updated regularly
 - Review [SECURITY.md](SECURITY.md) for detailed security guidelines
 

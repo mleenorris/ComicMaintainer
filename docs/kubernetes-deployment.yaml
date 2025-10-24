@@ -22,6 +22,10 @@ data:
   MAX_WORKERS: "4"
   PUID: "1000"
   PGID: "1000"
+  # HTTPS Configuration (uncomment to enable)
+  # HTTPS_ENABLED: "true"
+  # SSL_CERT: "/ssl/tls.crt"
+  # SSL_KEY: "/ssl/tls.key"
 
 ---
 # PersistentVolumeClaim for config storage
@@ -100,6 +104,10 @@ spec:
         # Optional: Mount duplicates directory
         # - name: duplicates
         #   mountPath: /duplicates
+        # Optional: Mount SSL certificates for HTTPS
+        # - name: ssl-certs
+        #   mountPath: /ssl
+        #   readOnly: true
         
         # Resource limits and requests
         resources:
@@ -115,6 +123,8 @@ spec:
           httpGet:
             path: /health
             port: 5000
+            # Use HTTPS scheme if HTTPS is enabled
+            # scheme: HTTPS
           initialDelaySeconds: 60
           periodSeconds: 30
           timeoutSeconds: 10
@@ -125,6 +135,8 @@ spec:
           httpGet:
             path: /health
             port: 5000
+            # Use HTTPS scheme if HTTPS is enabled
+            # scheme: HTTPS
           initialDelaySeconds: 30
           periodSeconds: 10
           timeoutSeconds: 5
@@ -135,6 +147,8 @@ spec:
           httpGet:
             path: /health
             port: 5000
+            # Use HTTPS scheme if HTTPS is enabled
+            # scheme: HTTPS
           initialDelaySeconds: 10
           periodSeconds: 10
           timeoutSeconds: 5
@@ -152,6 +166,10 @@ spec:
       # - name: duplicates
       #   persistentVolumeClaim:
       #     claimName: comicmaintainer-duplicates-pvc
+      # Optional: SSL certificates from secret
+      # - name: ssl-certs
+      #   secret:
+      #     secretName: comicmaintainer-tls
       
       # Security context
       securityContext:
@@ -186,15 +204,19 @@ metadata:
   annotations:
     # Example for nginx ingress controller
     # nginx.ingress.kubernetes.io/rewrite-target: /
-    # cert-manager.io/cluster-issuer: letsencrypt-prod
+    # For automatic TLS with cert-manager
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # For WebSocket/SSE support
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
   labels:
     app: comicmaintainer
 spec:
-  # Optional: TLS configuration
-  # tls:
-  # - hosts:
-  #   - comicmaintainer.example.com
-  #   secretName: comicmaintainer-tls
+  # TLS configuration (recommended for production)
+  tls:
+  - hosts:
+    - comicmaintainer.example.com
+    secretName: comicmaintainer-tls  # Created by cert-manager
   rules:
   - host: comicmaintainer.example.com  # Change to your domain
     http:

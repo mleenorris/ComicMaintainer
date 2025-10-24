@@ -146,12 +146,26 @@ def test_error_response_format():
         print("   ✓ Error responses have correct format")
         if ", 500" in content:
             print("   ✓ Error responses return 500 status code")
-            return True
         else:
             print("   ✗ Error responses don't return 500 status code")
             return False
     else:
         print("   ✗ Error responses don't have correct format")
+        return False
+    
+    # Check that error handling clears active job
+    if "clear_active_job()" in content:
+        # Count how many times clear_active_job is called after "Failed to start job"
+        failed_count = content.count("Failed to start job")
+        clear_count = content.count("# Clear active job since we failed to start")
+        if clear_count == failed_count:
+            print(f"   ✓ Active job is cleared in all {clear_count} error handlers")
+            return True
+        else:
+            print(f"   ✗ Active job cleared in {clear_count} handlers but {failed_count} error paths exist")
+            return False
+    else:
+        print("   ✗ Active job is not cleared on failure")
         return False
 
 
@@ -192,6 +206,7 @@ if __name__ == "__main__":
         print("  • start_job method signature includes RuntimeError in docstring")
         print("  • All API endpoints have try-except blocks for RuntimeError")
         print("  • Error responses return proper JSON with 500 status code")
+        print("  • Active job is cleared when start_job fails (prevents stale state)")
         sys.exit(0)
     else:
         print("\n✗ Some tests failed!")

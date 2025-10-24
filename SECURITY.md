@@ -128,8 +128,10 @@ When deploying ComicMaintainer:
 
 3. **Network Security**
    - Expose only necessary ports
-   - Use reverse proxy with HTTPS for external access
+   - **Always use a reverse proxy with HTTPS for external access** (required for production)
+   - Never expose the application directly to the internet without HTTPS
    - Consider using Docker networks for isolation
+   - All external API communications use HTTPS by default (e.g., GitHub API)
 
 4. **Keep Image Updated**
    ```bash
@@ -154,6 +156,47 @@ When deploying ComicMaintainer:
 4. **Dependencies**
    - Regularly update Python dependencies
    - Review security advisories for ComicTagger and other dependencies
+
+### Secure Communication
+
+**All external communication uses secure protocols:**
+
+1. **GitHub API Integration**
+   - All GitHub API calls use HTTPS exclusively
+   - GitHub API URL is hardcoded to `https://api.github.com`
+   - No insecure HTTP connections are allowed for external APIs
+
+2. **Web Interface**
+   - The application serves HTTP internally (for Docker container)
+   - **For production deployment, always use a reverse proxy with HTTPS**
+   - Examples: Nginx, Apache, Traefik, Caddy
+   - Never expose the web interface directly to the internet without HTTPS
+
+3. **Reverse Proxy Configuration Example**
+   ```nginx
+   # Nginx example - redirect HTTP to HTTPS
+   server {
+       listen 80;
+       server_name comics.example.com;
+       return 301 https://$server_name$request_uri;
+   }
+   
+   server {
+       listen 443 ssl http2;
+       server_name comics.example.com;
+       
+       ssl_certificate /path/to/cert.pem;
+       ssl_certificate_key /path/to/key.pem;
+       
+       location / {
+           proxy_pass http://localhost:5000;
+           proxy_set_header Host $host;
+           proxy_set_header X-Real-IP $remote_addr;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+       }
+   }
+   ```
 
 ### Known Security Considerations
 

@@ -21,7 +21,10 @@ DEBUG_MODE = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN', '')
 GITHUB_REPO = os.environ.get('GITHUB_REPOSITORY', 'mleenorris/ComicMaintainer')
 GITHUB_ISSUE_ASSIGNEE = os.environ.get('GITHUB_ISSUE_ASSIGNEE', 'copilot')
-GITHUB_API_URL = os.environ.get('GITHUB_API_URL', 'https://api.github.com')
+
+# GitHub API URL - enforce HTTPS for security
+# Always use secure HTTPS connection, no override allowed
+GITHUB_API_URL = 'https://api.github.com'
 
 
 

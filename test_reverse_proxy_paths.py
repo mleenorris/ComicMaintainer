@@ -54,13 +54,15 @@ def test_template_base_path():
         result4 = False
     
     # Check that fetch calls use apiUrl
-    # Should find many instances of fetch(apiUrl('/api
-    fetch_count = content.count("fetch(apiUrl('/api")
-    if fetch_count >= 30:  # We expect at least 30 API calls
-        print(f"✓ Found {fetch_count} fetch calls using apiUrl helper")
+    # Should find many instances of fetch(apiUrl('/api or fetch(apiUrl(`/api
+    fetch_count_single = content.count("fetch(apiUrl('/api")
+    fetch_count_backtick = content.count("fetch(apiUrl(`/api")
+    fetch_count = fetch_count_single + fetch_count_backtick
+    if fetch_count >= 40:  # We expect at least 40 API calls (36 with single quotes + ~13 with backticks)
+        print(f"✓ Found {fetch_count} fetch calls using apiUrl helper ({fetch_count_single} with single quotes, {fetch_count_backtick} with backticks)")
         result5 = True
     else:
-        print(f"✗ Only found {fetch_count} fetch calls using apiUrl (expected >= 30)")
+        print(f"✗ Only found {fetch_count} fetch calls using apiUrl (expected >= 40)")
         result5 = False
     
     # Check that EventSource uses apiUrl

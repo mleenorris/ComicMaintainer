@@ -2046,15 +2046,9 @@ def process_unmarked_files():
     
     stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
-    unmarked_files = []
     
     # Filter to only unmarked files that still exist
-    for filepath in files:
-        if not is_file_processed(filepath):
-            if os.path.exists(filepath):
-                unmarked_files.append(filepath)
-            else:
-                logging.warning(f"Skipping non-existent file: {filepath}")
+    unmarked_files = filter_unmarked_existing_files(files)
     
     if not stream:
         # Non-streaming mode (backward compatible)
@@ -2131,15 +2125,9 @@ def rename_unmarked_files():
     
     stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
-    unmarked_files = []
     
     # Filter to only unmarked files that still exist
-    for filepath in files:
-        if not is_file_processed(filepath):
-            if os.path.exists(filepath):
-                unmarked_files.append(filepath)
-            else:
-                logging.warning(f"Skipping non-existent file: {filepath}")
+    unmarked_files = filter_unmarked_existing_files(files)
     
     if not stream:
         # Non-streaming mode (backward compatible)
@@ -2216,15 +2204,9 @@ def normalize_unmarked_files():
     
     stream = request.args.get('stream', 'false').lower() == 'true'
     files = get_comic_files()
-    unmarked_files = []
     
     # Filter to only unmarked files that still exist
-    for filepath in files:
-        if not is_file_processed(filepath):
-            if os.path.exists(filepath):
-                unmarked_files.append(filepath)
-            else:
-                logging.warning(f"Skipping non-existent file: {filepath}")
+    unmarked_files = filter_unmarked_existing_files(files)
     
     if not stream:
         # Non-streaming mode (backward compatible)

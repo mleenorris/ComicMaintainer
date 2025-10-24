@@ -1366,6 +1366,8 @@ def async_process_all_files():
         job_manager.start_job(job_id, process_item, files)
     except RuntimeError as e:
         logging.error(f"[API] Failed to start job {job_id}: {e}")
+        # Clear active job since we failed to start
+        clear_active_job()
         return jsonify({'error': f'Failed to start processing job: {str(e)}'}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(files)} files")
@@ -1437,6 +1439,8 @@ def async_process_selected_files():
         job_manager.start_job(job_id, process_item, full_paths)
     except RuntimeError as e:
         logging.error(f"[API] Failed to start job {job_id}: {e}")
+        # Clear active job since we failed to start
+        clear_active_job()
         return jsonify({'error': f'Failed to start processing job: {str(e)}'}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(full_paths)} files")
@@ -1559,6 +1563,8 @@ def async_process_unmarked_files():
         job_manager.start_job(job_id, process_item, unmarked_files)
     except RuntimeError as e:
         logging.error(f"[API] Failed to start job {job_id}: {e}")
+        # Clear active job since we failed to start
+        clear_active_job()
         return jsonify({'error': f'Failed to start processing job: {str(e)}'}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
@@ -1623,6 +1629,8 @@ def async_rename_unmarked_files():
         job_manager.start_job(job_id, process_item, unmarked_files)
     except RuntimeError as e:
         logging.error(f"[API] Failed to start job {job_id}: {e}")
+        # Clear active job since we failed to start
+        clear_active_job()
         return jsonify({'error': f'Failed to start processing job: {str(e)}'}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
@@ -1686,6 +1694,8 @@ def async_normalize_unmarked_files():
         job_manager.start_job(job_id, process_item, unmarked_files)
     except RuntimeError as e:
         logging.error(f"[API] Failed to start job {job_id}: {e}")
+        # Clear active job since we failed to start
+        clear_active_job()
         return jsonify({'error': f'Failed to start processing job: {str(e)}'}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")

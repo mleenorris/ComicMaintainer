@@ -28,7 +28,7 @@ This service automatically watches a directory for new or changed comic archive 
     - Real-time SSE updates for instant feedback
     - Automatic reconnection and status sync when connection drops
     - Watchdog timer detects stuck jobs and auto-polls status after 60 seconds of inactivity
-- Logs all actions to `ComicMaintainer.log`
+- Logs all actions to `ComicMaintainer.log` (with optional separate debug log when `DEBUG_MODE=true`)
 - Containerized with Docker for easy deployment
 - **Supports custom user and group IDs (PUID/PGID) for proper file permissions**
 - **Installable Web App (PWA)**: Install the web interface as a standalone app on your device
@@ -393,7 +393,8 @@ When you mount `/Config`, the following data is preserved:
 
 4. **Log Files** - Application logs
    - Located in `/Config/Log/`
-   - `ComicMaintainer.log` with automatic rotation
+   - `ComicMaintainer.log` (regular application log) with automatic rotation
+   - `ComicMaintainer_debug.log` (debug log, only when DEBUG_MODE=true) with automatic rotation
 
 ### Example with Persistence
 
@@ -520,24 +521,34 @@ See the [Reverse Proxy Setup Guide](docs/REVERSE_PROXY.md) for detailed configur
 - ✅ Works well for private networks
 
 ## Logging
-- All actions and errors are logged to `ComicMaintainer.log` (located in `/Config/Log/ComicMaintainer.log`).
-- **Log Rotation**: Log files are automatically rotated when they reach a configurable size limit (default: 5MB)
-  - Up to 3 backup files are kept (`ComicMaintainer.log.1`, `.2`, `.3`)
-  - The rotation limit can be configured:
-    - Via the **Settings** menu in the web interface (changes take effect on restart)
-    - Via the `LOG_MAX_BYTES` environment variable (in bytes, e.g., `LOG_MAX_BYTES=10485760` for 10MB)
-  - View logs directly in the web interface via the "View Logs" option in the settings menu
 
-### Debug Logging
-- **Debug Mode**: Enable extensive debug logging by setting `DEBUG_MODE=true` environment variable
+The application maintains two separate log files in `/Config/Log/`:
+
+### Regular Application Log
+- **File**: `ComicMaintainer.log`
+- **Content**: Standard operational messages (INFO, WARNING, ERROR levels)
+- All actions and errors are logged here
+- View logs directly in the web interface via the "View Logs" option in the settings menu
+
+### Debug Log (Optional)
+- **File**: `ComicMaintainer_debug.log`
+- **Created**: Only when `DEBUG_MODE=true` is set
+- **Content**: All messages including detailed DEBUG level information
 - When enabled, debug logs include:
   - Function entry and exit with parameters and return values
   - Detailed operation tracking (file checks, database operations, metadata processing)
   - Variable values and state at key decision points
   - Performance insights for troubleshooting
-- Debug logs are written to the same log file as regular logs but with DEBUG level
 - Useful for troubleshooting issues, understanding file processing flow, and monitoring system behavior
 - Example: `docker run -e DEBUG_MODE=true ...`
+
+### Log Rotation
+Both log files use automatic rotation:
+- **Rotation trigger**: When file reaches configurable size limit (default: 5MB)
+- **Backup count**: Up to 3 backup files are kept (`.log.1`, `.log.2`, `.log.3`)
+- **Configuration**:
+  - Via the **Settings** menu in the web interface (changes take effect on restart)
+  - Via the `LOG_MAX_BYTES` environment variable (in bytes, e.g., `LOG_MAX_BYTES=10485760` for 10MB)
 
 ### Automatic Error Reporting
 - **GitHub Issue Creation**: Errors can automatically create GitHub issues when configured

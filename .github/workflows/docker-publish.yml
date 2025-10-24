@@ -2,7 +2,7 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, stable ]
   pull_request:
     branches: [ master ]
 
@@ -25,6 +25,26 @@ jobs:
           VERSION=$(python -c "import sys; sys.path.insert(0, 'src'); from version import __version__; print(__version__)")
           echo "Version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Determine Docker tags
+        id: docker_tags
+        run: |
+          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+          echo "Building from branch: $BRANCH_NAME"
+          
+          if [ "$BRANCH_NAME" = "stable" ]; then
+            # For stable branch, tag as stable
+            TAGS="iceburn1/comictagger-watcher:stable"
+          else
+            # For master branch, tag as latest and with version number
+            TAGS="iceburn1/comictagger-watcher:latest
+          iceburn1/comictagger-watcher:${{ steps.get_version.outputs.version }}"
+          fi
+          
+          # Output tags in a format that can be used by docker/build-push-action
+          echo "tags<<EOF" >> $GITHUB_OUTPUT
+          echo "$TAGS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
         
       - name: Cache Docker layers
         uses: actions/cache@v4
@@ -48,8 +68,6 @@ jobs:
         with:
           context: .
           push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            iceburn1/comictagger-watcher:latest
-            iceburn1/comictagger-watcher:${{ steps.get_version.outputs.version }}
+          tags: ${{ steps.docker_tags.outputs.tags }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache

@@ -44,6 +44,8 @@ ENV PUID=99
 ENV PGID=100
 ENV MAX_WORKERS=4
 ENV DB_CACHE_SIZE_MB=64
+# BASE_PATH is optional - set to serve from a subdirectory (e.g., /comics)
+# ENV BASE_PATH=
 
 # Expose web interface port
 EXPOSE 5000

@@ -77,6 +77,29 @@ def test_gunicorn_config():
         print("✗ Gunicorn forwarded-allow-ips NOT configured")
         return False
 
+def test_security_headers():
+    """Test that security headers are configured for HTTPS"""
+    web_app_path = os.path.join(os.path.dirname(__file__), 'src', 'web_app.py')
+    
+    with open(web_app_path, 'r') as f:
+        content = f.read()
+    
+    checks = [
+        ("X-Forwarded-Proto", "X-Forwarded-Proto header check"),
+        ("Strict-Transport-Security", "HSTS header"),
+        ("upgrade-insecure-requests", "CSP upgrade-insecure-requests"),
+    ]
+    
+    all_passed = True
+    for check, description in checks:
+        if check in content:
+            print(f"✓ {description} configured")
+        else:
+            print(f"✗ {description} NOT configured")
+            all_passed = False
+    
+    return all_passed
+
 def test_documentation_exists():
     """Test that reverse proxy documentation exists"""
     doc_path = os.path.join(os.path.dirname(__file__), 'docs', 'REVERSE_PROXY.md')
@@ -92,6 +115,7 @@ def test_documentation_exists():
             'Caddy Configuration',
             'BASE_PATH',
             'X-Forwarded',
+            'Connection Not Secure',
         ]
         
         all_found = True
@@ -117,6 +141,7 @@ def main():
         ("Web App Syntax", test_web_app_syntax),
         ("ProxyFix Usage", test_proxyfix_in_code),
         ("Gunicorn Config", test_gunicorn_config),
+        ("Security Headers", test_security_headers),
         ("Documentation", test_documentation_exists),
     ]
     

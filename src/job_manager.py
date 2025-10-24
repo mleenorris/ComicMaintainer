@@ -123,9 +123,10 @@ class JobManager:
         try:
             uuid.UUID(job_id)
         except ValueError:
-            logging.error(f"[JOB {job_id}] Cannot start job - invalid job_id format (expected UUID)")
+            error_msg = f"Cannot start job - invalid job_id format (expected UUID)"
+            logging.error(f"[JOB {job_id}] {error_msg}")
             log_debug("Invalid job_id format (expected UUID)", job_id=job_id)
-            return
+            raise RuntimeError(error_msg)
         
         job = job_store.get_job(job_id)
         if not job:

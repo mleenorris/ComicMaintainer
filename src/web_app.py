@@ -2443,7 +2443,8 @@ if __name__ == '__main__':
     # In production, Gunicorn will import the app directly
     init_app()
     port = int(os.environ.get('WEB_PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    bind_address = os.environ.get('BIND_ADDRESS', '0.0.0.0')
+    app.run(host=bind_address, port=port, debug=False)
 else:
     # When imported by Gunicorn, initialize the app
     init_app()

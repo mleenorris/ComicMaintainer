@@ -18,6 +18,11 @@ WATCHER_PID=$!
 # Get the port from environment variable (default: 5000)
 WEB_PORT=${WEB_PORT:-5000}
 
+# Get the bind address from environment variable (default: 0.0.0.0)
+# 0.0.0.0 = bind to all interfaces (remote access)
+# 127.0.0.1 = bind to localhost only (local access only, use with reverse proxy on same host)
+BIND_ADDRESS=${BIND_ADDRESS:-0.0.0.0}
+
 # Get number of workers from environment variable (default: 2)
 # Job state is now stored in SQLite, supporting multiple workers
 GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
@@ -29,7 +34,7 @@ GUNICORN_WORKERS=${GUNICORN_WORKERS:-2}
 # Reverse proxy support: --forwarded-allow-ips='*' trusts X-Forwarded-* headers from all proxies
 
 # Build gunicorn command with optional SSL support
-GUNICORN_CMD="gunicorn --workers ${GUNICORN_WORKERS} --bind 0.0.0.0:${WEB_PORT} --timeout 600 --forwarded-allow-ips='*'"
+GUNICORN_CMD="gunicorn --workers ${GUNICORN_WORKERS} --bind ${BIND_ADDRESS}:${WEB_PORT} --timeout 600 --forwarded-allow-ips='*'"
 
 # Add SSL/TLS support if certificates are provided
 if [ -n "$SSL_CERTFILE" ] && [ -n "$SSL_KEYFILE" ]; then

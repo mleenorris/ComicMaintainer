@@ -22,6 +22,11 @@ services:
       # Optional: Web interface port (default: 5000)
       - WEB_PORT=5000
       
+      # Optional: Network interface to bind to (default: 0.0.0.0)
+      # 0.0.0.0 = bind to all interfaces (for direct remote access or Docker default)
+      # 127.0.0.1 = bind to localhost only (for local-only access, use with reverse proxy on same host)
+      # - BIND_ADDRESS=0.0.0.0
+      
       # Optional: Number of Gunicorn workers (default: 2)
       - GUNICORN_WORKERS=2
       

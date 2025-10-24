@@ -107,6 +107,7 @@ docker run -d \
 - `PROCESS_SCRIPT`: Script to run for processing (default: `/app/process_file.py`)
 - `DUPLICATE_DIR`: Directory where duplicates are moved (required for duplicate handling)
 - `WEB_PORT`: Port for the web interface (default: `5000`)
+- `BIND_ADDRESS`: Network interface to bind to (default: `0.0.0.0`). Use `0.0.0.0` to bind to all interfaces (remote access), or `127.0.0.1` for localhost only (local access, recommended when using a reverse proxy on the same host for improved security).
 - `GUNICORN_WORKERS`: Number of Gunicorn worker processes (default: `2`). Job state is shared across workers via SQLite.
 - `PUID`: User ID to run the service as (default: `99` for user `nobody`)
 - `PGID`: Group ID to run the service as (default: `100` for group `users`)

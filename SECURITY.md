@@ -157,10 +157,18 @@ When deploying ComicMaintainer:
 
 ### Known Security Considerations
 
-1. **Binding to All Interfaces (0.0.0.0)**
-   - The web interface binds to 0.0.0.0 by default for Docker compatibility
-   - This is intentional but should be protected with a reverse proxy for external access
-   - Use firewall rules or Docker network configuration to restrict access
+1. **Network Binding Configuration**
+   - The web interface binds to 0.0.0.0 by default for Docker compatibility (all network interfaces)
+   - For improved security when using a reverse proxy on the same host, set `BIND_ADDRESS=127.0.0.1` to restrict access to localhost only
+   - Example with localhost binding:
+     ```bash
+     docker run -d \
+       -e BIND_ADDRESS=127.0.0.1 \
+       -e WATCHED_DIR=/watched_dir \
+       # ... other options
+     ```
+   - When binding to 127.0.0.1, ensure your reverse proxy is running on the same host and configured to forward requests
+   - Use firewall rules or Docker network configuration for additional access control
 
 2. **Subprocess Calls**
    - The application uses subprocess calls for process management

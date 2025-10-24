@@ -30,6 +30,7 @@ def validate_env_vars() -> Tuple[bool, List[str]]:
     optional_vars = {
         'PROCESS_SCRIPT': ('/app/process_file.py', 'Script to run for processing'),
         'WEB_PORT': ('5000', 'Port for the web interface'),
+        'BIND_ADDRESS': ('0.0.0.0', 'Network interface to bind to (0.0.0.0 for all interfaces, 127.0.0.1 for localhost only)'),
         'GUNICORN_WORKERS': ('2', 'Number of Gunicorn worker processes'),
         'PUID': ('99', 'User ID to run as'),
         'PGID': ('100', 'Group ID to run as'),
@@ -88,6 +89,24 @@ def validate_env_vars() -> Tuple[bool, List[str]]:
         elif not os.access(duplicate_dir, os.W_OK):
             errors.append(f"DUPLICATE_DIR '{duplicate_dir}' is not writable")
     
+    # Check BIND_ADDRESS
+    bind_address = os.environ.get('BIND_ADDRESS', '0.0.0.0')
+    # Validate IP address format (basic check)
+    if bind_address:  # Only validate if not empty
+        import re
+        ip_pattern = re.compile(r'^(\d{1,3}\.){3}\d{1,3}$')
+        if not ip_pattern.match(bind_address):
+            errors.append(f"BIND_ADDRESS '{bind_address}' is not a valid IP address")
+        else:
+            # Check each octet is 0-255
+            octets = bind_address.split('.')
+            for octet in octets:
+                if int(octet) > 255:
+                    errors.append(f"BIND_ADDRESS '{bind_address}' has invalid octet value")
+                    break
+    else:
+        errors.append("BIND_ADDRESS cannot be empty")
+    
     # Check DEBUG_MODE
     debug_mode = os.environ.get('DEBUG_MODE', 'false').lower()
     if debug_mode not in ['true', 'false', '1', '0', 'yes', 'no']:
@@ -134,6 +153,7 @@ def print_env_summary():
         'WATCHED_DIR': os.environ.get('WATCHED_DIR', 'NOT SET'),
         'DUPLICATE_DIR': os.environ.get('DUPLICATE_DIR', 'NOT SET'),
         'WEB_PORT': os.environ.get('WEB_PORT', '5000'),
+        'BIND_ADDRESS': os.environ.get('BIND_ADDRESS', '0.0.0.0'),
         'GUNICORN_WORKERS': os.environ.get('GUNICORN_WORKERS', '2'),
         'MAX_WORKERS': os.environ.get('MAX_WORKERS', '4'),
         'PUID': os.environ.get('PUID', '99'),

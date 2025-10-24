@@ -1473,6 +1473,16 @@ def list_jobs():
 @app.route('/api/jobs/<job_id>', methods=['DELETE'])
 def delete_job(job_id):
     """API endpoint to delete a job"""
+    import uuid
+    
+    # Validate job_id format (should be a UUID)
+    try:
+        uuid.UUID(job_id)
+    except ValueError:
+        # Invalid job_id format - likely stale data or incorrect usage
+        logging.debug(f"[API] Invalid job_id format for delete: {job_id} (expected UUID)")
+        return jsonify({'error': 'Job not found'}), 404
+    
     job_manager = get_job_manager(max_workers=get_max_workers())
     
     if job_manager.delete_job(job_id):
@@ -1484,6 +1494,16 @@ def delete_job(job_id):
 @app.route('/api/jobs/<job_id>/cancel', methods=['POST'])
 def cancel_job(job_id):
     """API endpoint to cancel a job"""
+    import uuid
+    
+    # Validate job_id format (should be a UUID)
+    try:
+        uuid.UUID(job_id)
+    except ValueError:
+        # Invalid job_id format - likely stale data or incorrect usage
+        logging.debug(f"[API] Invalid job_id format for cancel: {job_id} (expected UUID)")
+        return jsonify({'error': 'Job not found'}), 404
+    
     logging.info(f"[API] Request to cancel job {job_id}")
     job_manager = get_job_manager(max_workers=get_max_workers())
     
@@ -2284,6 +2304,8 @@ def get_active_job_endpoint():
 @app.route('/api/active-job', methods=['POST'])
 def set_active_job_endpoint():
     """API endpoint to set the currently active job"""
+    import uuid
+    
     try:
         data = request.json
         if not data or 'job_id' not in data:
@@ -2291,6 +2313,14 @@ def set_active_job_endpoint():
         
         job_id = data['job_id']
         job_title = data.get('job_title', 'Processing...')
+        
+        # Validate job_id format (should be a UUID)
+        try:
+            uuid.UUID(job_id)
+        except ValueError:
+            # Invalid job_id format - reject the request
+            logging.warning(f"[API] Attempt to set active job with invalid job_id format: {job_id} (expected UUID)")
+            return jsonify({'error': 'Invalid job_id format (must be UUID)'}), 400
         
         set_active_job(job_id, job_title)
         return jsonify({'success': True, 'message': 'Active job set'})

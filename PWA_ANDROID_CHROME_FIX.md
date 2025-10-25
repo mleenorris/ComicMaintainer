@@ -101,7 +101,7 @@ The `"purpose": "any maskable"` value tells browsers:
 **Examples of Adaptive Icon Shapes:**
 - Round (Pixel devices)
 - Rounded square (Samsung devices)
-- Squircle (OnePlus devices)
+- Superellipse (OnePlus devices)
 - Teardrop (Some custom launchers)
 
 ## Files Changed
@@ -213,11 +213,7 @@ For a PWA to be installable on Android Chrome, it must meet:
 
 ### Maskable Icon Specification
 
-From the [Web App Manifest specification](https://www.w3.org/TR/appmanifest/):
-
-> The `purpose` member is a string or array of strings representing the purposes of the image.
-> The `maskable` purpose indicates the image is designed with safe zones and can be cropped.
-> The `any` purpose indicates the image is suitable for any context.
+According to the [Web App Manifest specification](https://www.w3.org/TR/appmanifest/), the `purpose` member represents the purposes of the image. When set to `"maskable"`, it indicates the image is designed with safe zones and can be cropped to different shapes. When set to `"any"`, it indicates the image is suitable for any context. Using both purposes (space-separated as `"any maskable"`) provides maximum flexibility for browsers.
 
 **Best Practice (2024):**
 ```json
@@ -295,7 +291,7 @@ This change is **fully backward compatible**:
 
 ---
 
-**Fix Version:** Latest (commit b75a424)  
+**Fix Version:** Latest  
 **Issue Reported:** 2025-10-25  
 **Fix Implemented:** 2025-10-25  
 **Testing Completed:** 2025-10-25  

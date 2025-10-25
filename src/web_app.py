@@ -481,28 +481,16 @@ def serve_manifest():
         "prefer_related_applications": False,
         "icons": [
             {
-                "src": f"{base_path}/static/icons/icon-192x192.png",
-                "sizes": "192x192",
-                "type": "image/png",
-                "purpose": "any"
-            },
-            {
-                "src": f"{base_path}/static/icons/icon-512x512.png",
-                "sizes": "512x512",
-                "type": "image/png",
-                "purpose": "any"
-            },
-            {
                 "src": f"{base_path}/static/icons/icon-192x192-maskable.png",
                 "sizes": "192x192",
                 "type": "image/png",
-                "purpose": "maskable"
+                "purpose": "any maskable"
             },
             {
                 "src": f"{base_path}/static/icons/icon-512x512-maskable.png",
                 "sizes": "512x512",
                 "type": "image/png",
-                "purpose": "maskable"
+                "purpose": "any maskable"
             }
         ],
         "categories": ["utilities", "productivity"],

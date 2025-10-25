@@ -37,7 +37,6 @@ def test_fetch_calls_use_api_url():
         assert False, error_msg
     
     print("✓ All fetch() calls properly use apiUrl() helper")
-    assert True
 
 
 def test_api_url_helper_exists():
@@ -51,7 +50,6 @@ def test_api_url_helper_exists():
     assert 'return BASE_PATH + path' in content, "apiUrl() doesn't return BASE_PATH + path"
     
     print("✓ apiUrl() helper function exists and is properly defined")
-    assert True
 
 
 def test_fetch_calls_count():
@@ -85,7 +83,6 @@ def test_fetch_calls_count():
     assert count >= 13, f"Expected at least 13 apiUrl() wrapped fetch calls, found {count}"
     
     print(f"✓ Found {count} fetch() calls properly wrapped with apiUrl()")
-    assert True
 
 
 if __name__ == '__main__':

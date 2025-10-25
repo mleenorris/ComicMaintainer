@@ -49,9 +49,10 @@ def test_manifest_icons(manifest):
     
     assert len(icons) >= 2, f"Manifest should have at least 2 icons, found {len(icons)}"
     
-    # Check that we have both standard and maskable icons
+    # Check that we have icons with "any maskable" purpose (best practice for 2024)
     purposes = set()
     sizes = set()
+    has_any_maskable = False
     
     for icon in icons:
         assert 'src' in icon, "Icon missing 'src' field"
@@ -61,10 +62,13 @@ def test_manifest_icons(manifest):
         
         purposes.add(icon['purpose'])
         sizes.add(icon['sizes'])
+        
+        # Check if this icon has "any maskable" purpose (space-separated)
+        if icon['purpose'] == 'any maskable':
+            has_any_maskable = True
     
-    # Should have at least these purposes
-    assert 'any' in purposes, "Manifest should have 'any' purpose icons"
-    assert 'maskable' in purposes, "Manifest should have 'maskable' purpose icons"
+    # Should have "any maskable" purpose (recommended for Android Chrome PWA installation)
+    assert has_any_maskable, "Manifest should have at least one icon with 'any maskable' purpose for Android Chrome compatibility"
     
     # Should have required sizes
     assert '192x192' in sizes, "Manifest should have 192x192 icons"
@@ -72,6 +76,7 @@ def test_manifest_icons(manifest):
     
     print(f"✓ Manifest has {len(icons)} icons with purposes: {', '.join(sorted(purposes))}")
     print(f"✓ Icon sizes: {', '.join(sorted(sizes))}")
+    print(f"✓ Icons use 'any maskable' purpose for optimal Android Chrome compatibility")
 
 
 def test_icon_files_exist(manifest):

@@ -2,6 +2,9 @@
         // (before this external JS is loaded) to support Flask template variable injection.
         // They are available globally when this script executes.
         
+        // Constants
+        const DEFAULT_PER_PAGE = 100; // Default number of items per page
+        
         let files = [];
         let selectedFiles = new Set();
         let currentEditFile = null;
@@ -12,7 +15,7 @@
         let totalPages = 1;
         let totalFiles = 0;
         let unmarkedCount = 0;
-        let perPage = 100; // Default value, will be loaded from server
+        let perPage = DEFAULT_PER_PAGE; // Will be loaded from server preferences
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
         let searchDebounceTimer = null;
         let historyCurrentPage = 1;
@@ -464,54 +467,67 @@
         }
         
         document.addEventListener('DOMContentLoaded', async function() {
-            // Load preferences from server
-            const prefs = await getPreferences();
-            perPage = prefs.perPage || 100;
-            
+            // Initialize non-async operations immediately
             initTheme();
             loadVersion();
-            
-            // Set the per-page selector to the saved value
-            const perPageSelect = document.getElementById('perPageSelect');
-            if (perPageSelect) {
-                perPageSelect.value = perPage;
-            }
-            
-            // Restore filter mode from preferences
-            if (prefs.filterMode) {
-                filterMode = prefs.filterMode;
-                
-                // Update button label
-                const filterLabels = {
-                    'all': '📚 All',
-                    'unmarked': '⚠️ Unmarked',
-                    'marked': '✅ Marked',
-                    'duplicates': '🔁 Duplicates'
-                };
-                document.getElementById('headerFilterLabel').textContent = filterLabels[filterMode];
-                
-                // Update active class on dropdown items
-                document.querySelectorAll('#headerFilterMenu .header-dropdown-item').forEach(item => {
-                    if (item.dataset.filter === filterMode) {
-                        item.classList.add('active');
-                    } else {
-                        item.classList.remove('active');
-                    }
-                });
-            }
             
             // Initialize SSE connection for real-time updates
             initEventSource();
             
-            // Fetch initial watcher status, then rely on SSE for updates
+            // Start all async operations in parallel for faster initial load
+            // This prevents sequential API calls from blocking the file list display
+            const prefsPromise = getPreferences();
+            const jobCheckPromise = checkAndResumeActiveJob();
+            
+            // Start loading files immediately without waiting for preferences or job check
+            // The file list will use default values (perPage=DEFAULT_PER_PAGE) and update when preferences arrive
+            loadFiles();
+            
+            // Fetch initial watcher status in parallel
             updateWatcherStatus();
             
-            // Check for active job and resume polling FIRST (before loading files)
-            // This ensures the progress modal appears immediately on page load
-            await checkAndResumeActiveJob();
+            // Apply preferences when they arrive (don't block file loading)
+            prefsPromise.then(prefs => {
+                const oldPerPage = perPage;
+                perPage = prefs.perPage || DEFAULT_PER_PAGE;
+                
+                // Set the per-page selector to the saved value
+                const perPageSelect = document.getElementById('perPageSelect');
+                if (perPageSelect) {
+                    perPageSelect.value = perPage;
+                }
+                
+                // Restore filter mode from preferences
+                if (prefs.filterMode) {
+                    filterMode = prefs.filterMode;
+                    
+                    // Update button label
+                    const filterLabels = {
+                        'all': '📚 All',
+                        'unmarked': '⚠️ Unmarked',
+                        'marked': '✅ Marked',
+                        'duplicates': '🔁 Duplicates'
+                    };
+                    document.getElementById('headerFilterLabel').textContent = filterLabels[filterMode];
+                    
+                    // Update active class on dropdown items
+                    document.querySelectorAll('#headerFilterMenu .header-dropdown-item').forEach(item => {
+                        if (item.dataset.filter === filterMode) {
+                            item.classList.add('active');
+                        } else {
+                            item.classList.remove('active');
+                        }
+                    });
+                }
+                
+                // Reload files if perPage changed from default
+                if (perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE) {
+                    loadFiles(1);
+                }
+            });
             
-            // Then load files (don't await so file list loads in background)
-            loadFiles();
+            // Job check runs in parallel - no need to await
+            // The modal will appear immediately if there's an active job
         });
         
         // Warn user before leaving page if there's an active batch job

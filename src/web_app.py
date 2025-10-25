@@ -665,38 +665,93 @@ def list_files():
     sort_mode = request.args.get('sort', 'name', type=str)  # 'name', 'date', 'size'
     sort_direction = request.args.get('direction', 'asc', type=str)  # 'asc', 'desc'
     
-    # Get files from database
-    files = get_comic_files()
+    # Get unmarked count efficiently (single SQL query)
+    from unified_store import get_unmarked_file_count
+    unmarked_count = get_unmarked_file_count()
     
-    # Get enriched file list with metadata
-    all_files = get_enriched_file_list(files)
-    
-    # Calculate unmarked count from all files (before filtering)
-    unmarked_count = sum(1 for f in all_files if not f['processed'])
-    
-    # Get filtered and sorted files
-    filtered_files = get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, sort_direction)
-    
-    total_filtered = len(filtered_files)
-    
-    # Handle "all files" request (per_page = -1 or 0)
-    if per_page <= 0:
-        # Return all files in a single page
-        paginated_files = filtered_files
-        total_pages = 1
-        page = 1
-    else:
-        # Limit per_page to reasonable values
-        per_page = min(max(per_page, 10), 500)
+    # Optimize: if filter is 'all' (no marker filtering needed), use paginated query
+    if filter_mode == 'all':
+        # Use optimized paginated query from database
+        # Calculate offset
+        if per_page <= 0:
+            # Return all files
+            limit = -1
+            offset = 0
+        else:
+            # Limit per_page to reasonable values
+            per_page = min(max(per_page, 10), 500)
+            offset = (page - 1) * per_page
+            limit = per_page
+        
+        # Get paginated files directly from database with sorting
+        from unified_store import get_files_paginated
+        paginated_file_data, total_filtered = get_files_paginated(
+            limit=limit,
+            offset=offset,
+            sort_by=sort_mode,
+            sort_direction=sort_direction,
+            search_query=search_query if search_query else None
+        )
+        
+        # Enrich only the files in this page
+        marker_data = get_all_marker_data()
+        processed_files = marker_data.get('processed', set())
+        duplicate_files = marker_data.get('duplicate', set())
+        
+        paginated_files = []
+        for file_data in paginated_file_data:
+            filepath = file_data['filepath']
+            abs_path = os.path.abspath(filepath)
+            rel_path = os.path.relpath(filepath, WATCHED_DIR) if WATCHED_DIR else filepath
+            
+            paginated_files.append({
+                'path': filepath,
+                'name': os.path.basename(filepath),
+                'relative_path': rel_path,
+                'size': file_data['file_size'] or 0,
+                'modified': file_data['last_modified'],
+                'processed': abs_path in processed_files,
+                'duplicate': abs_path in duplicate_files
+            })
         
         # Calculate pagination
-        total_pages = (total_filtered + per_page - 1) // per_page if total_filtered > 0 else 1
-        page = max(1, min(page, total_pages))
+        if per_page <= 0:
+            total_pages = 1
+            page = 1
+        else:
+            total_pages = (total_filtered + per_page - 1) // per_page if total_filtered > 0 else 1
+            page = max(1, min(page, total_pages))
+    else:
+        # Fall back to old method when marker filtering is required
+        # Get files from database
+        files = get_comic_files()
         
-        start_idx = (page - 1) * per_page
-        end_idx = start_idx + per_page
+        # Get enriched file list with metadata
+        all_files = get_enriched_file_list(files)
         
-        paginated_files = filtered_files[start_idx:end_idx]
+        # Get filtered and sorted files
+        filtered_files = get_filtered_sorted_files(all_files, filter_mode, search_query, sort_mode, sort_direction)
+        
+        total_filtered = len(filtered_files)
+        
+        # Handle "all files" request (per_page = -1 or 0)
+        if per_page <= 0:
+            # Return all files in a single page
+            paginated_files = filtered_files
+            total_pages = 1
+            page = 1
+        else:
+            # Limit per_page to reasonable values
+            per_page = min(max(per_page, 10), 500)
+            
+            # Calculate pagination
+            total_pages = (total_filtered + per_page - 1) // per_page if total_filtered > 0 else 1
+            page = max(1, min(page, total_pages))
+            
+            start_idx = (page - 1) * per_page
+            end_idx = start_idx + per_page
+            
+            paginated_files = filtered_files[start_idx:end_idx]
     
     return jsonify({
         'files': paginated_files,

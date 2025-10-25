@@ -371,6 +371,84 @@ def get_all_files_with_metadata() -> List[Dict]:
         return []
 
 
+def get_files_paginated(
+    limit: int = 100,
+    offset: int = 0,
+    sort_by: str = 'name',
+    sort_direction: str = 'asc',
+    search_query: str = None
+) -> Tuple[List[Dict], int]:
+    """
+    Get files from the file store with pagination, sorting, and search.
+    This is much more efficient than loading all files and filtering in Python.
+    
+    Args:
+        limit: Maximum number of files to return (use -1 for all files)
+        offset: Number of files to skip
+        sort_by: Sort field ('name', 'date', 'size')
+        sort_direction: Sort direction ('asc', 'desc')
+        search_query: Optional search query to filter by filename
+    
+    Returns:
+        Tuple of (list of file dictionaries, total count matching criteria)
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Build WHERE clause for search
+            where_clause = ""
+            params = []
+            if search_query:
+                where_clause = "WHERE filepath LIKE ?"
+                params.append(f"%{search_query}%")
+            
+            # Get total count matching search criteria
+            count_query = f"SELECT COUNT(*) as count FROM files {where_clause}"
+            cursor.execute(count_query, params)
+            total_count = cursor.fetchone()['count']
+            
+            # Build ORDER BY clause
+            if sort_by == 'date':
+                order_by = 'last_modified'
+            elif sort_by == 'size':
+                order_by = 'file_size'
+            else:  # Default to name
+                order_by = 'filepath'
+            
+            # Add direction
+            direction = 'DESC' if sort_direction == 'desc' else 'ASC'
+            
+            # Build LIMIT clause
+            limit_clause = ""
+            if limit > 0:
+                limit_clause = f"LIMIT {limit} OFFSET {offset}"
+                
+            # Execute query
+            query = f'''
+                SELECT filepath, last_modified, file_size, added_timestamp
+                FROM files 
+                {where_clause}
+                ORDER BY {order_by} {direction}
+                {limit_clause}
+            '''
+            cursor.execute(query, params)
+            
+            results = []
+            for row in cursor.fetchall():
+                results.append({
+                    'filepath': row['filepath'],
+                    'last_modified': row['last_modified'],
+                    'file_size': row['file_size'],
+                    'added_timestamp': row['added_timestamp']
+                })
+            
+            return results, total_count
+    except Exception as e:
+        logging.error(f"Error getting paginated files from store: {e}")
+        return [], 0
+
+
 def get_file_count() -> int:
     """
     Get the total number of files in the store.
@@ -691,6 +769,32 @@ def get_all_markers_by_type(marker_types: list) -> dict:
     except Exception as e:
         logging.error(f"Error getting markers for types {marker_types}: {e}")
         return {marker_type: set() for marker_type in marker_types}
+
+
+def get_unmarked_file_count() -> int:
+    """
+    Get the count of files that are not marked as 'processed'.
+    This is much more efficient than loading all files and checking markers.
+    
+    Returns:
+        Number of unmarked files
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Count files that don't have a 'processed' marker
+            cursor.execute('''
+                SELECT COUNT(*) as count
+                FROM files
+                WHERE filepath NOT IN (
+                    SELECT filepath FROM markers WHERE marker_type = 'processed'
+                )
+            ''')
+            return cursor.fetchone()['count']
+    except Exception as e:
+        logging.error(f"Error getting unmarked file count: {e}")
+        return 0
 
 
 def cleanup_markers(marker_type: str, max_files: int) -> int:

@@ -617,7 +617,7 @@
         .action-dropdown-menu {
             display: none;
             position: absolute;
-            right: 0;
+            left: 0;
             top: calc(100% + 5px);
             background: var(--bg-secondary);
             border: 1px solid var(--border-secondary);
@@ -1382,10 +1382,10 @@
                 display: none;
             }
             
-            /* Fix action dropdown menu positioning on mobile */
+            /* Action dropdown menu positioning on mobile */
             .action-dropdown-menu {
-                right: 0;
-                left: auto;
+                left: 0;
+                right: auto;
                 min-width: max-content;
             }
             

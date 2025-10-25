@@ -886,14 +886,21 @@
                     const processedTitle = file.processed ? 'Processed' : 'Not processed yet';
                     const duplicateBadge = file.duplicate ? '🔁' : '';
                     const duplicateTitle = file.duplicate ? 'Duplicate' : '';
+                    
+                    // Split filename for middle truncation
+                    const filenameParts = truncateFilenameMiddle(file.name);
+                    const filenameHtml = filenameParts.end 
+                        ? `<span class="file-name-start">${escapeHtml(filenameParts.start)}</span><span class="file-name-end">${escapeHtml(filenameParts.end)}</span>`
+                        : `<span class="file-name-content">${escapeHtml(filenameParts.start)}</span>`;
+                    
                     html += `
                         <div class="file-item ${dir ? 'indented' : ''}">
                             <input type="checkbox" 
                                    ${isSelected ? 'checked' : ''} 
                                    onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
                             <div>
-                                <div class="file-name">
-                                    <span title="${processedTitle}">${processedBadge}</span>${duplicateBadge ? ` <span title="${duplicateTitle}">${duplicateBadge}</span>` : ''} ${escapeHtml(file.name)}
+                                <div class="file-name" title="${escapeHtml(file.name)}">
+                                    <span title="${processedTitle}">${processedBadge}</span>${duplicateBadge ? ` <span title="${duplicateTitle}">${duplicateBadge}</span>` : ''} ${filenameHtml}
                                 </div>
                                 ${!dir ? `<div class="file-path">${escapeHtml(file.relative_path)}</div>` : ''}
                             </div>
@@ -995,6 +1002,60 @@
                        .replace(/\n/g, '\\n')
                        .replace(/\r/g, '\\r')
                        .replace(/\t/g, '\\t');
+        }
+        
+        function truncateFilenameMiddle(filename) {
+            // Split filename into start and end parts for middle truncation
+            // This ensures the file extension is always visible
+            const maxStartLength = 30; // Characters to show at the start
+            const maxEndLength = 15; // Characters to show at the end (includes extension)
+            
+            if (filename.length <= maxStartLength + maxEndLength) {
+                // Filename is short enough, no truncation needed
+                return {
+                    start: filename,
+                    end: ''
+                };
+            }
+            
+            // Find the last dot for extension
+            const lastDotIndex = filename.lastIndexOf('.');
+            const hasExtension = lastDotIndex > 0 && lastDotIndex > filename.length - 10;
+            
+            if (hasExtension) {
+                // Preserve extension
+                const extension = filename.substring(lastDotIndex);
+                const nameWithoutExt = filename.substring(0, lastDotIndex);
+                
+                // Calculate how much of the name we can show
+                const remainingForName = maxEndLength - extension.length;
+                
+                if (nameWithoutExt.length <= maxStartLength + remainingForName) {
+                    // Can show the whole name
+                    return {
+                        start: nameWithoutExt,
+                        end: extension
+                    };
+                }
+                
+                // Need to truncate
+                const start = nameWithoutExt.substring(0, maxStartLength);
+                const end = nameWithoutExt.substring(nameWithoutExt.length - remainingForName) + extension;
+                
+                return {
+                    start: start + '...',
+                    end: end
+                };
+            } else {
+                // No clear extension, just split at character count
+                const start = filename.substring(0, maxStartLength);
+                const end = filename.substring(filename.length - maxEndLength);
+                
+                return {
+                    start: start + '...',
+                    end: end
+                };
+            }
         }
         
         function getDropdownId(filepath) {

@@ -521,7 +521,7 @@
                 }
                 
                 // Reload files if perPage changed from default
-                if (perPage !== oldPerPage && perPage !== 100) {
+                if (perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE) {
                     loadFiles(1);
                 }
             });

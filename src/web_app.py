@@ -4,6 +4,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import json
 import fcntl
+import traceback
 from flask import Flask, render_template, jsonify, request, send_from_directory
 from werkzeug.middleware.proxy_fix import ProxyFix
 from comicapi.comicarchive import ComicArchive
@@ -270,6 +271,28 @@ def handle_file_rename_in_store(original_path, final_path):
     """Handle file rename in file store - record change if file was actually renamed"""
     if original_path != final_path:
         record_file_change('rename', old_path=original_path, new_path=final_path)
+
+def get_user_friendly_error_message(error_msg, operation="processing"):
+    """
+    Convert backend error messages into user-friendly messages.
+    
+    Args:
+        error_msg: The error message from the backend exception
+        operation: The operation that failed (e.g., "processing", "renaming", "normalizing")
+    
+    Returns:
+        A user-friendly error message with actionable guidance
+    """
+    # Make the message more user-friendly by providing context
+    if "not found in database" in error_msg:
+        return f"Failed to start {operation}: job was not found. Please try again."
+    elif "already processing" in error_msg or "already completed" in error_msg:
+        return f"Failed to start {operation}: job is already running or completed. Please refresh the page and try again."
+    elif "invalid job_id format" in error_msg:
+        return f"Failed to start {operation}: internal error occurred. Please try again."
+    else:
+        # For any other error, use a generic message to avoid exposing internal details
+        return f"Failed to start {operation}: an unexpected error occurred. Please try again."
 
 def get_credits_by_role(credits_list, role_synonyms):
     """Extract credits for a specific role from credits list"""
@@ -1495,13 +1518,13 @@ def async_process_all_files():
     try:
         job_manager.start_job(job_id, process_item, files)
     except RuntimeError as e:
-        import traceback
         logging.error(f"[API] Failed to start job {job_id}: {e}")
         logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
-        # Return generic error message to user (log contains details)
-        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
+        # Return specific error message to help user understand the issue
+        user_msg = get_user_friendly_error_message(str(e), "processing")
+        return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(files)} files")
     return jsonify({
@@ -1571,13 +1594,13 @@ def async_process_selected_files():
     try:
         job_manager.start_job(job_id, process_item, full_paths)
     except RuntimeError as e:
-        import traceback
         logging.error(f"[API] Failed to start job {job_id}: {e}")
         logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
-        # Return generic error message to user (log contains details)
-        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
+        # Return specific error message to help user understand the issue
+        user_msg = get_user_friendly_error_message(str(e), "processing")
+        return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(full_paths)} files")
     return jsonify({
@@ -1714,13 +1737,13 @@ def async_process_unmarked_files():
     try:
         job_manager.start_job(job_id, process_item, unmarked_files)
     except RuntimeError as e:
-        import traceback
         logging.error(f"[API] Failed to start job {job_id}: {e}")
         logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
-        # Return generic error message to user (log contains details)
-        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
+        # Return specific error message to help user understand the issue
+        user_msg = get_user_friendly_error_message(str(e), "processing")
+        return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
     return jsonify({
@@ -1779,13 +1802,13 @@ def async_rename_unmarked_files():
     try:
         job_manager.start_job(job_id, process_item, unmarked_files)
     except RuntimeError as e:
-        import traceback
         logging.error(f"[API] Failed to start job {job_id}: {e}")
         logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
-        # Return generic error message to user (log contains details)
-        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
+        # Return specific error message to help user understand the issue
+        user_msg = get_user_friendly_error_message(str(e), "renaming")
+        return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
     return jsonify({
@@ -1843,13 +1866,13 @@ def async_normalize_unmarked_files():
     try:
         job_manager.start_job(job_id, process_item, unmarked_files)
     except RuntimeError as e:
-        import traceback
         logging.error(f"[API] Failed to start job {job_id}: {e}")
         logging.error(f"Traceback: {traceback.format_exc()}")
         # Clear active job since we failed to start
         clear_active_job()
-        # Return generic error message to user (log contains details)
-        return jsonify({'error': 'Failed to start processing job. Please try again.'}), 500
+        # Return specific error message to help user understand the issue
+        user_msg = get_user_friendly_error_message(str(e), "normalizing")
+        return jsonify({'error': user_msg}), 500
     
     logging.info(f"[API] Created and started job {job_id} for {len(unmarked_files)} unmarked files")
     return jsonify({

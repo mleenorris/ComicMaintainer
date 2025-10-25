@@ -2913,7 +2913,7 @@
         
         async function loadFiles(page = 1, refresh = false) {
             try {
-                let url = `/api/files?page=${page}&per_page=${perPage}`;
+                let url = apiUrl(`/api/files?page=${page}&per_page=${perPage}`);
                 if (refresh) {
                     url += '&refresh=true';
                 }
@@ -3533,7 +3533,7 @@
         
         async function viewTags(filepath) {
             try {
-                const response = await fetch(`/api/file/${encodeURIComponent(filepath)}/tags`);
+                const response = await fetch(apiUrl(`/api/file/${encodeURIComponent(filepath)}/tags`));
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -3578,7 +3578,7 @@
             }
             
             try {
-                const response = await fetch(`/api/file/${encodeURIComponent(currentEditFile)}/tags`, {
+                const response = await fetch(apiUrl(`/api/file/${encodeURIComponent(currentEditFile)}/tags`), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -3827,7 +3827,7 @@
             console.log(`[JOB ${jobId}] Polling job status once...`);
             
             try {
-                const response = await fetch(`/api/jobs/${jobId}`);
+                const response = await fetch(apiUrl(`/api/jobs/${jobId}`));
                 if (!response.ok) {
                     console.warn(`[JOB ${jobId}] Could not fetch job status: ${response.status}`);
                     return;
@@ -3939,7 +3939,7 @@
             try {
                 console.log(`[CANCEL] Cancelling job ${currentJobId}...`);
                 
-                const response = await fetch(`/api/jobs/${currentJobId}/cancel`, {
+                const response = await fetch(apiUrl(`/api/jobs/${currentJobId}/cancel`), {
                     method: 'POST'
                 });
                 
@@ -3989,7 +3989,7 @@
             
             try {
                 // Check if job still exists and is active
-                const response = await fetch(`/api/jobs/${activeJobId}`);
+                const response = await fetch(apiUrl(`/api/jobs/${activeJobId}`));
                 
                 if (!response.ok) {
                     if (response.status === 404) {
@@ -4482,7 +4482,7 @@
             showMessage('Processing file...', 'info');
             
             try {
-                const response = await fetch(`/api/process-file/${encodeURIComponent(filepath)}`, {
+                const response = await fetch(apiUrl(`/api/process-file/${encodeURIComponent(filepath)}`), {
                     method: 'POST'
                 });
                 
@@ -4510,7 +4510,7 @@
             showMessage('Renaming file...', 'info');
             
             try {
-                const response = await fetch(`/api/rename-file/${encodeURIComponent(filepath)}`, {
+                const response = await fetch(apiUrl(`/api/rename-file/${encodeURIComponent(filepath)}`), {
                     method: 'POST'
                 });
                 
@@ -4538,7 +4538,7 @@
             showMessage('Normalizing metadata...', 'info');
             
             try {
-                const response = await fetch(`/api/normalize-file/${encodeURIComponent(filepath)}`, {
+                const response = await fetch(apiUrl(`/api/normalize-file/${encodeURIComponent(filepath)}`), {
                     method: 'POST'
                 });
                 
@@ -4566,7 +4566,7 @@
             showMessage('Deleting file...', 'info');
             
             try {
-                const response = await fetch(`/api/delete-file/${encodeURIComponent(filepath)}`, {
+                const response = await fetch(apiUrl(`/api/delete-file/${encodeURIComponent(filepath)}`), {
                     method: 'DELETE'
                 });
                 
@@ -4711,7 +4711,7 @@
                 contentDiv.innerHTML = '';
                 
                 const offset = (historyCurrentPage - 1) * historyPerPage;
-                const response = await fetch(`/api/processing-history?limit=${historyPerPage}&offset=${offset}`);
+                const response = await fetch(apiUrl(`/api/processing-history?limit=${historyPerPage}&offset=${offset}`));
                 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
@@ -4954,7 +4954,7 @@
                 logsContent.textContent = '';
                 logStats.textContent = '';
                 
-                const response = await fetch(`/api/logs?lines=${lines}&type=${logType}`);
+                const response = await fetch(apiUrl(`/api/logs?lines=${lines}&type=${logType}`));
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -5258,7 +5258,7 @@
                 updateProgress(i + 1, selectedFilesArray.length, successCount, failCount);
                 
                 try {
-                    const response = await fetch(`/api/delete-file/${encodeURIComponent(filepath)}`, {
+                    const response = await fetch(apiUrl(`/api/delete-file/${encodeURIComponent(filepath)}`), {
                         method: 'DELETE'
                     });
                     

@@ -1,5 +1,6 @@
-        // BASE_PATH and apiUrl are now defined in the main HTML file
-        // to support Flask template variables
+        // BASE_PATH and apiUrl are defined in an inline script in the main HTML file
+        // (before this external JS is loaded) to support Flask template variable injection.
+        // They are available globally when this script executes.
         
         let files = [];
         let selectedFiles = new Set();

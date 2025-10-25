@@ -16,6 +16,13 @@ os.environ.setdefault('WEB_PORT', '5000')
 # Import Flask test client
 from web_app import app
 
+# Cache duration constants (in seconds)
+CACHE_DURATION_ONE_YEAR = 31536000  # 365 days
+CACHE_DURATION_ONE_DAY = 86400      # 1 day
+
+# Size thresholds for HTML file (in bytes)
+MAX_HTML_SIZE = 60 * 1024  # 60KB
+
 def test_index_page_loads():
     """Test that the index page loads successfully"""
     with app.test_client() as client:
@@ -35,7 +42,7 @@ def test_css_file_served():
         assert response.status_code == 200
         assert 'Cache-Control' in response.headers
         # CSS should have long cache
-        assert 'max-age=31536000' in response.headers['Cache-Control']
+        assert f'max-age={CACHE_DURATION_ONE_YEAR}' in response.headers['Cache-Control']
         assert 'immutable' in response.headers['Cache-Control']
         # Check that CSS content is present
         assert b':root' in response.data or b'body' in response.data
@@ -48,7 +55,7 @@ def test_js_file_served():
         assert response.status_code == 200
         assert 'Cache-Control' in response.headers
         # JS should have long cache
-        assert 'max-age=31536000' in response.headers['Cache-Control']
+        assert f'max-age={CACHE_DURATION_ONE_YEAR}' in response.headers['Cache-Control']
         assert 'immutable' in response.headers['Cache-Control']
         # Check that JS content is present
         assert b'function' in response.data or b'const' in response.data
@@ -62,7 +69,7 @@ def test_icon_file_cache():
         if response.status_code == 200:
             assert 'Cache-Control' in response.headers
             # Icons should have shorter cache (1 day)
-            assert 'max-age=86400' in response.headers['Cache-Control']
+            assert f'max-age={CACHE_DURATION_ONE_DAY}' in response.headers['Cache-Control']
             print("✓ Icon/manifest files have appropriate cache headers")
         else:
             print("⚠ Skipping icon cache test (manifest.json not found)")
@@ -73,8 +80,7 @@ def test_html_size_reduction():
         response = client.get('/')
         html_size = len(response.data)
         # Original was 217KB, new should be around 44KB
-        # Allow some variation but should be less than 60KB
-        assert html_size < 60 * 1024, f"HTML size {html_size} bytes is too large (should be < 60KB)"
+        assert html_size < MAX_HTML_SIZE, f"HTML size {html_size} bytes is too large (should be < {MAX_HTML_SIZE / 1024}KB)"
         print(f"✓ HTML size reduced to {html_size / 1024:.1f}KB (was ~217KB)")
 
 if __name__ == '__main__':

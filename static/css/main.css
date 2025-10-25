@@ -1466,7 +1466,7 @@
             }
             
             .file-item {
-                grid-template-columns: 30px 1fr 60px 60px;
+                grid-template-columns: 30px 1fr 60px;
                 padding: 10px;
                 gap: 8px;
                 overflow: hidden;
@@ -1476,9 +1476,14 @@
                 padding-left: 25px;
             }
             
+            /* Hide file size on mobile */
             .file-item > div:nth-child(3) {
-                font-size: 11px;
-                text-align: right;
+                display: none;
+            }
+            
+            /* Hide modified date on mobile */
+            .file-item > div:nth-child(4) {
+                display: none;
             }
             
             .file-actions {
@@ -1669,7 +1674,7 @@
             }
             
             .file-item {
-                grid-template-columns: 25px 1fr 55px 55px;
+                grid-template-columns: 25px 1fr 55px;
                 overflow: hidden;
             }
             

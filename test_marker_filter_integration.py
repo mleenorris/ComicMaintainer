@@ -71,9 +71,7 @@ def test_marker_filter_integration():
             
             print("\n--- Testing Query Integration ---")
             
-            print("\n--- Testing Query Integration ---")
-                
-                # Test 1: Get first page of all files
+            # Test 1: Get first page of all files
             start = time.time()
             results, total = get_files_paginated(
                 limit=100, offset=0, filter_mode='all'

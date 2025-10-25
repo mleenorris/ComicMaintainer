@@ -2792,16 +2792,52 @@
             document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
                 if (menu.id !== dropdownId) {
                     menu.classList.remove('show');
+                    menu.classList.remove('show-above');
                 }
             });
             
             // Toggle this dropdown
+            const isCurrentlyShown = dropdown.classList.contains('show');
             dropdown.classList.toggle('show');
+            
+            // If we're showing the dropdown, check if it needs to be positioned above
+            if (!isCurrentlyShown) {
+                // Remove any previous positioning class
+                dropdown.classList.remove('show-above');
+                
+                // Get the dropdown button position
+                const button = event.target.closest('.dropdown-toggle');
+                if (button) {
+                    const buttonRect = button.getBoundingClientRect();
+                    const dropdownRect = dropdown.getBoundingClientRect();
+                    const viewportHeight = window.innerHeight;
+                    
+                    // Check if dropdown would overflow the bottom of the viewport
+                    const spaceBelow = viewportHeight - buttonRect.bottom;
+                    const spaceAbove = buttonRect.top;
+                    const MARGIN = 20; // Safety margin to prevent edge cutoff
+                    
+                    // Show dropdown above if:
+                    // 1. There's not enough space below (with margin), OR
+                    // 2. There's more space above AND we're in the bottom half of viewport
+                    const notEnoughSpaceBelow = spaceBelow < (dropdownRect.height + MARGIN);
+                    const inBottomHalf = buttonRect.bottom > (viewportHeight / 2);
+                    const moreSpaceAbove = spaceAbove > spaceBelow;
+                    
+                    if (notEnoughSpaceBelow || (inBottomHalf && moreSpaceAbove)) {
+                        dropdown.classList.add('show-above');
+                    }
+                }
+            } else {
+                // If we're hiding it, also remove the positioning class
+                dropdown.classList.remove('show-above');
+            }
         }
         
         function closeAllDropdowns() {
             document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
                 menu.classList.remove('show');
+                menu.classList.remove('show-above');
             });
             // Also close filter dropdown
             const filterMenu = document.getElementById('filterDropdownMenu');

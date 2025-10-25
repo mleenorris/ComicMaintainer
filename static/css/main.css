@@ -923,6 +923,13 @@
             display: block;
         }
         
+        .dropdown-menu.show-above {
+            top: auto;
+            bottom: 100%;
+            margin-top: 0;
+            margin-bottom: 2px;
+        }
+        
         .dropdown-item {
             padding: 8px 12px;
             cursor: pointer;

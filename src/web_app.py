@@ -547,8 +547,16 @@ const BASE_PATH = '{base_path}';
 
 @app.route('/static/<path:filename>')
 def serve_static(filename):
-    """Serve static files (icons, etc.) for PWA"""
-    return send_from_directory(static_folder, filename)
+    """Serve static files (icons, CSS, JS, etc.) with caching headers"""
+    response = send_from_directory(static_folder, filename)
+    # Cache static files for 1 year (CSS/JS) or 1 day (icons)
+    if filename.endswith(('.css', '.js')):
+        # Long cache for versioned assets
+        response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    else:
+        # Shorter cache for icons and other assets
+        response.headers['Cache-Control'] = 'public, max-age=86400'
+    return response
 
 def preload_metadata_for_directories(files):
     """No longer needed - markers are now centralized in /Config"""

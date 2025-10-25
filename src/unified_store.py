@@ -795,7 +795,6 @@ def get_unmarked_file_count() -> int:
     except Exception as e:
         logging.error(f"Error getting unmarked file count: {e}")
         return 0
-        return {marker_type: set() for marker_type in marker_types}
 
 
 def cleanup_markers(marker_type: str, max_files: int) -> int:

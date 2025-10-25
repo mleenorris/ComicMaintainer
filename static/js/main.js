@@ -772,6 +772,13 @@
         function renderFileList() {
             const fileList = document.getElementById('fileList');
             
+            // Preserve the currently open dropdown before re-rendering
+            let openDropdownId = null;
+            const openDropdown = document.querySelector('.dropdown-menu.show');
+            if (openDropdown) {
+                openDropdownId = openDropdown.id;
+            }
+            
             // Clean up selectedFiles to remove files that no longer exist
             // This must happen before the early return for empty file lists
             const currentFilePaths = new Set(files.map(f => f.relative_path));
@@ -920,6 +927,14 @@
             });
             
             fileList.innerHTML = html;
+            
+            // Restore the open dropdown state after re-rendering
+            if (openDropdownId) {
+                const restoredDropdown = document.getElementById(openDropdownId);
+                if (restoredDropdown) {
+                    restoredDropdown.classList.add('show');
+                }
+            }
             
             updateSelectInfo();
             updateSelectAllCheckbox();

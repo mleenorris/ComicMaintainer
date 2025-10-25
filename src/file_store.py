@@ -23,7 +23,8 @@ from unified_store import (
     get_metadata,
     get_last_sync_timestamp,
     migrate_from_old_databases,
-    get_files_paginated
+    get_files_paginated,
+    get_unmarked_file_count
 )
 
 # For backward compatibility, allow setting these values
@@ -49,6 +50,7 @@ __all__ = [
     'get_metadata',
     'get_last_sync_timestamp',
     'get_files_paginated',
+    'get_unmarked_file_count',
     'CONFIG_DIR',
     'FILE_STORE_DIR',
     'DB_PATH',

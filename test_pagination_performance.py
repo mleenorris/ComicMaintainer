@@ -91,7 +91,7 @@ def test_paginated_query_basic():
 
 def test_pagination_performance():
     """Test that pagination is more efficient than loading all files"""
-    from unified_store import init_db, clear_all_files, batch_add_files, get_files_paginated, get_all_files_with_metadata
+    from unified_store import init_db, clear_all_files, batch_add_files, get_files_paginated, get_all_files_with_metadata, add_marker, get_unmarked_file_count
     
     # Create temp directory
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -132,6 +132,19 @@ def test_pagination_performance():
             batch_time = time.time() - start
             print(f"✓ Batch added {success} files in {batch_time:.2f}s")
             
+            # Mark 5000 files as processed
+            print("Marking 5000 files as processed...")
+            for i in range(0, 5000):
+                add_marker(test_files[i], 'processed')
+            
+            # Test unmarked count performance
+            start = time.time()
+            unmarked_count = get_unmarked_file_count()
+            unmarked_time = time.time() - start
+            
+            assert unmarked_count == 5000, f"Expected 5000 unmarked files, got {unmarked_count}"
+            print(f"✓ Unmarked count query took {unmarked_time:.4f}s")
+            
             # Test paginated query performance
             start = time.time()
             results, total = get_files_paginated(limit=100, offset=0)
@@ -151,6 +164,7 @@ def test_pagination_performance():
             
             # Pagination should be significantly faster for first page
             print(f"\n📊 Performance comparison:")
+            print(f"   Unmarked count:  {unmarked_time:.4f}s")
             print(f"   Paginated query: {paginated_time:.4f}s")
             print(f"   Load all files:  {all_files_time:.4f}s")
             print(f"   Speedup: {all_files_time / paginated_time:.1f}x faster")

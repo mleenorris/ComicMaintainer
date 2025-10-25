@@ -771,6 +771,33 @@ def get_all_markers_by_type(marker_types: list) -> dict:
         return {marker_type: set() for marker_type in marker_types}
 
 
+def get_unmarked_file_count() -> int:
+    """
+    Get the count of files that are not marked as 'processed'.
+    This is much more efficient than loading all files and checking markers.
+    
+    Returns:
+        Number of unmarked files
+    """
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Count files that don't have a 'processed' marker
+            cursor.execute('''
+                SELECT COUNT(*) as count
+                FROM files
+                WHERE filepath NOT IN (
+                    SELECT filepath FROM markers WHERE marker_type = 'processed'
+                )
+            ''')
+            return cursor.fetchone()['count']
+    except Exception as e:
+        logging.error(f"Error getting unmarked file count: {e}")
+        return 0
+        return {marker_type: set() for marker_type in marker_types}
+
+
 def cleanup_markers(marker_type: str, max_files: int) -> int:
     """Clean up old markers, keeping only the most recent ones"""
     try:

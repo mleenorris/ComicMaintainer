@@ -665,10 +665,9 @@ def list_files():
     sort_mode = request.args.get('sort', 'name', type=str)  # 'name', 'date', 'size'
     sort_direction = request.args.get('direction', 'asc', type=str)  # 'asc', 'desc'
     
-    # Calculate unmarked count (always needed, but can be optimized later)
-    all_files_for_count = get_comic_files()
-    all_files_enriched_for_count = get_enriched_file_list(all_files_for_count)
-    unmarked_count = sum(1 for f in all_files_enriched_for_count if not f['processed'])
+    # Get unmarked count efficiently (single SQL query)
+    from unified_store import get_unmarked_file_count
+    unmarked_count = get_unmarked_file_count()
     
     # Optimize: if filter is 'all' (no marker filtering needed), use paginated query
     if filter_mode == 'all':

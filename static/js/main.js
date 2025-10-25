@@ -774,7 +774,7 @@
             
             // Preserve the currently open dropdown before re-rendering
             let openDropdownId = null;
-            const openDropdown = document.querySelector('.dropdown-menu.show');
+            const openDropdown = document.querySelector('#fileList .dropdown-menu.show');
             if (openDropdown) {
                 openDropdownId = openDropdown.id;
             }
@@ -933,6 +933,8 @@
                 const restoredDropdown = document.getElementById(openDropdownId);
                 if (restoredDropdown) {
                     restoredDropdown.classList.add('show');
+                } else {
+                    console.warn('Could not restore dropdown - element not found:', openDropdownId);
                 }
             }
             

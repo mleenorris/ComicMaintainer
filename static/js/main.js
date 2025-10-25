@@ -2,6 +2,9 @@
         // (before this external JS is loaded) to support Flask template variable injection.
         // They are available globally when this script executes.
         
+        // Constants
+        const DEFAULT_PER_PAGE = 100; // Default number of items per page
+        
         let files = [];
         let selectedFiles = new Set();
         let currentEditFile = null;
@@ -12,7 +15,7 @@
         let totalPages = 1;
         let totalFiles = 0;
         let unmarkedCount = 0;
-        let perPage = 100; // Default value, will be loaded from server
+        let perPage = DEFAULT_PER_PAGE; // Will be loaded from server preferences
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
         let searchDebounceTimer = null;
         let historyCurrentPage = 1;
@@ -486,7 +489,7 @@
             // Apply preferences when they arrive (don't block file loading)
             prefsPromise.then(prefs => {
                 const oldPerPage = perPage;
-                perPage = prefs.perPage || 100;
+                perPage = prefs.perPage || DEFAULT_PER_PAGE;
                 
                 // Set the per-page selector to the saved value
                 const perPageSelect = document.getElementById('perPageSelect');

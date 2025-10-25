@@ -76,8 +76,11 @@ def test_parallel_initialization_in_javascript():
     # The optimization: check that we don't have sequential await statements
     # before loadFiles() that would block it
     
-    # Split by loadFiles call
-    before_load_files = handler_body.split('loadFiles()')[0]
+    # Split by first loadFiles call (either with or without argument)
+    if 'loadFiles()' in handler_body:
+        before_load_files = handler_body.split('loadFiles()')[0]
+    else:
+        before_load_files = handler_body.split('loadFiles(')[0]
     
     # Count await statements before loadFiles
     await_count_before = before_load_files.count('await')
@@ -146,12 +149,13 @@ def test_preferences_applied_asynchronously():
     assert 'prefsPromise.then' in js_content or 'prefsPromise.then(' in js_content, \
         "Should have a .then() handler to apply preferences asynchronously"
     
-    # Check that perPage is still being set
-    assert 'perPage = prefs.perPage' in js_content or 'perPage=prefs.perPage' in js_content, \
+    # Check that perPage is still being set (flexible whitespace matching)
+    import re
+    assert re.search(r'perPage\s*=\s*prefs\.perPage', js_content), \
         "Should still set perPage from preferences"
     
-    # Check that filterMode is still being set
-    assert 'filterMode = prefs.filterMode' in js_content or 'filterMode=prefs.filterMode' in js_content, \
+    # Check that filterMode is still being set (flexible whitespace matching)
+    assert re.search(r'filterMode\s*=\s*prefs\.filterMode', js_content), \
         "Should still set filterMode from preferences"
     
     print("✅ Preferences are applied asynchronously without blocking file load")

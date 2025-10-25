@@ -5,6 +5,12 @@
         // Constants
         const DEFAULT_PER_PAGE = 100; // Default number of items per page
         
+        // Filename truncation constants
+        const FILENAME_TRUNCATION_START_LENGTH = 30; // Characters to show at the start
+        const FILENAME_TRUNCATION_END_LENGTH = 15; // Characters to show at the end (includes extension)
+        const MAX_EXTENSION_LENGTH = 10; // Maximum length to consider as a valid extension
+        const TRUNCATION_ELLIPSIS = '...'; // String to indicate truncation
+        
         let files = [];
         let selectedFiles = new Set();
         let currentEditFile = null;
@@ -1007,10 +1013,7 @@
         function truncateFilenameMiddle(filename) {
             // Split filename into start and end parts for middle truncation
             // This ensures the file extension is always visible
-            const maxStartLength = 30; // Characters to show at the start
-            const maxEndLength = 15; // Characters to show at the end (includes extension)
-            
-            if (filename.length <= maxStartLength + maxEndLength) {
+            if (filename.length <= FILENAME_TRUNCATION_START_LENGTH + FILENAME_TRUNCATION_END_LENGTH) {
                 // Filename is short enough, no truncation needed
                 return {
                     start: filename,
@@ -1020,7 +1023,7 @@
             
             // Find the last dot for extension
             const lastDotIndex = filename.lastIndexOf('.');
-            const hasExtension = lastDotIndex > 0 && lastDotIndex > filename.length - 10;
+            const hasExtension = lastDotIndex > 0 && lastDotIndex > filename.length - MAX_EXTENSION_LENGTH;
             
             if (hasExtension) {
                 // Preserve extension
@@ -1028,9 +1031,9 @@
                 const nameWithoutExt = filename.substring(0, lastDotIndex);
                 
                 // Calculate how much of the name we can show
-                const remainingForName = maxEndLength - extension.length;
+                const remainingForName = FILENAME_TRUNCATION_END_LENGTH - extension.length;
                 
-                if (nameWithoutExt.length <= maxStartLength + remainingForName) {
+                if (nameWithoutExt.length <= FILENAME_TRUNCATION_START_LENGTH + remainingForName) {
                     // Can show the whole name
                     return {
                         start: nameWithoutExt,
@@ -1039,20 +1042,20 @@
                 }
                 
                 // Need to truncate
-                const start = nameWithoutExt.substring(0, maxStartLength);
+                const start = nameWithoutExt.substring(0, FILENAME_TRUNCATION_START_LENGTH);
                 const end = nameWithoutExt.substring(nameWithoutExt.length - remainingForName) + extension;
                 
                 return {
-                    start: start + '...',
+                    start: start + TRUNCATION_ELLIPSIS,
                     end: end
                 };
             } else {
                 // No clear extension, just split at character count
-                const start = filename.substring(0, maxStartLength);
-                const end = filename.substring(filename.length - maxEndLength);
+                const start = filename.substring(0, FILENAME_TRUNCATION_START_LENGTH);
+                const end = filename.substring(filename.length - FILENAME_TRUNCATION_END_LENGTH);
                 
                 return {
-                    start: start + '...',
+                    start: start + TRUNCATION_ELLIPSIS,
                     end: end
                 };
             }

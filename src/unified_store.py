@@ -376,10 +376,11 @@ def get_files_paginated(
     offset: int = 0,
     sort_by: str = 'name',
     sort_direction: str = 'asc',
-    search_query: str = None
+    search_query: str = None,
+    filter_mode: str = 'all'
 ) -> Tuple[List[Dict], int]:
     """
-    Get files from the file store with pagination, sorting, and search.
+    Get files from the file store with pagination, sorting, search, and marker filtering.
     This is much more efficient than loading all files and filtering in Python.
     
     Args:
@@ -388,6 +389,7 @@ def get_files_paginated(
         sort_by: Sort field ('name', 'date', 'size')
         sort_direction: Sort direction ('asc', 'desc')
         search_query: Optional search query to filter by filename
+        filter_mode: Filter by marker status ('all', 'marked', 'unmarked', 'duplicates')
     
     Returns:
         Tuple of (list of file dictionaries, total count matching criteria)
@@ -396,25 +398,56 @@ def get_files_paginated(
         with get_db_connection() as conn:
             cursor = conn.cursor()
             
-            # Build WHERE clause for search
-            where_clause = ""
+            # Build WHERE clauses
+            where_clauses = []
             params = []
+            
+            # Add search filter
             if search_query:
-                where_clause = "WHERE filepath LIKE ?"
+                where_clauses.append("f.filepath LIKE ?")
                 params.append(f"%{search_query}%")
             
+            # Build base query depending on filter mode
+            if filter_mode == 'marked':
+                # Files with 'processed' marker
+                from_clause = """
+                    files f
+                    INNER JOIN markers m ON f.filepath = m.filepath AND m.marker_type = 'processed'
+                """
+            elif filter_mode == 'unmarked':
+                # Files without 'processed' marker
+                from_clause = """
+                    files f
+                    LEFT JOIN markers m ON f.filepath = m.filepath AND m.marker_type = 'processed'
+                """
+                where_clauses.append("m.filepath IS NULL")
+            elif filter_mode == 'duplicates':
+                # Files with 'duplicate' marker
+                from_clause = """
+                    files f
+                    INNER JOIN markers m ON f.filepath = m.filepath AND m.marker_type = 'duplicate'
+                """
+            else:
+                # All files
+                from_clause = "files f"
+            
+            # Combine WHERE clauses
+            where_clause = ""
+            if where_clauses:
+                where_clause = "WHERE " + " AND ".join(where_clauses)
+            
             # Get total count matching search criteria
-            count_query = f"SELECT COUNT(*) as count FROM files {where_clause}"
+            count_query = f"SELECT COUNT(*) as count FROM {from_clause} {where_clause}"
             cursor.execute(count_query, params)
             total_count = cursor.fetchone()['count']
             
             # Build ORDER BY clause
             if sort_by == 'date':
-                order_by = 'last_modified'
+                order_by = 'f.last_modified'
             elif sort_by == 'size':
-                order_by = 'file_size'
+                order_by = 'f.file_size'
             else:  # Default to name
-                order_by = 'filepath'
+                order_by = 'f.filepath'
             
             # Add direction
             direction = 'DESC' if sort_direction == 'desc' else 'ASC'
@@ -426,8 +459,8 @@ def get_files_paginated(
                 
             # Execute query
             query = f'''
-                SELECT filepath, last_modified, file_size, added_timestamp
-                FROM files 
+                SELECT f.filepath, f.last_modified, f.file_size, f.added_timestamp
+                FROM {from_clause}
                 {where_clause}
                 ORDER BY {order_by} {direction}
                 {limit_clause}

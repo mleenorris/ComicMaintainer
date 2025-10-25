@@ -480,7 +480,7 @@
             const jobCheckPromise = checkAndResumeActiveJob();
             
             // Start loading files immediately without waiting for preferences or job check
-            // The file list will use default values (perPage=100) and update when preferences arrive
+            // The file list will use default values (perPage=DEFAULT_PER_PAGE) and update when preferences arrive
             loadFiles();
             
             // Fetch initial watcher status in parallel

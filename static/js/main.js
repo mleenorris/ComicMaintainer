@@ -893,6 +893,16 @@
                     const duplicateBadge = file.duplicate ? '🔁' : '';
                     const duplicateTitle = file.duplicate ? 'Duplicate' : '';
                     
+                    // Determine status class for background color
+                    let statusClass = '';
+                    if (file.duplicate) {
+                        statusClass = 'status-duplicate';
+                    } else if (file.processed) {
+                        statusClass = 'status-marked';
+                    } else {
+                        statusClass = 'status-unmarked';
+                    }
+                    
                     // Split filename for middle truncation
                     const filenameParts = truncateFilenameMiddle(file.name);
                     const filenameHtml = filenameParts.end 
@@ -900,7 +910,7 @@
                         : `<span class="file-name-content">${escapeHtml(filenameParts.start)}</span>`;
                     
                     html += `
-                        <div class="file-item ${dir ? 'indented' : ''}">
+                        <div class="file-item ${dir ? 'indented' : ''} ${statusClass}">
                             <input type="checkbox" 
                                    ${isSelected ? 'checked' : ''} 
                                    onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">

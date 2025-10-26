@@ -1502,7 +1502,6 @@
             .file-item {
                 grid-template-columns: 30px 1fr 60px;
                 padding: 10px;
-                padding-left: 10px;
                 gap: 8px;
                 overflow: hidden;
             }
@@ -1719,7 +1718,6 @@
             .file-item {
                 grid-template-columns: 25px 1fr 55px;
                 padding: 8px;
-                padding-left: 8px;
                 gap: 6px;
                 overflow: hidden;
             }

@@ -857,6 +857,30 @@
         .file-name {
             font-weight: 500;
             color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            min-width: 0;
+        }
+        
+        .file-name-content {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .file-name-start {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            flex-shrink: 1;
+            min-width: 0;
+        }
+        
+        .file-name-end {
+            flex-shrink: 0;
+            white-space: nowrap;
         }
         
         .file-path {
@@ -1550,11 +1574,20 @@
             
             .file-name {
                 font-size: 14px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
                 max-width: 100%;
                 min-width: 0;
+            }
+            
+            .file-name-content {
+                font-size: 14px;
+            }
+            
+            .file-name-start {
+                font-size: 14px;
+            }
+            
+            .file-name-end {
+                font-size: 14px;
             }
             
             .file-path {

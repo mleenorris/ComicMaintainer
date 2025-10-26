@@ -824,6 +824,7 @@
             display: none;
         }
         
+        /* Grid layout: checkbox (30px) + spacer for toggle button alignment (40px) + file info (1fr) + size + date + actions */
         .file-item {
             padding: 15px;
             padding-left: 45px;
@@ -846,6 +847,11 @@
         
         .file-item.indented:hover {
             background: var(--bg-indented-hover);
+        }
+        
+        /* Spacer element to align with header's toggle button column */
+        .grid-spacer {
+            /* Empty spacer for grid alignment */
         }
         
         .file-item input[type="checkbox"] {
@@ -1501,7 +1507,7 @@
             }
             
             /* Hide spacer on mobile */
-            .file-item > div:nth-child(2) {
+            .file-item .grid-spacer {
                 display: none;
             }
             
@@ -1717,7 +1723,7 @@
             }
             
             /* Hide spacer on very small mobile */
-            .file-item > div:nth-child(2) {
+            .file-item .grid-spacer {
                 display: none;
             }
             

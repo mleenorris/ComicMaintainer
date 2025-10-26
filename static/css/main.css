@@ -1485,7 +1485,7 @@
             }
             
             .file-list-header {
-                grid-template-columns: 30px 1fr 60px;
+                grid-template-columns: 30px 1fr auto;
                 padding: 10px;
                 font-size: 13px;
                 overflow: hidden;
@@ -1500,7 +1500,7 @@
             }
             
             .file-item {
-                grid-template-columns: 30px 1fr 60px;
+                grid-template-columns: 30px 1fr auto;
                 padding: 10px;
                 gap: 8px;
                 overflow: hidden;
@@ -1520,7 +1520,7 @@
             .file-actions {
                 flex-direction: column;
                 gap: 5px;
-                width: 100%;
+                justify-self: end;
             }
             
             .btn-small {
@@ -1709,14 +1709,14 @@
             }
             
             .file-list-header {
-                grid-template-columns: 25px 1fr 55px;
+                grid-template-columns: 25px 1fr auto;
                 padding: 8px;
                 gap: 6px;
                 overflow: hidden;
             }
             
             .file-item {
-                grid-template-columns: 25px 1fr 55px;
+                grid-template-columns: 25px 1fr auto;
                 padding: 8px;
                 gap: 6px;
                 overflow: hidden;

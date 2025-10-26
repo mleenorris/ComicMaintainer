@@ -828,7 +828,7 @@
             padding: 15px;
             padding-left: 45px;
             display: grid;
-            grid-template-columns: 40px 1fr minmax(100px, auto) minmax(150px, auto) minmax(200px, auto);
+            grid-template-columns: 30px 40px 1fr minmax(100px, auto) minmax(150px, auto) minmax(200px, auto);
             gap: 10px;
             border-bottom: 1px solid var(--border-primary);
             align-items: center;
@@ -1231,7 +1231,7 @@
             }
             
             .file-item {
-                grid-template-columns: 40px 1fr minmax(80px, auto) minmax(120px, auto) minmax(150px, auto);
+                grid-template-columns: 30px 40px 1fr minmax(80px, auto) minmax(120px, auto) minmax(150px, auto);
                 margin-left: 30px;
             }
             
@@ -1490,7 +1490,7 @@
             }
             
             .file-item {
-                grid-template-columns: 30px 1fr 60px;
+                grid-template-columns: 30px 0 1fr 60px;
                 padding: 10px;
                 gap: 8px;
                 overflow: hidden;
@@ -1500,13 +1500,18 @@
                 padding-left: 25px;
             }
             
+            /* Hide spacer on mobile */
+            .file-item > div:nth-child(2) {
+                display: none;
+            }
+            
             /* Hide file size on mobile */
-            .file-item > div:nth-child(3) {
+            .file-item > div:nth-child(4) {
                 display: none;
             }
             
             /* Hide modified date on mobile */
-            .file-item > div:nth-child(4) {
+            .file-item > div:nth-child(5) {
                 display: none;
             }
             
@@ -1707,8 +1712,23 @@
             }
             
             .file-item {
-                grid-template-columns: 25px 1fr 55px;
+                grid-template-columns: 25px 0 1fr 55px;
                 overflow: hidden;
+            }
+            
+            /* Hide spacer on very small mobile */
+            .file-item > div:nth-child(2) {
+                display: none;
+            }
+            
+            /* Hide file size on very small mobile */
+            .file-item > div:nth-child(4) {
+                display: none;
+            }
+            
+            /* Hide modified date on very small mobile */
+            .file-item > div:nth-child(5) {
+                display: none;
             }
             
             .directory-header {

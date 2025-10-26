@@ -904,6 +904,7 @@
                             <input type="checkbox" 
                                    ${isSelected ? 'checked' : ''} 
                                    onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
+                            <div></div>
                             <div>
                                 <div class="file-name" title="${escapeHtml(file.name)}">
                                     <span title="${processedTitle}">${processedBadge}</span>${duplicateBadge ? ` <span title="${duplicateTitle}">${duplicateBadge}</span>` : ''} ${filenameHtml}

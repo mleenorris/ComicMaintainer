@@ -1493,9 +1493,9 @@
             }
             
             /* Hide toggle-all button, size column, and date column on mobile */
-            .file-list-header > div:nth-child(2),
-            .file-list-header > div:nth-child(5),
-            .file-list-header > div:nth-child(6) {
+            .file-list-header > *:nth-child(2),
+            .file-list-header > *:nth-child(4),
+            .file-list-header > *:nth-child(5) {
                 display: none;
             }
             
@@ -1511,9 +1511,9 @@
             }
             
             /* Hide spacer, size, and date columns on mobile */
-            .file-item > div:nth-child(2),
-            .file-item > div:nth-child(4),
-            .file-item > div:nth-child(5) {
+            .file-item > *:nth-child(2),
+            .file-item > *:nth-child(4),
+            .file-item > *:nth-child(5) {
                 display: none;
             }
             

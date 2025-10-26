@@ -849,9 +849,10 @@
             background: var(--bg-indented-hover);
         }
         
-        /* Spacer element to align with header's toggle button column */
+        /* Spacer element to align with header's toggle button column (40px)
+           No explicit styling needed - grid-template-columns handles sizing */
         .grid-spacer {
-            /* Empty spacer for grid alignment */
+            /* Intentionally empty - exists only for grid alignment */
         }
         
         .file-item input[type="checkbox"] {

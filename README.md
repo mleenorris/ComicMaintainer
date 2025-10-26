@@ -578,6 +578,11 @@ Both log files use automatic rotation:
 - **Automatic Version Bumping**: Every merge to `master` automatically increments the patch version (e.g., 1.0.0 → 1.0.1), updates `CHANGELOG.md`, creates a Git tag, and publishes a GitHub release
 - Docker images are tagged with both `latest` and the specific version number (e.g., `1.0.1`)
 - Automated security scanning runs on every push, pull request, and weekly schedule
+- **Automatic Branch Cleanup**: Daily cleanup of stale branches (runs at 2:00 AM UTC)
+  - Deletes branches that are at least 5 days old
+  - Protects `master`, `test`, and `stable` branches
+  - Skips branches with open pull requests
+  - Manual trigger available via GitHub Actions
 
 ## Security
 

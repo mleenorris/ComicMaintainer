@@ -1,0 +1,105 @@
+name: Delete Old Branches
+
+on:
+  schedule:
+    # Run daily at 2:00 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  delete-old-branches:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Delete old branches
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Set minimum age for deletion (5 days in seconds)
+          MIN_AGE_SECONDS=$((5 * 24 * 60 * 60))
+          CURRENT_TIME=$(date +%s)
+          
+          # Protected branches that should never be deleted
+          PROTECTED_BRANCHES=("master" "test" "stable")
+          
+          echo "=== Starting branch cleanup ==="
+          echo "Current time: $(date -u)"
+          echo "Minimum branch age: 5 days"
+          echo "Protected branches: ${PROTECTED_BRANCHES[*]}"
+          echo ""
+          
+          # Get all remote branches
+          git fetch --all
+          BRANCHES=$(git branch -r | grep -v HEAD | sed 's/origin\///' | sed 's/^[[:space:]]*//')
+          
+          DELETED_COUNT=0
+          SKIPPED_COUNT=0
+          
+          for BRANCH in $BRANCHES; do
+            # Skip protected branches
+            IS_PROTECTED=false
+            for PROTECTED in "${PROTECTED_BRANCHES[@]}"; do
+              if [ "$BRANCH" = "$PROTECTED" ]; then
+                IS_PROTECTED=true
+                echo "⏭️  Skipping protected branch: $BRANCH"
+                SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+                break
+              fi
+            done
+            
+            if [ "$IS_PROTECTED" = true ]; then
+              continue
+            fi
+            
+            # Get the last commit date for the branch
+            LAST_COMMIT_TIMESTAMP=$(git log -1 --format=%ct origin/$BRANCH 2>/dev/null)
+            
+            if [ -z "$LAST_COMMIT_TIMESTAMP" ]; then
+              echo "⚠️  Could not get timestamp for branch: $BRANCH"
+              SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+              continue
+            fi
+            
+            # Calculate branch age
+            BRANCH_AGE=$((CURRENT_TIME - LAST_COMMIT_TIMESTAMP))
+            BRANCH_AGE_DAYS=$((BRANCH_AGE / 86400))
+            
+            # Check if branch is old enough
+            if [ $BRANCH_AGE -lt $MIN_AGE_SECONDS ]; then
+              echo "⏭️  Branch too recent ($BRANCH_AGE_DAYS days old): $BRANCH"
+              SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+              continue
+            fi
+            
+            # Check if branch has an open pull request
+            PR_COUNT=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+              "https://api.github.com/repos/$REPO/pulls?state=open&head=${REPO%/*}:$BRANCH" \
+              | jq '. | length')
+            
+            if [ "$PR_COUNT" -gt 0 ]; then
+              echo "⏭️  Branch has $PR_COUNT open PR(s): $BRANCH"
+              SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
+              continue
+            fi
+            
+            # Delete the branch
+            echo "🗑️  Deleting branch (${BRANCH_AGE_DAYS} days old): $BRANCH"
+            git push origin --delete $BRANCH
+            DELETED_COUNT=$((DELETED_COUNT + 1))
+          done
+          
+          echo ""
+          echo "=== Cleanup Summary ==="
+          echo "Branches deleted: $DELETED_COUNT"
+          echo "Branches skipped: $SKIPPED_COUNT"
+          echo "Cleanup completed at: $(date -u)"

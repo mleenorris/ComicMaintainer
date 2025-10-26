@@ -23,6 +23,14 @@
             --shadow-md: 0 4px 20px rgba(0,0,0,0.3);
             
             --modal-overlay: rgba(0,0,0,0.5);
+            
+            /* Status background colors */
+            --status-marked: #d4edda;
+            --status-marked-hover: #c3e6cb;
+            --status-unmarked: #fff3cd;
+            --status-unmarked-hover: #ffeaa7;
+            --status-duplicate: #ffe5cc;
+            --status-duplicate-hover: #ffd9b3;
         }
         
         [data-theme="dark"] {
@@ -50,6 +58,14 @@
             --shadow-md: 0 4px 20px rgba(0,0,0,0.5);
             
             --modal-overlay: rgba(0,0,0,0.7);
+            
+            /* Status background colors for dark theme */
+            --status-marked: #1a3a1a;
+            --status-marked-hover: #234d23;
+            --status-unmarked: #3d3419;
+            --status-unmarked-hover: #4d4320;
+            --status-duplicate: #3d2b1a;
+            --status-duplicate-hover: #4d3720;
         }
         
         * {
@@ -894,6 +910,37 @@
             font-size: 12px;
             color: var(--text-muted);
             margin-top: 3px;
+        }
+        
+        /* File status background colors */
+        .file-item.status-marked,
+        .file-item.indented.status-marked {
+            background: var(--status-marked);
+        }
+        
+        .file-item.status-marked:hover,
+        .file-item.indented.status-marked:hover {
+            background: var(--status-marked-hover);
+        }
+        
+        .file-item.status-unmarked,
+        .file-item.indented.status-unmarked {
+            background: var(--status-unmarked);
+        }
+        
+        .file-item.status-unmarked:hover,
+        .file-item.indented.status-unmarked:hover {
+            background: var(--status-unmarked-hover);
+        }
+        
+        .file-item.status-duplicate,
+        .file-item.indented.status-duplicate {
+            background: var(--status-duplicate);
+        }
+        
+        .file-item.status-duplicate:hover,
+        .file-item.indented.status-duplicate:hover {
+            background: var(--status-duplicate-hover);
         }
         
         .file-actions {

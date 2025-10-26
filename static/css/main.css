@@ -913,28 +913,34 @@
         }
         
         /* File status background colors */
-        .file-item.status-marked {
-            background: var(--status-marked) !important;
+        .file-item.status-marked,
+        .file-item.indented.status-marked {
+            background: var(--status-marked);
         }
         
-        .file-item.status-marked:hover {
-            background: var(--status-marked-hover) !important;
+        .file-item.status-marked:hover,
+        .file-item.indented.status-marked:hover {
+            background: var(--status-marked-hover);
         }
         
-        .file-item.status-unmarked {
-            background: var(--status-unmarked) !important;
+        .file-item.status-unmarked,
+        .file-item.indented.status-unmarked {
+            background: var(--status-unmarked);
         }
         
-        .file-item.status-unmarked:hover {
-            background: var(--status-unmarked-hover) !important;
+        .file-item.status-unmarked:hover,
+        .file-item.indented.status-unmarked:hover {
+            background: var(--status-unmarked-hover);
         }
         
-        .file-item.status-duplicate {
-            background: var(--status-duplicate) !important;
+        .file-item.status-duplicate,
+        .file-item.indented.status-duplicate {
+            background: var(--status-duplicate);
         }
         
-        .file-item.status-duplicate:hover {
-            background: var(--status-duplicate-hover) !important;
+        .file-item.status-duplicate:hover,
+        .file-item.indented.status-duplicate:hover {
+            background: var(--status-duplicate-hover);
         }
         
         .file-actions {

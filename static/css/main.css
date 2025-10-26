@@ -1485,19 +1485,22 @@
             }
             
             .file-list-header {
-                grid-template-columns: 25px 25px 1fr 60px;
+                grid-template-columns: 30px 1fr 60px;
                 padding: 10px;
                 font-size: 13px;
                 overflow: hidden;
+                gap: 8px;
             }
             
-            .file-list-header > div:nth-child(4),
-            .file-list-header > div:nth-child(5) {
+            /* Hide toggle-all button, size column, and date column on mobile */
+            .file-list-header > div:nth-child(2),
+            .file-list-header > div:nth-child(5),
+            .file-list-header > div:nth-child(6) {
                 display: none;
             }
             
             .file-item {
-                grid-template-columns: 30px 0 1fr 60px;
+                grid-template-columns: 30px 1fr 60px;
                 padding: 10px;
                 gap: 8px;
                 overflow: hidden;
@@ -1507,17 +1510,9 @@
                 padding-left: 25px;
             }
             
-            /* Hide spacer on mobile */
-            .file-item .grid-spacer {
-                display: none;
-            }
-            
-            /* Hide file size on mobile */
-            .file-item > div:nth-child(4) {
-                display: none;
-            }
-            
-            /* Hide modified date on mobile */
+            /* Hide spacer, size, and date columns on mobile */
+            .file-item > div:nth-child(2),
+            .file-item > div:nth-child(4),
             .file-item > div:nth-child(5) {
                 display: none;
             }
@@ -1619,9 +1614,9 @@
             }
             
             .directory-header-clickable {
-                grid-template-columns: 12px 14px 1fr 60px;
+                grid-template-columns: 14px 14px 1fr 60px;
                 gap: 6px;
-                font-size: 12px;
+                font-size: 13px;
                 overflow: hidden;
             }
             
@@ -1639,8 +1634,8 @@
             }
             
             .directory-toggle {
-                font-size: 10px;
-                width: 12px;
+                font-size: 12px;
+                width: 14px;
             }
             
             .directory-icon {
@@ -1714,33 +1709,49 @@
             }
             
             .file-list-header {
-                grid-template-columns: 20px 20px 1fr 55px;
+                grid-template-columns: 25px 1fr 55px;
+                padding: 8px;
+                gap: 6px;
                 overflow: hidden;
             }
             
             .file-item {
-                grid-template-columns: 25px 0 1fr 55px;
+                grid-template-columns: 25px 1fr 55px;
+                padding: 8px;
+                gap: 6px;
                 overflow: hidden;
             }
             
-            /* Hide spacer on very small mobile */
-            .file-item .grid-spacer {
-                display: none;
-            }
-            
-            /* Hide file size on very small mobile */
-            .file-item > div:nth-child(4) {
-                display: none;
-            }
-            
-            /* Hide modified date on very small mobile */
-            .file-item > div:nth-child(5) {
-                display: none;
+            .file-item.indented {
+                padding-left: 20px;
             }
             
             .directory-header {
+                padding: 8px;
                 font-size: 12px;
                 overflow: hidden;
+            }
+            
+            .directory-header-clickable {
+                grid-template-columns: 12px 12px 1fr 55px;
+                gap: 5px;
+            }
+            
+            .directory-path {
+                font-size: 11px;
+            }
+            
+            .directory-file-count {
+                font-size: 10px;
+            }
+            
+            .directory-toggle {
+                font-size: 11px;
+                width: 12px;
+            }
+            
+            .directory-icon {
+                font-size: 12px;
             }
             
             .empty-state {

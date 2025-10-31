@@ -2,6 +2,48 @@
         // (before this external JS is loaded) to support Flask template variable injection.
         // They are available globally when this script executes.
         
+        // Authentication check - redirect to login if no token
+        (function checkAuth() {
+            const token = localStorage.getItem('jwt_token');
+            if (!token) {
+                window.location.href = '/login.html';
+                return;
+            }
+        })();
+        
+        // Helper function to get auth headers
+        function getAuthHeaders() {
+            const token = localStorage.getItem('jwt_token');
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            return headers;
+        }
+        
+        // Helper function to handle auth errors
+        function handleAuthError(response) {
+            if (response.status === 401) {
+                // Token expired or invalid, redirect to login
+                localStorage.removeItem('jwt_token');
+                localStorage.removeItem('username');
+                window.location.href = '/login.html';
+                return true;
+            }
+            return false;
+        }
+        
+        // Add logout function
+        function logout() {
+            if (confirm('Are you sure you want to logout?')) {
+                localStorage.removeItem('jwt_token');
+                localStorage.removeItem('username');
+                window.location.href = '/login.html';
+            }
+        }
+        
         // Constants
         const DEFAULT_PER_PAGE = 100; // Default number of items per page
         
@@ -475,6 +517,18 @@
         document.addEventListener('DOMContentLoaded', async function() {
             // Initialize non-async operations immediately
             initTheme();
+            
+            // Display logged in username
+            const username = localStorage.getItem('username');
+            if (username) {
+                const userInfo = document.getElementById('userInfo');
+                const usernameDisplay = document.getElementById('usernameDisplay');
+                if (userInfo && usernameDisplay) {
+                    usernameDisplay.textContent = username;
+                    userInfo.style.display = 'block';
+                }
+            }
+            
             loadVersion();
             
             // Initialize SSE connection for real-time updates

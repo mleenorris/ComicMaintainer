@@ -198,7 +198,7 @@ ComicMaintainer/
 
 1. **Comic Processing**: ✅ Implemented with SharpCompress integration for archive handling, ComicInfo.xml metadata parsing/writing, duplicate detection, and file renaming based on templates
 2. **File Storage**: ✅ Implemented with Entity Framework Core and SQLite for persistence
-3. **Event Broadcasting**: Would need to implement SignalR for real-time updates (equivalent to Python's Server-Sent Events)
+3. **Event Broadcasting**: ✅ Implemented with SignalR for WebSocket communication and real-time updates
 
 ## Future Enhancements
 
@@ -221,10 +221,12 @@ ComicMaintainer/
    - ✅ Database migrations
    - 🔲 Migration from Python's file-based storage (future enhancement)
 
-4. **Real-Time Updates**:
-   - SignalR for WebSocket communication
-   - Live job progress updates
-   - Real-time file status changes
+4. **Real-Time Updates**: ✅ **Implemented**
+   - ✅ SignalR for WebSocket communication
+   - ✅ ProgressHub for broadcasting updates
+   - ✅ Job subscription support
+   - 🔲 Live job progress updates (needs integration with ComicProcessorService)
+   - 🔲 Real-time file status changes (needs integration with FileStoreService)
 
 5. **Authentication & Authorization**:
    - User management

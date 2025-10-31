@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -36,6 +37,9 @@ builder.Services.AddDbContext<ComicMaintainerDbContext>(options =>
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Add SignalR
+builder.Services.AddSignalR();
 
 // Add CORS
 builder.Services.AddCors(options =>
@@ -81,6 +85,7 @@ app.UseRouting();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<ProgressHub>("/hubs/progress");
 
 // Map default route to serve index.html
 app.MapFallbackToFile("index.html");

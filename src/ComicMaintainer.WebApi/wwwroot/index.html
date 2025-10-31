@@ -72,6 +72,9 @@
                     <span class="watcher-icon">⚙️</span>
                     <span class="watcher-text">Checking...</span>
                 </div>
+                <div class="user-info" id="userInfo" style="margin-left: 15px; color: rgba(255,255,255,0.9); font-size: 14px; display: none;">
+                    👤 <span id="usernameDisplay"></span>
+                </div>
                 <div class="settings-menu-wrapper">
                     <button class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle">
                         ⋮
@@ -100,6 +103,9 @@
                         </button>
                         <button class="settings-dropdown-item" id="installAppButton" onclick="installApp(); closeSettingsMenu();" style="display: none;">
                             📱 Install App
+                        </button>
+                        <button class="settings-dropdown-item" onclick="logout(); closeSettingsMenu();" style="border-top: 1px solid var(--border-primary); margin-top: 5px; padding-top: 10px;">
+                            🚪 Logout
                         </button>
                     </div>
                 </div>

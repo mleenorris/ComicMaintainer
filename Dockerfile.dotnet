@@ -3,10 +3,11 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 WORKDIR /app
 EXPOSE 5000
 
-# Install system dependencies for file handling and unrar
+# Install system dependencies for file handling, unrar, and su-exec for user switching
 RUN apt-get update && apt-get install -y \
     unrar-free \
     p7zip-full \
+    su-exec \
     && rm -rf /var/lib/apt/lists/*
 
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
@@ -55,18 +56,17 @@ ENV DB_CACHE_SIZE_MB=64
 ENV ADMIN_USERNAME=admin
 ENV ADMIN_EMAIL=admin@comicmaintainer.local
 
-# Create necessary directories
+# Copy entrypoint script
+COPY entrypoint.dotnet.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Create necessary directories with default permissions
+# User/group will be created dynamically based on PUID/PGID at runtime
 RUN mkdir -p /watched_dir /duplicates /Config && \
     chmod -R 755 /watched_dir /duplicates /Config
 
 # Expose web interface port
 EXPOSE 5000
 
-# Run as non-root user for security
-RUN groupadd -g 1000 comicmaintainer && \
-    useradd -r -u 1000 -g comicmaintainer comicmaintainer && \
-    chown -R comicmaintainer:comicmaintainer /app /Config /watched_dir /duplicates
-
-USER comicmaintainer
-
-ENTRYPOINT ["dotnet", "ComicMaintainer.WebApi.dll"]
+# Use entrypoint script to handle dynamic user creation and permission management
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

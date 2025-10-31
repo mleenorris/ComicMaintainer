@@ -12,8 +12,8 @@ services:
       - WATCHED_DIR=/watched_dir
       - DUPLICATE_DIR=/duplicates
       - CONFIG_DIR=/Config
-      - PUID=99
-      - PGID=100
+      - PUID=${PUID:-99}
+      - PGID=${PGID:-100}
       - MAX_WORKERS=4
       - DB_CACHE_SIZE_MB=64
       - JWT_SECRET=${JWT_SECRET:-ChangeThisToASecureRandomString-MustBeAtLeast32CharactersLong!!}

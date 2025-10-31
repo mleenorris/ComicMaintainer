@@ -51,6 +51,8 @@ docker build -f Dockerfile.dotnet -t comicmaintainer-dotnet:latest .
 docker run -d \
   --name comicmaintainer-dotnet \
   -p 5000:5000 \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
   -e JWT_SECRET="$(cat jwt_secret.txt)" \
   -e ADMIN_PASSWORD="YourStrongPassword123!" \
   -v $(pwd)/test_comics:/watched_dir \
@@ -58,6 +60,8 @@ docker run -d \
   -v $(pwd)/config:/Config \
   comicmaintainer-dotnet:latest
 ```
+
+**Note**: Setting `PUID` and `PGID` to match your host user ensures proper file ownership.
 
 ## Configuration
 
@@ -69,14 +73,16 @@ docker run -d \
 | `WATCHED_DIR` | /watched_dir | Directory to watch for comics |
 | `DUPLICATE_DIR` | /duplicates | Directory for duplicate files |
 | `CONFIG_DIR` | /Config | Configuration and database directory |
-| `PUID` | 99 | User ID for file operations |
-| `PGID` | 100 | Group ID for file operations |
+| `PUID` | 99 | User ID for file operations (dynamically created) |
+| `PGID` | 100 | Group ID for file operations (dynamically created) |
 | `MAX_WORKERS` | 4 | Maximum concurrent workers |
 | `DB_CACHE_SIZE_MB` | 64 | Database cache size |
 | `JWT_SECRET` | *required* | JWT signing key (32+ chars) |
 | `ADMIN_USERNAME` | admin | Default admin username |
 | `ADMIN_EMAIL` | admin@local | Default admin email |
 | `ADMIN_PASSWORD` | *required* | Default admin password |
+
+**Note on PUID/PGID**: The application dynamically creates a user and group with the specified IDs at container startup. This ensures files created by the container have the correct ownership on the host system. Use `id -u` and `id -g` on your host to find your user/group IDs.
 
 ### Volume Mounts
 
@@ -117,10 +123,18 @@ docker service create \
 ### 3. Set Proper Permissions
 
 ```bash
-# Create directories with proper ownership
+# Find your user and group IDs
+echo "Your UID: $(id -u)"
+echo "Your GID: $(id -g)"
+
+# Set PUID and PGID in .env to match your user
+# This ensures files created by the container have correct ownership
+
+# Create directories
 mkdir -p test_comics duplicates config
-sudo chown -R 1000:1000 test_comics duplicates config
 chmod -R 755 test_comics duplicates config
+
+# The container will automatically set ownership based on PUID/PGID
 ```
 
 ### 4. Network Security

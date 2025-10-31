@@ -87,3 +87,9 @@ bld/
 [Ll]og/
 .vs/
 *.userprefs
+
+# Test Results and Coverage
+TestResults/
+coverage.cobertura.xml
+*.coverage
+*.coveragexml

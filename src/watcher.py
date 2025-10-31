@@ -16,7 +16,7 @@ from error_handler import (
 import file_store
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
-CONFIG_DIR = '/Config'
+CONFIG_DIR = os.environ.get('CONFIG_DIR', '/Config')
 LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
 PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
 

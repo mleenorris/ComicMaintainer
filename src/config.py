@@ -3,7 +3,7 @@ import os
 import logging
 
 # Store config in /Config for persistence
-CONFIG_DIR = '/Config'
+CONFIG_DIR = os.environ.get('CONFIG_DIR', '/Config')
 CONFIG_FILE = os.path.join(CONFIG_DIR, 'config.json')
 DEFAULT_FILENAME_FORMAT = '{series} - Chapter {issue}'
 DEFAULT_WATCHER_ENABLED = True

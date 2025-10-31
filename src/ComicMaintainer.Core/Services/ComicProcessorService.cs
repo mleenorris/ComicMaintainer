@@ -214,13 +214,17 @@ public class ComicProcessorService : IComicProcessorService
                         if (entry.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) != true && entry.Key != null)
                         {
                             using var stream = entry.OpenEntryStream();
-                            writer.AddEntry(entry.Key, stream, true, entry.Size, entry.LastModifiedTime);
+                            var memStream = new MemoryStream();
+                            stream.CopyTo(memStream);
+                            memStream.Position = 0;
+                            writer.AddEntry(entry.Key, memStream, true, entry.Size, entry.LastModifiedTime);
                         }
                     }
                     
                     // Add new ComicInfo.xml
                     var xmlBytes = System.Text.Encoding.UTF8.GetBytes(comicInfoXml);
-                    writer.AddEntry("ComicInfo.xml", new MemoryStream(xmlBytes), true);
+                    var xmlStream = new MemoryStream(xmlBytes);
+                    writer.AddEntry("ComicInfo.xml", xmlStream, true);
                     
                     // Save to temp file
                     writer.SaveTo(tempFile, new WriterOptions(CompressionType.Deflate));

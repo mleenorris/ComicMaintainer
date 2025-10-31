@@ -23,6 +23,11 @@ public interface IComicProcessorService
     ProcessingJob? GetJob(Guid jobId);
 
     /// <summary>
+    /// Get currently active job, if any
+    /// </summary>
+    ProcessingJob? GetActiveJob();
+
+    /// <summary>
     /// Get metadata from a comic file
     /// </summary>
     Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default);

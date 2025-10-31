@@ -153,6 +153,12 @@ public class ComicProcessorService : IComicProcessorService
         return _jobs.TryGetValue(jobId, out var job) ? job : null;
     }
 
+    public ProcessingJob? GetActiveJob()
+    {
+        return _jobs.Values
+            .FirstOrDefault(j => j.Status == JobStatus.Running || j.Status == JobStatus.Queued);
+    }
+
     public Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default)
     {
         try

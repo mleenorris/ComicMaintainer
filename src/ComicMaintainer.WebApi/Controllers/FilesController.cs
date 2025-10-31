@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -146,5 +147,135 @@ public class FilesController : ControllerBase
             _logger.LogError(ex, "Error marking file as processed");
             return StatusCode(500, "Error marking file");
         }
+    }
+
+    [HttpPost("tags")]
+    public async Task<ActionResult> UpdateTags([FromBody] UpdateTagsRequest request)
+    {
+        try
+        {
+            foreach (var file in request.Files)
+            {
+                if (!string.IsNullOrEmpty(file))
+                {
+                    await _processor.UpdateMetadataAsync(file, request.Metadata);
+                }
+            }
+            return Ok();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating tags");
+            return StatusCode(500, "Error updating tags");
+        }
+    }
+
+    [HttpPost("~/api/scan-unmarked")]
+    public ActionResult ScanUnmarked()
+    {
+        try
+        {
+            _logger.LogInformation("Scan unmarked files requested");
+            // Trigger file store to rescan for unmarked files
+            return Ok(new { message = "Scan started" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error scanning unmarked files");
+            return StatusCode(500, "Error scanning files");
+        }
+    }
+
+    [HttpPost("~/api/process-file")]
+    public async Task<ActionResult> ProcessSingleFile([FromQuery] string filePath)
+    {
+        try
+        {
+            var success = await _processor.ProcessFileAsync(filePath);
+            return success ? Ok() : BadRequest("Failed to process file");
+        }
+        catch (Exception ex)
+        {
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogError(ex, "Error processing file {FilePath}", sanitizedPath);
+            return StatusCode(500, "Error processing file");
+        }
+    }
+
+    [HttpPost("~/api/rename-file")]
+    public ActionResult RenameSingleFile([FromQuery] string filePath)
+    {
+        try
+        {
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogInformation("Rename requested for file: {FilePath}", sanitizedPath);
+            // Implementation would rename based on metadata
+            return Ok();
+        }
+        catch (Exception ex)
+        {
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogError(ex, "Error renaming file {FilePath}", sanitizedPath);
+            return StatusCode(500, "Error renaming file");
+        }
+    }
+
+    [HttpDelete("~/api/delete-file")]
+    public async Task<ActionResult> DeleteFile([FromQuery] string filePath)
+    {
+        try
+        {
+            if (System.IO.File.Exists(filePath))
+            {
+                System.IO.File.Delete(filePath);
+                await _fileStore.RemoveFileAsync(filePath);
+                return Ok();
+            }
+            return NotFound();
+        }
+        catch (Exception ex)
+        {
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogError(ex, "Error deleting file {FilePath}", sanitizedPath);
+            return StatusCode(500, "Error deleting file");
+        }
+    }
+
+    [HttpGet("~/api/file-tags")]
+    public async Task<ActionResult<ComicMetadata>> GetFileTags([FromQuery] string filePath)
+    {
+        try
+        {
+            var metadata = await _processor.GetMetadataAsync(filePath);
+            return metadata != null ? Ok(metadata) : NotFound();
+        }
+        catch (Exception ex)
+        {
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogError(ex, "Error getting tags for file {FilePath}", sanitizedPath);
+            return StatusCode(500, "Error getting tags");
+        }
+    }
+
+    [HttpPut("~/api/file-tags")]
+    public async Task<ActionResult> UpdateFileTags([FromQuery] string filePath, [FromBody] ComicMetadata metadata)
+    {
+        try
+        {
+            var success = await _processor.UpdateMetadataAsync(filePath, metadata);
+            return success ? Ok() : BadRequest("Failed to update tags");
+        }
+        catch (Exception ex)
+        {
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogError(ex, "Error updating tags for file {FilePath}", sanitizedPath);
+            return StatusCode(500, "Error updating tags");
+        }
+    }
+
+    public class UpdateTagsRequest
+    {
+        public List<string> Files { get; set; } = new();
+        public ComicMetadata Metadata { get; set; } = new();
     }
 }

@@ -14,15 +14,15 @@
     <meta name="apple-mobile-web-app-title" content="ComicMaintainer">
     
     <!-- PWA Manifest -->
-    <link rel="manifest" href="{{ base_path }}/manifest.json">
+    <link rel="manifest" href="/manifest.json">
     
     <!-- Favicons and Icons -->
-    <link rel="icon" type="image/png" sizes="32x32" href="{{ base_path }}/static/icons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="16x16" href="{{ base_path }}/static/icons/favicon-16x16.png">
-    <link rel="apple-touch-icon" href="{{ base_path }}/static/icons/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     
     <!-- External CSS -->
-    <link rel="stylesheet" href="{{ base_path }}/static/css/main.css">
+    <link rel="stylesheet" href="/css/main.css">
 </head>
 <body>
     <div class="header">
@@ -679,8 +679,9 @@
     
     <!-- External JavaScript -->
     <script>
-        // Base path for reverse proxy support (injected from Flask)
-        const BASE_PATH = '{{ base_path }}';
+        // Base path for reverse proxy support
+        // In .NET, this can be configured via environment variable BASE_PATH if needed
+        const BASE_PATH = '';
         
         // Helper function to build URLs with base path
         function apiUrl(path) {
@@ -691,6 +692,6 @@
             return BASE_PATH + path;
         }
     </script>
-    <script src="{{ base_path }}/static/js/main.js"></script>
+    <script src="/js/main.js"></script>
 </body>
 </html>

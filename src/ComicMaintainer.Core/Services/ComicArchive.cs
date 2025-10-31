@@ -2,6 +2,7 @@ using System.Text;
 using System.Xml;
 using System.Xml.Serialization;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Zip;
 using SharpCompress.Archives.Rar;
@@ -29,13 +30,20 @@ public class ComicArchive : IDisposable
 
         _filePath = filePath;
         
-        // Determine archive type and open
+        // Validate and determine archive type
         var extension = Path.GetExtension(filePath).ToLowerInvariant();
-        if (extension == ".cbz")
+        if (!ComicFileExtensions.IsComicArchive(filePath))
+        {
+            throw new NotSupportedException($"Unsupported comic format: {extension}");
+        }
+        
+        // Open the appropriate archive type
+        var normalizedExt = ComicFileExtensions.NormalizeExtension(extension);
+        if (normalizedExt == ".cbz")
         {
             _archive = ZipArchive.Open(filePath);
         }
-        else if (extension == ".cbr")
+        else if (normalizedExt == ".cbr")
         {
             _archive = RarArchive.Open(filePath);
         }
@@ -101,8 +109,7 @@ public class ComicArchive : IDisposable
         }
 
         // Only support CBZ for writing (ZIP format)
-        var extension = Path.GetExtension(_filePath).ToLowerInvariant();
-        if (extension != ".cbz")
+        if (!ComicFileExtensions.IsWritableArchive(_filePath))
         {
             throw new NotSupportedException("Writing tags is only supported for CBZ files");
         }

@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
@@ -284,8 +285,7 @@ public class ComicProcessorService : IComicProcessorService
 
     private static bool IsComicArchive(string filePath)
     {
-        var extension = Path.GetExtension(filePath).ToLowerInvariant();
-        return extension == ".cbz" || extension == ".zip" || extension == ".cbr" || extension == ".rar";
+        return ComicFileExtensions.IsComicArchive(filePath);
     }
 
     private static string ExtractSeriesFromFilename(string filePath)

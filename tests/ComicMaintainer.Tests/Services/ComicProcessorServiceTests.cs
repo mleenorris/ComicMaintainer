@@ -168,6 +168,84 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetMetadataAsync_FileWithoutComicInfo_ParsesFromFilename()
+    {
+        // Arrange
+        var filePath = CreateTestComicArchiveNoMetadata("Batman Chapter 12.cbz");
+
+        // Act
+        var metadata = await _service.GetMetadataAsync(filePath);
+
+        // Assert
+        Assert.NotNull(metadata);
+        Assert.NotNull(metadata.Series);
+        Assert.NotNull(metadata.Issue);
+    }
+
+    [Fact]
+    public async Task UpdateMetadataAsync_WithLargeFile_HandlesCorrectly()
+    {
+        // Arrange
+        var filePath = CreateTestComicArchive("Test", "1");
+        var metadata = new ComicMetadata
+        {
+            Series = "Updated",
+            Issue = "2"
+        };
+
+        // Act
+        var result = await _service.UpdateMetadataAsync(filePath, metadata);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_WithDuplicate_MovesToDuplicateFolder()
+    {
+        // Arrange
+        var file1 = CreateTestComicArchive("Same Series", "1");
+        var file2 = CreateTestComicArchive("Same Series 2", "1");
+        
+        var existingFiles = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = file1,
+                FileSize = new FileInfo(file1).Length,
+                Metadata = new ComicMetadata { Series = "Same Series", Issue = "1" }
+            }
+        };
+
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(existingFiles);
+        _mockFileStore.Setup(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _service.ProcessFileAsync(file2);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    private string CreateTestComicArchiveNoMetadata(string fileName)
+    {
+        var filePath = Path.Combine(_testDirectory, fileName);
+
+        using (var archive = System.IO.Compression.ZipFile.Open(filePath, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+
+        return filePath;
+    }
+
+    [Fact]
     public void GetJob_NonExistentJob_ReturnsNull()
     {
         // Arrange

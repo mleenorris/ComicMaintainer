@@ -5,13 +5,16 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
+using System.Xml.Linq;
+using SharpCompress.Archives;
+using SharpCompress.Archives.Zip;
+using SharpCompress.Common;
+using SharpCompress.Writers;
 
 namespace ComicMaintainer.Core.Services;
 
 /// <summary>
-/// Service for processing comic files
-/// Note: This is a placeholder implementation. Full comic processing would require
-/// integration with a C# comic library (e.g., SharpCompress for archive handling)
+/// Service for processing comic files with SharpCompress integration
 /// </summary>
 public class ComicProcessorService : IComicProcessorService
 {
@@ -42,15 +45,37 @@ public class ComicProcessorService : IComicProcessorService
                 return false;
             }
 
-            // TODO: Implement actual comic processing logic
-            // This would involve:
-            // 1. Reading comic archive (CBZ/CBR)
-            // 2. Extracting/updating metadata
-            // 3. Renaming file based on template
-            // 4. Checking for duplicates
-            // 5. Moving duplicates to duplicate directory
+            // Verify it's a comic archive
+            if (!IsComicArchive(filePath))
+            {
+                _logger.LogWarning("File is not a comic archive: {FilePath}", filePath);
+                return false;
+            }
 
-            // For now, just mark as processed
+            // Extract metadata from the archive
+            var metadata = await GetMetadataAsync(filePath, cancellationToken);
+            
+            // Check for duplicates based on metadata
+            if (await IsDuplicateAsync(filePath, metadata, cancellationToken))
+            {
+                _logger.LogInformation("Duplicate detected: {FilePath}", filePath);
+                await MoveToDuplicatesAsync(filePath, cancellationToken);
+                return true;
+            }
+
+            // Rename file based on template if metadata is available
+            if (metadata != null && !string.IsNullOrEmpty(metadata.Series))
+            {
+                var newFilePath = GenerateFileName(metadata, filePath);
+                if (newFilePath != filePath && !File.Exists(newFilePath))
+                {
+                    _logger.LogInformation("Renaming file from {OldPath} to {NewPath}", filePath, newFilePath);
+                    File.Move(filePath, newFilePath);
+                    filePath = newFilePath;
+                }
+            }
+
+            // Mark as processed
             await _fileStore.MarkFileProcessedAsync(filePath, true, cancellationToken);
             _logger.LogInformation("File processed successfully: {FilePath}", filePath);
 
@@ -129,27 +154,97 @@ public class ComicProcessorService : IComicProcessorService
 
     public Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default)
     {
-        // TODO: Implement metadata extraction from comic archive
-        // This would use a library like SharpCompress to read the archive
-        // and extract ComicInfo.xml or other metadata formats
-
-        return Task.FromResult<ComicMetadata?>(new ComicMetadata
+        try
         {
-            Series = "Unknown Series",
-            Issue = ParseIssueNumber(Path.GetFileNameWithoutExtension(filePath))
-        });
+            if (!File.Exists(filePath) || !IsComicArchive(filePath))
+                return Task.FromResult<ComicMetadata?>(null);
+
+            using var archive = ArchiveFactory.Open(filePath);
+            
+            // Look for ComicInfo.xml
+            var comicInfoEntry = archive.Entries.FirstOrDefault(e => 
+                e.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) == true);
+
+            if (comicInfoEntry != null)
+            {
+                using var stream = comicInfoEntry.OpenEntryStream();
+                using var reader = new StreamReader(stream);
+                var xmlContent = reader.ReadToEnd();
+                return Task.FromResult(ParseComicInfoXml(xmlContent));
+            }
+
+            // Fallback: parse from filename
+            return Task.FromResult<ComicMetadata?>(new ComicMetadata
+            {
+                Series = ExtractSeriesFromFilename(filePath),
+                Issue = ParseIssueNumber(Path.GetFileNameWithoutExtension(filePath))
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reading metadata from {FilePath}", filePath);
+            return Task.FromResult<ComicMetadata?>(null);
+        }
     }
 
     public Task<bool> UpdateMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default)
     {
-        // TODO: Implement metadata updating in comic archive
-        // This would involve:
-        // 1. Opening the archive
-        // 2. Creating/updating ComicInfo.xml
-        // 3. Saving the archive
+        try
+        {
+            if (!File.Exists(filePath) || !IsComicArchive(filePath))
+                return Task.FromResult(false);
 
-        _logger.LogInformation("Updating metadata for: {FilePath}", filePath);
-        return Task.FromResult(true);
+            _logger.LogInformation("Updating metadata for: {FilePath}", filePath);
+
+            // Create ComicInfo.xml content
+            var comicInfoXml = GenerateComicInfoXml(metadata);
+            
+            // Create a temporary file
+            var tempFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.cbz");
+            
+            try
+            {
+                // Create new archive with updated metadata
+                using (var sourceArchive = ArchiveFactory.Open(filePath))
+                using (var writer = ZipArchive.Create())
+                {
+                    // Add all existing entries except ComicInfo.xml
+                    foreach (var entry in sourceArchive.Entries.Where(e => !e.IsDirectory))
+                    {
+                        if (entry.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) != true && entry.Key != null)
+                        {
+                            using var stream = entry.OpenEntryStream();
+                            writer.AddEntry(entry.Key, stream, true, entry.Size, entry.LastModifiedTime);
+                        }
+                    }
+                    
+                    // Add new ComicInfo.xml
+                    var xmlBytes = System.Text.Encoding.UTF8.GetBytes(comicInfoXml);
+                    writer.AddEntry("ComicInfo.xml", new MemoryStream(xmlBytes), true);
+                    
+                    // Save to temp file
+                    writer.SaveTo(tempFile, new WriterOptions(CompressionType.Deflate));
+                }
+                
+                // Replace original file with updated one
+                File.Delete(filePath);
+                File.Move(tempFile, filePath);
+                
+                _logger.LogInformation("Successfully updated metadata for: {FilePath}", filePath);
+                return Task.FromResult(true);
+            }
+            finally
+            {
+                // Clean up temp file if it still exists
+                if (File.Exists(tempFile))
+                    File.Delete(tempFile);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating metadata for {FilePath}", filePath);
+            return Task.FromResult(false);
+        }
     }
 
     private static string? ParseIssueNumber(string filename)
@@ -157,5 +252,159 @@ public class ComicProcessorService : IComicProcessorService
         // Simple pattern matching for issue numbers
         var match = Regex.Match(filename, @"(?i)(?:ch|chapter|issue|#)?\s*(\d+(?:\.\d+)?)", RegexOptions.IgnoreCase);
         return match.Success ? match.Groups[1].Value : null;
+    }
+
+    private static bool IsComicArchive(string filePath)
+    {
+        var extension = Path.GetExtension(filePath).ToLowerInvariant();
+        return extension == ".cbz" || extension == ".zip" || extension == ".cbr" || extension == ".rar";
+    }
+
+    private static string ExtractSeriesFromFilename(string filePath)
+    {
+        var filename = Path.GetFileNameWithoutExtension(filePath);
+        // Remove issue numbers and common patterns
+        var series = Regex.Replace(filename, @"(?i)(?:ch|chapter|issue|#)?\s*\d+(?:\.\d+)?.*$", "").Trim();
+        return string.IsNullOrEmpty(series) ? "Unknown Series" : series;
+    }
+
+    private ComicMetadata? ParseComicInfoXml(string xmlContent)
+    {
+        try
+        {
+            var doc = XDocument.Parse(xmlContent);
+            var root = doc.Root;
+            if (root == null) return null;
+
+            return new ComicMetadata
+            {
+                Series = root.Element("Series")?.Value,
+                Title = root.Element("Title")?.Value,
+                Issue = root.Element("Number")?.Value,
+                Volume = root.Element("Volume")?.Value,
+                Publisher = root.Element("Publisher")?.Value,
+                Year = int.TryParse(root.Element("Year")?.Value, out var year) ? year : null,
+                Summary = root.Element("Summary")?.Value,
+                Authors = root.Elements("Writer").Select(e => e.Value).ToList(),
+                Tags = root.Elements("Tag").Select(e => e.Value).ToList()
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error parsing ComicInfo.xml");
+            return null;
+        }
+    }
+
+    private static string GenerateComicInfoXml(ComicMetadata metadata)
+    {
+        var doc = new XDocument(
+            new XElement("ComicInfo",
+                metadata.Series != null ? new XElement("Series", metadata.Series) : null,
+                metadata.Title != null ? new XElement("Title", metadata.Title) : null,
+                metadata.Issue != null ? new XElement("Number", metadata.Issue) : null,
+                metadata.Volume != null ? new XElement("Volume", metadata.Volume) : null,
+                metadata.Publisher != null ? new XElement("Publisher", metadata.Publisher) : null,
+                metadata.Year.HasValue ? new XElement("Year", metadata.Year.Value) : null,
+                metadata.Summary != null ? new XElement("Summary", metadata.Summary) : null,
+                metadata.Authors.Select(a => new XElement("Writer", a)),
+                metadata.Tags.Select(t => new XElement("Tag", t))
+            )
+        );
+        return doc.ToString();
+    }
+
+    private string GenerateFileName(ComicMetadata metadata, string originalPath)
+    {
+        try
+        {
+            var directory = Path.GetDirectoryName(originalPath) ?? _settings.WatchedDirectory;
+            var extension = Path.GetExtension(originalPath);
+            
+            // Apply filename template
+            var filename = _settings.FilenameFormat
+                .Replace("{series}", metadata.Series ?? "Unknown")
+                .Replace("{title}", metadata.Title ?? "")
+                .Replace("{issue}", metadata.Issue?.PadLeft(_settings.IssueNumberPadding, '0') ?? "")
+                .Replace("{volume}", metadata.Volume ?? "");
+            
+            // Clean filename
+            foreach (var c in Path.GetInvalidFileNameChars())
+            {
+                filename = filename.Replace(c, '_');
+            }
+            
+            return Path.Combine(directory, filename + extension);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error generating filename");
+            return originalPath;
+        }
+    }
+
+    private async Task<bool> IsDuplicateAsync(string filePath, ComicMetadata? metadata, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (metadata == null || string.IsNullOrEmpty(metadata.Series))
+                return false;
+
+            var allFiles = await _fileStore.GetFilteredFilesAsync(null, cancellationToken);
+            var fileInfo = new FileInfo(filePath);
+            
+            // Check for files with same series/issue but different path
+            foreach (var file in allFiles)
+            {
+                if (file.FilePath == filePath)
+                    continue;
+
+                if (file.Metadata?.Series == metadata.Series && 
+                    file.Metadata?.Issue == metadata.Issue &&
+                    Math.Abs(file.FileSize - fileInfo.Length) < 1024 * 10) // Within 10KB
+                {
+                    _logger.LogInformation("Found duplicate: {File1} matches {File2}", filePath, file.FilePath);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking for duplicates");
+            return false;
+        }
+    }
+
+    private async Task MoveToDuplicatesAsync(string filePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var fileName = Path.GetFileName(filePath);
+            var duplicatePath = Path.Combine(_settings.DuplicateDirectory, fileName);
+            
+            // Ensure duplicate directory exists
+            Directory.CreateDirectory(_settings.DuplicateDirectory);
+            
+            // Handle filename conflicts
+            var counter = 1;
+            while (File.Exists(duplicatePath))
+            {
+                var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+                var ext = Path.GetExtension(fileName);
+                duplicatePath = Path.Combine(_settings.DuplicateDirectory, $"{nameWithoutExt}_{counter}{ext}");
+                counter++;
+            }
+            
+            File.Move(filePath, duplicatePath);
+            await _fileStore.MarkFileProcessedAsync(duplicatePath, true, cancellationToken);
+            
+            _logger.LogInformation("Moved duplicate file to: {DuplicatePath}", duplicatePath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error moving duplicate file");
+        }
     }
 }

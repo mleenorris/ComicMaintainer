@@ -138,11 +138,11 @@ Configuration can be set via:
 
 - `GET /api/files` - Get all files (optional ?filter=processed|unprocessed|duplicates)
 - `GET /api/files/counts` - Get file statistics
-- `GET /api/files/{filePath}/metadata` - Get file metadata
-- `PUT /api/files/{filePath}/metadata` - Update file metadata
-- `POST /api/files/{filePath}/process` - Process a single file
+- `GET /api/files/metadata?filePath={path}` - Get file metadata
+- `PUT /api/files/metadata?filePath={path}` - Update file metadata
+- `POST /api/files/process?filePath={path}` - Process a single file
 - `POST /api/files/process-batch` - Process multiple files
-- `POST /api/files/{filePath}/mark-processed` - Mark file as processed
+- `POST /api/files/mark-processed?filePath={path}` - Mark file as processed
 
 ### Jobs API
 
@@ -196,7 +196,7 @@ ComicMaintainer/
 
 ### Implementation Notes
 
-1. **Comic Processing**: The current implementation provides the framework but would need integration with a C# comic library (e.g., SharpCompress for archive handling) for full comic processing functionality similar to ComicTagger
+1. **Comic Processing**: ✅ Implemented with SharpCompress integration for archive handling, ComicInfo.xml metadata parsing/writing, duplicate detection, and file renaming based on templates
 2. **File Storage**: Currently uses in-memory storage; can be extended to use Entity Framework Core with SQLite/PostgreSQL for persistence
 3. **Event Broadcasting**: Would need to implement SignalR for real-time updates (equivalent to Python's Server-Sent Events)
 
@@ -204,10 +204,11 @@ ComicMaintainer/
 
 ### Planned Features
 
-1. **Full Comic Processing**:
-   - Integration with SharpCompress for archive manipulation
-   - ComicInfo.xml metadata parsing and writing
-   - File renaming based on templates
+1. **Full Comic Processing**: ✅ **Implemented**
+   - ✅ Integration with SharpCompress for archive manipulation
+   - ✅ ComicInfo.xml metadata parsing and writing
+   - ✅ File renaming based on templates
+   - ✅ Duplicate detection and handling
 
 2. **.NET MAUI Mobile App**:
    - Native Android app

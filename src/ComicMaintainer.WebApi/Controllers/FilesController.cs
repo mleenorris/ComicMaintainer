@@ -52,11 +52,14 @@ public class FilesController : ControllerBase
         }
     }
 
-    [HttpGet("{*filePath}/metadata")]
-    public async Task<ActionResult<ComicMetadata>> GetMetadata(string filePath)
+    [HttpGet("metadata")]
+    public async Task<ActionResult<ComicMetadata>> GetMetadata([FromQuery] string filePath)
     {
         try
         {
+            if (string.IsNullOrEmpty(filePath))
+                return BadRequest("File path is required");
+
             var metadata = await _processor.GetMetadataAsync(filePath);
             if (metadata == null)
                 return NotFound();
@@ -70,11 +73,14 @@ public class FilesController : ControllerBase
         }
     }
 
-    [HttpPut("{*filePath}/metadata")]
-    public async Task<ActionResult> UpdateMetadata(string filePath, [FromBody] ComicMetadata metadata)
+    [HttpPut("metadata")]
+    public async Task<ActionResult> UpdateMetadata([FromQuery] string filePath, [FromBody] ComicMetadata metadata)
     {
         try
         {
+            if (string.IsNullOrEmpty(filePath))
+                return BadRequest("File path is required");
+
             var success = await _processor.UpdateMetadataAsync(filePath, metadata);
             if (!success)
                 return BadRequest("Failed to update metadata");
@@ -88,11 +94,14 @@ public class FilesController : ControllerBase
         }
     }
 
-    [HttpPost("{*filePath}/process")]
-    public async Task<ActionResult> ProcessFile(string filePath)
+    [HttpPost("process")]
+    public async Task<ActionResult> ProcessFile([FromQuery] string filePath)
     {
         try
         {
+            if (string.IsNullOrEmpty(filePath))
+                return BadRequest("File path is required");
+
             var success = await _processor.ProcessFileAsync(filePath);
             if (!success)
                 return BadRequest("Failed to process file");
@@ -121,11 +130,14 @@ public class FilesController : ControllerBase
         }
     }
 
-    [HttpPost("{*filePath}/mark-processed")]
-    public async Task<ActionResult> MarkProcessed(string filePath, [FromBody] bool processed)
+    [HttpPost("mark-processed")]
+    public async Task<ActionResult> MarkProcessed([FromQuery] string filePath, [FromBody] bool processed)
     {
         try
         {
+            if (string.IsNullOrEmpty(filePath))
+                return BadRequest("File path is required");
+
             await _fileStore.MarkFileProcessedAsync(filePath, processed);
             return Ok();
         }

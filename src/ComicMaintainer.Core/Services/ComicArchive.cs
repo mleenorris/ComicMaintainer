@@ -121,12 +121,11 @@ public class ComicArchive : IDisposable
                 {
                     // Add ComicInfo.xml
                     var comicInfoBytes = Encoding.UTF8.GetBytes(xmlContent);
-                    using (var memoryStream = new MemoryStream(comicInfoBytes))
-                    {
-                        newArchive.AddEntry("ComicInfo.xml", memoryStream, true, comicInfoBytes.Length, DateTime.Now);
-                    }
+                    var comicInfoStream = new MemoryStream(comicInfoBytes);
+                    newArchive.AddEntry("ComicInfo.xml", comicInfoStream, false, comicInfoBytes.Length, DateTime.Now);
 
                     // Copy all other entries from original archive
+                    var entryStreams = new List<MemoryStream>();
                     foreach (var entry in _archive.Entries.Where(e => !e.IsDirectory))
                     {
                         // Skip existing ComicInfo.xml
@@ -136,11 +135,12 @@ public class ComicArchive : IDisposable
                         }
 
                         using var entryStream = entry.OpenEntryStream();
-                        using var memStream = new MemoryStream();
+                        var memStream = new MemoryStream();
                         entryStream.CopyTo(memStream);
                         memStream.Position = 0;
+                        entryStreams.Add(memStream);
                         
-                        newArchive.AddEntry(entry.Key ?? "unknown", memStream, true, memStream.Length, entry.LastModifiedTime ?? DateTime.Now);
+                        newArchive.AddEntry(entry.Key ?? "unknown", memStream, false, memStream.Length, entry.LastModifiedTime ?? DateTime.Now);
                     }
 
                     // Save to temp file
@@ -149,6 +149,13 @@ public class ComicArchive : IDisposable
                     {
                         LeaveStreamOpen = false
                     });
+                    
+                    // Clean up streams
+                    comicInfoStream.Dispose();
+                    foreach (var stream in entryStreams)
+                    {
+                        stream.Dispose();
+                    }
                 }
 
                 // Close current archive

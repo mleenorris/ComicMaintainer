@@ -26,11 +26,14 @@ The solution is organized into multiple projects:
 ### ComicMaintainer.Core
 Core business logic and domain models:
 - Models for comic files, metadata, and processing jobs
+- ComicInfo.xml schema implementation
 - Interfaces for services
 - Service implementations:
   - `FileStoreService`: Manages file tracking
   - `FileWatcherService`: Monitors directory changes
-  - `ComicProcessorService`: Processes comic files
+  - `ComicProcessorService`: Processes comic files with full metadata support
+  - `ComicArchive`: Comic archive handler (CBZ/CBR) - C# equivalent of Python's ComicTagger
+  - `ComicFileProcessor`: Filename formatting and parsing utilities
 
 ### ComicMaintainer.WebApi
 ASP.NET Core Web API application:
@@ -196,18 +199,36 @@ ComicMaintainer/
 
 ### Implementation Notes
 
-1. **Comic Processing**: The current implementation provides the framework but would need integration with a C# comic library (e.g., SharpCompress for archive handling) for full comic processing functionality similar to ComicTagger
+1. **Comic Processing**: ✅ **IMPLEMENTED** - Full ComicTagger functionality converted to C# using SharpCompress for archive handling. See [COMICTAGGER_CSHARP_CONVERSION.md](COMICTAGGER_CSHARP_CONVERSION.md) for details.
 2. **File Storage**: Currently uses in-memory storage; can be extended to use Entity Framework Core with SQLite/PostgreSQL for persistence
 3. **Event Broadcasting**: Would need to implement SignalR for real-time updates (equivalent to Python's Server-Sent Events)
+
+### Dependencies
+
+The .NET version uses the following NuGet packages:
+
+**ComicMaintainer.Core:**
+- SharpCompress 0.41.0 - Comic archive handling (CBZ/CBR)
+- Microsoft.Extensions.Logging.Abstractions 9.0.10
+- Microsoft.Extensions.Options 9.0.10
+
+**ComicMaintainer.WebApi:**
+- ASP.NET Core 9.0 (included in .NET SDK)
+- Swashbuckle.AspNetCore (Swagger/OpenAPI)
+
+For a detailed comparison of the ComicTagger conversion from Python to C#, see [COMICTAGGER_CSHARP_CONVERSION.md](COMICTAGGER_CSHARP_CONVERSION.md).
 
 ## Future Enhancements
 
 ### Planned Features
 
-1. **Full Comic Processing**:
-   - Integration with SharpCompress for archive manipulation
-   - ComicInfo.xml metadata parsing and writing
-   - File renaming based on templates
+1. **Full Comic Processing**: ✅ **COMPLETED**
+   - ✅ Integration with SharpCompress for archive manipulation
+   - ✅ ComicInfo.xml metadata parsing and writing
+   - ✅ File renaming based on templates
+   - ✅ Chapter number parsing (including decimal chapters)
+   - ✅ Normalization checking (skip already-processed files)
+   - See [COMICTAGGER_CSHARP_CONVERSION.md](COMICTAGGER_CSHARP_CONVERSION.md)
 
 2. **.NET MAUI Mobile App**:
    - Native Android app

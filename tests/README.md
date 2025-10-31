@@ -149,10 +149,10 @@ See `.github/workflows/test-dotnet.yml` for CI configuration.
 ## Current Test Coverage
 
 As of the last update:
-- **Total Tests**: 56
+- **Total Tests**: 59
 - **Controllers**: 9 tests
-- **Services**: 19 tests
-- **Utilities**: 28 tests
+- **Services**: 32 tests (ComicProcessor: 8, ComicFileProcessor: 13, etc.)
+- **Utilities**: 18 tests
 
 ## Adding New Tests
 

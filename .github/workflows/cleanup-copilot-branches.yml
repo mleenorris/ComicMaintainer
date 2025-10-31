@@ -25,8 +25,8 @@ jobs:
             echo "PR was closed without merging - deleting branch $BRANCH_NAME"
           fi
           
-          # URL encode the branch name for the API call
-          ENCODED_BRANCH=$(printf %s "$BRANCH_NAME" | jq -sRr @uri)
+          # URL encode the branch name for the API call using Python (guaranteed to be available)
+          ENCODED_BRANCH=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$BRANCH_NAME', safe=''))")
           
           # Delete the branch using GitHub API
           HTTP_STATUS=$(curl -s -o /tmp/response.json -w "%{http_code}" -X DELETE \

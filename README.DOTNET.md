@@ -201,6 +201,17 @@ ComicMaintainer/
 3. **Event Broadcasting**: ✅ SignalR for WebSocket communication
 4. **Authentication**: ✅ ASP.NET Core Identity with JWT and API key support
 5. **Authorization**: ✅ Role-based access control with Admin, User, and ReadOnly roles
+6. **Security**: ✅ Path validation middleware, log sanitization, Docker hardening
+
+### Security Features
+
+- **Path Injection Protection**: Middleware validates all file paths against allowed directories
+- **Log Forging Prevention**: Automatic sanitization of user input in logs
+- **Non-Root Container**: Docker image runs as dedicated user (UID 1000)
+- **Secrets Management**: Environment-based configuration for sensitive data
+- **JWT Security**: HMAC SHA256 signing with configurable expiration
+
+See [SECURITY_FIXES_DOTNET.md](SECURITY_FIXES_DOTNET.md) for complete security documentation.
 
 ## Future Enhancements
 
@@ -238,6 +249,8 @@ ComicMaintainer/
    - ✅ Role-based access control (Admin, User, ReadOnly)
    - ✅ Automatic role and admin user seeding
    - ✅ Authentication endpoints (login, register, change password, API key generation)
+   - ✅ Security hardening (path validation, log sanitization)
+   - ✅ Docker security best practices (non-root user, secrets management)
 
 ## Contributing
 

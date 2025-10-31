@@ -23,14 +23,14 @@ public class ProcessController : ControllerBase
     {
         try
         {
+            // TODO: Implement actual processing logic to get all unprocessed files
+            // For now, returning a stub job ID. Full implementation would:
+            // 1. Query file store for all unprocessed files
+            // 2. Call ProcessFilesAsync with the file list
             var jobId = Guid.NewGuid();
-            if (stream)
-            {
-                _logger.LogInformation("Process all files requested (streaming), job ID: {JobId}", jobId);
-                return Ok(new { jobId, streaming = true });
-            }
-
-            return Ok(new { jobId });
+            _logger.LogInformation("Process all files requested (stub implementation), job ID: {JobId}", jobId);
+            
+            return Ok(new { jobId, streaming = stream });
         }
         catch (Exception ex)
         {
@@ -40,11 +40,11 @@ public class ProcessController : ControllerBase
     }
 
     [HttpPost("process-selected")]
-    public async Task<ActionResult<object>> ProcessSelected([FromBody] ProcessRequest request, [FromQuery] bool stream = false)
+    public async Task<ActionResult<object>> ProcessSelected([FromBody] ProcessRequest request, [FromQuery] bool stream = false, CancellationToken cancellationToken = default)
     {
         try
         {
-            var jobId = await _processor.ProcessFilesAsync(request.Files);
+            var jobId = await _processor.ProcessFilesAsync(request.Files, cancellationToken);
             return Ok(new { jobId, streaming = stream });
         }
         catch (Exception ex)

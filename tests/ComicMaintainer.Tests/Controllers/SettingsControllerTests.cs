@@ -58,8 +58,8 @@ public class SettingsControllerTests
         // Act
         var result = _controller.SetFilenameFormat(request);
 
-        // Assert
-        Assert.IsType<OkResult>(result);
+        // Assert - Returns OkObjectResult with message about read-only settings
+        Assert.IsType<OkObjectResult>(result);
     }
 
     [Fact]

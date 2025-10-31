@@ -26,8 +26,9 @@ public class EventsController : ControllerBase
         {
             while (!HttpContext.RequestAborted.IsCancellationRequested)
             {
-                // Send a heartbeat every 30 seconds to keep the connection alive
-                await Response.WriteAsync(":\n\n");
+                // Send a heartbeat comment every 30 seconds to keep the connection alive
+                // SSE comments must be ": " (colon followed by space) per spec
+                await Response.WriteAsync(": heartbeat\n\n");
                 await Response.Body.FlushAsync();
                 await Task.Delay(30000, HttpContext.RequestAborted);
             }

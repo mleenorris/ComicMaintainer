@@ -27,8 +27,10 @@ public class SettingsController : ControllerBase
     public ActionResult SetFilenameFormat([FromBody] FilenameFormatRequest request)
     {
         _logger.LogInformation("Filename format update requested: {Format}", request.Format);
-        // Note: This would need to be persisted in a production implementation
-        return Ok();
+        // TODO: Implement persistence - settings are currently read-only from configuration
+        // In a full implementation, this would update a user preferences table in the database
+        _logger.LogWarning("Filename format changes are not persisted - requires database implementation");
+        return Ok(new { message = "Setting received but not persisted (read-only)" });
     }
 
     [HttpGet("issue-number-padding")]

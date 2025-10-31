@@ -5,6 +5,17 @@ set -e
 PUID=${PUID:-99}
 PGID=${PGID:-100}
 
+# Validate that PUID and PGID are numeric
+if ! [[ "$PUID" =~ ^[0-9]+$ ]]; then
+    echo "Error: PUID must be a numeric value, got: $PUID"
+    exit 1
+fi
+
+if ! [[ "$PGID" =~ ^[0-9]+$ ]]; then
+    echo "Error: PGID must be a numeric value, got: $PGID"
+    exit 1
+fi
+
 echo "Starting ComicMaintainer with PUID=$PUID and PGID=$PGID"
 
 # Handle group creation/assignment

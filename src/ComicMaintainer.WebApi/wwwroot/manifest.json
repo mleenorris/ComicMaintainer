@@ -2,8 +2,10 @@
   "name": "Comic Maintainer",
   "short_name": "ComicMaintainer",
   "id": "/",
+  "lang": "en",
   "description": "Manage and process your comic archive files with ComicTagger",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#2c3e50",
   "theme_color": "#2c3e50",
@@ -11,13 +13,13 @@
   "prefer_related_applications": false,
   "icons": [
     {
-      "src": "/static/icons/icon-192x192-maskable.png",
+      "src": "/icons/icon-192x192-maskable.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/static/icons/icon-512x512-maskable.png",
+      "src": "/icons/icon-512x512-maskable.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"

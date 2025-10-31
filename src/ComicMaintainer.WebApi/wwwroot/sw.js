@@ -5,13 +5,13 @@ const CACHE_NAME = 'comic-maintainer-v2';
 const urlsToCache = [
   '/',
   '/manifest.json',
-  '/static/icons/icon-192x192.png',
-  '/static/icons/icon-512x512.png',
-  '/static/icons/icon-192x192-maskable.png',
-  '/static/icons/icon-512x512-maskable.png',
-  '/static/icons/apple-touch-icon.png',
-  '/static/icons/favicon-32x32.png',
-  '/static/icons/favicon-16x16.png'
+  '/icons/icon-192x192.png',
+  '/icons/icon-512x512.png',
+  '/icons/icon-192x192-maskable.png',
+  '/icons/icon-512x512-maskable.png',
+  '/icons/apple-touch-icon.png',
+  '/icons/favicon-32x32.png',
+  '/icons/favicon-16x16.png'
 ];
 
 // Install event - cache essential resources
@@ -91,7 +91,7 @@ self.addEventListener('fetch', (event) => {
           const responseToCache = response.clone();
           
           // Cache static assets
-          if (url.pathname.startsWith('/static/') || url.pathname === '/') {
+          if (url.pathname.startsWith('/icons/') || url.pathname.startsWith('/css/') || url.pathname.startsWith('/js/') || url.pathname === '/') {
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(request, responseToCache);
             });

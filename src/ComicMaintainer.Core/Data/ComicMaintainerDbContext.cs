@@ -1,12 +1,14 @@
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Models.Auth;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace ComicMaintainer.Core.Data;
 
 /// <summary>
-/// Entity Framework Core database context for ComicMaintainer
+/// Entity Framework Core database context for ComicMaintainer with Identity support
 /// </summary>
-public class ComicMaintainerDbContext : DbContext
+public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, string>
 {
     public ComicMaintainerDbContext(DbContextOptions<ComicMaintainerDbContext> options)
         : base(options)

@@ -1,0 +1,46 @@
+name: Cleanup Copilot Branches
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  cleanup-branch:
+    # Only run for branches that start with "copilot/"
+    if: startsWith(github.head_ref, 'copilot/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Delete copilot branch
+        run: |
+          BRANCH_NAME="${{ github.head_ref }}"
+          echo "PR #${{ github.event.pull_request.number }} was closed"
+          echo "Branch: $BRANCH_NAME"
+          
+          if [ "${{ github.event.pull_request.merged }}" == "true" ]; then
+            echo "PR was merged - deleting branch $BRANCH_NAME"
+          else
+            echo "PR was closed without merging - deleting branch $BRANCH_NAME"
+          fi
+          
+          # URL encode the branch name for the API call using Python (guaranteed to be available)
+          # Pass via environment variable to avoid shell injection
+          ENCODED_BRANCH=$(BRANCH_NAME="$BRANCH_NAME" python3 -c "import os, urllib.parse; print(urllib.parse.quote(os.environ['BRANCH_NAME'], safe=''))")
+          
+          # Delete the branch using GitHub API
+          HTTP_STATUS=$(curl -s -o /tmp/response.json -w "%{http_code}" -X DELETE \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/git/refs/heads/$ENCODED_BRANCH")
+          
+          # GitHub API returns 204 No Content for successful branch deletion
+          if [ "$HTTP_STATUS" -eq 204 ]; then
+            echo "✓ Branch $BRANCH_NAME deleted successfully"
+          else
+            echo "✗ Failed to delete branch $BRANCH_NAME (HTTP $HTTP_STATUS)"
+            cat /tmp/response.json
+            exit 1
+          fi

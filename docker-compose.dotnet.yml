@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  comicmaintainer-dotnet:
+    build:
+      context: .
+      dockerfile: Dockerfile.dotnet
+    container_name: comicmaintainer-dotnet
+    ports:
+      - "5000:5000"
+    environment:
+      - WATCHED_DIR=/watched_dir
+      - DUPLICATE_DIR=/duplicates
+      - CONFIG_DIR=/Config
+      - PUID=99
+      - PGID=100
+      - MAX_WORKERS=4
+      - DB_CACHE_SIZE_MB=64
+    volumes:
+      - ./test_comics:/watched_dir
+      - ./duplicates:/duplicates
+      - ./config:/Config
+    restart: unless-stopped
+    networks:
+      - comicmaintainer
+
+networks:
+  comicmaintainer:
+    driver: bridge

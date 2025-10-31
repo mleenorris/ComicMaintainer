@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comic Maintainer - Web Interface</title>
+    
+    <!-- PWA Meta Tags -->
+    <meta name="description" content="Manage and process your comic archive files with ComicTagger">
+    <meta name="theme-color" content="#2c3e50">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ComicMaintainer">
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="{{ base_path }}/manifest.json">
+    
+    <!-- Favicons and Icons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ base_path }}/static/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ base_path }}/static/icons/favicon-16x16.png">
+    <link rel="apple-touch-icon" href="{{ base_path }}/static/icons/apple-touch-icon.png">
+    
+    <!-- External CSS -->
+    <link rel="stylesheet" href="{{ base_path }}/static/css/main.css">
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <div class="header-content">
+                <svg width="48" height="48" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Brown border/frame -->
+                    <rect x="5" y="5" width="90" height="90" rx="10" fill="#8B5A3C" stroke="#5C3A28" stroke-width="2"/>
+                    <rect x="10" y="10" width="80" height="80" rx="8" fill="#A67C52"/>
+                    
+                    <!-- Teal shelf background -->
+                    <rect x="15" y="15" width="70" height="70" rx="6" fill="#7CB8B8"/>
+                    
+                    <!-- Three comic books -->
+                    <!-- Left book - yellow/green -->
+                    <rect x="20" y="22" width="18" height="30" rx="2" fill="#D4D46E" stroke="#5C3A28" stroke-width="1.5"/>
+                    <rect x="20" y="22" width="18" height="8" fill="#B8B85A"/>
+                    <text x="29" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                    <text x="29" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
+                    
+                    <!-- Middle book - orange/red -->
+                    <rect x="41" y="22" width="18" height="30" rx="2" fill="#E67E5A" stroke="#5C3A28" stroke-width="1.5"/>
+                    <rect x="41" y="22" width="18" height="8" fill="#CC6644"/>
+                    <text x="50" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">O</text>
+                    <text x="50" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
+                    
+                    <!-- Right book - beige -->
+                    <rect x="62" y="22" width="18" height="30" rx="2" fill="#E8D4C4" stroke="#5C3A28" stroke-width="1.5"/>
+                    <rect x="62" y="22" width="18" height="8" fill="#D4BCA8"/>
+                    <text x="71" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                    <text x="71" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                    
+                    <!-- Label "COMIC LIBRARY" -->
+                    <rect x="20" y="54" width="60" height="10" rx="2" fill="#F4C430"/>
+                    <text x="50" y="61.5" font-family="Arial, sans-serif" font-size="6" font-weight="bold" fill="#5C3A28" text-anchor="middle">COMIC LIBRARY</text>
+                    
+                    <!-- Bottom shelf with books -->
+                    <rect x="20" y="68" width="8" height="12" fill="#6A8AB8"/>
+                    <rect x="30" y="68" width="6" height="12" fill="#E67E5A"/>
+                    <rect x="38" y="68" width="8" height="12" fill="#7CB8B8"/>
+                    <rect x="48" y="68" width="6" height="12" fill="#E8D4C4"/>
+                    <rect x="58" y="68" width="6" height="12" fill="#E67E5A"/>
+                    <rect x="66" y="68" width="8" height="12" fill="#7CB8B8"/>
+                    <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
+                </svg>
+                <div class="watcher-status-indicator" id="watcherStatus" title="Watcher Status">
+                    <span class="watcher-icon">⚙️</span>
+                    <span class="watcher-text">Checking...</span>
+                </div>
+                <div class="settings-menu-wrapper">
+                    <button class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle">
+                        ⋮
+                    </button>
+                    <div class="settings-dropdown-menu" id="settingsDropdownMenu">
+                        <button class="settings-dropdown-item" onclick="openAboutModal(); closeSettingsMenu();">
+                            ℹ️ About
+                        </button>
+                        <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
+                            ⚙️ Settings
+                        </button>
+                        <button class="settings-dropdown-item" onclick="openProcessingHistoryModal(); closeSettingsMenu();">
+                            📜 Processing History
+                        </button>
+                        <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
+                            📋 View Logs
+                        </button>
+                        <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
+                            🌓 Toggle Theme
+                        </button>
+                        <button class="settings-dropdown-item" onclick="refreshFiles(); closeSettingsMenu();">
+                            🔄 Refresh
+                        </button>
+                        <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
+                            🔍 Scan Unmarked
+                        </button>
+                        <button class="settings-dropdown-item" id="installAppButton" onclick="installApp(); closeSettingsMenu();" style="display: none;">
+                            📱 Install App
+                        </button>
+                    </div>
+                </div>
+                <div class="header-controls">
+                    <button id="progressIndicator" class="progress-indicator-btn" onclick="restoreProgressModal()" style="display: none;" title="Show progress">
+                        <span id="progressIndicatorText">⏳ Processing...</span>
+                    </button>
+                    <div class="header-search">
+                        <input type="text" id="headerSearchInput" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
+                    </div>
+                    <div class="header-filter-dropdown">
+                        <button class="header-filter-toggle" onclick="toggleHeaderFilterDropdown(event)" id="headerFilterToggle">
+                            <span id="headerFilterLabel">📚 All</span>
+                        </button>
+                        <div class="header-dropdown-menu" id="headerFilterMenu">
+                            <button class="header-dropdown-item active" onclick="setHeaderFilter('all')" data-filter="all">
+                                📚 All Files
+                            </button>
+                            <button class="header-dropdown-item" onclick="setHeaderFilter('unmarked')" data-filter="unmarked">
+                                ⚠️ Unmarked
+                            </button>
+                            <button class="header-dropdown-item" onclick="setHeaderFilter('marked')" data-filter="marked">
+                                ✅ Marked
+                            </button>
+                            <button class="header-dropdown-item" onclick="setHeaderFilter('duplicates')" data-filter="duplicates">
+                                🔁 Duplicates
+                            </button>
+                        </div>
+                    </div>
+                    <div class="header-sort-dropdown">
+                        <button class="header-sort-toggle" onclick="toggleHeaderSortDropdown(event)" id="headerSortToggle">
+                            <span id="headerSortLabel">🔤 Name</span>
+                        </button>
+                        <div class="header-dropdown-menu" id="headerSortMenu">
+                            <button class="header-dropdown-item active" onclick="setSort('name')" data-sort="name">
+                                🔤 Name
+                            </button>
+                            <button class="header-dropdown-item" onclick="setSort('date')" data-sort="date">
+                                📅 Date
+                            </button>
+                            <button class="header-dropdown-item" onclick="setSort('size')" data-sort="size">
+                                💾 Size
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="container">
+        <div id="messageContainer"></div>
+        
+        <div class="controls-wrapper">
+            <div class="actions-bar">
+                <div class="button-group">
+                    <!-- Process Dropdown -->
+                    <div class="action-dropdown">
+                        <button class="action-dropdown-toggle process" onclick="toggleActionDropdown(event, 'processDropdown')">
+                            🚀<span> Process</span>
+                        </button>
+                        <div class="action-dropdown-menu" id="processDropdown">
+                            <button class="action-dropdown-item" onclick="processAllFilesAsync(); closeAllActionDropdowns();">
+                                🚀 Process All
+                            </button>
+                            <button class="action-dropdown-item" onclick="processUnmarkedFiles(); closeAllActionDropdowns();">
+                                ⚠️ Process Unmarked
+                            </button>
+                            <button class="action-dropdown-item" id="processSelectedItem" onclick="processSelectedFilesAsync(); closeAllActionDropdowns();" disabled>
+                                ⚡ Process Selected
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Rename Dropdown -->
+                    <div class="action-dropdown">
+                        <button class="action-dropdown-toggle rename" onclick="toggleActionDropdown(event, 'renameDropdown')">
+                            📝<span> Rename</span>
+                        </button>
+                        <div class="action-dropdown-menu" id="renameDropdown">
+                            <button class="action-dropdown-item" onclick="renameAllFiles(); closeAllActionDropdowns();">
+                                📝 Rename All
+                            </button>
+                            <button class="action-dropdown-item" onclick="renameUnmarkedFiles(); closeAllActionDropdowns();">
+                                📝 Rename Unmarked
+                            </button>
+                            <button class="action-dropdown-item" id="renameSelectedItem" onclick="renameSelectedFiles(); closeAllActionDropdowns();" disabled>
+                                📝 Rename Selected
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Normalize Dropdown -->
+                    <div class="action-dropdown">
+                        <button class="action-dropdown-toggle normalize" onclick="toggleActionDropdown(event, 'normalizeDropdown')">
+                            🔧<span> Normalize</span>
+                        </button>
+                        <div class="action-dropdown-menu" id="normalizeDropdown">
+                            <button class="action-dropdown-item" onclick="normalizeAllFiles(); closeAllActionDropdowns();">
+                                🔧 Normalize All
+                            </button>
+                            <button class="action-dropdown-item" onclick="normalizeUnmarkedFiles(); closeAllActionDropdowns();">
+                                🔧 Normalize Unmarked
+                            </button>
+                            <button class="action-dropdown-item" id="normalizeSelectedItem" onclick="normalizeSelectedFiles(); closeAllActionDropdowns();" disabled>
+                                🔧 Normalize Selected
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>✏️<span> Update Selected</span></button>
+                    <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteSelectedBtn" disabled>🗑️<span> Delete Selected</span></button>
+                </div>
+                <span class="select-info" id="selectInfo">No files selected</span>
+            </div>
+
+        </div>
+        
+        <div class="content-wrapper">
+            <div class="file-list" id="fileList">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading files...</p>
+                </div>
+            </div>
+            
+            <!-- Pagination Controls -->
+            <div class="pagination" id="pagination" style="display: none;">
+                <button class="btn btn-small" id="prevBtn" onclick="previousPage()" disabled>← Previous</button>
+                <span class="page-info" id="pageInfo">Page 1 of 1</span>
+                <button class="btn btn-small" id="nextBtn" onclick="nextPage()" disabled>Next →</button>
+                <div style="display: flex; align-items: center; gap: 8px; margin-left: 15px;">
+                    <label for="perPageSelect" style="color: var(--text-secondary); font-size: 14px;">Files per page:</label>
+                    <select id="perPageSelect" onchange="changePerPage()" style="padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer;">
+                        <option value="25">25</option>
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="200">200</option>
+                        <option value="500">500</option>
+                        <option value="-1">All</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Tag Editor Modal -->
+    <div class="modal" id="tagModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">Edit Tags</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="tagForm">
+                    <div class="form-group">
+                        <label for="title">Title</label>
+                        <input type="text" id="title" name="title">
+                    </div>
+                    <div class="form-group">
+                        <label for="series">Series</label>
+                        <input type="text" id="series" name="series">
+                    </div>
+                    <div class="form-group">
+                        <label for="issue">Issue</label>
+                        <input type="text" id="issue" name="issue">
+                    </div>
+                    <div class="form-group">
+                        <label for="volume">Volume</label>
+                        <input type="text" id="volume" name="volume">
+                    </div>
+                    <div class="form-group">
+                        <label for="publisher">Publisher</label>
+                        <input type="text" id="publisher" name="publisher">
+                    </div>
+                    <div class="form-group">
+                        <label for="year">Year</label>
+                        <input type="text" id="year" name="year">
+                    </div>
+                    <div class="form-group">
+                        <label for="month">Month</label>
+                        <input type="text" id="month" name="month">
+                    </div>
+                    <div class="form-group">
+                        <label for="writer">Writer</label>
+                        <input type="text" id="writer" name="writer">
+                    </div>
+                    <div class="form-group">
+                        <label for="summary">Summary</label>
+                        <textarea id="summary" name="summary"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="notes">Notes</label>
+                        <textarea id="notes" name="notes"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveTags()">Save</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Batch Update Modal -->
+    <div class="modal" id="batchModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Batch Update Tags</h2>
+                <button class="close-btn" onclick="closeBatchModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 15px; color: #7f8c8d;">
+                    Only fill in the fields you want to update for all selected files.
+                    Empty fields will be ignored.
+                </p>
+                <form id="batchForm">
+                    <div class="form-group">
+                        <label for="batch_series">Series</label>
+                        <input type="text" id="batch_series" name="series">
+                    </div>
+                    <div class="form-group">
+                        <label for="batch_publisher">Publisher</label>
+                        <input type="text" id="batch_publisher" name="publisher">
+                    </div>
+                    <div class="form-group">
+                        <label for="batch_year">Year</label>
+                        <input type="text" id="batch_year" name="year">
+                    </div>
+                    <div class="form-group">
+                        <label for="batch_writer">Writer</label>
+                        <input type="text" id="batch_writer" name="writer">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeBatchModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveBatchTags()">Update Selected Files</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- File Info Modal -->
+    <div class="modal" id="fileInfoModal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2>File Information</h2>
+                <button class="close-btn" onclick="closeFileInfoModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label style="font-weight: 600; color: var(--text-secondary);">File Name:</label>
+                    <p id="fileInfoName" style="word-wrap: break-word; word-break: break-all; color: var(--text-primary); padding: 10px; background: var(--bg-hover); border-radius: 5px; margin-top: 5px;"></p>
+                </div>
+                <div class="form-group">
+                    <label style="font-weight: 600; color: var(--text-secondary);">Full Path:</label>
+                    <p id="fileInfoPath" style="word-wrap: break-word; word-break: break-all; color: var(--text-primary); padding: 10px; background: var(--bg-hover); border-radius: 5px; margin-top: 5px;"></p>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
+                    <div>
+                        <label style="font-weight: 600; color: var(--text-secondary);">Size:</label>
+                        <p id="fileInfoSize" style="color: var(--text-primary); margin-top: 5px;"></p>
+                    </div>
+                    <div>
+                        <label style="font-weight: 600; color: var(--text-secondary);">Processed:</label>
+                        <p id="fileInfoProcessed" style="color: var(--text-primary); margin-top: 5px;"></p>
+                    </div>
+                </div>
+                <div style="margin-top: 15px;">
+                    <label style="font-weight: 600; color: var(--text-secondary);">Duplicate:</label>
+                    <p id="fileInfoDuplicate" style="color: var(--text-primary); margin-top: 5px;"></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeFileInfoModal()">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- About Modal -->
+    <div class="modal" id="aboutModal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2>About Comic Maintainer</h2>
+                <button class="close-btn" onclick="closeAboutModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; margin-bottom: 20px;">
+                    <svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                        <!-- Brown border/frame -->
+                        <rect x="5" y="5" width="90" height="90" rx="10" fill="#8B5A3C" stroke="#5C3A28" stroke-width="2"/>
+                        <rect x="10" y="10" width="80" height="80" rx="8" fill="#A67C52"/>
+                        
+                        <!-- Teal shelf background -->
+                        <rect x="15" y="15" width="70" height="70" rx="6" fill="#7CB8B8"/>
+                        
+                        <!-- Three comic books -->
+                        <!-- Left book - yellow/green -->
+                        <rect x="20" y="22" width="18" height="30" rx="2" fill="#D4D46E" stroke="#5C3A28" stroke-width="1.5"/>
+                        <rect x="20" y="22" width="18" height="8" fill="#B8B85A"/>
+                        <text x="29" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                        <text x="29" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
+                        
+                        <!-- Middle book - orange/red -->
+                        <rect x="41" y="22" width="18" height="30" rx="2" fill="#E67E5A" stroke="#5C3A28" stroke-width="1.5"/>
+                        <rect x="41" y="22" width="18" height="8" fill="#CC6644"/>
+                        <text x="50" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">O</text>
+                        <text x="50" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
+                        
+                        <!-- Right book - beige -->
+                        <rect x="62" y="22" width="18" height="30" rx="2" fill="#E8D4C4" stroke="#5C3A28" stroke-width="1.5"/>
+                        <rect x="62" y="22" width="18" height="8" fill="#D4BCA8"/>
+                        <text x="71" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                        <text x="71" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
+                        
+                        <!-- Label "COMIC LIBRARY" -->
+                        <rect x="20" y="54" width="60" height="10" rx="2" fill="#F4C430"/>
+                        <text x="50" y="61.5" font-family="Arial, sans-serif" font-size="6" font-weight="bold" fill="#5C3A28" text-anchor="middle">COMIC LIBRARY</text>
+                        
+                        <!-- Bottom shelf with books -->
+                        <rect x="20" y="68" width="8" height="12" fill="#6A8AB8"/>
+                        <rect x="30" y="68" width="6" height="12" fill="#E67E5A"/>
+                        <rect x="38" y="68" width="8" height="12" fill="#7CB8B8"/>
+                        <rect x="48" y="68" width="6" height="12" fill="#E8D4C4"/>
+                        <rect x="58" y="68" width="6" height="12" fill="#E67E5A"/>
+                        <rect x="66" y="68" width="8" height="12" fill="#7CB8B8"/>
+                        <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
+                    </svg>
+                </div>
+                
+                <h3 style="margin-bottom: 10px; color: var(--text-secondary); text-align: center;">Comic Maintainer</h3>
+                <p style="text-align: center; color: var(--text-muted); margin-bottom: 20px;">
+                    Version: <strong id="aboutVersion">Loading...</strong>
+                </p>
+                
+                <div style="padding: 15px; background: var(--bg-hover); border-radius: 8px; margin-bottom: 15px;">
+                    <h4 style="margin-bottom: 10px; color: var(--text-secondary);">Description</h4>
+                    <p style="color: var(--text-primary); line-height: 1.6;">
+                        Comic Maintainer is a service that automatically watches a directory for new or changed comic archive files (.cbz/.cbr), 
+                        tags them using ComicTagger, and manages duplicates. It provides a web interface for managing and processing comic files 
+                        in your watched directory.
+                    </p>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div style="padding: 15px; background: var(--bg-hover); border-radius: 8px;">
+                        <h4 style="margin-bottom: 8px; color: var(--text-secondary);">Created</h4>
+                        <p style="color: var(--text-primary);">2024</p>
+                    </div>
+                    <div style="padding: 15px; background: var(--bg-hover); border-radius: 8px;">
+                        <h4 style="margin-bottom: 8px; color: var(--text-secondary);">License</h4>
+                        <p style="color: var(--text-primary);">MIT</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" onclick="closeAboutModal()">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Progress Modal -->
+    <div class="modal" id="progressModal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2 id="progressTitle">Processing Files...</h2>
+                <button class="close-btn" onclick="minimizeProgressModal()" title="Minimize">&minus;</button>
+            </div>
+            <div class="modal-body">
+                <div style="margin-bottom: 15px;">
+                    <div class="progress-bar-container">
+                        <div class="progress-bar-fill" id="progressBarFill"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 8px;">
+                        <span id="progressText" style="color: var(--text-secondary); font-size: 14px;">0 / 0 files</span>
+                        <span id="progressPercent" style="color: var(--text-secondary); font-size: 14px;">0%</span>
+                    </div>
+                </div>
+                <div id="progressDetails" style="max-height: 200px; overflow-y: auto; padding: 10px; background: var(--bg-hover); border-radius: 5px; font-size: 13px; color: var(--text-muted);"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-danger" id="progressCancelBtn" onclick="cancelCurrentJob()" style="display: none;">Cancel</button>
+                <button class="btn" id="progressCloseBtn" onclick="closeProgressModal()" style="display: none;">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Settings Modal -->
+    <div class="modal" id="settingsModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Settings</h2>
+                <button class="close-btn" onclick="closeSettings()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <h3 style="margin-bottom: 10px; color: var(--text-secondary);">Appearance</h3>
+                <div class="form-group">
+                    <label for="themeSelect">Theme</label>
+                    <select id="themeSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);" onchange="updateThemeFromSettings()">
+                        <option value="light">Light Mode</option>
+                        <option value="dark">Dark Mode</option>
+                    </select>
+                </div>
+                
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Watcher</h3>
+                <div class="form-group">
+                    <label for="watcherToggleCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="watcherToggleCheckbox" onchange="updateWatcherFromSettings()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <span>Enable file watcher (automatically process new/modified files)</span>
+                    </label>
+                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                        When enabled, the watcher monitors the directory for changes and automatically processes files.
+                    </small>
+                </div>
+                
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Log Rotation</h3>
+                <div class="form-group">
+                    <label for="logMaxSize">Maximum Log File Size (MB)</label>
+                    <input type="number" id="logMaxSize" min="1" max="100" step="1" placeholder="5" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. Changes take effect on restart.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>LOG_MAX_BYTES</code> environment variable (in bytes).
+                    </small>
+                </div>
+                
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Filename Format</h3>
+                <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
+                    Configure how files are renamed when processed. Use placeholders like <code>{series}</code>, <code>{issue}</code>, etc.
+                </p>
+                <div class="form-group">
+                    <label for="filenameFormat">Filename Template</label>
+                    <input type="text" id="filenameFormat" placeholder="{series} - Chapter {issue}">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Available placeholders:
+                    </small>
+                    <ul style="margin: 10px 0 10px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.6;">
+                        <li><code>{series}</code> - Series name</li>
+                        <li><code>{issue}</code> - Issue number (padded based on settings, default 4 digits, e.g., 0001, or 0071.4 for decimals)</li>
+                        <li><code>{issue_no_pad}</code> - Issue number (no padding, e.g., 1, or 71.4 for decimals)</li>
+                        <li><code>{title}</code> - Issue title</li>
+                        <li><code>{volume}</code> - Volume number</li>
+                        <li><code>{year}</code> - Publication year</li>
+                        <li><code>{publisher}</code> - Publisher name</li>
+                    </ul>
+                    <small style="display: block; margin-top: 10px; color: var(--text-muted);">
+                        <strong>Example:</strong> <code>{series} v{volume} #{issue_no_pad} ({year})</code><br>
+                        <strong>Note:</strong> File extension (.cbz or .cbr) is automatically preserved
+                    </small>
+                </div>
+                <div style="margin-top: 15px; padding: 10px; background: var(--bg-hover); border-radius: 5px;">
+                    <small style="color: var(--text-muted);">
+                        <strong>Current format:</strong> <span id="currentFormat" style="font-family: monospace;"></span>
+                    </small>
+                </div>
+                
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Issue Number Padding</h3>
+                <div class="form-group">
+                    <label for="issueNumberPadding">Number of Digits for {issue} Placeholder</label>
+                    <input type="number" id="issueNumberPadding" min="0" max="10" step="1" placeholder="4" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Controls how many digits the <code>{issue}</code> placeholder uses (default: 4). For example, with padding set to 4, issue 5 becomes 0005, with padding 3 it becomes 005, and with padding 0 it remains 5.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> This only affects the <code>{issue}</code> placeholder. Use <code>{issue_no_pad}</code> for unpadded issue numbers regardless of this setting.
+                    </small>
+                </div>
+                
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">GitHub Integration</h3>
+                <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
+                    Configure GitHub integration for automatic error reporting. When configured, errors will automatically create GitHub issues.
+                </p>
+                <div class="form-group">
+                    <label for="githubToken">GitHub Personal Access Token</label>
+                    <input type="password" id="githubToken" placeholder="ghp_..." style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Personal Access Token with <code>repo</code> scope for creating issues. Leave empty to disable GitHub integration.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>GITHUB_TOKEN</code> environment variable.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="githubRepository">GitHub Repository</label>
+                    <input type="text" id="githubRepository" placeholder="owner/repo" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Repository in format <code>owner/repo</code> where issues should be created.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>GITHUB_REPOSITORY</code> environment variable.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="githubIssueAssignee">GitHub Issue Assignee (Optional)</label>
+                    <input type="text" id="githubIssueAssignee" placeholder="username" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        GitHub username to assign auto-generated issues to. Leave empty for no assignment.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Note:</strong> Can also be configured via the <code>GITHUB_ISSUE_ASSIGNEE</code> environment variable.
+                    </small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeSettings()">Cancel</button>
+                <button class="btn" onclick="resetFilenameFormat()" style="background: #e67e22; color: white;">Reset to Default</button>
+                <button class="btn btn-primary" onclick="saveFilenameFormat()">Save</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="logsModal">
+        <div class="modal-content" style="max-width: 900px; height: 80vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h2>Application Logs</h2>
+                <button class="close-btn" onclick="closeLogsModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center; flex-wrap: wrap;">
+                    <label for="logType" style="color: var(--text-secondary); font-weight: 500;">Log Type:</label>
+                    <select id="logType" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                        <option value="basic" selected>Basic Logs</option>
+                        <option value="debug">Debug Logs</option>
+                    </select>
+                    <label for="logLines" style="color: var(--text-secondary); font-weight: 500; margin-left: 10px;">Lines to display:</label>
+                    <select id="logLines" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                        <option value="100">Last 100 lines</option>
+                        <option value="500" selected>Last 500 lines</option>
+                        <option value="1000">Last 1000 lines</option>
+                        <option value="0">All lines</option>
+                    </select>
+                    <button class="btn" onclick="loadLogs()" style="margin-left: auto;">🔄 Refresh</button>
+                </div>
+                <div id="logsLoadingIndicator" style="display: none; padding: 20px; text-align: center; color: var(--text-muted);">
+                    Loading logs...
+                </div>
+                <pre id="logsContent" style="flex: 1; overflow: auto; background: var(--bg-primary); padding: 15px; border-radius: 5px; border: 1px solid var(--border-secondary); font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.4; white-space: pre-wrap; word-wrap: break-word; margin: 0;"></pre>
+                <div style="margin-top: 10px; padding: 10px; background: var(--bg-hover); border-radius: 5px; font-size: 13px; color: var(--text-muted);">
+                    <span id="logStats"></span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeLogsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="processingHistoryModal">
+        <div class="modal-content" style="max-width: 1200px; height: 85vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h2>Processing History</h2>
+                <button class="close-btn" onclick="closeProcessingHistoryModal()">&times;</button>
+            </div>
+            <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                <div style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
+                    Shows all file processing changes with before and after values
+                </div>
+                <div id="historyLoadingIndicator" style="display: none; padding: 20px; text-align: center; color: var(--text-muted);">
+                    Loading history...
+                </div>
+                <div id="historyContent" style="flex: 1; overflow: auto;">
+                    <!-- History items will be loaded here -->
+                </div>
+                <div id="historyPagination" style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-primary);">
+                    <button class="btn" id="historyPrevBtn" onclick="loadPreviousHistoryPage()" disabled>← Previous</button>
+                    <span id="historyPageInfo" style="color: var(--text-secondary); font-size: 14px;">Page 1</span>
+                    <button class="btn" id="historyNextBtn" onclick="loadNextHistoryPage()" disabled>Next →</button>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeProcessingHistoryModal()">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    
+    <!-- External JavaScript -->
+    <script>
+        // Base path for reverse proxy support (injected from Flask)
+        const BASE_PATH = '{{ base_path }}';
+        
+        // Helper function to build URLs with base path
+        function apiUrl(path) {
+            // Ensure path starts with /
+            if (!path.startsWith('/')) {
+                path = '/' + path;
+            }
+            return BASE_PATH + path;
+        }
+    </script>
+    <script src="{{ base_path }}/static/js/main.js"></script>
+</body>
+</html>

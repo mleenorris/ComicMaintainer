@@ -30,4 +30,4 @@ chmod -R 755 /watched_dir /duplicates /Config 2>/dev/null || true
 
 # Switch to the specified user and run the application
 echo "Switching to user comicmaintainer (UID=$PUID, GID=$PGID)"
-exec su-exec comicmaintainer dotnet ComicMaintainer.WebApi.dll
+exec gosu comicmaintainer dotnet ComicMaintainer.WebApi.dll

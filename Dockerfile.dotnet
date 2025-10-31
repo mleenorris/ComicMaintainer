@@ -3,11 +3,11 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 WORKDIR /app
 EXPOSE 5000
 
-# Install system dependencies for file handling, unrar, and su-exec for user switching
+# Install system dependencies for file handling, unrar, and gosu for user switching
 RUN apt-get update && apt-get install -y \
     unrar-free \
     p7zip-full \
-    su-exec \
+    gosu \
     && rm -rf /var/lib/apt/lists/*
 
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build

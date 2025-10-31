@@ -10,33 +10,21 @@ This document describes the GitHub Actions workflow for building and publishing 
 
 The workflow is triggered on:
 
-- **Push** to branches:
-  - `master` - Main development branch
-  - `stable` - Stable release branch
-  - `copilot/implement-next-steps-dotnet` - .NET development branch
+- **Push** to branch:
+  - `dotnet` - .NET branch (when PRs are merged)
 
-- **Pull Request** to branches:
-  - `master`
-  - `copilot/implement-next-steps-dotnet`
+- **Pull Request** to branch:
+  - `dotnet`
 
 ## Docker Image Tags
 
-The workflow creates Docker images with different tags based on the branch:
+The workflow creates a Docker image with a single tag:
 
-### Master Branch
-When code is pushed to `master`, the following tags are created:
-- `iceburn1/comicmaintainer-dotnet:latest`
-- `iceburn1/comicmaintainer-dotnet:<version>` (e.g., `1.0.0`)
-- `iceburn1/comicmaintainer-dotnet:dotnet-latest`
+### .NET Branch
+When PRs are merged to the `dotnet` branch, the following tag is created:
+- `iceburn1/comicmaintainer:dotnet`
 
-### Stable Branch
-When code is pushed to `stable`, the following tag is created:
-- `iceburn1/comicmaintainer-dotnet:stable`
-
-### Development Branch (copilot/implement-next-steps-dotnet)
-When code is pushed to the .NET development branch, the following tags are created:
-- `iceburn1/comicmaintainer-dotnet:dotnet-dev`
-- `iceburn1/comicmaintainer-dotnet:dotnet-<version>` (e.g., `dotnet-1.0.0`)
+This uses the same Docker Hub repository as the Python version (`iceburn1/comicmaintainer`) but with the `dotnet` tag to distinguish it from the Python version (which uses `latest`, `stable`, etc.)
 
 ## Workflow Steps
 
@@ -124,19 +112,34 @@ To monitor build status:
 - Verify the version in `ComicMaintainer.WebApi.csproj` is correct
 - Check that the grep command in the workflow successfully extracts the version
 
+## Usage
+
+Once secrets are configured and PRs are merged to the `dotnet` branch, the workflow runs automatically. To use the published image:
+
+```bash
+# Pull the .NET version
+docker pull iceburn1/comicmaintainer:dotnet
+
+# Run the container
+docker run -e PUID=$(id -u) -e PGID=$(id -g) \
+  -v /path/to/comics:/watched_dir \
+  -v /path/to/config:/Config \
+  iceburn1/comicmaintainer:dotnet
+```
+
 ## Local Testing
 
 To test the Docker build locally before pushing:
 
 ```bash
 # Build the image
-docker build -f Dockerfile.dotnet -t comicmaintainer-dotnet:test .
+docker build -f Dockerfile.dotnet -t comicmaintainer:dotnet-test .
 
 # Run the image
 docker run -e PUID=$(id -u) -e PGID=$(id -g) \
   -v $(pwd)/test_comics:/watched_dir \
   -v $(pwd)/config:/Config \
-  comicmaintainer-dotnet:test
+  comicmaintainer:dotnet-test
 ```
 
 ## Related Documentation

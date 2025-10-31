@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 
@@ -155,7 +156,6 @@ public class FileWatcherService : IFileWatcherService
 
     private static bool IsComicFile(string path)
     {
-        var extension = Path.GetExtension(path).ToLowerInvariant();
-        return extension == ".cbz" || extension == ".cbr";
+        return ComicFileExtensions.IsComicArchive(path);
     }
 }

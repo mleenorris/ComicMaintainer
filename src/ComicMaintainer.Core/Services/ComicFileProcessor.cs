@@ -211,14 +211,12 @@ public class ComicFileProcessor
                 }
 
                 var seriesName = Path.GetFileName(comicFolder);
-                seriesName = seriesName.Replace('_', ':');
-                var seriesNameCompare = seriesName.Replace("'", "\u0027");
-                seriesNameCompare = Regex.Replace(seriesNameCompare, @"\(\*\)|\[\*\]", "");
+                var seriesNameCompare = NormalizeSeriesName(seriesName, forComparison: true);
 
                 if (!string.IsNullOrEmpty(tags.Series))
                 {
-                    var tagsSeriesCompare = Regex.Replace(tags.Series, @"\(\*\)|\[\*\]", "");
-                    if (tagsSeriesCompare.Trim() != seriesNameCompare.Trim())
+                    var tagsSeriesCompare = NormalizeSeriesName(tags.Series, forComparison: true);
+                    if (tagsSeriesCompare != seriesNameCompare)
                     {
                         return false;
                     }
@@ -266,20 +264,19 @@ public class ComicFileProcessor
     /// Normalize series name from folder name
     /// Converted from Python's series normalization logic
     /// </summary>
-    public static string NormalizeSeriesName(string folderName)
+    /// <param name="folderName">The folder name to normalize</param>
+    /// <param name="forComparison">If true, also applies comparison-specific transformations</param>
+    public static string NormalizeSeriesName(string folderName, bool forComparison = false)
     {
         var seriesName = folderName.Replace('_', ':');
+        
+        if (forComparison)
+        {
+            seriesName = seriesName.Replace("'", "\u0027");
+            seriesName = Regex.Replace(seriesName, @"\(\*\)|\[\*\]", "");
+            seriesName = seriesName.Trim();
+        }
+        
         return seriesName;
-    }
-
-    /// <summary>
-    /// Get expected series name for comparison
-    /// Converted from Python's series comparison logic
-    /// </summary>
-    public static string GetSeriesNameForComparison(string seriesName)
-    {
-        var result = seriesName.Replace("'", "\u0027");
-        result = Regex.Replace(result, @"\(\*\)|\[\*\]", "");
-        return result.Trim();
     }
 }

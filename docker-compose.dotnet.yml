@@ -16,6 +16,10 @@ services:
       - PGID=100
       - MAX_WORKERS=4
       - DB_CACHE_SIZE_MB=64
+      - JWT_SECRET=${JWT_SECRET:-ChangeThisToASecureRandomString-MustBeAtLeast32CharactersLong!!}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@comicmaintainer.local}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Admin123!}
     volumes:
       - ./test_comics:/watched_dir
       - ./duplicates:/duplicates

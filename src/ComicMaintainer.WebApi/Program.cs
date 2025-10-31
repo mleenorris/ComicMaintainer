@@ -5,6 +5,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Hubs;
+using ComicMaintainer.WebApi.Middleware;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -178,6 +179,9 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+
+// Add path validation middleware for security
+app.UseMiddleware<PathValidationMiddleware>();
 
 // Serve static files from wwwroot (we'll copy the Python templates/static there)
 app.UseStaticFiles();

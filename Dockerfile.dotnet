@@ -3,25 +3,29 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 WORKDIR /app
 EXPOSE 5000
 
-# Install system dependencies for file handling and unrar
+# Install system dependencies for file handling, unrar, and su-exec for user switching
 RUN apt-get update && apt-get install -y \
     unrar-free \
     p7zip-full \
+    su-exec \
     && rm -rf /var/lib/apt/lists/*
 
 FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 WORKDIR /src
 
 # Copy solution and project files
-COPY ["ComicMaintainer.sln", "./"]
 COPY ["src/ComicMaintainer.Core/ComicMaintainer.Core.csproj", "src/ComicMaintainer.Core/"]
 COPY ["src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj", "src/ComicMaintainer.WebApi/"]
 
-# Restore dependencies
-RUN dotnet restore "ComicMaintainer.sln"
+# Restore dependencies for each project
+WORKDIR "/src/src/ComicMaintainer.Core"
+RUN dotnet restore "ComicMaintainer.Core.csproj"
+WORKDIR "/src/src/ComicMaintainer.WebApi"
+RUN dotnet restore "ComicMaintainer.WebApi.csproj"
 
-# Copy all source files
-COPY . .
+# Copy source files
+WORKDIR "/src"
+COPY ["src/", "src/"]
 
 # Build the application
 WORKDIR "/src/src/ComicMaintainer.WebApi"
@@ -47,7 +51,22 @@ ENV PGID=100
 ENV MAX_WORKERS=4
 ENV DB_CACHE_SIZE_MB=64
 
+# Security note: These default values should be overridden in production
+# Use Docker secrets or environment variables for sensitive data
+ENV ADMIN_USERNAME=admin
+ENV ADMIN_EMAIL=admin@comicmaintainer.local
+
+# Copy entrypoint script
+COPY entrypoint.dotnet.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Create necessary directories with default permissions
+# User/group will be created dynamically based on PUID/PGID at runtime
+RUN mkdir -p /watched_dir /duplicates /Config && \
+    chmod -R 755 /watched_dir /duplicates /Config
+
 # Expose web interface port
 EXPOSE 5000
 
-ENTRYPOINT ["dotnet", "ComicMaintainer.WebApi.dll"]
+# Use entrypoint script to handle dynamic user creation and permission management
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

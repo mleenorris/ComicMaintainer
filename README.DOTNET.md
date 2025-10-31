@@ -138,11 +138,11 @@ Configuration can be set via:
 
 - `GET /api/files` - Get all files (optional ?filter=processed|unprocessed|duplicates)
 - `GET /api/files/counts` - Get file statistics
-- `GET /api/files/{filePath}/metadata` - Get file metadata
-- `PUT /api/files/{filePath}/metadata` - Update file metadata
-- `POST /api/files/{filePath}/process` - Process a single file
+- `GET /api/files/metadata?filePath={path}` - Get file metadata
+- `PUT /api/files/metadata?filePath={path}` - Update file metadata
+- `POST /api/files/process?filePath={path}` - Process a single file
 - `POST /api/files/process-batch` - Process multiple files
-- `POST /api/files/{filePath}/mark-processed` - Mark file as processed
+- `POST /api/files/mark-processed?filePath={path}` - Mark file as processed
 
 ### Jobs API
 
@@ -196,38 +196,61 @@ ComicMaintainer/
 
 ### Implementation Notes
 
-1. **Comic Processing**: The current implementation provides the framework but would need integration with a C# comic library (e.g., SharpCompress for archive handling) for full comic processing functionality similar to ComicTagger
-2. **File Storage**: Currently uses in-memory storage; can be extended to use Entity Framework Core with SQLite/PostgreSQL for persistence
-3. **Event Broadcasting**: Would need to implement SignalR for real-time updates (equivalent to Python's Server-Sent Events)
+1. **Comic Processing**: ✅ Fully implemented with SharpCompress integration, ComicInfo.xml support from PR 405
+2. **File Storage**: ✅ Entity Framework Core with SQLite for persistence
+3. **Event Broadcasting**: ✅ SignalR for WebSocket communication
+4. **Authentication**: ✅ ASP.NET Core Identity with JWT and API key support
+5. **Authorization**: ✅ Role-based access control with Admin, User, and ReadOnly roles
+6. **Security**: ✅ Path validation middleware, log sanitization, Docker hardening
+
+### Security Features
+
+- **Path Injection Protection**: Middleware validates all file paths against allowed directories
+- **Log Forging Prevention**: Automatic sanitization of user input in logs
+- **Non-Root Container**: Docker image runs as dedicated user (UID 1000)
+- **Secrets Management**: Environment-based configuration for sensitive data
+- **JWT Security**: HMAC SHA256 signing with configurable expiration
+
+See [SECURITY_FIXES_DOTNET.md](SECURITY_FIXES_DOTNET.md) for complete security documentation.
 
 ## Future Enhancements
 
 ### Planned Features
 
-1. **Full Comic Processing**:
-   - Integration with SharpCompress for archive manipulation
-   - ComicInfo.xml metadata parsing and writing
-   - File renaming based on templates
+1. **Full Comic Processing**: ✅ **Implemented**
+   - ✅ Integration with SharpCompress for archive manipulation
+   - ✅ ComicInfo.xml metadata parsing and writing
+   - ✅ File renaming based on templates
+   - ✅ Duplicate detection and handling
 
 2. **.NET MAUI Mobile App**:
    - Native Android app
    - iOS app support
    - Shared UI components with web version
 
-3. **Enhanced Storage**:
-   - Entity Framework Core integration
-   - SQLite database for persistence
-   - Migration from Python's file-based storage
+3. **Enhanced Storage**: ✅ **Implemented**
+   - ✅ Entity Framework Core integration
+   - ✅ SQLite database for persistence
+   - ✅ Database migrations
+   - 🔲 Migration from Python's file-based storage (future enhancement)
 
-4. **Real-Time Updates**:
-   - SignalR for WebSocket communication
-   - Live job progress updates
-   - Real-time file status changes
+4. **Real-Time Updates**: ✅ **Implemented**
+   - ✅ SignalR for WebSocket communication
+   - ✅ ProgressHub for broadcasting updates
+   - ✅ Job subscription support
+   - 🔲 Live job progress updates (needs integration with ComicProcessorService)
+   - 🔲 Real-time file status changes (needs integration with FileStoreService)
 
-5. **Authentication & Authorization**:
-   - User management
-   - API key authentication
-   - Role-based access control
+5. **Authentication & Authorization**: ✅ **Implemented**
+   - ✅ ASP.NET Core Identity integration
+   - ✅ User management with email and password
+   - ✅ JWT token authentication
+   - ✅ API key authentication
+   - ✅ Role-based access control (Admin, User, ReadOnly)
+   - ✅ Automatic role and admin user seeding
+   - ✅ Authentication endpoints (login, register, change password, API key generation)
+   - ✅ Security hardening (path validation, log sanitization)
+   - ✅ Docker security best practices (non-root user, secrets management)
 
 ## Contributing
 

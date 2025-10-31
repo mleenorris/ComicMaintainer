@@ -1,0 +1,79 @@
+name: Build and Push .NET Docker Image
+
+on:
+  push:
+    branches: 
+      - dotnet
+  pull_request:
+    branches: 
+      - dotnet
+
+jobs:
+  build-and-push-dotnet:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      
+      - name: Get version from .NET project
+        id: get_version
+        run: |
+          # Extract version from ComicMaintainer.WebApi.csproj
+          VERSION=$(grep -oP '<Version>\K[^<]+' src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj || echo "1.0.0")
+          echo "Version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Determine Docker tags
+        id: docker_tags
+        run: |
+          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+          echo "Building from branch: $BRANCH_NAME"
+          
+          # Use the same image repository as Python version, but with dotnet tag
+          IMAGE_BASE="iceburn1/comicmaintainer"
+          
+          # For dotnet branch, tag as dotnet
+          TAGS="${IMAGE_BASE}:dotnet"
+          
+          # Output tags in a format that can be used by docker/build-push-action
+          echo "tags<<EOF" >> $GITHUB_OUTPUT
+          echo "$TAGS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-dotnet
+          key: ${{ runner.os }}-buildx-dotnet-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-dotnet-
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push .NET Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.dotnet
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.docker_tags.outputs.tags }}
+          cache-from: type=local,src=/tmp/.buildx-cache-dotnet
+          cache-to: type=local,dest=/tmp/.buildx-cache-dotnet
+          platforms: linux/amd64
+          
+      - name: Image digest
+        if: github.event_name != 'pull_request'
+        run: echo "Image pushed with tags ${{ steps.docker_tags.outputs.tags }}"

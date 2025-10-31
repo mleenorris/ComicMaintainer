@@ -135,10 +135,10 @@ public class ComicInfo
             Publisher = Publisher,
             Year = Year,
             Summary = Summary,
-            Authors = new List<string>
-            {
-                Writer, Penciller, Inker, Colorist, Letterer, Editor
-            }.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a!).ToList(),
+            Authors = new[] { Writer, Penciller, Inker, Colorist, Letterer, Editor }
+                .Where(a => !string.IsNullOrWhiteSpace(a))
+                .Select(a => a!)
+                .ToList(),
             Tags = new List<string>()
         };
     }

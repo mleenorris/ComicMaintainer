@@ -88,7 +88,7 @@ public class ComicProcessorService : IComicProcessorService
         }
     }
 
-    public async Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    public Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
     {
         var jobId = Guid.NewGuid();
         var fileList = filePaths.ToList();
@@ -144,7 +144,7 @@ public class ComicProcessorService : IComicProcessorService
             }
         }, cancellationToken);
 
-        return jobId;
+        return Task.FromResult(jobId);
     }
 
     public ProcessingJob? GetJob(Guid jobId)

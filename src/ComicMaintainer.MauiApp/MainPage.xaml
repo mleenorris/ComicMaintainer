@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="ComicMaintainer.MauiApp.MainPage"
+             Title="Comic Maintainer">
+
+    <ScrollView>
+        <VerticalStackLayout Spacing="25" Padding="30,0" VerticalOptions="Center">
+            
+            <Label 
+                Text="Comic Maintainer"
+                SemanticProperties.HeadingLevel="Level1"
+                FontSize="32"
+                HorizontalOptions="Center" />
+
+            <Label 
+                Text="Manage your comic collection on the go"
+                SemanticProperties.HeadingLevel="Level2"
+                SemanticProperties.Description="Welcome message"
+                FontSize="18"
+                HorizontalOptions="Center" />
+
+            <Button 
+                x:Name="BrowseBtn"
+                Text="Browse Comics"
+                SemanticProperties.Hint="Browse comic files"
+                Clicked="OnBrowseClicked"
+                HorizontalOptions="Center" />
+
+            <Button 
+                x:Name="ProcessBtn"
+                Text="Process All"
+                SemanticProperties.Hint="Process all unprocessed comics"
+                Clicked="OnProcessClicked"
+                HorizontalOptions="Center" />
+
+            <Button 
+                x:Name="SettingsBtn"
+                Text="Settings"
+                SemanticProperties.Hint="Open settings"
+                Clicked="OnSettingsClicked"
+                HorizontalOptions="Center" />
+
+            <Label x:Name="StatusLabel"
+                   Text=""
+                   FontSize="14"
+                   HorizontalOptions="Center" />
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

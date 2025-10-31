@@ -214,8 +214,15 @@ public class ComicProcessorService : IComicProcessorService
                             var destPath = Path.Combine(targetDir, Path.GetFileName(filePath));
                             
                             _logger.LogInformation("Duplicate detected. Moving {Source} to {Dest}", filePath, destPath);
-                            // Note: Actual move would be done here
-                            // File.Move(filePath, destPath);
+                            try
+                            {
+                                File.Move(filePath, destPath);
+                                finalFilePath = destPath;
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Error moving duplicate file {Source} to {Dest}", filePath, destPath);
+                            }
                         }
                         else
                         {

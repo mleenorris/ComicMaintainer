@@ -78,9 +78,11 @@ public class ComicArchive : IDisposable
             using var stringReader = new StringReader(xmlContent);
             return serializer.Deserialize(stringReader) as ComicInfo;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // If we can't read the tags, return empty
+            // This can happen with corrupted files or invalid XML
+            System.Diagnostics.Debug.WriteLine($"Failed to read tags from {_filePath}: {ex.Message}");
             return new ComicInfo();
         }
     }
@@ -174,7 +176,15 @@ public class ComicArchive : IDisposable
                 // Clean up temp file if it still exists
                 if (File.Exists(tempFile))
                 {
-                    try { File.Delete(tempFile); } catch { /* ignore */ }
+                    try 
+                    { 
+                        File.Delete(tempFile); 
+                    } 
+                    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+                    { 
+                        // Log but don't throw - cleanup failure shouldn't fail the operation
+                        System.Diagnostics.Debug.WriteLine($"Failed to delete temp file {tempFile}: {ex.Message}");
+                    }
                 }
             }
         }

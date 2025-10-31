@@ -254,8 +254,10 @@ public class ComicFileProcessor
 
             return true;
         }
-        catch
+        catch (Exception ex) when (ex is FileNotFoundException or IOException or UnauthorizedAccessException)
         {
+            // Expected exceptions when file is not accessible or doesn't exist
+            System.Diagnostics.Debug.WriteLine($"Cannot check normalization for {filepath}: {ex.Message}");
             return false;
         }
     }

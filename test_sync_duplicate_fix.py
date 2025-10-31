@@ -13,11 +13,13 @@ import sys
 import os
 import tempfile
 import shutil
+import time
+import sqlite3
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-# Set up temporary config directory for tests
+# Set up temporary config directory for tests - will be cleaned up in main()
 TEST_CONFIG_DIR = tempfile.mkdtemp(prefix='test_sync_dup_')
 os.environ['CONFIG_DIR_OVERRIDE'] = TEST_CONFIG_DIR
 
@@ -79,7 +81,6 @@ def test_sync_with_duplicate_files():
         print(f"✓ Database still has correct count: {len(db_files)} files")
         
         # Third sync after modifying a file
-        import time
         time.sleep(0.1)  # Ensure timestamp changes
         with open(test_files[0], 'a') as f:
             f.write(' modified')
@@ -98,9 +99,8 @@ def test_sync_with_duplicate_files():
         traceback.print_exc()
         return False
     finally:
-        # Clean up
+        # Clean up test directory only
         shutil.rmtree(test_dir, ignore_errors=True)
-        shutil.rmtree(TEST_CONFIG_DIR, ignore_errors=True)
 
 
 def test_concurrent_sync_scenario():
@@ -126,10 +126,10 @@ def test_concurrent_sync_scenario():
         
         print(f"✓ Created test file: {filepath}")
         
-        # Manually add the file to database
-        import time
-        unified_store.add_file(filepath, last_modified=time.time(), file_size=100)
-        print(f"✓ Manually added file to database")
+        # Manually add the file to database with actual file metadata
+        stat = os.stat(filepath)
+        unified_store.add_file(filepath, last_modified=stat.st_mtime, file_size=stat.st_size)
+        print("✓ Manually added file to database")
         
         # Now run sync - the file is already in database
         # Without the fix, this would cause UNIQUE constraint error
@@ -148,9 +148,8 @@ def test_concurrent_sync_scenario():
         traceback.print_exc()
         return False
     finally:
-        # Clean up
+        # Clean up test directory only
         shutil.rmtree(test_dir, ignore_errors=True)
-        shutil.rmtree(TEST_CONFIG_DIR, ignore_errors=True)
 
 
 def test_direct_insert_with_existing_file():
@@ -183,8 +182,6 @@ def test_direct_insert_with_existing_file():
         
         # Directly execute the problematic INSERT that was in the old code
         # This simulates what happens in a race condition
-        import time
-        import sqlite3
         
         # Try to insert the same file directly (simulating concurrent sync)
         try:
@@ -197,7 +194,7 @@ def test_direct_insert_with_existing_file():
                     VALUES (?, ?, ?, ?)
                 ''', (filepath, stat.st_mtime, stat.st_size, time.time()))
                 conn.commit()
-            print(f"✓ INSERT OR REPLACE succeeded (fix is working)")
+            print("✓ INSERT OR REPLACE succeeded (fix is working)")
         except sqlite3.IntegrityError as e:
             print(f"❌ UNIQUE constraint error: {e}")
             return False
@@ -216,9 +213,8 @@ def test_direct_insert_with_existing_file():
         traceback.print_exc()
         return False
     finally:
-        # Clean up
+        # Clean up test directory only
         shutil.rmtree(test_dir, ignore_errors=True)
-        shutil.rmtree(TEST_CONFIG_DIR, ignore_errors=True)
 
 
 def main():
@@ -227,20 +223,23 @@ def main():
     print("SYNC DUPLICATE FIX TESTS")
     print("=" * 60)
     
-    test1_passed = test_sync_with_duplicate_files()
-    test2_passed = test_concurrent_sync_scenario()
-    test3_passed = test_direct_insert_with_existing_file()
-    
-    if test1_passed and test2_passed and test3_passed:
-        print("\n" + "=" * 60)
-        print("✅ ALL TESTS PASSED")
-        print("=" * 60)
-        return 0
-    else:
+    try:
+        test1_passed = test_sync_with_duplicate_files()
+        test2_passed = test_concurrent_sync_scenario()
+        test3_passed = test_direct_insert_with_existing_file()
+        
+        if test1_passed and test2_passed and test3_passed:
+            print("\n" + "=" * 60)
+            print("✅ ALL TESTS PASSED")
+            print("=" * 60)
+            return 0
         print("\n" + "=" * 60)
         print("❌ SOME TESTS FAILED")
         print("=" * 60)
         return 1
+    finally:
+        # Clean up TEST_CONFIG_DIR at the end of all tests
+        shutil.rmtree(TEST_CONFIG_DIR, ignore_errors=True)
 
 
 if __name__ == '__main__':

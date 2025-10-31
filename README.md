@@ -3,6 +3,14 @@
 
 This service automatically watches a directory for new or changed comic archive files (`.cbz`/`.cbr`), tags them using ComicTagger, and manages duplicates. It is designed to run in a Docker container and is fully automated. **The container supports custom user and group IDs (PUID/PGID) to ensure proper file permissions when working with host-mounted directories.**
 
+## Components
+
+This repository includes multiple components:
+
+- **Python Service** (main): Automated watcher service with web interface
+- **[.NET Web API](src/ComicMaintainer.WebApi)**: RESTful API for comic management
+- **[.NET MAUI App](src/ComicMaintainer.MauiApp)**: Cross-platform mobile and desktop app for Android, iOS, macOS, and Windows
+
 ## Features
 - Watches a directory for file changes (create, modify, move/rename, delete)
 - Processes `.cbz` and `.cbr` files only

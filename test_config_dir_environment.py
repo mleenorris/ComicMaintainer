@@ -65,10 +65,11 @@ except Exception as e:
     sys.exit(1)
 """
         
-        # Run the test script
+        # Run the test script (use the directory where this script is located)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
         result = subprocess.run(
             [sys.executable, '-c', test_script],
-            cwd='/home/runner/work/ComicMaintainer/ComicMaintainer',
+            cwd=script_dir,
             capture_output=True,
             text=True,
             timeout=10
@@ -116,9 +117,11 @@ else:
     sys.exit(1)
 """
     
+    # Use the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
     result = subprocess.run(
         [sys.executable, '-c', test_script],
-        cwd='/home/runner/work/ComicMaintainer/ComicMaintainer',
+        cwd=script_dir,
         capture_output=True,
         text=True,
         timeout=10

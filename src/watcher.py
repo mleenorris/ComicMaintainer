@@ -6,51 +6,24 @@ from watchdog.events import FileSystemEventHandler
 import subprocess
 import os
 import logging
-from logging.handlers import RotatingFileHandler
-from config import get_watcher_enabled, get_log_max_bytes
+from config import get_watcher_enabled
 from markers import is_file_processed, is_file_web_modified, clear_file_web_modified
 from error_handler import (
     setup_debug_logging, log_debug, log_error_with_context,
     log_function_entry, log_function_exit
 )
 import file_store
+from logging_setup import setup_logging
+from file_operations import record_file_change
 
 WATCHED_DIR = os.environ.get('WATCHED_DIR')
-CONFIG_DIR = '/Config'
-LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
 PROCESS_SCRIPT = os.environ.get('PROCESS_SCRIPT', 'process_file.py')
 
 # Initialize file store on startup
 file_store.init_db()
 
-# Ensure log directory exists
-os.makedirs(LOG_DIR, exist_ok=True)
-
-# Set up logging to file and stdout with rotation
-# Initialize basic logging first to avoid issues with get_log_max_bytes() logging errors
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [WATCHER] %(levelname)s %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-
-# Explicitly set root logger level to INFO (in case it was already configured by imports)
-logging.getLogger().setLevel(logging.INFO)
-
-# Now safely get log max bytes (which may log warnings)
-log_max_bytes = get_log_max_bytes()
-log_handler = RotatingFileHandler(
-    os.path.join(LOG_DIR, "ComicMaintainer.log"),
-    maxBytes=log_max_bytes,
-    backupCount=3
-)
-log_handler.setLevel(logging.INFO)
-log_handler.setFormatter(logging.Formatter('%(asctime)s [WATCHER] %(levelname)s %(message)s'))
-
-# Add the file handler to the root logger
-logging.getLogger().addHandler(log_handler)
+# Set up logging for this module
+setup_logging('WATCHER', use_rotation=True)
 
 # Setup debug logging if DEBUG_MODE is enabled
 setup_debug_logging()
@@ -59,30 +32,6 @@ log_debug("Watcher module initialized", watched_dir=WATCHED_DIR, process_script=
 
 # Debounce settings
 DEBOUNCE_SECONDS = 30
-
-def record_file_change(change_type, old_path=None, new_path=None):
-    """Record a file change directly in the file store"""
-    log_function_entry("record_file_change", change_type=change_type, old_path=old_path, new_path=new_path)
-    
-    try:
-        if change_type == 'add' and new_path:
-            file_store.add_file(new_path)
-            logging.info(f"Added file to store: {new_path}")
-        elif change_type == 'remove' and old_path:
-            file_store.remove_file(old_path)
-            logging.info(f"Removed file from store: {old_path}")
-        elif change_type == 'rename' and old_path and new_path:
-            file_store.rename_file(old_path, new_path)
-            logging.info(f"Renamed file in store: {old_path} -> {new_path}")
-        
-        log_function_exit("record_file_change", result="success")
-    except Exception as e:
-        log_error_with_context(
-            e,
-            context=f"Recording file change: {change_type}",
-            additional_info={"old_path": old_path, "new_path": new_path}
-        )
-        logging.error(f"Error recording file change: {e}")
 
 
 

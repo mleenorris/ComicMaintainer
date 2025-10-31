@@ -11,22 +11,11 @@ from error_handler import (
 )
 import file_store
 from unified_store import add_processing_history
+from logging_setup import setup_logging
+from file_operations import record_file_change
 
-CONFIG_DIR = '/Config'
-LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
-
-# Ensure log directory exists
-os.makedirs(LOG_DIR, exist_ok=True)
-
-# Set up logging to file and stdout (same as watcher.py)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [WATCHER] %(levelname)s %(message)s',
-    handlers=[
-        logging.FileHandler(os.path.join(LOG_DIR, "ComicMaintainer.log")),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+# Set up logging for this module
+setup_logging('PROCESSOR', use_rotation=False)
 
 # Setup debug logging if DEBUG_MODE is enabled
 setup_debug_logging()
@@ -34,36 +23,6 @@ log_debug("process_file module initialized")
 
 # Initialize file store
 file_store.init_db()
-
-def record_file_change(change_type, old_path=None, new_path=None):
-    """Record a file change directly in the file store
-    
-    Args:
-        change_type: 'add', 'remove', or 'rename'
-        old_path: Original file path (for 'remove' and 'rename')
-        new_path: New file path (for 'add' and 'rename')
-    """
-    log_function_entry("record_file_change", change_type=change_type, old_path=old_path, new_path=new_path)
-    
-    try:
-        if change_type == 'add' and new_path:
-            file_store.add_file(new_path)
-            logging.info(f"Added file to store: {new_path}")
-        elif change_type == 'remove' and old_path:
-            file_store.remove_file(old_path)
-            logging.info(f"Removed file from store: {old_path}")
-        elif change_type == 'rename' and old_path and new_path:
-            file_store.rename_file(old_path, new_path)
-            logging.info(f"Renamed file in store: {old_path} -> {new_path}")
-        
-        log_function_exit("record_file_change", result="success")
-    except Exception as e:
-        log_error_with_context(
-            e,
-            context=f"Recording file change in process_file: {change_type}",
-            additional_info={"old_path": old_path, "new_path": new_path}
-        )
-        logging.error(f"Error recording file change: {e}")
 
 # mark_file_duplicate is now imported from markers module
 

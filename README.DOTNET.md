@@ -196,9 +196,11 @@ ComicMaintainer/
 
 ### Implementation Notes
 
-1. **Comic Processing**: ✅ Implemented with SharpCompress integration for archive handling, ComicInfo.xml metadata parsing/writing, duplicate detection, and file renaming based on templates
-2. **File Storage**: ✅ Implemented with Entity Framework Core and SQLite for persistence
-3. **Event Broadcasting**: ✅ Implemented with SignalR for WebSocket communication and real-time updates
+1. **Comic Processing**: ✅ Fully implemented with SharpCompress integration, ComicInfo.xml support from PR 405
+2. **File Storage**: ✅ Entity Framework Core with SQLite for persistence
+3. **Event Broadcasting**: ✅ SignalR for WebSocket communication
+4. **Authentication**: ✅ ASP.NET Core Identity with JWT and API key support
+5. **Authorization**: ✅ Role-based access control with Admin, User, and ReadOnly roles
 
 ## Future Enhancements
 
@@ -228,10 +230,14 @@ ComicMaintainer/
    - 🔲 Live job progress updates (needs integration with ComicProcessorService)
    - 🔲 Real-time file status changes (needs integration with FileStoreService)
 
-5. **Authentication & Authorization**:
-   - User management
-   - API key authentication
-   - Role-based access control
+5. **Authentication & Authorization**: ✅ **Implemented**
+   - ✅ ASP.NET Core Identity integration
+   - ✅ User management with email and password
+   - ✅ JWT token authentication
+   - ✅ API key authentication
+   - ✅ Role-based access control (Admin, User, ReadOnly)
+   - ✅ Automatic role and admin user seeding
+   - ✅ Authentication endpoints (login, register, change password, API key generation)
 
 ## Contributing
 

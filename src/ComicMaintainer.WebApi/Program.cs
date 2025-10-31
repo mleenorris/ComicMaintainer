@@ -123,11 +123,51 @@ builder.Services.AddHostedService<FileWatcherHostedService>();
 
 var app = builder.Build();
 
-// Initialize database
+// Initialize database and seed roles
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
     db.Database.Migrate();
+    
+    // Seed roles
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
+    var roles = new[] { "Admin", "User", "ReadOnly" };
+    
+    foreach (var roleName in roles)
+    {
+        if (!await roleManager.RoleExistsAsync(roleName))
+        {
+            await roleManager.CreateAsync(new ApplicationRole 
+            { 
+                Name = roleName,
+                Description = $"{roleName} role"
+            });
+        }
+    }
+    
+    // Seed default admin user if it doesn't exist
+    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+    var adminEmail = Environment.GetEnvironmentVariable("ADMIN_EMAIL") ?? "admin@comicmaintainer.local";
+    var adminUsername = Environment.GetEnvironmentVariable("ADMIN_USERNAME") ?? "admin";
+    var adminPassword = Environment.GetEnvironmentVariable("ADMIN_PASSWORD") ?? "Admin123!";
+    
+    if (await userManager.FindByNameAsync(adminUsername) == null)
+    {
+        var adminUser = new ApplicationUser
+        {
+            UserName = adminUsername,
+            Email = adminEmail,
+            FullName = "Administrator",
+            IsActive = true,
+            EmailConfirmed = true
+        };
+        
+        var result = await userManager.CreateAsync(adminUser, adminPassword);
+        if (result.Succeeded)
+        {
+            await userManager.AddToRoleAsync(adminUser, "Admin");
+        }
+    }
 }
 
 // Configure the HTTP request pipeline

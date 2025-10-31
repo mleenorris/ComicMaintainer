@@ -1,7 +1,9 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Services;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,6 +25,12 @@ builder.Services.Configure<AppSettings>(options =>
     if (!string.IsNullOrEmpty(basePath))
         options.BasePath = basePath;
 });
+
+// Configure database
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
+    ?? $"Data Source={Path.Combine(builder.Configuration["AppSettings:ConfigDirectory"] ?? "/Config", "comicmaintainer.db")}";
+builder.Services.AddDbContext<ComicMaintainerDbContext>(options =>
+    options.UseSqlite(connectionString));
 
 // Add services to the container
 builder.Services.AddControllers();
@@ -49,6 +57,13 @@ builder.Services.AddSingleton<IFileWatcherService, FileWatcherService>();
 builder.Services.AddHostedService<FileWatcherHostedService>();
 
 var app = builder.Build();
+
+// Initialize database
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+    db.Database.Migrate();
+}
 
 // Configure the HTTP request pipeline
 if (app.Environment.IsDevelopment())

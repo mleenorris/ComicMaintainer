@@ -197,7 +197,7 @@ ComicMaintainer/
 ### Implementation Notes
 
 1. **Comic Processing**: ✅ Implemented with SharpCompress integration for archive handling, ComicInfo.xml metadata parsing/writing, duplicate detection, and file renaming based on templates
-2. **File Storage**: Currently uses in-memory storage; can be extended to use Entity Framework Core with SQLite/PostgreSQL for persistence
+2. **File Storage**: ✅ Implemented with Entity Framework Core and SQLite for persistence
 3. **Event Broadcasting**: Would need to implement SignalR for real-time updates (equivalent to Python's Server-Sent Events)
 
 ## Future Enhancements
@@ -215,10 +215,11 @@ ComicMaintainer/
    - iOS app support
    - Shared UI components with web version
 
-3. **Enhanced Storage**:
-   - Entity Framework Core integration
-   - SQLite database for persistence
-   - Migration from Python's file-based storage
+3. **Enhanced Storage**: ✅ **Implemented**
+   - ✅ Entity Framework Core integration
+   - ✅ SQLite database for persistence
+   - ✅ Database migrations
+   - 🔲 Migration from Python's file-based storage (future enhancement)
 
 4. **Real-Time Updates**:
    - SignalR for WebSocket communication

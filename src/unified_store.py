@@ -648,7 +648,7 @@ def sync_with_filesystem(watched_dir: str, extensions: List[str] = None) -> Tupl
                     try:
                         stat = os.stat(filepath)
                         cursor.execute('''
-                            INSERT INTO files (filepath, last_modified, file_size, added_timestamp)
+                            INSERT OR REPLACE INTO files (filepath, last_modified, file_size, added_timestamp)
                             VALUES (?, ?, ?, ?)
                         ''', (filepath, stat.st_mtime, stat.st_size, time.time()))
                         added_count += 1

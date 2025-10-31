@@ -14,10 +14,13 @@
         // Helper function to get auth headers
         function getAuthHeaders() {
             const token = localStorage.getItem('jwt_token');
-            return {
-                'Content-Type': 'application/json',
-                'Authorization': `******`
+            const headers = {
+                'Content-Type': 'application/json'
             };
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            return headers;
         }
         
         // Helper function to handle auth errors

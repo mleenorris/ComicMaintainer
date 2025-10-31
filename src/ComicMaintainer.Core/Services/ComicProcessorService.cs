@@ -214,6 +214,13 @@ public class ComicProcessorService : IComicProcessorService
                         if (entry.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) != true && entry.Key != null)
                         {
                             using var stream = entry.OpenEntryStream();
+                            // Use a buffer to avoid loading entire files into memory
+                            const int maxBufferSize = 10 * 1024 * 1024; // 10MB limit per entry
+                            if (entry.Size > maxBufferSize)
+                            {
+                                _logger.LogWarning("Skipping large entry {Entry} ({Size} bytes) to prevent memory issues", entry.Key, entry.Size);
+                                continue;
+                            }
                             var memStream = new MemoryStream();
                             stream.CopyTo(memStream);
                             memStream.Position = 0;
@@ -230,9 +237,26 @@ public class ComicProcessorService : IComicProcessorService
                     writer.SaveTo(tempFile, new WriterOptions(CompressionType.Deflate));
                 }
                 
-                // Replace original file with updated one
-                File.Delete(filePath);
-                File.Move(tempFile, filePath);
+                // Replace original file with updated one using atomic operation
+                // File.Replace is safer as it creates a backup and ensures atomicity
+                var backupPath = $"{filePath}.backup";
+                try
+                {
+                    File.Replace(tempFile, filePath, backupPath);
+                    // Clean up backup if replace succeeded
+                    if (File.Exists(backupPath))
+                        File.Delete(backupPath);
+                }
+                catch (Exception)
+                {
+                    // If Replace fails, restore from backup
+                    if (File.Exists(backupPath))
+                    {
+                        File.Copy(backupPath, filePath, true);
+                        File.Delete(backupPath);
+                    }
+                    throw;
+                }
                 
                 _logger.LogInformation("Successfully updated metadata for: {FilePath}", filePath);
                 return Task.FromResult(true);

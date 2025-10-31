@@ -1,7 +1,7 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Mvc;
-using System.Text.Json;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
@@ -196,7 +196,8 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing file {FilePath}", filePath);
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogError(ex, "Error processing file {FilePath}", sanitizedPath);
             return StatusCode(500, "Error processing file");
         }
     }
@@ -206,13 +207,15 @@ public class FilesController : ControllerBase
     {
         try
         {
-            _logger.LogInformation("Rename requested for file: {FilePath}", filePath);
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogInformation("Rename requested for file: {FilePath}", sanitizedPath);
             // Implementation would rename based on metadata
             return Ok();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error renaming file {FilePath}", filePath);
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogError(ex, "Error renaming file {FilePath}", sanitizedPath);
             return StatusCode(500, "Error renaming file");
         }
     }
@@ -232,7 +235,8 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error deleting file {FilePath}", filePath);
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogError(ex, "Error deleting file {FilePath}", sanitizedPath);
             return StatusCode(500, "Error deleting file");
         }
     }
@@ -247,7 +251,8 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting tags for file {FilePath}", filePath);
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogError(ex, "Error getting tags for file {FilePath}", sanitizedPath);
             return StatusCode(500, "Error getting tags");
         }
     }
@@ -262,7 +267,8 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating tags for file {FilePath}", filePath);
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogError(ex, "Error updating tags for file {FilePath}", sanitizedPath);
             return StatusCode(500, "Error updating tags");
         }
     }

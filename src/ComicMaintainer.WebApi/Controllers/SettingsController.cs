@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -26,7 +27,8 @@ public class SettingsController : ControllerBase
     [HttpPost("filename-format")]
     public ActionResult SetFilenameFormat([FromBody] FilenameFormatRequest request)
     {
-        _logger.LogInformation("Filename format update requested: {Format}", request.Format);
+        var sanitizedFormat = LoggingHelper.SanitizeForLog(request.Format);
+        _logger.LogInformation("Filename format update requested: {Format}", sanitizedFormat);
         // TODO: Implement persistence - settings are currently read-only from configuration
         // In a full implementation, this would update a user preferences table in the database
         _logger.LogWarning("Filename format changes are not persisted - requires database implementation");
@@ -95,7 +97,8 @@ public class SettingsController : ControllerBase
     [HttpPost("github-repository")]
     public ActionResult SetGitHubRepository([FromBody] GitHubRepositoryRequest request)
     {
-        _logger.LogInformation("GitHub repository update requested: {Repository}", request.Repository);
+        var sanitizedRepo = LoggingHelper.SanitizeForLog(request.Repository);
+        _logger.LogInformation("GitHub repository update requested: {Repository}", sanitizedRepo);
         return Ok();
     }
 
@@ -108,7 +111,8 @@ public class SettingsController : ControllerBase
     [HttpPost("github-issue-assignee")]
     public ActionResult SetGitHubIssueAssignee([FromBody] GitHubIssueAssigneeRequest request)
     {
-        _logger.LogInformation("GitHub issue assignee update requested: {Assignee}", request.Assignee);
+        var sanitizedAssignee = LoggingHelper.SanitizeForLog(request.Assignee);
+        _logger.LogInformation("GitHub issue assignee update requested: {Assignee}", sanitizedAssignee);
         return Ok();
     }
 

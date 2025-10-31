@@ -11,8 +11,51 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Serilog;
+using Serilog.Events;
+
+// Configure Serilog for dual logging: console (clean) and file (debug)
+var configDir = Environment.GetEnvironmentVariable("CONFIG_DIR") 
+    ?? "/Config";
+
+// Ensure log directory exists
+try
+{
+    Directory.CreateDirectory(configDir);
+}
+catch (UnauthorizedAccessException)
+{
+    // Fallback to temp directory if we don't have permission
+    configDir = Path.Combine(Path.GetTempPath(), "ComicMaintainer");
+    Directory.CreateDirectory(configDir);
+}
+
+// Configure Serilog with two sinks: console and file
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Debug()
+    // Console sink - only show Information and above, clean formatting
+    .WriteTo.Console(
+        restrictedToMinimumLevel: LogEventLevel.Information,
+        outputTemplate: "[{Timestamp:HH:mm:ss}] [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+    // File sink - capture everything at Debug level and above
+    .WriteTo.File(
+        Path.Combine(configDir, "debug.log"),
+        restrictedToMinimumLevel: LogEventLevel.Debug,
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 3,
+        fileSizeLimitBytes: 10_485_760, // 10 MB
+        outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
+    // Override specific namespaces to reduce console noise
+    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Migrations", LogEventLevel.Warning)
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Model.Validation", LogEventLevel.Error)
+    .CreateLogger();
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Use Serilog for logging
+builder.Host.UseSerilog();
 
 // Configure settings from environment variables and appsettings
 builder.Services.Configure<AppSettings>(options =>
@@ -124,6 +167,14 @@ builder.Services.AddHostedService<FileWatcherHostedService>();
 
 var app = builder.Build();
 
+// Print startup banner
+var logger = app.Services.GetRequiredService<ILogger<Program>>();
+var version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0";
+logger.LogInformation("╔══════════════════════════════════════════════════╗");
+logger.LogInformation("║         Comic Maintainer - .NET Edition          ║");
+logger.LogInformation("║                  Version {Version}                  ║", version.PadRight(21));
+logger.LogInformation("╚══════════════════════════════════════════════════╝");
+
 // Initialize database and seed roles
 using (var scope = app.Services.CreateScope())
 {
@@ -195,5 +246,11 @@ app.MapHub<ProgressHub>("/hubs/progress");
 
 // Map default route to serve index.html
 app.MapFallbackToFile("index.html");
+
+// Log startup complete
+var appSettingsValue = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<AppSettings>>().Value;
+logger.LogInformation("Server started successfully");
+logger.LogInformation("Watched Directory: {WatchedDir}", appSettingsValue.WatchedDirectory);
+logger.LogInformation("Watcher Status: {Status}", appSettingsValue.WatcherEnabled ? "Enabled" : "Disabled");
 
 app.Run();

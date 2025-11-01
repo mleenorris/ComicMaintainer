@@ -72,6 +72,10 @@ builder.Services.Configure<AppSettings>(options =>
     if (!string.IsNullOrEmpty(duplicateDir))
         options.DuplicateDirectory = duplicateDir;
     
+    var configDir = Environment.GetEnvironmentVariable("CONFIG_DIR");
+    if (!string.IsNullOrEmpty(configDir))
+        options.ConfigDirectory = configDir;
+    
     var basePath = Environment.GetEnvironmentVariable("BASE_PATH");
     if (!string.IsNullOrEmpty(basePath))
         options.BasePath = basePath;
@@ -100,9 +104,17 @@ try
 {
     var dataProtectionPath = Path.Combine(configDirectory, "DataProtection-Keys");
     Directory.CreateDirectory(dataProtectionPath);
-    builder.Services.AddDataProtection()
+    
+    var dpBuilder = builder.Services.AddDataProtection()
         .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath))
         .SetApplicationName("ComicMaintainer");
+    
+    // On Linux/Docker, use unprotected keys as DPAPI is not available
+    // Keys are protected by file system permissions (container isolation + PUID/PGID)
+    if (!OperatingSystem.IsWindows())
+    {
+        dpBuilder.UnprotectKeysWithAnyCertificate();
+    }
 }
 catch (Exception ex)
 {

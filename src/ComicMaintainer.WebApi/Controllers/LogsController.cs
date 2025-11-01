@@ -25,18 +25,24 @@ public class LogsController : ControllerBase
         try
         {
             var configDir = _settings.ConfigDirectory ?? "/Config";
-            var logFileName = type == "debug" ? "debug.log" : "debug.log"; // Currently using same file for both
-            var logFilePath = Path.Combine(configDir, logFileName);
+            
+            // Find the most recent log file (Serilog uses rolling date suffix)
+            var logFilePattern = "debug*.log";
+            var logFiles = Directory.GetFiles(configDir, logFilePattern)
+                .OrderByDescending(f => System.IO.File.GetLastWriteTime(f))
+                .ToArray();
 
-            if (!System.IO.File.Exists(logFilePath))
+            if (logFiles.Length == 0)
             {
                 return Ok(new
                 {
-                    content = $"Log file not found: {logFileName}",
+                    content = $"No log files found matching pattern: {logFilePattern}",
                     total_lines = 0,
                     shown_lines = 0
                 });
             }
+
+            var logFilePath = logFiles[0]; // Most recent log file
 
             // Read the file
             var allLines = System.IO.File.ReadAllLines(logFilePath);

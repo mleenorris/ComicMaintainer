@@ -2951,10 +2951,14 @@
                     const viewportHeight = window.innerHeight;
                     const viewportWidth = window.innerWidth;
                     
+                    // Constants for positioning calculations
+                    const MARGIN = 20; // Safety margin to prevent edge cutoff
+                    const DROPDOWN_OFFSET = 2; // Spacing between button and dropdown
+                    const VIEWPORT_MARGIN = 10; // Minimum margin from viewport edges
+                    
                     // Check if dropdown would overflow the bottom of the viewport
                     const spaceBelow = viewportHeight - buttonRect.bottom;
                     const spaceAbove = buttonRect.top;
-                    const MARGIN = 20; // Safety margin to prevent edge cutoff
                     
                     // Determine if we should show above or below
                     const notEnoughSpaceBelow = spaceBelow < (dropdownRect.height + MARGIN);
@@ -2967,24 +2971,24 @@
                     
                     if (showAbove) {
                         // Position above the button
-                        top = buttonRect.top - dropdownRect.height - 2;
+                        top = buttonRect.top - dropdownRect.height - DROPDOWN_OFFSET;
                         dropdown.classList.add('show-above');
                     } else {
                         // Position below the button
-                        top = buttonRect.bottom + 2;
+                        top = buttonRect.bottom + DROPDOWN_OFFSET;
                     }
                     
                     // Align to the right edge of the button
                     left = buttonRect.right - dropdownRect.width;
                     
                     // Make sure dropdown doesn't go off the left edge of the viewport
-                    if (left < 10) {
-                        left = 10;
+                    if (left < VIEWPORT_MARGIN) {
+                        left = VIEWPORT_MARGIN;
                     }
                     
                     // Make sure dropdown doesn't go off the right edge of the viewport
-                    if (left + dropdownRect.width > viewportWidth - 10) {
-                        left = viewportWidth - dropdownRect.width - 10;
+                    if (left + dropdownRect.width > viewportWidth - VIEWPORT_MARGIN) {
+                        left = viewportWidth - dropdownRect.width - VIEWPORT_MARGIN;
                     }
                     
                     // Apply the position

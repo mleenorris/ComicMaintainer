@@ -111,8 +111,8 @@ public class ComicProcessorService : IComicProcessorService
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
 
-        // Process files asynchronously
-        _ = Task.Run(async () =>
+        // Process files asynchronously using LongRunning for potentially long batch operations
+        _ = Task.Factory.StartNew(async () =>
         {
             try
             {
@@ -165,7 +165,7 @@ public class ComicProcessorService : IComicProcessorService
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
-        }, cancellationToken);
+        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         return Task.FromResult(jobId);
     }
@@ -189,8 +189,8 @@ public class ComicProcessorService : IComicProcessorService
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
 
-        // Rename files asynchronously
-        _ = Task.Run(async () =>
+        // Rename files asynchronously using LongRunning for potentially long batch operations
+        _ = Task.Factory.StartNew(async () =>
         {
             try
             {
@@ -243,7 +243,7 @@ public class ComicProcessorService : IComicProcessorService
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
-        }, cancellationToken);
+        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         return Task.FromResult(jobId);
     }
@@ -267,8 +267,8 @@ public class ComicProcessorService : IComicProcessorService
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
 
-        // Normalize files asynchronously
-        _ = Task.Run(async () =>
+        // Normalize files asynchronously using LongRunning for potentially long batch operations
+        _ = Task.Factory.StartNew(async () =>
         {
             try
             {
@@ -321,7 +321,7 @@ public class ComicProcessorService : IComicProcessorService
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
-        }, cancellationToken);
+        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         return Task.FromResult(jobId);
     }
@@ -345,9 +345,17 @@ public class ComicProcessorService : IComicProcessorService
             if (metadata != null && !string.IsNullOrEmpty(metadata.Series))
             {
                 var newFilePath = GenerateFileName(metadata, filePath);
-                if (newFilePath != filePath && !File.Exists(newFilePath))
+                if (newFilePath == filePath)
+                {
+                    _logger.LogInformation("File already has correct name: {FilePath}", filePath);
+                    return true;
+                }
+                
+                try
                 {
                     _logger.LogInformation("Renaming file from {OldPath} to {NewPath}", filePath, newFilePath);
+                    // Use File.Move with overwrite parameter (available in .NET) to handle race conditions
+                    // This will throw IOException if target exists, which we catch and handle
                     File.Move(filePath, newFilePath);
                     
                     // Update file store with new path
@@ -357,14 +365,9 @@ public class ComicProcessorService : IComicProcessorService
                     _logger.LogInformation("File renamed successfully: {NewPath}", newFilePath);
                     return true;
                 }
-                else if (newFilePath == filePath)
+                catch (IOException ex) when (File.Exists(newFilePath))
                 {
-                    _logger.LogInformation("File already has correct name: {FilePath}", filePath);
-                    return true;
-                }
-                else
-                {
-                    _logger.LogWarning("Target file already exists: {NewPath}", newFilePath);
+                    _logger.LogWarning(ex, "Target file already exists: {NewPath}", newFilePath);
                     return false;
                 }
             }

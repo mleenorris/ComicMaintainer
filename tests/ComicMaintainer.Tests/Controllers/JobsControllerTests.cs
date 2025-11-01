@@ -4,6 +4,7 @@ using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Newtonsoft.Json.Linq;
 
 namespace ComicMaintainer.Tests.Controllers;
 
@@ -20,6 +21,13 @@ public class JobsControllerTests
         _mockFileStore = new Mock<IFileStoreService>();
         _mockLogger = new Mock<ILogger<JobsController>>();
         _controller = new JobsController(_mockProcessor.Object, _mockFileStore.Object, _mockLogger.Object);
+    }
+
+    // Helper method to extract job response from OkObjectResult without reflection
+    private static (string jobId, int totalItems) GetJobResponse(OkObjectResult result)
+    {
+        var json = JObject.FromObject(result.Value!);
+        return (json["job_id"]!.ToString(), json["total_items"]!.Value<int>());
     }
 
     [Fact]
@@ -127,14 +135,9 @@ public class JobsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var value = okResult.Value;
-        var jobIdProperty = value?.GetType().GetProperty("job_id");
-        Assert.NotNull(jobIdProperty);
-        Assert.Equal(expectedJobId.ToString(), jobIdProperty.GetValue(value));
-        
-        var totalItemsProperty = value?.GetType().GetProperty("total_items");
-        Assert.NotNull(totalItemsProperty);
-        Assert.Equal(files.Count, totalItemsProperty.GetValue(value));
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(expectedJobId.ToString(), jobId);
+        Assert.Equal(files.Count, totalItems);
     }
 
     [Fact]
@@ -161,15 +164,9 @@ public class JobsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var value = okResult.Value;
-        
-        var jobIdProperty = value?.GetType().GetProperty("job_id");
-        Assert.NotNull(jobIdProperty);
-        Assert.Equal(expectedJobId.ToString(), jobIdProperty.GetValue(value));
-        
-        var totalItemsProperty = value?.GetType().GetProperty("total_items");
-        Assert.NotNull(totalItemsProperty);
-        Assert.Equal(unprocessedFiles.Count, totalItemsProperty.GetValue(value));
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(expectedJobId.ToString(), jobId);
+        Assert.Equal(unprocessedFiles.Count, totalItems);
     }
     
     [Fact]
@@ -185,15 +182,9 @@ public class JobsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var value = okResult.Value;
-        
-        var jobIdProperty = value?.GetType().GetProperty("job_id");
-        Assert.NotNull(jobIdProperty);
-        Assert.Equal(Guid.Empty.ToString(), jobIdProperty.GetValue(value));
-        
-        var totalItemsProperty = value?.GetType().GetProperty("total_items");
-        Assert.NotNull(totalItemsProperty);
-        Assert.Equal(0, totalItemsProperty.GetValue(value));
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(Guid.Empty.ToString(), jobId);
+        Assert.Equal(0, totalItems);
     }
 
     [Fact]
@@ -233,15 +224,9 @@ public class JobsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var value = okResult.Value;
-        
-        var jobIdProperty = value?.GetType().GetProperty("job_id");
-        Assert.NotNull(jobIdProperty);
-        Assert.Equal(expectedJobId.ToString(), jobIdProperty.GetValue(value));
-        
-        var totalItemsProperty = value?.GetType().GetProperty("total_items");
-        Assert.NotNull(totalItemsProperty);
-        Assert.Equal(unprocessedFiles.Count, totalItemsProperty.GetValue(value));
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(expectedJobId.ToString(), jobId);
+        Assert.Equal(unprocessedFiles.Count, totalItems);
     }
 
     [Fact]
@@ -257,15 +242,9 @@ public class JobsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var value = okResult.Value;
-        
-        var jobIdProperty = value?.GetType().GetProperty("job_id");
-        Assert.NotNull(jobIdProperty);
-        Assert.Equal(Guid.Empty.ToString(), jobIdProperty.GetValue(value));
-        
-        var totalItemsProperty = value?.GetType().GetProperty("total_items");
-        Assert.NotNull(totalItemsProperty);
-        Assert.Equal(0, totalItemsProperty.GetValue(value));
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(Guid.Empty.ToString(), jobId);
+        Assert.Equal(0, totalItems);
     }
 
     [Fact]
@@ -292,15 +271,9 @@ public class JobsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var value = okResult.Value;
-        
-        var jobIdProperty = value?.GetType().GetProperty("job_id");
-        Assert.NotNull(jobIdProperty);
-        Assert.Equal(expectedJobId.ToString(), jobIdProperty.GetValue(value));
-        
-        var totalItemsProperty = value?.GetType().GetProperty("total_items");
-        Assert.NotNull(totalItemsProperty);
-        Assert.Equal(unprocessedFiles.Count, totalItemsProperty.GetValue(value));
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(expectedJobId.ToString(), jobId);
+        Assert.Equal(unprocessedFiles.Count, totalItems);
     }
 
     [Fact]
@@ -316,14 +289,8 @@ public class JobsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var value = okResult.Value;
-        
-        var jobIdProperty = value?.GetType().GetProperty("job_id");
-        Assert.NotNull(jobIdProperty);
-        Assert.Equal(Guid.Empty.ToString(), jobIdProperty.GetValue(value));
-        
-        var totalItemsProperty = value?.GetType().GetProperty("total_items");
-        Assert.NotNull(totalItemsProperty);
-        Assert.Equal(0, totalItemsProperty.GetValue(value));
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(Guid.Empty.ToString(), jobId);
+        Assert.Equal(0, totalItems);
     }
 }

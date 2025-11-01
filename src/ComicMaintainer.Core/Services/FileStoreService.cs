@@ -41,7 +41,7 @@ public class FileStoreService : IFileStoreService
         return input.Replace("\r", "").Replace("\n", "");
     }
 
-    private ComicFileEntity CreateFileEntity(string filePath)
+    private ComicFileEntity CreateFileEntity(string filePath, bool? isProcessed = null, bool? isDuplicate = null)
     {
         var fileInfo = new FileInfo(filePath);
         return new ComicFileEntity
@@ -51,8 +51,8 @@ public class FileStoreService : IFileStoreService
             Directory = fileInfo.DirectoryName ?? string.Empty,
             FileSize = fileInfo.Length,
             LastModified = fileInfo.LastWriteTime,
-            IsProcessed = _processedFiles.ContainsKey(filePath),
-            IsDuplicate = _duplicateFiles.ContainsKey(filePath),
+            IsProcessed = isProcessed ?? _processedFiles.ContainsKey(filePath),
+            IsDuplicate = isDuplicate ?? _duplicateFiles.ContainsKey(filePath),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -203,8 +203,7 @@ public class FileStoreService : IFileStoreService
                 // Create entity if it doesn't exist
                 if (File.Exists(filePath))
                 {
-                    entity = CreateFileEntity(filePath);
-                    entity.IsProcessed = processed;
+                    entity = CreateFileEntity(filePath, isProcessed: processed);
                     dbContext.ComicFiles.Add(entity);
                     await dbContext.SaveChangesAsync(cancellationToken);
                     _logger.LogDebug("Created file entity and set processing status for {FilePath} to {Status}", SanitizeForLogging(filePath), processed);
@@ -258,8 +257,7 @@ public class FileStoreService : IFileStoreService
                 // Create entity if it doesn't exist
                 if (File.Exists(filePath))
                 {
-                    entity = CreateFileEntity(filePath);
-                    entity.IsDuplicate = duplicate;
+                    entity = CreateFileEntity(filePath, isDuplicate: duplicate);
                     dbContext.ComicFiles.Add(entity);
                     await dbContext.SaveChangesAsync(cancellationToken);
                     _logger.LogDebug("Created file entity and set duplicate status for {FilePath} to {Status}", SanitizeForLogging(filePath), duplicate);

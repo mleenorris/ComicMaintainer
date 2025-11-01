@@ -41,6 +41,39 @@ public class FileStoreService : IFileStoreService
         return input.Replace("\r", "").Replace("\n", "");
     }
 
+    private bool IsPathWithinAllowedDirectories(string filePath)
+    {
+        try
+        {
+            // Get the full path to resolve any relative paths
+            var fullPath = Path.GetFullPath(filePath);
+            
+            // Check for path traversal attempts
+            if (fullPath.Contains(".."))
+            {
+                _logger.LogWarning("Path traversal attempt detected: {FilePath}", SanitizeForLogging(filePath));
+                return false;
+            }
+
+            // Ensure path is within allowed directories
+            var watchedDir = Path.GetFullPath(_settings.WatchedDirectory);
+            var duplicateDir = !string.IsNullOrEmpty(_settings.DuplicateDirectory) 
+                ? Path.GetFullPath(_settings.DuplicateDirectory) 
+                : string.Empty;
+
+            var isInWatchedDir = fullPath.StartsWith(watchedDir, StringComparison.OrdinalIgnoreCase);
+            var isInDuplicateDir = !string.IsNullOrEmpty(duplicateDir) && 
+                                  fullPath.StartsWith(duplicateDir, StringComparison.OrdinalIgnoreCase);
+
+            return isInWatchedDir || isInDuplicateDir;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error validating path: {FilePath}", SanitizeForLogging(filePath));
+            return false;
+        }
+    }
+
     private ComicFileEntity CreateFileEntity(string filePath, bool? isProcessed = null, bool? isDuplicate = null)
     {
         var fileInfo = new FileInfo(filePath);
@@ -84,6 +117,13 @@ public class FileStoreService : IFileStoreService
 
     public async Task AddFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
+        // Validate path is within allowed directories
+        if (!IsPathWithinAllowedDirectories(filePath))
+        {
+            _logger.LogWarning("Attempted to add file outside allowed directories: {FilePath}", SanitizeForLogging(filePath));
+            return;
+        }
+
         if (!File.Exists(filePath))
             return;
 
@@ -201,7 +241,7 @@ public class FileStoreService : IFileStoreService
             else
             {
                 // Create entity if it doesn't exist
-                if (File.Exists(filePath))
+                if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
                 {
                     entity = CreateFileEntity(filePath, isProcessed: processed);
                     dbContext.ComicFiles.Add(entity);
@@ -210,7 +250,7 @@ public class FileStoreService : IFileStoreService
                 }
                 else
                 {
-                    _logger.LogDebug("File {FilePath} not found on filesystem, skipping database creation", SanitizeForLogging(filePath));
+                    _logger.LogDebug("File {FilePath} not found on filesystem or outside allowed directories, skipping database creation", SanitizeForLogging(filePath));
                 }
             }
         }
@@ -255,7 +295,7 @@ public class FileStoreService : IFileStoreService
             else
             {
                 // Create entity if it doesn't exist
-                if (File.Exists(filePath))
+                if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
                 {
                     entity = CreateFileEntity(filePath, isDuplicate: duplicate);
                     dbContext.ComicFiles.Add(entity);
@@ -264,7 +304,7 @@ public class FileStoreService : IFileStoreService
                 }
                 else
                 {
-                    _logger.LogDebug("File {FilePath} not found on filesystem, skipping database creation", SanitizeForLogging(filePath));
+                    _logger.LogDebug("File {FilePath} not found on filesystem or outside allowed directories, skipping database creation", SanitizeForLogging(filePath));
                 }
             }
         }

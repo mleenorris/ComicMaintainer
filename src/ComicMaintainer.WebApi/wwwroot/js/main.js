@@ -35,6 +35,17 @@
             return false;
         }
         
+        // Helper function to encode filepath for RESTful URL
+        function encodeFilePathForUrl(filePath) {
+            // Convert to base64 URL-safe encoding
+            // Use TextEncoder for proper UTF-8 encoding
+            const encoder = new TextEncoder();
+            const data = encoder.encode(filePath);
+            // Convert Uint8Array to regular array and then to base64
+            const base64 = btoa(String.fromCharCode(...data));
+            return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        
         // Add logout function
         function logout() {
             if (confirm('Are you sure you want to logout?')) {
@@ -1284,7 +1295,8 @@
         
         async function viewTags(filepath) {
             try {
-                const response = await fetch(apiUrl(`/api/file/${encodeURIComponent(filepath)}/tags`), {
+                const encodedPath = encodeFilePathForUrl(filepath);
+                const response = await fetch(apiUrl(`/api/files/${encodedPath}/tags`), {
                     headers: getAuthHeaders()
                 });
                 if (handleAuthError(response)) return;
@@ -1332,25 +1344,23 @@
             }
             
             try {
-                const response = await fetch(apiUrl(`/api/file/${encodeURIComponent(currentEditFile)}/tags`), {
-                    method: 'POST',
+                const encodedPath = encodeFilePathForUrl(currentEditFile);
+                const response = await fetch(apiUrl(`/api/files/${encodedPath}/tags`), {
+                    method: 'PUT',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify(tags)
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    const errorText = await response.text();
+                    throw new Error(errorText || `HTTP error! status: ${response.status}`);
                 }
-                const result = await response.json();
                 
-                if (result.success) {
-                    showMessage('Tags updated successfully!', 'success');
-                    closeModal();
-                } else {
-                    showMessage(result.error || 'Failed to update tags', 'error');
-                }
+                showMessage('Tags updated successfully!', 'success');
+                closeModal();
             } catch (error) {
                 showMessage('Failed to save tags: ' + error.message, 'error');
             }

@@ -23,7 +23,7 @@ public class JobsController : ControllerBase
     }
 
     [HttpGet("{jobId}")]
-    public ActionResult<ProcessingJob> GetJob(Guid jobId)
+    public ActionResult<object> GetJob(Guid jobId)
     {
         try
         {
@@ -31,7 +31,36 @@ public class JobsController : ControllerBase
             if (job == null)
                 return NotFound();
             
-            return Ok(job);
+            // Return in snake_case format expected by frontend
+            // Build a set of successfully processed files (files that were processed but not in error list)
+            var processedFilesList = new List<string>();
+            var fileIndex = 0;
+            foreach (var file in job.Files)
+            {
+                if (fileIndex < job.ProcessedFiles + job.FailedFiles)
+                {
+                    processedFilesList.Add(file);
+                }
+                fileIndex++;
+            }
+            
+            return Ok(new
+            {
+                job_id = job.JobId.ToString(),
+                status = job.Status.ToString().ToLower(),
+                total_items = job.TotalFiles,
+                processed_items = job.ProcessedFiles,
+                failed_items = job.FailedFiles,
+                current_file = job.CurrentFile,
+                start_time = job.StartTime,
+                end_time = job.EndTime,
+                results = job.Files.Select(f => new
+                {
+                    file = f,
+                    success = processedFilesList.Contains(f) && !job.Errors.ContainsKey(f),
+                    error = job.Errors.ContainsKey(f) ? job.Errors[f] : null
+                }).ToList()
+            });
         }
         catch (Exception ex)
         {
@@ -41,7 +70,7 @@ public class JobsController : ControllerBase
     }
 
     [HttpGet("~/api/active-job")]
-    public ActionResult<ProcessingJob> GetActiveJob()
+    public ActionResult<object> GetActiveJob()
     {
         try
         {
@@ -49,13 +78,39 @@ public class JobsController : ControllerBase
             if (job == null)
                 return Ok(new { active = false });
             
-            return Ok(job);
+            // Return in snake_case format expected by frontend
+            return Ok(new
+            {
+                job_id = job.JobId.ToString(),
+                job_title = DetermineJobTitle(job),
+                status = job.Status.ToString().ToLower(),
+                total_items = job.TotalFiles,
+                processed_items = job.ProcessedFiles,
+                failed_items = job.FailedFiles,
+                current_file = job.CurrentFile,
+                start_time = job.StartTime,
+                end_time = job.EndTime
+            });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting active job");
             return StatusCode(500, "Error retrieving active job");
         }
+    }
+
+    private string DetermineJobTitle(ProcessingJob job)
+    {
+        // Determine a user-friendly title based on job characteristics
+        return job.Status switch
+        {
+            JobStatus.Queued when job.ProcessedFiles == 0 => "Processing Files...",
+            JobStatus.Running => $"Processing {job.TotalFiles} files...",
+            JobStatus.Completed => $"Completed {job.TotalFiles} files",
+            JobStatus.Failed => "Processing Failed",
+            JobStatus.Cancelled => "Processing Cancelled",
+            _ => "Processing..."
+        };
     }
 
     [HttpPost("process-all")]

@@ -2931,7 +2931,7 @@
             const isCurrentlyShown = dropdown.classList.contains('show');
             dropdown.classList.toggle('show');
             
-            // If we're showing the dropdown, check if it needs to be positioned above
+            // If we're showing the dropdown, position it relative to the button
             if (!isCurrentlyShown) {
                 // Remove any previous positioning class
                 dropdown.classList.remove('show-above');
@@ -2940,24 +2940,56 @@
                 const button = event.target.closest('.dropdown-toggle');
                 if (button) {
                     const buttonRect = button.getBoundingClientRect();
+                    
+                    // Temporarily show dropdown to get its dimensions
+                    dropdown.style.visibility = 'hidden';
+                    dropdown.style.display = 'block';
                     const dropdownRect = dropdown.getBoundingClientRect();
+                    dropdown.style.visibility = '';
+                    dropdown.style.display = '';
+                    
                     const viewportHeight = window.innerHeight;
+                    const viewportWidth = window.innerWidth;
                     
                     // Check if dropdown would overflow the bottom of the viewport
                     const spaceBelow = viewportHeight - buttonRect.bottom;
                     const spaceAbove = buttonRect.top;
                     const MARGIN = 20; // Safety margin to prevent edge cutoff
                     
-                    // Show dropdown above if:
-                    // 1. There's not enough space below (with margin), OR
-                    // 2. There's more space above AND we're in the bottom half of viewport
+                    // Determine if we should show above or below
                     const notEnoughSpaceBelow = spaceBelow < (dropdownRect.height + MARGIN);
                     const inBottomHalf = buttonRect.bottom > (viewportHeight / 2);
                     const moreSpaceAbove = spaceAbove > spaceBelow;
+                    const showAbove = notEnoughSpaceBelow || (inBottomHalf && moreSpaceAbove);
                     
-                    if (notEnoughSpaceBelow || (inBottomHalf && moreSpaceAbove)) {
+                    // Calculate position
+                    let top, left;
+                    
+                    if (showAbove) {
+                        // Position above the button
+                        top = buttonRect.top - dropdownRect.height - 2;
                         dropdown.classList.add('show-above');
+                    } else {
+                        // Position below the button
+                        top = buttonRect.bottom + 2;
                     }
+                    
+                    // Align to the right edge of the button
+                    left = buttonRect.right - dropdownRect.width;
+                    
+                    // Make sure dropdown doesn't go off the left edge of the viewport
+                    if (left < 10) {
+                        left = 10;
+                    }
+                    
+                    // Make sure dropdown doesn't go off the right edge of the viewport
+                    if (left + dropdownRect.width > viewportWidth - 10) {
+                        left = viewportWidth - dropdownRect.width - 10;
+                    }
+                    
+                    // Apply the position
+                    dropdown.style.top = `${top}px`;
+                    dropdown.style.left = `${left}px`;
                 }
             } else {
                 // If we're hiding it, also remove the positioning class

@@ -262,7 +262,7 @@ Related documentation files:
 ### For Users
 Simply update to the latest version:
 ```bash
-docker pull iceburn1/comictagger-watcher:latest
+docker pull mleenorris/comicmaintainer:latest
 docker restart comictagger-watcher
 ```
 

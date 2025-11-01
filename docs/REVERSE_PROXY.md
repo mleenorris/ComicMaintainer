@@ -45,7 +45,7 @@ docker run -d \
   -v /path/to/comics:/watched_dir \
   -v /path/to/config:/Config \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 **Important**: `BASE_PATH` must start with a forward slash (e.g., `/comics`, not `comics`).
@@ -131,7 +131,7 @@ docker run -d \
   -v /path/to/comics:/watched_dir \
   -v /path/to/config:/Config \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 **Nginx Configuration:**
@@ -184,7 +184,7 @@ version: '3.8'
 
 services:
   comictagger-watcher:
-    image: iceburn1/comictagger-watcher:latest
+    image: mleenorris/comicmaintainer:latest
     container_name: comictagger-watcher
     environment:
       - WATCHED_DIR=/watched_dir
@@ -234,7 +234,7 @@ version: '3.8'
 
 services:
   comictagger-watcher:
-    image: iceburn1/comictagger-watcher:latest
+    image: mleenorris/comicmaintainer:latest
     container_name: comictagger-watcher
     environment:
       - WATCHED_DIR=/watched_dir
@@ -353,7 +353,7 @@ docker run -d \
   -v /path/to/comics:/watched_dir \
   -v /path/to/config:/Config \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 ## Caddy Configuration
@@ -413,7 +413,7 @@ docker run -d \
   -v /path/to/comics:/watched_dir \
   -v /path/to/config:/Config \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 ## Testing Your Setup

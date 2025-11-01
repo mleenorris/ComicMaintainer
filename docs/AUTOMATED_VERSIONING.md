@@ -47,10 +47,10 @@ __version__ = "1.0.0"
 
 ```bash
 # Pull latest version
-docker pull iceburn1/comictagger-watcher:latest
+docker pull mleenorris/comicmaintainer:latest
 
 # Pull specific version
-docker pull iceburn1/comictagger-watcher:1.0.1
+docker pull mleenorris/comicmaintainer:1.0.1
 ```
 
 ### Checking Version
@@ -160,7 +160,7 @@ The test verifies:
 - Check GitHub Actions logs for errors
 - Pull the specific version tag instead of `latest`:
   ```bash
-  docker pull iceburn1/comictagger-watcher:1.0.1
+  docker pull mleenorris/comicmaintainer:1.0.1
   ```
 
 ### Merge Conflict in version.py

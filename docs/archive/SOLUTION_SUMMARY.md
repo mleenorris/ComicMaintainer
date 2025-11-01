@@ -108,7 +108,7 @@ Request → Worker → Immediate Response (<100ms)
      -v /path/to/config:/Config \
      -e WATCHED_DIR=/watched_dir \
      -p 5000:5000 \
-     iceburn1/comictagger-watcher:latest
+     mleenorris/comicmaintainer:latest
    ```
 
 2. **Test scenarios:**

@@ -274,7 +274,7 @@ docker run -d \
   -e MAX_WORKERS=4 \
   -e DB_CACHE_SIZE_MB=64 \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 ### Optimized for Large Library
@@ -287,14 +287,14 @@ docker run -d \
   -e GUNICORN_WORKERS=4 \
   -e DB_CACHE_SIZE_MB=128 \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 ### Docker Compose
 ```yaml
 services:
   comictagger-watcher:
-    image: iceburn1/comictagger-watcher:latest
+    image: mleenorris/comicmaintainer:latest
     environment:
       - WATCHED_DIR=/watched_dir
       - MAX_WORKERS=4

@@ -77,7 +77,7 @@ spec:
     spec:
       containers:
       - name: comicmaintainer
-        image: iceburn1/comictagger-watcher:latest
+        image: mleenorris/comicmaintainer:latest
         imagePullPolicy: Always
         
         # Environment variables from ConfigMap

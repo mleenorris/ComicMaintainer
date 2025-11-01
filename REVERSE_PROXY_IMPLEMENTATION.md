@@ -150,7 +150,7 @@ docker run -d \
   -v /path/to/comics:/watched_dir \
   -v /path/to/config:/Config \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 Nginx config forwards all traffic to port 5000. No BASE_PATH needed.
@@ -164,7 +164,7 @@ docker run -d \
   -v /path/to/comics:/watched_dir \
   -v /path/to/config:/Config \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 Nginx config forwards `/comics/` to port 5000 with `X-Forwarded-Prefix` header.

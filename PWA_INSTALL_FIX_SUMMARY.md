@@ -226,7 +226,7 @@ Related documentation files:
 ### For Users
 No action required. Simply update to the latest version:
 ```bash
-docker pull iceburn1/comictagger-watcher:latest
+docker pull mleenorris/comicmaintainer:latest
 docker restart comictagger-watcher
 ```
 
@@ -239,7 +239,7 @@ If you've customized the template:
 ### Rollback
 If issues occur (unlikely), rollback to previous version:
 ```bash
-docker pull iceburn1/comictagger-watcher:<previous-version>
+docker pull mleenorris/comicmaintainer:<previous-version>
 ```
 
 ## Issue Status

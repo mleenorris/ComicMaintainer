@@ -142,7 +142,7 @@ docker run -d \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 
 # After: Simple compose command
 docker-compose up -d

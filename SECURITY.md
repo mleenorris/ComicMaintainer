@@ -133,7 +133,7 @@ When deploying ComicMaintainer:
 
 4. **Keep Image Updated**
    ```bash
-   docker pull iceburn1/comictagger-watcher:latest
+   docker pull mleenorris/comicmaintainer:latest
    ```
 
 ### Application Security

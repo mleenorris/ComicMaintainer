@@ -36,7 +36,9 @@ public class FileDto
             RelativePath = file.FilePath,
             Name = file.FileName,
             Size = file.FileSize,
-            Modified = new DateTimeOffset(file.LastModified).ToUnixTimeSeconds(),
+            Modified = file.LastModified.Kind == DateTimeKind.Utc 
+                ? new DateTimeOffset(file.LastModified, TimeSpan.Zero).ToUnixTimeSeconds()
+                : new DateTimeOffset(file.LastModified).ToUnixTimeSeconds(),
             Processed = file.IsProcessed,
             Duplicate = file.IsDuplicate
         };

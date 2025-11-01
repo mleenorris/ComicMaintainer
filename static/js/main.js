@@ -579,16 +579,34 @@
                 }
                 const data = await response.json();
                 
-                files = data.files;
-                currentPage = data.page;
-                totalPages = data.total_pages;
-                totalFiles = data.total_files;
+                // Handle error responses from API
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // Safely handle response with defaults
+                files = data.files || [];
+                currentPage = data.page || 1;
+                totalPages = data.total_pages || 1;
+                totalFiles = data.total_files || 0;
                 unmarkedCount = data.unmarked_count || 0;
                 
                 renderFileList();
                 updatePagination();
                 updateButtonVisibility();
             } catch (error) {
+                console.error('Error loading files:', error);
+                // Set safe defaults on error to prevent undefined errors
+                files = [];
+                currentPage = 1;
+                totalPages = 1;
+                totalFiles = 0;
+                unmarkedCount = 0;
+                
+                renderFileList();
+                updatePagination();
+                updateButtonVisibility();
+                
                 showMessage('Failed to load files: ' + error.message, 'error');
             }
         }
@@ -2670,6 +2688,13 @@
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
+                
+                // Check if response is actually JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error('Server returned non-JSON response. Check server logs for errors.');
+                }
+                
                 const data = await response.json();
                 
                 if (data.error) {
@@ -2677,9 +2702,10 @@
                 } else {
                     logsContent.textContent = data.logs || 'No logs available';
                     const logTypeLabel = data.log_type === 'debug' ? 'Debug Logs' : 'Basic Logs';
-                    logStats.textContent = `${logTypeLabel} - Showing ${data.returned_lines} of ${data.total_lines} total lines`;
+                    logStats.textContent = `${logTypeLabel} - Showing ${data.returned_lines || 0} of ${data.total_lines || 0} total lines`;
                 }
             } catch (error) {
+                console.error('Error loading logs:', error);
                 logsContent.textContent = 'Failed to load logs: ' + error.message;
             } finally {
                 logsLoadingIndicator.style.display = 'none';
@@ -3044,7 +3070,20 @@
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
+                
+                // Check if response is actually JSON
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error('Server returned non-JSON response');
+                }
+                
                 const data = await response.json();
+                
+                // Handle error responses from API
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
                 updateWatcherStatusDisplay(data.running, data.enabled);
             } catch (error) {
                 console.error('Error fetching initial watcher status:', error);

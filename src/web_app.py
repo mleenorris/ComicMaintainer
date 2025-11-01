@@ -182,6 +182,35 @@ def add_performance_headers(response):
     return response
 
 
+@app.errorhandler(404)
+def not_found_error(error):
+    """Handle 404 errors - return JSON for API routes, HTML for others"""
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Not found'}), 404
+    # For non-API routes, return the default 404 page
+    return render_template('index.html', base_path=app.config.get('APPLICATION_ROOT', '')), 404
+
+
+@app.errorhandler(500)
+def internal_error(error):
+    """Handle 500 errors - return JSON for API routes, HTML for others"""
+    logging.error(f"Internal server error: {error}")
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Internal server error'}), 500
+    # For non-API routes, return a generic error page
+    return render_template('index.html', base_path=app.config.get('APPLICATION_ROOT', '')), 500
+
+
+@app.errorhandler(Exception)
+def handle_exception(error):
+    """Handle unhandled exceptions - return JSON for API routes, HTML for others"""
+    logging.error(f"Unhandled exception: {error}", exc_info=True)
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'An unexpected error occurred'}), 500
+    # For non-API routes, return a generic error page
+    return render_template('index.html', base_path=app.config.get('APPLICATION_ROOT', '')), 500
+
+
 def record_file_change(change_type, old_path=None, new_path=None):
     """Record a file change directly in the file store
     
@@ -1907,9 +1936,15 @@ def get_watcher_status_api():
         result = subprocess.run(
             ['pgrep', '-f', 'python.*watcher.py'],
             capture_output=True,
-            text=True
+            text=True,
+            timeout=5  # Add timeout to prevent hanging
         )
         is_running = result.returncode == 0 and len(result.stdout.strip()) > 0
+        logging.debug(f"Watcher status check: is_running={is_running}, returncode={result.returncode}, stdout='{result.stdout.strip()}'")
+    except subprocess.TimeoutExpired:
+        logging.error("Timeout checking watcher status with pgrep")
+    except FileNotFoundError:
+        logging.error("pgrep command not found - cannot check watcher status")
     except Exception as e:
         logging.error(f"Error checking watcher status: {e}")
     

@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from config import get_db_cache_size_mb
 
 # Database configuration
-CONFIG_DIR = '/Config'
+CONFIG_DIR = os.environ.get('CONFIG_DIR', '/Config')
 STORE_DIR = os.path.join(CONFIG_DIR, 'store')
 DB_PATH = os.path.join(STORE_DIR, 'comicmaintainer.db')
 

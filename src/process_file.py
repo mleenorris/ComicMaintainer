@@ -12,7 +12,7 @@ from error_handler import (
 import file_store
 from unified_store import add_processing_history
 
-CONFIG_DIR = '/Config'
+CONFIG_DIR = os.environ.get('CONFIG_DIR', '/Config')
 LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
 
 # Ensure log directory exists

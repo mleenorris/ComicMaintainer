@@ -22,7 +22,7 @@ from typing import Set, Optional
 from marker_store import add_marker, remove_marker, has_marker, get_markers, cleanup_markers, get_all_markers_by_type
 
 # Marker storage configuration (for legacy JSON migration)
-CONFIG_DIR = '/Config'
+CONFIG_DIR = os.environ.get('CONFIG_DIR', '/Config')
 MARKERS_DIR = os.path.join(CONFIG_DIR, 'markers')
 
 # Legacy marker file names (for migration)

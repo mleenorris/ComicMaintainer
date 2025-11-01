@@ -41,7 +41,7 @@ from event_broadcaster import (
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-CONFIG_DIR = '/Config'
+CONFIG_DIR = os.environ.get('CONFIG_DIR', '/Config')
 LOG_DIR = os.path.join(CONFIG_DIR, 'Log')
 
 # Ensure log directory exists

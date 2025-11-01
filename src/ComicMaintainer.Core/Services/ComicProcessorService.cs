@@ -354,8 +354,8 @@ public class ComicProcessorService : IComicProcessorService
                 try
                 {
                     _logger.LogInformation("Renaming file from {OldPath} to {NewPath}", filePath, newFilePath);
-                    // Use File.Move with overwrite parameter (available in .NET) to handle race conditions
-                    // This will throw IOException if target exists, which we catch and handle
+                    // File.Move will throw IOException if target exists, which we catch and handle
+                    // This avoids race condition from check-then-act pattern
                     File.Move(filePath, newFilePath);
                     
                     // Update file store with new path

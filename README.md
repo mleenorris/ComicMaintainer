@@ -664,6 +664,7 @@ See [STABLE_BRANCH_CREATION.md](STABLE_BRANCH_CREATION.md) for details about the
 - **[Performance Tuning Guide](docs/PERFORMANCE_TUNING.md)** - Optimize performance for your system
 - **[Automated Versioning](docs/AUTOMATED_VERSIONING.md)** - How automatic version bumping works
 - **[Contributing Guide](CONTRIBUTING.md)** - How to contribute to the project
+- **[Testing Policy](TESTING_POLICY.md)** - Testing requirements and best practices
 - **[Debug Logging Guide](DEBUG_LOGGING_GUIDE.md)** - Debug logging and error reporting
 - **[Security Policy](SECURITY.md)** - Security guidelines and vulnerability reporting
 - **[Changelog](CHANGELOG.md)** - Version history and changes

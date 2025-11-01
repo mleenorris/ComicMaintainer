@@ -48,6 +48,22 @@ jobs:
         output: both
         thresholds: '60 80'
     
+    - name: Add Testing Policy Note to Coverage Report
+      if: github.event_name == 'pull_request'
+      run: |
+        echo "" >> code-coverage-results.md
+        echo "---" >> code-coverage-results.md
+        echo "" >> code-coverage-results.md
+        echo "### 📋 Testing Requirements" >> code-coverage-results.md
+        echo "" >> code-coverage-results.md
+        echo "All code changes must include appropriate tests. See [TESTING_POLICY.md](../blob/${{ github.head_ref || github.ref_name }}/TESTING_POLICY.md) for details." >> code-coverage-results.md
+        echo "" >> code-coverage-results.md
+        echo "**Minimum Requirements:**" >> code-coverage-results.md
+        echo "- ✅ Unit tests for all new/changed code" >> code-coverage-results.md
+        echo "- ✅ Integration tests for multi-component features" >> code-coverage-results.md
+        echo "- ✅ Target: 80%+ coverage for new code" >> code-coverage-results.md
+        echo "- ✅ No significant coverage decrease" >> code-coverage-results.md
+    
     - name: Add Coverage PR Comment
       uses: marocchino/sticky-pull-request-comment@v2
       if: github.event_name == 'pull_request'

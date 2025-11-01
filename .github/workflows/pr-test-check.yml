@@ -1,0 +1,139 @@
+name: PR Test Check
+
+on:
+  pull_request:
+    branches: [ main, master, develop ]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v41
+        with:
+          files: |
+            src/**/*.cs
+          files_ignore: |
+            src/**/*.csproj
+            src/**/Program.cs
+      
+      - name: Get changed test files
+        id: changed-test-files
+        uses: tj-actions/changed-files@v41
+        with:
+          files: |
+            tests/**/*.cs
+      
+      - name: Check for tests
+        id: check
+        run: |
+          SOURCE_FILES="${{ steps.changed-files.outputs.all_changed_files }}"
+          TEST_FILES="${{ steps.changed-test-files.outputs.all_changed_files }}"
+          DOC_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '\.md$|\.txt$|^docs/|^LICENSE|^\.github/PULL_REQUEST_TEMPLATE\.md|^TESTING_POLICY\.md' || true)
+          CONFIG_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | grep -E '\.(yml|yaml|json|config|xml)$' | grep -v '\.csproj$' || true)
+          
+          echo "Source files changed: $SOURCE_FILES"
+          echo "Test files changed: $TEST_FILES"
+          echo "Doc files changed: $DOC_FILES"
+          echo "Config files changed: $CONFIG_FILES"
+          
+          # Check if only documentation or config files were changed
+          if [ -n "$DOC_FILES" ] || [ -n "$CONFIG_FILES" ]; then
+            ALL_CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }})
+            NON_DOC_NON_CONFIG=$(echo "$ALL_CHANGED" | grep -v -E '\.md$|\.txt$|^docs/|^LICENSE|\.(yml|yaml|json|config)$|^\.github/PULL_REQUEST_TEMPLATE\.md|^TESTING_POLICY\.md' || true)
+            
+            if [ -z "$NON_DOC_NON_CONFIG" ]; then
+              echo "status=docs_only" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+          
+          # Check if source files were changed
+          if [ -z "$SOURCE_FILES" ]; then
+            echo "status=no_source_changes" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Check if test files were also changed
+          if [ -z "$TEST_FILES" ]; then
+            echo "status=missing_tests" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "status=tests_present" >> $GITHUB_OUTPUT
+      
+      - name: Comment on PR
+        if: steps.check.outputs.status == 'missing_tests'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const message = `## ⚠️ Test Coverage Check
+            
+            This PR modifies source code but doesn't appear to include test changes.
+            
+            **Testing Requirements:**
+            - ✅ All bug fixes MUST include tests that reproduce the issue
+            - ✅ All new features MUST include unit and/or integration tests
+            - ✅ Tests should cover both success and failure scenarios
+            - ✅ Aim for at least 80% code coverage
+            
+            **If this is a special case:**
+            - Documentation-only changes don't require tests
+            - If tests aren't applicable, explain why in the PR description
+            - Reviewers may approve PRs without tests in exceptional cases
+            
+            📚 See [TESTING_POLICY.md](https://github.com/${{ github.repository }}/blob/${{ github.head_ref }}/TESTING_POLICY.md) for detailed requirements.
+            
+            ---
+            *This is an automated reminder. If you've added tests but they weren't detected, please verify that test files are in the \`tests/\` directory.*`;
+            
+            // Check if we already commented
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const botComment = comments.data.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('Test Coverage Check')
+            );
+            
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: message
+              });
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: message
+              });
+            }
+      
+      - name: Success message
+        if: steps.check.outputs.status == 'tests_present'
+        run: |
+          echo "✅ Test files detected in this PR. Great job!"
+      
+      - name: Documentation only
+        if: steps.check.outputs.status == 'docs_only'
+        run: |
+          echo "ℹ️ This PR contains only documentation/configuration changes. Tests are not required."

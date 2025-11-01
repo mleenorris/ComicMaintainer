@@ -32,6 +32,18 @@ public class JobsController : ControllerBase
                 return NotFound();
             
             // Return in snake_case format expected by frontend
+            // Build a set of successfully processed files (files that were processed but not in error list)
+            var processedFilesList = new List<string>();
+            var fileIndex = 0;
+            foreach (var file in job.Files)
+            {
+                if (fileIndex < job.ProcessedFiles + job.FailedFiles)
+                {
+                    processedFilesList.Add(file);
+                }
+                fileIndex++;
+            }
+            
             return Ok(new
             {
                 job_id = job.JobId.ToString(),
@@ -42,10 +54,10 @@ public class JobsController : ControllerBase
                 current_file = job.CurrentFile,
                 start_time = job.StartTime,
                 end_time = job.EndTime,
-                results = job.Files.Select((f, i) => new
+                results = job.Files.Select(f => new
                 {
                     file = f,
-                    success = i < job.ProcessedFiles && !job.Errors.ContainsKey(f),
+                    success = processedFilesList.Contains(f) && !job.Errors.ContainsKey(f),
                     error = job.Errors.ContainsKey(f) ? job.Errors[f] : null
                 }).ToList()
             });
@@ -90,17 +102,15 @@ public class JobsController : ControllerBase
     private string DetermineJobTitle(ProcessingJob job)
     {
         // Determine a user-friendly title based on job characteristics
-        if (job.ProcessedFiles == 0 && job.Status == JobStatus.Queued)
-            return "Processing Files...";
-        if (job.Status == JobStatus.Running)
-            return $"Processing {job.TotalFiles} files...";
-        if (job.Status == JobStatus.Completed)
-            return $"Completed {job.TotalFiles} files";
-        if (job.Status == JobStatus.Failed)
-            return "Processing Failed";
-        if (job.Status == JobStatus.Cancelled)
-            return "Processing Cancelled";
-        return "Processing...";
+        return job.Status switch
+        {
+            JobStatus.Queued when job.ProcessedFiles == 0 => "Processing Files...",
+            JobStatus.Running => $"Processing {job.TotalFiles} files...",
+            JobStatus.Completed => $"Completed {job.TotalFiles} files",
+            JobStatus.Failed => "Processing Failed",
+            JobStatus.Cancelled => "Processing Cancelled",
+            _ => "Processing..."
+        };
     }
 
     [HttpPost("process-all")]

@@ -63,21 +63,7 @@ public class JobsController : ControllerBase
     {
         try
         {
-            // Get all unprocessed files
-            var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
-            var filePaths = files.Select(f => f.FilePath).ToList();
-            
-            if (filePaths.Count == 0)
-            {
-                _logger.LogInformation("No unprocessed files found");
-                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
-            }
-            
-            // Start the processing job
-            var jobId = await _processor.ProcessFilesAsync(filePaths);
-            _logger.LogInformation("Process all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
-            
-            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
+            return await ProcessUnprocessedFilesAsync("Process all files");
         }
         catch (Exception ex)
         {
@@ -113,21 +99,7 @@ public class JobsController : ControllerBase
     {
         try
         {
-            // Get all unprocessed files (unmarked)
-            var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
-            var filePaths = files.Select(f => f.FilePath).ToList();
-            
-            if (filePaths.Count == 0)
-            {
-                _logger.LogInformation("No unmarked files found");
-                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
-            }
-            
-            // Start the processing job
-            var jobId = await _processor.ProcessFilesAsync(filePaths);
-            _logger.LogInformation("Process unmarked files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
-            
-            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
+            return await ProcessUnprocessedFilesAsync("Process unmarked files");
         }
         catch (Exception ex)
         {
@@ -184,6 +156,25 @@ public class JobsController : ControllerBase
             _logger.LogError(ex, "Error cancelling job {JobId}", jobId);
             return StatusCode(500, "Error cancelling job");
         }
+    }
+
+    private async Task<ActionResult<object>> ProcessUnprocessedFilesAsync(string logMessage)
+    {
+        // Get all unprocessed files
+        var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
+        var filePaths = files.Select(f => f.FilePath).ToList();
+        
+        if (filePaths.Count == 0)
+        {
+            _logger.LogInformation("{LogMessage}: No unprocessed files found", logMessage);
+            return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
+        }
+        
+        // Start the processing job
+        var jobId = await _processor.ProcessFilesAsync(filePaths);
+        _logger.LogInformation("{LogMessage} requested, job ID: {JobId}, total files: {TotalFiles}", logMessage, jobId, filePaths.Count);
+        
+        return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
     }
 
     public class ProcessSelectedRequest

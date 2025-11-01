@@ -356,6 +356,17 @@
             background: var(--bg-hover);
         }
         
+        .settings-dropdown-item.user-info-item {
+            cursor: default;
+            border-bottom: 1px solid var(--border-primary);
+            margin-bottom: 5px;
+            padding-bottom: 10px;
+        }
+        
+        .settings-dropdown-item.user-info-item:hover {
+            background: none;
+        }
+        
         .container {
             max-width: 1400px;
             min-width: 800px;

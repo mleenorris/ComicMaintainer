@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Testing Policy
+    url: https://github.com/mleenorris/ComicMaintainer/blob/master/TESTING_POLICY.md
+    about: Read our comprehensive testing policy for all contributions
+  - name: Contributing Guidelines
+    url: https://github.com/mleenorris/ComicMaintainer/blob/master/CONTRIBUTING.md
+    about: Learn how to contribute to the project
+  - name: Documentation
+    url: https://github.com/mleenorris/ComicMaintainer/blob/master/README.md
+    about: View the complete project documentation

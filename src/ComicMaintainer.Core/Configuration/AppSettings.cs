@@ -25,4 +25,8 @@ public class AppSettings
     public string? GitHubToken { get; set; }
     public string? GitHubRepository { get; set; }
     public string? GitHubIssueAssignee { get; set; }
+    
+    // File watcher settings
+    public int WatcherFileStabilityDelaySeconds { get; set; } = 30;
+    public int WatcherDirectoryScanDelaySeconds { get; set; } = 2;
 }

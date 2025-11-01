@@ -146,7 +146,7 @@ public class FileWatcherService : IFileWatcherService
                 {
                     await _fileStore.AddFileAsync(file, cancellationToken);
                     // Process each file after a delay to avoid overwhelming the system
-                    await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+                    await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds), cancellationToken);
                     await _processor.ProcessFileAsync(file, cancellationToken);
                 }
                 catch (Exception ex)
@@ -201,7 +201,7 @@ public class FileWatcherService : IFileWatcherService
             _ = Task.Run(async () =>
             {
                 // Give the system time to finish copying files into the directory
-                await Task.Delay(TimeSpan.FromSeconds(2));
+                await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherDirectoryScanDelaySeconds));
                 await ScanDirectoryAsync(e.FullPath);
             });
         }
@@ -212,7 +212,7 @@ public class FileWatcherService : IFileWatcherService
             {
                 await _fileStore.AddFileAsync(e.FullPath);
                 // Debounce and process
-                await Task.Delay(TimeSpan.FromSeconds(30));
+                await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
                 await _processor.ProcessFileAsync(e.FullPath);
             });
         }
@@ -225,7 +225,7 @@ public class FileWatcherService : IFileWatcherService
             _logger.LogInformation("File changed: {Path}", e.FullPath);
             _ = Task.Run(async () =>
             {
-                await Task.Delay(TimeSpan.FromSeconds(30));
+                await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
                 await _processor.ProcessFileAsync(e.FullPath);
             });
         }

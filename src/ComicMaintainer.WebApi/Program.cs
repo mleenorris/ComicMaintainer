@@ -200,6 +200,8 @@ builder.Services.AddCors(options =>
 });
 
 // Register application services
+builder.Services.AddSingleton<EventBroadcasterService>();
+builder.Services.AddSingleton<IEventBroadcaster>(sp => sp.GetRequiredService<EventBroadcasterService>());
 builder.Services.AddSingleton<IFileStoreService, FileStoreService>();
 builder.Services.AddSingleton<IComicProcessorService, ComicProcessorService>();
 builder.Services.AddSingleton<IFileWatcherService, FileWatcherService>();

@@ -88,31 +88,112 @@ Add health check endpoint for container orchestration
 
 ## Testing
 
+⚠️ **IMPORTANT**: All bug fixes and new features **MUST** include tests. See [TESTING_POLICY.md](TESTING_POLICY.md) for detailed requirements.
+
+### Testing Requirements
+
+**Before submitting a pull request, you MUST:**
+1. ✅ Add unit tests for all new/changed code
+2. ✅ Add integration tests for features involving multiple components
+3. ✅ Ensure all tests pass locally
+4. ✅ Verify code coverage hasn't decreased
+5. ✅ Include test details in the PR description
+
 ### Run All Tests
 
 ```bash
-pytest -v
+# Run all tests
+dotnet test
+
+# Run tests with coverage
+dotnet test --collect:"XPlat Code Coverage"
+
+# Run tests with verbose output
+dotnet test --verbosity normal
 ```
 
 ### Run Specific Test File
 
 ```bash
-pytest test_file_store.py -v
+# Run specific test class
+dotnet test --filter "FullyQualifiedName~ComicFileProcessorTests"
+
+# Run specific test method
+dotnet test --filter "FullyQualifiedName~ComicFileProcessorTests.NormalizeSeriesName_WithUnderscores_ReplacesWithColons"
 ```
 
-### Run Tests with Coverage
+### Run Tests with Coverage Report
 
 ```bash
-pytest --cov=src --cov-report=html
+# Generate HTML coverage report
+dotnet test --collect:"XPlat Code Coverage" --results-directory ./TestResults
+
+# View coverage (requires reportgenerator tool)
+dotnet tool install -g dotnet-reportgenerator-globaltool
+reportgenerator -reports:"./TestResults/**/coverage.cobertura.xml" -targetdir:"./TestResults/html" -reporttypes:Html
 ```
 
 ### Add New Tests
 
-When adding new features:
-1. Create or update test files in the project root
-2. Follow existing test patterns
-3. Ensure tests are independent and can run in any order
-4. Use descriptive test names that explain what is being tested
+**When adding new features or fixing bugs:**
+1. Create or update test files in `tests/ComicMaintainer.Tests/`
+2. Mirror the source code structure (e.g., `Services/MyServiceTests.cs`)
+3. Follow existing test patterns (see example test files)
+4. Ensure tests are independent and can run in any order
+5. Use descriptive test names: `MethodName_Scenario_ExpectedBehavior`
+6. Test both success and failure scenarios
+7. Test edge cases and boundary conditions
+8. Aim for at least 80% code coverage for new code
+
+**Example Unit Test:**
+```csharp
+[Theory]
+[InlineData("input", "expected")]
+public void MethodName_Scenario_ExpectedBehavior(string input, string expected)
+{
+    // Arrange
+    var service = new MyService();
+    
+    // Act
+    var result = service.MyMethod(input);
+    
+    // Assert
+    Assert.Equal(expected, result);
+}
+```
+
+**Example Integration Test:**
+```csharp
+[Fact]
+public async Task ProcessFile_WithValidFile_CompletesSuccessfully()
+{
+    // Arrange
+    var testFile = CreateTestFile();
+    
+    // Act
+    var result = await _processor.ProcessFileAsync(testFile);
+    
+    // Assert
+    Assert.True(result.Success);
+    // ... additional assertions
+    
+    // Cleanup
+    CleanupTestFile(testFile);
+}
+```
+
+### Test Organization
+
+```
+tests/
+└── ComicMaintainer.Tests/
+    ├── Controllers/         # Controller tests
+    ├── Services/           # Service tests
+    ├── Models/             # Model tests
+    └── Utilities/          # Utility tests
+```
+
+For detailed testing guidelines, see [TESTING_POLICY.md](TESTING_POLICY.md).
 
 ## Code Quality
 
@@ -139,7 +220,9 @@ pip-audit -r requirements.txt
 ### Pre-commit Checks
 
 Before committing, ensure:
-- [ ] All tests pass
+- [ ] **All tests pass** (`dotnet test`)
+- [ ] **New tests added** for all code changes (see [TESTING_POLICY.md](TESTING_POLICY.md))
+- [ ] **Code coverage hasn't decreased**
 - [ ] No linter errors
 - [ ] Security scans pass
 - [ ] Code is properly formatted

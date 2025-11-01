@@ -1609,6 +1609,17 @@
                 // Update progress UI
                 updateProgress(processed, total, successCount, errorCount);
                 
+                // Populate progress details with already-processed files when resuming
+                if (status.results && Array.isArray(status.results)) {
+                    for (const result of status.results) {
+                        // Only show files that have been processed (either success or error)
+                        if (result.success || result.error) {
+                            const filename = result.file.split(/[/\\]/).pop(); // Extract just the filename
+                            addProgressDetail(filename, result.success, result.error);
+                        }
+                    }
+                }
+                
                 // Handle completion states
                 if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
                     console.log(`[JOB ${jobId}] Job is ${status.status}, triggering completion handler`);

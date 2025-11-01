@@ -70,9 +70,50 @@ public class FileWatcherService : IFileWatcherService
 
             _watcher.EnableRaisingEvents = true;
             _logger.LogInformation("File watcher started for directory: {Directory}", _settings.WatchedDirectory);
+            
+            // Perform initial scan of existing files
+            _ = Task.Run(async () => await ScanExistingFilesAsync(cancellationToken));
         }
 
         return Task.CompletedTask;
+    }
+    
+    /// <summary>
+    /// Scans the watched directory for existing comic files and adds them to the file store
+    /// </summary>
+    private async Task ScanExistingFilesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Starting initial scan of directory: {Directory}", _settings.WatchedDirectory);
+            
+            var comicFiles = Directory.EnumerateFiles(_settings.WatchedDirectory, "*.*", SearchOption.AllDirectories)
+                .Where(IsComicFile)
+                .ToList();
+            
+            _logger.LogInformation("Found {Count} comic files during initial scan", comicFiles.Count);
+            
+            foreach (var file in comicFiles)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+                    
+                try
+                {
+                    await _fileStore.AddFileAsync(file, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error adding file during initial scan: {File}", file);
+                }
+            }
+            
+            _logger.LogInformation("Initial scan completed. Added {Count} files", comicFiles.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during initial directory scan");
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken = default)

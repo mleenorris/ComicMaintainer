@@ -2713,14 +2713,18 @@
             const logsLoadingIndicator = document.getElementById('logsLoadingIndicator');
             const logStats = document.getElementById('logStats');
             const lines = document.getElementById('logLines').value;
-            const logType = document.getElementById('logType').value;
             
             try {
                 logsLoadingIndicator.style.display = 'block';
                 logsContent.textContent = '';
                 logStats.textContent = '';
                 
-                const response = await fetch(apiUrl(`/api/logs?lines=${lines}&type=${logType}`));
+                const response = await fetch(apiUrl(`/api/logs?lines=${lines}`), {
+                    headers: getAuthHeaders()
+                });
+                
+                if (handleAuthError(response)) return;
+                
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -2729,9 +2733,8 @@
                 if (data.error) {
                     logsContent.textContent = 'Error: ' + data.error;
                 } else {
-                    logsContent.textContent = data.logs || 'No logs available';
-                    const logTypeLabel = data.log_type === 'debug' ? 'Debug Logs' : 'Basic Logs';
-                    logStats.textContent = `${logTypeLabel} - Showing ${data.returned_lines} of ${data.total_lines} total lines`;
+                    logsContent.textContent = data.content || 'No logs available';
+                    logStats.textContent = `Showing ${data.shown_lines} of ${data.total_lines} total lines`;
                 }
             } catch (error) {
                 logsContent.textContent = 'Failed to load logs: ' + error.message;

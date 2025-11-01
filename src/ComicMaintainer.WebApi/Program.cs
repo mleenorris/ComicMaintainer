@@ -110,7 +110,13 @@ try
         .SetApplicationName("ComicMaintainer");
     
     // On Linux/Docker, use unprotected keys as DPAPI is not available
-    // Keys are protected by file system permissions (container isolation + PUID/PGID)
+    // Security Note: Keys are protected by:
+    // 1. Container isolation (keys not accessible outside container)
+    // 2. File system permissions (controlled via PUID/PGID)
+    // 3. Volume mount security (host controls access to /Config)
+    // This is acceptable for containerized deployments where the container itself
+    // provides the security boundary. For additional security, mount /Config to
+    // an encrypted volume on the host system.
     if (!OperatingSystem.IsWindows())
     {
         dpBuilder.UnprotectKeysWithAnyCertificate();

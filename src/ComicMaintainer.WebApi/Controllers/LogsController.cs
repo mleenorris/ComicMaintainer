@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Configuration;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -6,6 +7,7 @@ namespace ComicMaintainer.WebApi.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class LogsController : ControllerBase
 {
     private readonly AppSettings _settings;
@@ -20,7 +22,7 @@ public class LogsController : ControllerBase
     }
 
     [HttpGet]
-    public ActionResult<object> GetLogs([FromQuery] int lines = 500, [FromQuery] string type = "basic")
+    public ActionResult<object> GetLogs([FromQuery] int lines = 500)
     {
         try
         {
@@ -44,12 +46,35 @@ public class LogsController : ControllerBase
 
             var logFilePath = logFiles[0]; // Most recent log file
 
-            // Read the file
-            var allLines = System.IO.File.ReadAllLines(logFilePath);
-            var totalLines = allLines.Length;
+            // Use streaming for memory efficiency with large log files
+            string[] linesToShow;
+            int totalLines;
+            
+            if (lines == 0)
+            {
+                // Read all lines when lines = 0
+                linesToShow = System.IO.File.ReadAllLines(logFilePath);
+                totalLines = linesToShow.Length;
+            }
+            else
+            {
+                // Use ReadLines for streaming and take last N lines
+                var allLinesEnumerable = System.IO.File.ReadLines(logFilePath);
+                totalLines = 0;
+                
+                // Count lines efficiently while building queue of last N lines
+                var queue = new Queue<string>(lines);
+                foreach (var line in allLinesEnumerable)
+                {
+                    totalLines++;
+                    if (queue.Count >= lines)
+                        queue.Dequeue();
+                    queue.Enqueue(line);
+                }
+                
+                linesToShow = queue.ToArray();
+            }
 
-            // Get the last N lines (or all if lines is 0)
-            var linesToShow = lines == 0 ? allLines : allLines.TakeLast(lines).ToArray();
             var content = string.Join(Environment.NewLine, linesToShow);
 
             return Ok(new

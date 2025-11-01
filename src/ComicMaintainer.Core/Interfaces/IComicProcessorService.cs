@@ -36,4 +36,14 @@ public interface IComicProcessorService
     /// Update metadata for a comic file
     /// </summary>
     Task<bool> UpdateMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rename multiple comic files based on metadata as a batch job
+    /// </summary>
+    Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Normalize metadata for multiple comic files as a batch job
+    /// </summary>
+    Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
 }

@@ -4,20 +4,30 @@ using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Newtonsoft.Json.Linq;
 
 namespace ComicMaintainer.Tests.Controllers;
 
 public class JobsControllerTests
 {
     private readonly Mock<IComicProcessorService> _mockProcessor;
+    private readonly Mock<IFileStoreService> _mockFileStore;
     private readonly Mock<ILogger<JobsController>> _mockLogger;
     private readonly JobsController _controller;
 
     public JobsControllerTests()
     {
         _mockProcessor = new Mock<IComicProcessorService>();
+        _mockFileStore = new Mock<IFileStoreService>();
         _mockLogger = new Mock<ILogger<JobsController>>();
-        _controller = new JobsController(_mockProcessor.Object, _mockLogger.Object);
+        _controller = new JobsController(_mockProcessor.Object, _mockFileStore.Object, _mockLogger.Object);
+    }
+
+    // Helper method to extract job response from OkObjectResult without reflection
+    private static (string jobId, int totalItems) GetJobResponse(OkObjectResult result)
+    {
+        var json = JObject.FromObject(result.Value!);
+        return (json["job_id"]!.ToString(), json["total_items"]!.Value<int>());
     }
 
     [Fact]
@@ -125,20 +135,56 @@ public class JobsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var value = okResult.Value;
-        var jobIdProperty = value?.GetType().GetProperty("jobId");
-        Assert.Equal(expectedJobId, jobIdProperty?.GetValue(value));
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(expectedJobId.ToString(), jobId);
+        Assert.Equal(files.Count, totalItems);
     }
 
     [Fact]
-    public void ProcessAll_ReturnsJobId()
+    public async Task ProcessAll_WithUnprocessedFiles_ReturnsJobIdAndTotalItems()
     {
+        // Arrange
+        var unprocessedFiles = new List<ComicFile>
+        {
+            new() { FilePath = "/path/file1.cbz", IsProcessed = false },
+            new() { FilePath = "/path/file2.cbz", IsProcessed = false }
+        };
+        var expectedJobId = Guid.NewGuid();
+        
+        _mockFileStore
+            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .ReturnsAsync(unprocessedFiles);
+        
+        _mockProcessor
+            .Setup(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), default))
+            .ReturnsAsync(expectedJobId);
+
         // Act
-        var result = _controller.ProcessAll();
+        var result = await _controller.ProcessAll();
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        Assert.NotNull(okResult.Value);
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(expectedJobId.ToString(), jobId);
+        Assert.Equal(unprocessedFiles.Count, totalItems);
+    }
+    
+    [Fact]
+    public async Task ProcessAll_WithNoUnprocessedFiles_ReturnsEmptyJobId()
+    {
+        // Arrange
+        _mockFileStore
+            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var result = await _controller.ProcessAll();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(Guid.Empty.ToString(), jobId);
+        Assert.Equal(0, totalItems);
     }
 
     [Fact]
@@ -152,5 +198,99 @@ public class JobsControllerTests
 
         // Assert
         Assert.IsType<OkResult>(result);
+    }
+
+    [Fact]
+    public async Task RenameUnmarked_WithUnprocessedFiles_ReturnsJobIdAndTotalItems()
+    {
+        // Arrange
+        var unprocessedFiles = new List<ComicFile>
+        {
+            new() { FilePath = "/path/file1.cbz", IsProcessed = false },
+            new() { FilePath = "/path/file2.cbz", IsProcessed = false }
+        };
+        var expectedJobId = Guid.NewGuid();
+        
+        _mockFileStore
+            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .ReturnsAsync(unprocessedFiles);
+        
+        _mockProcessor
+            .Setup(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), default))
+            .ReturnsAsync(expectedJobId);
+
+        // Act
+        var result = await _controller.RenameUnmarked();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(expectedJobId.ToString(), jobId);
+        Assert.Equal(unprocessedFiles.Count, totalItems);
+    }
+
+    [Fact]
+    public async Task RenameUnmarked_WithNoUnprocessedFiles_ReturnsEmptyJobId()
+    {
+        // Arrange
+        _mockFileStore
+            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var result = await _controller.RenameUnmarked();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(Guid.Empty.ToString(), jobId);
+        Assert.Equal(0, totalItems);
+    }
+
+    [Fact]
+    public async Task NormalizeUnmarked_WithUnprocessedFiles_ReturnsJobIdAndTotalItems()
+    {
+        // Arrange
+        var unprocessedFiles = new List<ComicFile>
+        {
+            new() { FilePath = "/path/file1.cbz", IsProcessed = false },
+            new() { FilePath = "/path/file2.cbz", IsProcessed = false }
+        };
+        var expectedJobId = Guid.NewGuid();
+        
+        _mockFileStore
+            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .ReturnsAsync(unprocessedFiles);
+        
+        _mockProcessor
+            .Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), default))
+            .ReturnsAsync(expectedJobId);
+
+        // Act
+        var result = await _controller.NormalizeUnmarked();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(expectedJobId.ToString(), jobId);
+        Assert.Equal(unprocessedFiles.Count, totalItems);
+    }
+
+    [Fact]
+    public async Task NormalizeUnmarked_WithNoUnprocessedFiles_ReturnsEmptyJobId()
+    {
+        // Arrange
+        _mockFileStore
+            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var result = await _controller.NormalizeUnmarked();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(Guid.Empty.ToString(), jobId);
+        Assert.Equal(0, totalItems);
     }
 }

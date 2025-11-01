@@ -243,13 +243,26 @@ public class FilesController : ControllerBase
     }
 
     [HttpPost("~/api/scan-unmarked")]
-    public ActionResult ScanUnmarked()
+    public async Task<ActionResult> ScanUnmarked()
     {
         try
         {
             _logger.LogInformation("Scan unmarked files requested");
-            // Trigger file store to rescan for unmarked files
-            return Ok(new { message = "Scan started" });
+            
+            // Get file counts
+            var allFiles = await _fileStore.GetAllFilesAsync();
+            var unmarkedFiles = await _fileStore.GetFilteredFilesAsync("unprocessed");
+            var markedFiles = await _fileStore.GetFilteredFilesAsync("processed");
+            
+            var totalCount = allFiles.Count();
+            var unmarkedCount = unmarkedFiles.Count();
+            var markedCount = markedFiles.Count();
+            
+            return Ok(new { 
+                total_count = totalCount,
+                unmarked_count = unmarkedCount,
+                marked_count = markedCount
+            });
         }
         catch (Exception ex)
         {

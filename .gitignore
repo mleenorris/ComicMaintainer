@@ -43,6 +43,7 @@ Thumbs.db
 .duplicate_files
 ComicMaintainer.log
 config.json
+.env
 
 # SQLite database files
 jobs.db

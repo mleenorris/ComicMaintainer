@@ -32,6 +32,15 @@ public class FileStoreService : IFileStoreService
         _serviceProvider = serviceProvider;
     }
 
+    private static string SanitizeForLogging(string? input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return string.Empty;
+        
+        // Remove newlines and carriage returns to prevent log forging
+        return input.Replace("\r", "").Replace("\n", "");
+    }
+
     public Task<IEnumerable<ComicFile>> GetAllFilesAsync(CancellationToken cancellationToken = default)
     {
         var files = _files.Values.ToList();
@@ -115,16 +124,16 @@ public class FileStoreService : IFileStoreService
                 entity.IsProcessed = processed;
                 entity.UpdatedAt = DateTime.UtcNow;
                 await dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogDebug("Updated processing status for {FilePath} to {Status}", filePath, processed);
+                _logger.LogDebug("Updated processing status for {FilePath} to {Status}", SanitizeForLogging(filePath), processed);
             }
             else
             {
-                _logger.LogDebug("File {FilePath} not found in database, skipping status update", filePath);
+                _logger.LogDebug("File {FilePath} not found in database, skipping status update", SanitizeForLogging(filePath));
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating processing status in database for {FilePath}", filePath);
+            _logger.LogError(ex, "Error updating processing status in database for {FilePath}", SanitizeForLogging(filePath));
         }
     }
 
@@ -158,16 +167,16 @@ public class FileStoreService : IFileStoreService
                 entity.IsDuplicate = duplicate;
                 entity.UpdatedAt = DateTime.UtcNow;
                 await dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogDebug("Updated duplicate status for {FilePath} to {Status}", filePath, duplicate);
+                _logger.LogDebug("Updated duplicate status for {FilePath} to {Status}", SanitizeForLogging(filePath), duplicate);
             }
             else
             {
-                _logger.LogDebug("File {FilePath} not found in database, skipping duplicate status update", filePath);
+                _logger.LogDebug("File {FilePath} not found in database, skipping duplicate status update", SanitizeForLogging(filePath));
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating duplicate status in database for {FilePath}", filePath);
+            _logger.LogError(ex, "Error updating duplicate status in database for {FilePath}", SanitizeForLogging(filePath));
         }
     }
 

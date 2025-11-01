@@ -1,7 +1,12 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Moq;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -9,6 +14,7 @@ public class FileStoreServiceTests
 {
     private readonly FileStoreService _service;
     private readonly string _testDirectory;
+    private readonly IServiceProvider _serviceProvider;
 
     public FileStoreServiceTests()
     {
@@ -20,7 +26,15 @@ public class FileStoreServiceTests
             WatchedDirectory = _testDirectory
         };
         var options = Options.Create(settings);
-        _service = new FileStoreService(options);
+        
+        // Setup in-memory database
+        var services = new ServiceCollection();
+        services.AddDbContext<ComicMaintainerDbContext>(opt =>
+            opt.UseInMemoryDatabase($"TestDb_{Guid.NewGuid()}"));
+        _serviceProvider = services.BuildServiceProvider();
+        
+        var logger = new Mock<ILogger<FileStoreService>>().Object;
+        _service = new FileStoreService(options, logger, _serviceProvider);
     }
 
     [Fact]

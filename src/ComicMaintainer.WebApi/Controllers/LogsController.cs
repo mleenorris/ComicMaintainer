@@ -50,30 +50,25 @@ public class LogsController : ControllerBase
             string[] linesToShow;
             int totalLines;
             
-            if (lines == 0)
+            // Set a reasonable maximum to prevent memory issues
+            const int MAX_LINES = 10000;
+            int effectiveLines = lines == 0 ? MAX_LINES : Math.Min(lines, MAX_LINES);
+            
+            // Use ReadLines for streaming and take last N lines
+            var allLinesEnumerable = System.IO.File.ReadLines(logFilePath);
+            totalLines = 0;
+            
+            // Count lines efficiently while building queue of last N lines
+            var queue = new Queue<string>(effectiveLines);
+            foreach (var line in allLinesEnumerable)
             {
-                // Read all lines when lines = 0
-                linesToShow = System.IO.File.ReadAllLines(logFilePath);
-                totalLines = linesToShow.Length;
+                totalLines++;
+                if (queue.Count >= effectiveLines)
+                    queue.Dequeue();
+                queue.Enqueue(line);
             }
-            else
-            {
-                // Use ReadLines for streaming and take last N lines
-                var allLinesEnumerable = System.IO.File.ReadLines(logFilePath);
-                totalLines = 0;
-                
-                // Count lines efficiently while building queue of last N lines
-                var queue = new Queue<string>(lines);
-                foreach (var line in allLinesEnumerable)
-                {
-                    totalLines++;
-                    if (queue.Count >= lines)
-                        queue.Dequeue();
-                    queue.Enqueue(line);
-                }
-                
-                linesToShow = queue.ToArray();
-            }
+            
+            linesToShow = queue.ToArray();
 
             var content = string.Join(Environment.NewLine, linesToShow);
 

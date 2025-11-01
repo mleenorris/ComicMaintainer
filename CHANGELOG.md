@@ -331,6 +331,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Automatic version bump on merge to master
 
+
+## [1.0.45] - 2025-11-01
+
+### Changed
+- Automatic version bump on merge to master
+
 ## [1.0.0] - 2024
 
 ### Added

@@ -35,6 +35,13 @@
             return false;
         }
         
+        // Helper function to encode filepath for RESTful URL
+        function encodeFilePathForUrl(filePath) {
+            // Convert to base64 URL-safe encoding
+            const base64 = btoa(unescape(encodeURIComponent(filePath)));
+            return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        
         // Add logout function
         function logout() {
             if (confirm('Are you sure you want to logout?')) {
@@ -1284,7 +1291,8 @@
         
         async function viewTags(filepath) {
             try {
-                const response = await fetch(apiUrl(`/api/file-tags?filePath=${encodeURIComponent(filepath)}`), {
+                const encodedPath = encodeFilePathForUrl(filepath);
+                const response = await fetch(apiUrl(`/api/files/${encodedPath}/tags`), {
                     headers: getAuthHeaders()
                 });
                 if (handleAuthError(response)) return;
@@ -1332,7 +1340,8 @@
             }
             
             try {
-                const response = await fetch(apiUrl(`/api/file-tags?filePath=${encodeURIComponent(currentEditFile)}`), {
+                const encodedPath = encodeFilePathForUrl(currentEditFile);
+                const response = await fetch(apiUrl(`/api/files/${encodedPath}/tags`), {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',

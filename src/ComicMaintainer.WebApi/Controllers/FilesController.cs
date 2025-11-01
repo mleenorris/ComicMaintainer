@@ -328,35 +328,73 @@ public class FilesController : ControllerBase
         }
     }
 
-    [HttpGet("~/api/file-tags")]
-    public async Task<ActionResult<ComicMetadata>> GetFileTags([FromQuery] string filePath)
+    [HttpGet("~/api/files/{encodedFilePath}/tags")]
+    public async Task<ActionResult<ComicMetadata>> GetFileTags(string encodedFilePath)
     {
         try
         {
+            // Decode the base64 URL-safe encoded file path
+            var filePath = DecodeBase64UrlSafe(encodedFilePath);
+            if (string.IsNullOrEmpty(filePath))
+                return BadRequest("Invalid file path");
+
             var metadata = await _processor.GetMetadataAsync(filePath);
             return metadata != null ? Ok(metadata) : NotFound();
         }
         catch (Exception ex)
         {
-            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
-            _logger.LogError(ex, "Error getting tags for file {FilePath}", sanitizedPath);
+            _logger.LogError(ex, "Error getting tags for encoded path {EncodedPath}", encodedFilePath);
             return StatusCode(500, "Error getting tags");
         }
     }
 
-    [HttpPut("~/api/file-tags")]
-    public async Task<ActionResult> UpdateFileTags([FromQuery] string filePath, [FromBody] ComicMetadata metadata)
+    [HttpPut("~/api/files/{encodedFilePath}/tags")]
+    public async Task<ActionResult> UpdateFileTags(string encodedFilePath, [FromBody] ComicMetadata metadata)
     {
         try
         {
+            // Decode the base64 URL-safe encoded file path
+            var filePath = DecodeBase64UrlSafe(encodedFilePath);
+            if (string.IsNullOrEmpty(filePath))
+                return BadRequest("Invalid file path");
+
             var success = await _processor.UpdateMetadataAsync(filePath, metadata);
             return success ? Ok() : BadRequest("Failed to update tags");
         }
         catch (Exception ex)
         {
-            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
-            _logger.LogError(ex, "Error updating tags for file {FilePath}", sanitizedPath);
+            _logger.LogError(ex, "Error updating tags for encoded path {EncodedPath}", encodedFilePath);
             return StatusCode(500, "Error updating tags");
+        }
+    }
+
+    private static string EncodeBase64UrlSafe(string input)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(input);
+        return Convert.ToBase64String(bytes)
+            .Replace('+', '-')
+            .Replace('/', '_')
+            .TrimEnd('=');
+    }
+
+    private static string DecodeBase64UrlSafe(string input)
+    {
+        try
+        {
+            // Convert URL-safe base64 back to standard base64
+            var base64 = input.Replace('-', '+').Replace('_', '/');
+            // Add padding if necessary
+            switch (base64.Length % 4)
+            {
+                case 2: base64 += "=="; break;
+                case 3: base64 += "="; break;
+            }
+            var bytes = Convert.FromBase64String(base64);
+            return System.Text.Encoding.UTF8.GetString(bytes);
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 

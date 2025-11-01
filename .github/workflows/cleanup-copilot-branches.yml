@@ -1,0 +1,55 @@
+name: Cleanup Copilot Branches
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if branch is a copilot branch
+        id: check-branch
+        run: |
+          BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+          echo "Branch name: $BRANCH_NAME"
+          
+          if [[ "$BRANCH_NAME" == "copilot/"* ]]; then
+            echo "is_copilot_branch=true" >> $GITHUB_OUTPUT
+            echo "This is a copilot branch - will delete"
+          else
+            echo "is_copilot_branch=false" >> $GITHUB_OUTPUT
+            echo "This is not a copilot branch - skipping deletion"
+          fi
+      
+      - name: Delete copilot branch
+        if: steps.check-branch.outputs.is_copilot_branch == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+          echo "Deleting copilot branch: $BRANCH_NAME"
+          
+          # Delete the branch using GitHub CLI
+          gh api \
+            --method DELETE \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/repos/${{ github.repository }}/git/refs/heads/$BRANCH_NAME" || {
+              echo "Failed to delete branch $BRANCH_NAME (it may have already been deleted)"
+              exit 0
+            }
+          
+          echo "Successfully deleted branch: $BRANCH_NAME"
+      
+      - name: Log result
+        if: always()
+        run: |
+          if [[ "${{ steps.check-branch.outputs.is_copilot_branch }}" == "true" ]]; then
+            echo "✅ Copilot branch cleanup completed"
+          else
+            echo "ℹ️ No copilot branch to cleanup"
+          fi

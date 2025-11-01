@@ -1003,7 +1003,7 @@
             border: 1px solid var(--border-secondary);
             border-radius: 4px;
             box-shadow: var(--shadow-md);
-            z-index: 100;
+            z-index: 200;
             min-width: 150px;
             margin-top: 2px;
         }

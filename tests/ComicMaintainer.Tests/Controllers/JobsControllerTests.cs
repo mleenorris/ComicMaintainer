@@ -10,14 +10,16 @@ namespace ComicMaintainer.Tests.Controllers;
 public class JobsControllerTests
 {
     private readonly Mock<IComicProcessorService> _mockProcessor;
+    private readonly Mock<IFileStoreService> _mockFileStore;
     private readonly Mock<ILogger<JobsController>> _mockLogger;
     private readonly JobsController _controller;
 
     public JobsControllerTests()
     {
         _mockProcessor = new Mock<IComicProcessorService>();
+        _mockFileStore = new Mock<IFileStoreService>();
         _mockLogger = new Mock<ILogger<JobsController>>();
-        _controller = new JobsController(_mockProcessor.Object, _mockLogger.Object);
+        _controller = new JobsController(_mockProcessor.Object, _mockFileStore.Object, _mockLogger.Object);
     }
 
     [Fact]
@@ -126,19 +128,72 @@ public class JobsControllerTests
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
         var value = okResult.Value;
-        var jobIdProperty = value?.GetType().GetProperty("jobId");
-        Assert.Equal(expectedJobId, jobIdProperty?.GetValue(value));
+        var jobIdProperty = value?.GetType().GetProperty("job_id");
+        Assert.NotNull(jobIdProperty);
+        Assert.Equal(expectedJobId.ToString(), jobIdProperty.GetValue(value));
+        
+        var totalItemsProperty = value?.GetType().GetProperty("total_items");
+        Assert.NotNull(totalItemsProperty);
+        Assert.Equal(files.Count, totalItemsProperty.GetValue(value));
     }
 
     [Fact]
-    public void ProcessAll_ReturnsJobId()
+    public async Task ProcessAll_WithUnprocessedFiles_ReturnsJobIdAndTotalItems()
     {
+        // Arrange
+        var unprocessedFiles = new List<ComicFile>
+        {
+            new() { FilePath = "/path/file1.cbz", IsProcessed = false },
+            new() { FilePath = "/path/file2.cbz", IsProcessed = false }
+        };
+        var expectedJobId = Guid.NewGuid();
+        
+        _mockFileStore
+            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .ReturnsAsync(unprocessedFiles);
+        
+        _mockProcessor
+            .Setup(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), default))
+            .ReturnsAsync(expectedJobId);
+
         // Act
-        var result = _controller.ProcessAll();
+        var result = await _controller.ProcessAll();
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        Assert.NotNull(okResult.Value);
+        var value = okResult.Value;
+        
+        var jobIdProperty = value?.GetType().GetProperty("job_id");
+        Assert.NotNull(jobIdProperty);
+        Assert.Equal(expectedJobId.ToString(), jobIdProperty.GetValue(value));
+        
+        var totalItemsProperty = value?.GetType().GetProperty("total_items");
+        Assert.NotNull(totalItemsProperty);
+        Assert.Equal(unprocessedFiles.Count, totalItemsProperty.GetValue(value));
+    }
+    
+    [Fact]
+    public async Task ProcessAll_WithNoUnprocessedFiles_ReturnsEmptyJobId()
+    {
+        // Arrange
+        _mockFileStore
+            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var result = await _controller.ProcessAll();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var value = okResult.Value;
+        
+        var jobIdProperty = value?.GetType().GetProperty("job_id");
+        Assert.NotNull(jobIdProperty);
+        Assert.Equal(Guid.Empty.ToString(), jobIdProperty.GetValue(value));
+        
+        var totalItemsProperty = value?.GetType().GetProperty("total_items");
+        Assert.NotNull(totalItemsProperty);
+        Assert.Equal(0, totalItemsProperty.GetValue(value));
     }
 
     [Fact]

@@ -9,13 +9,16 @@ namespace ComicMaintainer.WebApi.Controllers;
 public class JobsController : ControllerBase
 {
     private readonly IComicProcessorService _processor;
+    private readonly IFileStoreService _fileStore;
     private readonly ILogger<JobsController> _logger;
 
     public JobsController(
         IComicProcessorService processor,
+        IFileStoreService fileStore,
         ILogger<JobsController> logger)
     {
         _processor = processor;
+        _fileStore = fileStore;
         _logger = logger;
     }
 
@@ -56,20 +59,30 @@ public class JobsController : ControllerBase
     }
 
     [HttpPost("process-all")]
-    public ActionResult<object> ProcessAll()
+    public async Task<ActionResult<object>> ProcessAll()
     {
         try
         {
-            // This would get all unprocessed files and process them
-            // For now, return a job ID
-            var jobId = Guid.NewGuid();
-            _logger.LogInformation("Process all files requested, job ID: {JobId}", jobId);
-            return Ok(new { jobId });
+            // Get all unprocessed files
+            var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
+            var filePaths = files.Select(f => f.FilePath).ToList();
+            
+            if (filePaths.Count == 0)
+            {
+                _logger.LogInformation("No unprocessed files found");
+                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
+            }
+            
+            // Start the processing job
+            var jobId = await _processor.ProcessFilesAsync(filePaths);
+            _logger.LogInformation("Process all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            
+            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error starting process all job");
-            return StatusCode(500, "Error starting job");
+            return StatusCode(500, new { error = "Error starting job" });
         }
     }
 
@@ -78,29 +91,48 @@ public class JobsController : ControllerBase
     {
         try
         {
+            if (request.Files == null || request.Files.Count == 0)
+            {
+                return BadRequest(new { error = "No files specified" });
+            }
+            
             var jobId = await _processor.ProcessFilesAsync(request.Files);
-            return Ok(new { jobId });
+            _logger.LogInformation("Process selected files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, request.Files.Count);
+            
+            return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error starting process selected job");
-            return StatusCode(500, "Error starting job");
+            return StatusCode(500, new { error = "Error starting job" });
         }
     }
 
     [HttpPost("process-unmarked")]
-    public ActionResult<object> ProcessUnmarked()
+    public async Task<ActionResult<object>> ProcessUnmarked()
     {
         try
         {
-            var jobId = Guid.NewGuid();
-            _logger.LogInformation("Process unmarked files requested, job ID: {JobId}", jobId);
-            return Ok(new { jobId });
+            // Get all unprocessed files (unmarked)
+            var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
+            var filePaths = files.Select(f => f.FilePath).ToList();
+            
+            if (filePaths.Count == 0)
+            {
+                _logger.LogInformation("No unmarked files found");
+                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
+            }
+            
+            // Start the processing job
+            var jobId = await _processor.ProcessFilesAsync(filePaths);
+            _logger.LogInformation("Process unmarked files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            
+            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error starting process unmarked job");
-            return StatusCode(500, "Error starting job");
+            return StatusCode(500, new { error = "Error starting job" });
         }
     }
 

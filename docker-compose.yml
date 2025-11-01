@@ -6,7 +6,7 @@ services:
     # - latest: Latest features from master branch
     # - stable: Stable release for production (recommended)
     # - <version>: Specific version (e.g., 1.0.23)
-    image: iceburn1/comictagger-watcher:latest
+    image: mleenorris/comicmaintainer:latest
     container_name: comictagger-watcher
     restart: unless-stopped
     

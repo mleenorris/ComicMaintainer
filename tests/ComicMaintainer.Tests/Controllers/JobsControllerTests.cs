@@ -208,4 +208,122 @@ public class JobsControllerTests
         // Assert
         Assert.IsType<OkResult>(result);
     }
+
+    [Fact]
+    public async Task RenameUnmarked_WithUnprocessedFiles_ReturnsJobIdAndTotalItems()
+    {
+        // Arrange
+        var unprocessedFiles = new List<ComicFile>
+        {
+            new() { FilePath = "/path/file1.cbz", IsProcessed = false },
+            new() { FilePath = "/path/file2.cbz", IsProcessed = false }
+        };
+        var expectedJobId = Guid.NewGuid();
+        
+        _mockFileStore
+            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .ReturnsAsync(unprocessedFiles);
+        
+        _mockProcessor
+            .Setup(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), default))
+            .ReturnsAsync(expectedJobId);
+
+        // Act
+        var result = await _controller.RenameUnmarked();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var value = okResult.Value;
+        
+        var jobIdProperty = value?.GetType().GetProperty("job_id");
+        Assert.NotNull(jobIdProperty);
+        Assert.Equal(expectedJobId.ToString(), jobIdProperty.GetValue(value));
+        
+        var totalItemsProperty = value?.GetType().GetProperty("total_items");
+        Assert.NotNull(totalItemsProperty);
+        Assert.Equal(unprocessedFiles.Count, totalItemsProperty.GetValue(value));
+    }
+
+    [Fact]
+    public async Task RenameUnmarked_WithNoUnprocessedFiles_ReturnsEmptyJobId()
+    {
+        // Arrange
+        _mockFileStore
+            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var result = await _controller.RenameUnmarked();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var value = okResult.Value;
+        
+        var jobIdProperty = value?.GetType().GetProperty("job_id");
+        Assert.NotNull(jobIdProperty);
+        Assert.Equal(Guid.Empty.ToString(), jobIdProperty.GetValue(value));
+        
+        var totalItemsProperty = value?.GetType().GetProperty("total_items");
+        Assert.NotNull(totalItemsProperty);
+        Assert.Equal(0, totalItemsProperty.GetValue(value));
+    }
+
+    [Fact]
+    public async Task NormalizeUnmarked_WithUnprocessedFiles_ReturnsJobIdAndTotalItems()
+    {
+        // Arrange
+        var unprocessedFiles = new List<ComicFile>
+        {
+            new() { FilePath = "/path/file1.cbz", IsProcessed = false },
+            new() { FilePath = "/path/file2.cbz", IsProcessed = false }
+        };
+        var expectedJobId = Guid.NewGuid();
+        
+        _mockFileStore
+            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .ReturnsAsync(unprocessedFiles);
+        
+        _mockProcessor
+            .Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), default))
+            .ReturnsAsync(expectedJobId);
+
+        // Act
+        var result = await _controller.NormalizeUnmarked();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var value = okResult.Value;
+        
+        var jobIdProperty = value?.GetType().GetProperty("job_id");
+        Assert.NotNull(jobIdProperty);
+        Assert.Equal(expectedJobId.ToString(), jobIdProperty.GetValue(value));
+        
+        var totalItemsProperty = value?.GetType().GetProperty("total_items");
+        Assert.NotNull(totalItemsProperty);
+        Assert.Equal(unprocessedFiles.Count, totalItemsProperty.GetValue(value));
+    }
+
+    [Fact]
+    public async Task NormalizeUnmarked_WithNoUnprocessedFiles_ReturnsEmptyJobId()
+    {
+        // Arrange
+        _mockFileStore
+            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var result = await _controller.NormalizeUnmarked();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var value = okResult.Value;
+        
+        var jobIdProperty = value?.GetType().GetProperty("job_id");
+        Assert.NotNull(jobIdProperty);
+        Assert.Equal(Guid.Empty.ToString(), jobIdProperty.GetValue(value));
+        
+        var totalItemsProperty = value?.GetType().GetProperty("total_items");
+        Assert.NotNull(totalItemsProperty);
+        Assert.Equal(0, totalItemsProperty.GetValue(value));
+    }
 }

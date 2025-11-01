@@ -170,6 +170,255 @@ public class ComicProcessorService : IComicProcessorService
         return Task.FromResult(jobId);
     }
 
+    public Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    {
+        var jobId = Guid.NewGuid();
+        var fileList = filePaths.ToList();
+
+        var job = new ProcessingJob
+        {
+            JobId = jobId,
+            Status = JobStatus.Queued,
+            Files = fileList,
+            TotalFiles = fileList.Count,
+            StartTime = DateTime.UtcNow
+        };
+
+        _jobs[jobId] = job;
+
+        // Broadcast initial job status
+        _ = BroadcastJobStatusAsync(job);
+
+        // Rename files asynchronously
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                job.Status = JobStatus.Running;
+                await BroadcastJobStatusAsync(job);
+
+                foreach (var file in fileList)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        job.Status = JobStatus.Cancelled;
+                        await BroadcastJobStatusAsync(job);
+                        return;
+                    }
+
+                    job.CurrentFile = file;
+                    var success = await RenameFileAsync(file, cancellationToken);
+
+                    if (success)
+                    {
+                        job.ProcessedFiles++;
+                    }
+                    else
+                    {
+                        job.FailedFiles++;
+                        job.Errors[file] = "Rename failed";
+                    }
+
+                    // Broadcast progress after each file
+                    await BroadcastJobStatusAsync(job);
+                    
+                    // Broadcast individual file processed event
+                    if (_eventBroadcaster != null)
+                    {
+                        await _eventBroadcaster.BroadcastFileProcessedAsync(
+                            Path.GetFileName(file), 
+                            success, 
+                            success ? null : "Rename failed");
+                    }
+                }
+
+                job.Status = JobStatus.Completed;
+                job.EndTime = DateTime.UtcNow;
+                await BroadcastJobStatusAsync(job);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing rename job: {JobId}", jobId);
+                job.Status = JobStatus.Failed;
+                job.EndTime = DateTime.UtcNow;
+                await BroadcastJobStatusAsync(job);
+            }
+        }, cancellationToken);
+
+        return Task.FromResult(jobId);
+    }
+
+    public Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    {
+        var jobId = Guid.NewGuid();
+        var fileList = filePaths.ToList();
+
+        var job = new ProcessingJob
+        {
+            JobId = jobId,
+            Status = JobStatus.Queued,
+            Files = fileList,
+            TotalFiles = fileList.Count,
+            StartTime = DateTime.UtcNow
+        };
+
+        _jobs[jobId] = job;
+
+        // Broadcast initial job status
+        _ = BroadcastJobStatusAsync(job);
+
+        // Normalize files asynchronously
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                job.Status = JobStatus.Running;
+                await BroadcastJobStatusAsync(job);
+
+                foreach (var file in fileList)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        job.Status = JobStatus.Cancelled;
+                        await BroadcastJobStatusAsync(job);
+                        return;
+                    }
+
+                    job.CurrentFile = file;
+                    var success = await NormalizeFileAsync(file, cancellationToken);
+
+                    if (success)
+                    {
+                        job.ProcessedFiles++;
+                    }
+                    else
+                    {
+                        job.FailedFiles++;
+                        job.Errors[file] = "Normalize failed";
+                    }
+
+                    // Broadcast progress after each file
+                    await BroadcastJobStatusAsync(job);
+                    
+                    // Broadcast individual file processed event
+                    if (_eventBroadcaster != null)
+                    {
+                        await _eventBroadcaster.BroadcastFileProcessedAsync(
+                            Path.GetFileName(file), 
+                            success, 
+                            success ? null : "Normalize failed");
+                    }
+                }
+
+                job.Status = JobStatus.Completed;
+                job.EndTime = DateTime.UtcNow;
+                await BroadcastJobStatusAsync(job);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing normalize job: {JobId}", jobId);
+                job.Status = JobStatus.Failed;
+                job.EndTime = DateTime.UtcNow;
+                await BroadcastJobStatusAsync(job);
+            }
+        }, cancellationToken);
+
+        return Task.FromResult(jobId);
+    }
+
+    private async Task<bool> RenameFileAsync(string filePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Renaming file: {FilePath}", filePath);
+
+            if (!File.Exists(filePath) || !IsComicArchive(filePath))
+            {
+                _logger.LogWarning("File not found or not a comic archive: {FilePath}", filePath);
+                return false;
+            }
+
+            // Extract metadata from the archive
+            var metadata = await GetMetadataAsync(filePath, cancellationToken);
+            
+            // Rename file based on template if metadata is available
+            if (metadata != null && !string.IsNullOrEmpty(metadata.Series))
+            {
+                var newFilePath = GenerateFileName(metadata, filePath);
+                if (newFilePath != filePath && !File.Exists(newFilePath))
+                {
+                    _logger.LogInformation("Renaming file from {OldPath} to {NewPath}", filePath, newFilePath);
+                    File.Move(filePath, newFilePath);
+                    
+                    // Update file store with new path
+                    await _fileStore.RemoveFileAsync(filePath, cancellationToken);
+                    await _fileStore.AddFileAsync(newFilePath, cancellationToken);
+                    
+                    _logger.LogInformation("File renamed successfully: {NewPath}", newFilePath);
+                    return true;
+                }
+                else if (newFilePath == filePath)
+                {
+                    _logger.LogInformation("File already has correct name: {FilePath}", filePath);
+                    return true;
+                }
+                else
+                {
+                    _logger.LogWarning("Target file already exists: {NewPath}", newFilePath);
+                    return false;
+                }
+            }
+            else
+            {
+                _logger.LogWarning("No metadata or series information found for: {FilePath}", filePath);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error renaming file: {FilePath}", filePath);
+            return false;
+        }
+    }
+
+    private async Task<bool> NormalizeFileAsync(string filePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogInformation("Normalizing file: {FilePath}", filePath);
+
+            if (!File.Exists(filePath) || !IsComicArchive(filePath))
+            {
+                _logger.LogWarning("File not found or not a comic archive: {FilePath}", filePath);
+                return false;
+            }
+
+            // Extract metadata from the archive
+            var metadata = await GetMetadataAsync(filePath, cancellationToken);
+            
+            if (metadata == null)
+            {
+                _logger.LogWarning("No metadata found for: {FilePath}", filePath);
+                return false;
+            }
+
+            // Update metadata (normalize it by re-writing ComicInfo.xml)
+            var success = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
+            
+            if (success)
+            {
+                _logger.LogInformation("File normalized successfully: {FilePath}", filePath);
+            }
+            
+            return success;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error normalizing file: {FilePath}", filePath);
+            return false;
+        }
+    }
+
     private async Task BroadcastJobStatusAsync(ProcessingJob job)
     {
         if (_eventBroadcaster != null)

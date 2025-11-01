@@ -109,14 +109,25 @@ public class JobsController : ControllerBase
     }
 
     [HttpPost("rename-unmarked")]
-    public ActionResult<object> RenameUnmarked()
+    public async Task<ActionResult<object>> RenameUnmarked()
     {
         try
         {
-            // TODO: Implement rename functionality
-            // For now, return not implemented error
-            _logger.LogWarning("Rename unmarked files requested but not implemented");
-            return StatusCode(501, new { error = "Rename functionality not yet implemented" });
+            // Get all unprocessed files
+            var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
+            var filePaths = files.Select(f => f.FilePath).ToList();
+            
+            if (filePaths.Count == 0)
+            {
+                _logger.LogInformation("No unmarked files found to rename");
+                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
+            }
+            
+            // Start the rename job
+            var jobId = await _processor.RenameFilesAsync(filePaths);
+            _logger.LogInformation("Rename unmarked files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            
+            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
         catch (Exception ex)
         {
@@ -126,14 +137,25 @@ public class JobsController : ControllerBase
     }
 
     [HttpPost("normalize-unmarked")]
-    public ActionResult<object> NormalizeUnmarked()
+    public async Task<ActionResult<object>> NormalizeUnmarked()
     {
         try
         {
-            // TODO: Implement normalize functionality
-            // For now, return not implemented error
-            _logger.LogWarning("Normalize unmarked files requested but not implemented");
-            return StatusCode(501, new { error = "Normalize functionality not yet implemented" });
+            // Get all unprocessed files
+            var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
+            var filePaths = files.Select(f => f.FilePath).ToList();
+            
+            if (filePaths.Count == 0)
+            {
+                _logger.LogInformation("No unmarked files found to normalize");
+                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
+            }
+            
+            // Start the normalize job
+            var jobId = await _processor.NormalizeFilesAsync(filePaths);
+            _logger.LogInformation("Normalize unmarked files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            
+            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
         catch (Exception ex)
         {

@@ -17,7 +17,7 @@ jobs:
           BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
           echo "Branch name: $BRANCH_NAME"
           
-          if [[ "$BRANCH_NAME" == copilot/* ]]; then
+          if [[ "$BRANCH_NAME" == "copilot/"* ]]; then
             echo "is_copilot_branch=true" >> $GITHUB_OUTPUT
             echo "This is a copilot branch - will delete"
           else

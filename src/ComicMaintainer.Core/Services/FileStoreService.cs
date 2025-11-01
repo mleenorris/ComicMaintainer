@@ -190,4 +190,44 @@ public class FileStoreService : IFileStoreService
 
         return Task.FromResult((total, processed, unprocessed, duplicates));
     }
+
+    public async Task InitializeFromDatabaseAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogInformation("Initializing file store from database");
+            
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            
+            // Load all processed and duplicate files from database
+            var processedFiles = await dbContext.ComicFiles
+                .Where(e => e.IsProcessed)
+                .Select(e => e.FilePath)
+                .ToListAsync(cancellationToken);
+            
+            var duplicateFiles = await dbContext.ComicFiles
+                .Where(e => e.IsDuplicate)
+                .Select(e => e.FilePath)
+                .ToListAsync(cancellationToken);
+            
+            // Populate in-memory dictionaries
+            foreach (var filePath in processedFiles)
+            {
+                _processedFiles.TryAdd(filePath, true);
+            }
+            
+            foreach (var filePath in duplicateFiles)
+            {
+                _duplicateFiles.TryAdd(filePath, true);
+            }
+            
+            _logger.LogInformation("Loaded {ProcessedCount} processed files and {DuplicateCount} duplicate files from database", 
+                processedFiles.Count, duplicateFiles.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error initializing file store from database");
+        }
+    }
 }

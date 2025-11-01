@@ -34,26 +34,26 @@ public class FileWatcherService : IFileWatcherService
         _enabled = _settings.WatcherEnabled;
     }
 
-    public Task StartAsync(CancellationToken cancellationToken = default)
+    public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         lock (_lock)
         {
             if (!_enabled)
             {
                 _logger.LogInformation("Watcher is disabled, not starting");
-                return Task.CompletedTask;
+                return;
             }
 
             if (_watcher != null && _watcher.EnableRaisingEvents)
             {
                 _logger.LogInformation("Watcher is already running");
-                return Task.CompletedTask;
+                return;
             }
 
             if (!Directory.Exists(_settings.WatchedDirectory))
             {
                 _logger.LogError("Watched directory does not exist: {Directory}", _settings.WatchedDirectory);
-                return Task.CompletedTask;
+                return;
             }
 
             _watcher = new FileSystemWatcher(_settings.WatchedDirectory)
@@ -70,12 +70,13 @@ public class FileWatcherService : IFileWatcherService
 
             _watcher.EnableRaisingEvents = true;
             _logger.LogInformation("File watcher started for directory: {Directory}", _settings.WatchedDirectory);
-            
-            // Perform initial scan of existing files
-            _ = Task.Run(async () => await ScanExistingFilesAsync(cancellationToken));
         }
-
-        return Task.CompletedTask;
+        
+        // Initialize file store from database before scanning files
+        await _fileStore.InitializeFromDatabaseAsync(cancellationToken);
+        
+        // Perform initial scan of existing files
+        _ = Task.Run(async () => await ScanExistingFilesAsync(cancellationToken));
     }
     
     /// <summary>

@@ -41,4 +41,9 @@ public interface IFileStoreService
     /// Get file count statistics
     /// </summary>
     Task<(int total, int processed, int unprocessed, int duplicates)> GetFileCountsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Initialize file store by loading existing processed/duplicate status from database
+    /// </summary>
+    Task InitializeFromDatabaseAsync(CancellationToken cancellationToken = default);
 }

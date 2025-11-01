@@ -193,10 +193,11 @@
                         await clearActiveJobOnServer();
                         hasActiveJob = false;
                         currentJobTitle = null;
-                        setTimeout(() => {
-                            closeProgressModal();
-                            loadFiles(currentPage, true);
-                        }, 2000);
+                        // Clear selected files and refresh the file list
+                        selectedFiles.clear();
+                        await loadFiles(currentPage, true);
+                        // Close modal after refresh completes
+                        setTimeout(closeProgressModal, 1000);
                     } else if (status === 'failed') {
                         document.getElementById('progressTitle').textContent = 'Failed - Job processing failed';
                         completeProgress();
@@ -2085,7 +2086,8 @@
                             if (data.done) {
                                 completeProgress();
                                 showMessage(`Processed ${successCount} of ${files.length} files successfully!`, 'success');
-                                // Refresh file list
+                                // Clear selected files and refresh file list
+                                selectedFiles.clear();
                                 await loadFiles(1, true);
                             } else {
                                 if (data.success) {
@@ -2149,7 +2151,8 @@
                             if (data.done) {
                                 completeProgress();
                                 showMessage(`Renamed ${successCount} of ${files.length} files successfully!`, 'success');
-                                // Refresh file list
+                                // Clear selected files and refresh file list
+                                selectedFiles.clear();
                                 await loadFiles(1, true);
                             } else {
                                 if (data.success) {
@@ -2213,7 +2216,8 @@
                             if (data.done) {
                                 completeProgress();
                                 showMessage(`Normalized metadata for ${successCount} of ${files.length} files successfully!`, 'success');
-                                // Refresh file list
+                                // Clear selected files and refresh file list
+                                selectedFiles.clear();
                                 await loadFiles(1, true);
                             } else {
                                 if (data.success) {
@@ -3113,7 +3117,8 @@
                 showMessage(`Deleted ${successCount} file(s), ${failCount} failed`, 'warning');
             }
             
-            // Refresh file list
+            // Clear selected files and refresh file list
+            selectedFiles.clear();
             await loadFiles(1, true);
         }
         

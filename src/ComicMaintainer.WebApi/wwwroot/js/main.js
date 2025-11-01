@@ -1284,7 +1284,7 @@
         
         async function viewTags(filepath) {
             try {
-                const response = await fetch(apiUrl(`/api/file/${encodeURIComponent(filepath)}/tags`), {
+                const response = await fetch(apiUrl(`/api/file-tags?filePath=${encodeURIComponent(filepath)}`), {
                     headers: getAuthHeaders()
                 });
                 if (handleAuthError(response)) return;
@@ -1332,25 +1332,22 @@
             }
             
             try {
-                const response = await fetch(apiUrl(`/api/file/${encodeURIComponent(currentEditFile)}/tags`), {
-                    method: 'POST',
+                const response = await fetch(apiUrl(`/api/file-tags?filePath=${encodeURIComponent(currentEditFile)}`), {
+                    method: 'PUT',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify(tags)
                 });
                 
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    const errorText = await response.text();
+                    throw new Error(errorText || `HTTP error! status: ${response.status}`);
                 }
-                const result = await response.json();
                 
-                if (result.success) {
-                    showMessage('Tags updated successfully!', 'success');
-                    closeModal();
-                } else {
-                    showMessage(result.error || 'Failed to update tags', 'error');
-                }
+                showMessage('Tags updated successfully!', 'success');
+                closeModal();
             } catch (error) {
                 showMessage('Failed to save tags: ' + error.message, 'error');
             }

@@ -360,41 +360,7 @@ public class FilesController : ControllerBase
         }
     }
 
-    [HttpGet("~/api/file/{filepath}/tags")]
-    public async Task<ActionResult<ComicMetadata>> GetFileTagsRest(string filepath)
-    {
-        try
-        {
-            var metadata = await _processor.GetMetadataAsync(filepath);
-            return metadata != null ? Ok(metadata) : NotFound();
-        }
-        catch (Exception ex)
-        {
-            var sanitizedPath = LoggingHelper.SanitizePathForLog(filepath);
-            _logger.LogError(ex, "Error getting tags for file {FilePath}", sanitizedPath);
-            return StatusCode(500, "Error getting tags");
-        }
-    }
 
-    [HttpPost("~/api/file/{filepath}/tags")]
-    public async Task<ActionResult> UpdateFileTagsRest(string filepath, [FromBody] ComicMetadata metadata)
-    {
-        try
-        {
-            var success = await _processor.UpdateMetadataAsync(filepath, metadata);
-            if (success)
-            {
-                return Ok(new { success = true, error = (string?)null });
-            }
-            return Ok(new { success = false, error = "Failed to update tags" });
-        }
-        catch (Exception ex)
-        {
-            var sanitizedPath = LoggingHelper.SanitizePathForLog(filepath);
-            _logger.LogError(ex, "Error updating tags for file {FilePath}", sanitizedPath);
-            return StatusCode(500, new { success = false, error = "Error updating tags" });
-        }
-    }
 
     public class UpdateTagsRequest
     {

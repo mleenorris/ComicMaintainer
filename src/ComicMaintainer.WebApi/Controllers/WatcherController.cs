@@ -23,7 +23,8 @@ public class WatcherController : ControllerBase
     {
         try
         {
-            return Ok(new { enabled = _watcher.IsRunning });
+            var isRunning = _watcher.IsRunning;
+            return Ok(new { running = isRunning, enabled = isRunning });
         }
         catch (Exception ex)
         {

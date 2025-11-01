@@ -33,14 +33,22 @@ public class FilesControllerTests
         };
         _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
+        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("unprocessed", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile> { files[1] });
 
         // Act
-        var result = await _controller.GetFiles(null);
+        var result = await _controller.GetFiles();
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var returnedFiles = Assert.IsAssignableFrom<IEnumerable<ComicFile>>(okResult.Value);
-        Assert.Equal(2, returnedFiles.Count());
+        Assert.NotNull(okResult.Value);
+        // Check that it returns an object with expected properties
+        var resultValue = okResult.Value;
+        var filesProperty = resultValue?.GetType().GetProperty("files");
+        Assert.NotNull(filesProperty);
+        var returnedFiles = filesProperty.GetValue(resultValue) as List<ComicFile>;
+        Assert.NotNull(returnedFiles);
+        Assert.Equal(2, returnedFiles.Count);
     }
 
     [Fact]
@@ -51,15 +59,22 @@ public class FilesControllerTests
         {
             new() { FilePath = "/test/batman.cbz", IsProcessed = true }
         };
-        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("batman", It.IsAny<CancellationToken>()))
+        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("processed", It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
+        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("unprocessed", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
 
         // Act
-        var result = await _controller.GetFiles("batman");
+        var result = await _controller.GetFiles(filter: "marked");
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var returnedFiles = Assert.IsAssignableFrom<IEnumerable<ComicFile>>(okResult.Value);
+        Assert.NotNull(okResult.Value);
+        var resultValue = okResult.Value;
+        var filesProperty = resultValue?.GetType().GetProperty("files");
+        Assert.NotNull(filesProperty);
+        var returnedFiles = filesProperty.GetValue(resultValue) as List<ComicFile>;
+        Assert.NotNull(returnedFiles);
         Assert.Single(returnedFiles);
     }
 
@@ -71,7 +86,7 @@ public class FilesControllerTests
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
         // Act
-        var result = await _controller.GetFiles(null);
+        var result = await _controller.GetFiles();
 
         // Assert
         var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);

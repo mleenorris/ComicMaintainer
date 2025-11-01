@@ -18,6 +18,7 @@ public class FileWatcherService : IFileWatcherService
     private FileSystemWatcher? _watcher;
     private bool _enabled;
     private readonly object _lock = new();
+    private bool _initialized = false;
 
     public bool IsRunning => _watcher?.EnableRaisingEvents ?? false;
 
@@ -36,6 +37,8 @@ public class FileWatcherService : IFileWatcherService
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
+        bool shouldInitialize = false;
+        
         lock (_lock)
         {
             if (!_enabled)
@@ -70,10 +73,20 @@ public class FileWatcherService : IFileWatcherService
 
             _watcher.EnableRaisingEvents = true;
             _logger.LogInformation("File watcher started for directory: {Directory}", _settings.WatchedDirectory);
+            
+            // Set flag to initialize outside the lock
+            if (!_initialized)
+            {
+                shouldInitialize = true;
+                _initialized = true;
+            }
         }
         
-        // Initialize file store from database before scanning files
-        await _fileStore.InitializeFromDatabaseAsync(cancellationToken);
+        // Initialize file store from database before scanning files (only once)
+        if (shouldInitialize)
+        {
+            await _fileStore.InitializeFromDatabaseAsync(cancellationToken);
+        }
         
         // Perform initial scan of existing files
         _ = Task.Run(async () => await ScanExistingFilesAsync(cancellationToken));

@@ -75,9 +75,10 @@ public class FilesController : ControllerBase
             // Handle pagination (-1 means return all)
             if (per_page == -1)
             {
+                var allFilesDto = filesList.Select(FileDto.FromComicFile).ToList();
                 return Ok(new
                 {
-                    files = filesList,
+                    files = allFilesDto,
                     page = 1,
                     total_pages = 1,
                     total_files = totalFiles,
@@ -92,6 +93,7 @@ public class FilesController : ControllerBase
             var pagedFiles = filesList
                 .Skip((page - 1) * per_page)
                 .Take(per_page)
+                .Select(FileDto.FromComicFile)
                 .ToList();
 
             return Ok(new

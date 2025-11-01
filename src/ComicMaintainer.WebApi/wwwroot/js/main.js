@@ -903,6 +903,12 @@
             // Group files by directory (filtering is now done on backend)
             const filesByDirectory = {};
             files.forEach(file => {
+                // Skip files with missing relative_path (should not happen with proper API response)
+                if (!file.relative_path) {
+                    console.error('File object missing relative_path:', file);
+                    return;
+                }
+                
                 const dirPath = file.relative_path.includes('/') || file.relative_path.includes('\\') 
                     ? file.relative_path.substring(0, file.relative_path.lastIndexOf(file.relative_path.includes('/') ? '/' : '\\'))
                     : '';

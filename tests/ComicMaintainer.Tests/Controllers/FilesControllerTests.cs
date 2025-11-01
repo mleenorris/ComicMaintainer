@@ -46,7 +46,7 @@ public class FilesControllerTests
         var resultValue = okResult.Value;
         var filesProperty = resultValue?.GetType().GetProperty("files");
         Assert.NotNull(filesProperty);
-        var returnedFiles = filesProperty.GetValue(resultValue) as List<ComicFile>;
+        var returnedFiles = filesProperty.GetValue(resultValue) as List<FileDto>;
         Assert.NotNull(returnedFiles);
         Assert.Equal(2, returnedFiles.Count);
     }
@@ -73,7 +73,7 @@ public class FilesControllerTests
         var resultValue = okResult.Value;
         var filesProperty = resultValue?.GetType().GetProperty("files");
         Assert.NotNull(filesProperty);
-        var returnedFiles = filesProperty.GetValue(resultValue) as List<ComicFile>;
+        var returnedFiles = filesProperty.GetValue(resultValue) as List<FileDto>;
         Assert.NotNull(returnedFiles);
         Assert.Single(returnedFiles);
     }

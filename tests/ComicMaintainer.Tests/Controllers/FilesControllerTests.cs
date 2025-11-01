@@ -4,6 +4,7 @@ using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Text.Json;
 
 namespace ComicMaintainer.Tests.Controllers;
 
@@ -314,5 +315,76 @@ public class FilesControllerTests
         // Assert
         var statusCodeResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetFileTagsRest_WithValidPath_ReturnsOkWithMetadata()
+    {
+        // Arrange
+        var metadata = new ComicMetadata { Series = "Batman", Issue = "12" };
+        _mockProcessor.Setup(p => p.GetMetadataAsync("/test/file.cbz", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(metadata);
+
+        // Act
+        var result = await _controller.GetFileTagsRest("/test/file.cbz");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var returnedMetadata = Assert.IsType<ComicMetadata>(okResult.Value);
+        Assert.Equal("Batman", returnedMetadata.Series);
+    }
+
+    [Fact]
+    public async Task GetFileTagsRest_WhenMetadataNotFound_ReturnsNotFound()
+    {
+        // Arrange
+        _mockProcessor.Setup(p => p.GetMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ComicMetadata?)null);
+
+        // Act
+        var result = await _controller.GetFileTagsRest("/test/file.cbz");
+
+        // Assert
+        Assert.IsType<NotFoundResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdateFileTagsRest_WithValidData_ReturnsOkWithSuccess()
+    {
+        // Arrange
+        var metadata = new ComicMetadata { Series = "Superman", Issue = "5" };
+        _mockProcessor.Setup(p => p.UpdateMetadataAsync("/test/file.cbz", metadata, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _controller.UpdateFileTagsRest("/test/file.cbz", metadata);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+        var json = JsonSerializer.Serialize(okResult.Value);
+        var response = JsonSerializer.Deserialize<JsonElement>(json);
+        Assert.True(response.GetProperty("success").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, response.GetProperty("error").ValueKind);
+    }
+
+    [Fact]
+    public async Task UpdateFileTagsRest_WhenUpdateFails_ReturnsOkWithFailure()
+    {
+        // Arrange
+        var metadata = new ComicMetadata { Series = "Superman" };
+        _mockProcessor.Setup(p => p.UpdateMetadataAsync(It.IsAny<string>(), metadata, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        // Act
+        var result = await _controller.UpdateFileTagsRest("/test/file.cbz", metadata);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+        var json = JsonSerializer.Serialize(okResult.Value);
+        var response = JsonSerializer.Deserialize<JsonElement>(json);
+        Assert.False(response.GetProperty("success").GetBoolean());
+        Assert.Equal("Failed to update tags", response.GetProperty("error").GetString());
     }
 }

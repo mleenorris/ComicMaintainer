@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Test that API error handlers return JSON instead of HTML"""
 
-import pytest
 import json
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, request
 
 
 def test_error_handler_logic():
@@ -111,7 +110,7 @@ def test_javascript_error_handling():
             totalFiles = response_data.get('total_files') or 0
             unmarkedCount = response_data.get('unmarked_count') or 0
             
-        except Exception as error:
+        except Exception:
             # Set safe defaults on error to prevent undefined errors
             files = []
             currentPage = 1

@@ -1937,7 +1937,8 @@ def get_watcher_status_api():
             ['pgrep', '-f', 'python.*watcher.py'],
             capture_output=True,
             text=True,
-            timeout=5  # Add timeout to prevent hanging
+            timeout=5,  # Add timeout to prevent hanging
+            check=False  # Don't raise exception on non-zero exit (pgrep returns 1 if no match)
         )
         is_running = result.returncode == 0 and len(result.stdout.strip()) > 0
         logging.debug(f"Watcher status check: is_running={is_running}, returncode={result.returncode}, stdout='{result.stdout.strip()}'")

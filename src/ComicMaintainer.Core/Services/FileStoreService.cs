@@ -1,8 +1,12 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Data;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -15,10 +19,17 @@ public class FileStoreService : IFileStoreService
     private readonly ConcurrentDictionary<string, bool> _processedFiles = new();
     private readonly ConcurrentDictionary<string, bool> _duplicateFiles = new();
     private readonly AppSettings _settings;
+    private readonly ILogger<FileStoreService> _logger;
+    private readonly IServiceProvider _serviceProvider;
 
-    public FileStoreService(IOptions<AppSettings> settings)
+    public FileStoreService(
+        IOptions<AppSettings> settings,
+        ILogger<FileStoreService> logger,
+        IServiceProvider serviceProvider)
     {
         _settings = settings.Value;
+        _logger = logger;
+        _serviceProvider = serviceProvider;
     }
 
     public Task<IEnumerable<ComicFile>> GetAllFilesAsync(CancellationToken cancellationToken = default)
@@ -74,7 +85,7 @@ public class FileStoreService : IFileStoreService
         return Task.CompletedTask;
     }
 
-    public Task MarkFileProcessedAsync(string filePath, bool processed, CancellationToken cancellationToken = default)
+    public async Task MarkFileProcessedAsync(string filePath, bool processed, CancellationToken cancellationToken = default)
     {
         if (processed)
         {
@@ -90,10 +101,34 @@ public class FileStoreService : IFileStoreService
             file.IsProcessed = processed;
         }
 
-        return Task.CompletedTask;
+        // Persist to database
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            
+            var entity = await dbContext.ComicFiles
+                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+
+            if (entity != null)
+            {
+                entity.IsProcessed = processed;
+                entity.UpdatedAt = DateTime.UtcNow;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                _logger.LogDebug("Updated processing status for {FilePath} to {Status}", filePath, processed);
+            }
+            else
+            {
+                _logger.LogDebug("File {FilePath} not found in database, skipping status update", filePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating processing status in database for {FilePath}", filePath);
+        }
     }
 
-    public Task MarkFileDuplicateAsync(string filePath, bool duplicate, CancellationToken cancellationToken = default)
+    public async Task MarkFileDuplicateAsync(string filePath, bool duplicate, CancellationToken cancellationToken = default)
     {
         if (duplicate)
         {
@@ -109,7 +144,31 @@ public class FileStoreService : IFileStoreService
             file.IsDuplicate = duplicate;
         }
 
-        return Task.CompletedTask;
+        // Persist to database
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            
+            var entity = await dbContext.ComicFiles
+                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+
+            if (entity != null)
+            {
+                entity.IsDuplicate = duplicate;
+                entity.UpdatedAt = DateTime.UtcNow;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                _logger.LogDebug("Updated duplicate status for {FilePath} to {Status}", filePath, duplicate);
+            }
+            else
+            {
+                _logger.LogDebug("File {FilePath} not found in database, skipping duplicate status update", filePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating duplicate status in database for {FilePath}", filePath);
+        }
     }
 
     public Task<(int total, int processed, int unprocessed, int duplicates)> GetFileCountsAsync(CancellationToken cancellationToken = default)

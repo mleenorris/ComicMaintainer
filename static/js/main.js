@@ -2701,7 +2701,7 @@
                     logsContent.textContent = 'Error: ' + data.error;
                 } else {
                     logsContent.textContent = data.logs || 'No logs available';
-                    const logTypeLabel = data.log_type === 'debug' ? 'Debug Logs' : 'Basic Logs';
+                    const logTypeLabel = (data.log_type || 'basic') === 'debug' ? 'Debug Logs' : 'Basic Logs';
                     logStats.textContent = `${logTypeLabel} - Showing ${data.returned_lines || 0} of ${data.total_lines || 0} total lines`;
                 }
             } catch (error) {

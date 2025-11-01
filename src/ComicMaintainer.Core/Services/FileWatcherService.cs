@@ -18,6 +18,7 @@ public class FileWatcherService : IFileWatcherService
     private FileSystemWatcher? _watcher;
     private bool _enabled;
     private readonly object _lock = new();
+    private bool _initialized = false;
 
     public bool IsRunning => _watcher?.EnableRaisingEvents ?? false;
 
@@ -34,26 +35,28 @@ public class FileWatcherService : IFileWatcherService
         _enabled = _settings.WatcherEnabled;
     }
 
-    public Task StartAsync(CancellationToken cancellationToken = default)
+    public async Task StartAsync(CancellationToken cancellationToken = default)
     {
+        bool shouldInitialize = false;
+        
         lock (_lock)
         {
             if (!_enabled)
             {
                 _logger.LogInformation("Watcher is disabled, not starting");
-                return Task.CompletedTask;
+                return;
             }
 
             if (_watcher != null && _watcher.EnableRaisingEvents)
             {
                 _logger.LogInformation("Watcher is already running");
-                return Task.CompletedTask;
+                return;
             }
 
             if (!Directory.Exists(_settings.WatchedDirectory))
             {
                 _logger.LogError("Watched directory does not exist: {Directory}", _settings.WatchedDirectory);
-                return Task.CompletedTask;
+                return;
             }
 
             _watcher = new FileSystemWatcher(_settings.WatchedDirectory)
@@ -71,11 +74,22 @@ public class FileWatcherService : IFileWatcherService
             _watcher.EnableRaisingEvents = true;
             _logger.LogInformation("File watcher started for directory: {Directory}", _settings.WatchedDirectory);
             
-            // Perform initial scan of existing files
-            _ = Task.Run(async () => await ScanExistingFilesAsync(cancellationToken));
+            // Set flag to initialize outside the lock
+            if (!_initialized)
+            {
+                shouldInitialize = true;
+                _initialized = true;
+            }
         }
-
-        return Task.CompletedTask;
+        
+        // Initialize file store from database before scanning files (only once)
+        if (shouldInitialize)
+        {
+            await _fileStore.InitializeFromDatabaseAsync(cancellationToken);
+        }
+        
+        // Perform initial scan of existing files
+        _ = Task.Run(async () => await ScanExistingFilesAsync(cancellationToken));
     }
     
     /// <summary>

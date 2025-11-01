@@ -23,7 +23,7 @@ public class JobsController : ControllerBase
     }
 
     [HttpGet("{jobId}")]
-    public ActionResult<ProcessingJob> GetJob(Guid jobId)
+    public ActionResult<object> GetJob(Guid jobId)
     {
         try
         {
@@ -31,7 +31,24 @@ public class JobsController : ControllerBase
             if (job == null)
                 return NotFound();
             
-            return Ok(job);
+            // Return in snake_case format expected by frontend
+            return Ok(new
+            {
+                job_id = job.JobId.ToString(),
+                status = job.Status.ToString().ToLower(),
+                total_items = job.TotalFiles,
+                processed_items = job.ProcessedFiles,
+                failed_items = job.FailedFiles,
+                current_file = job.CurrentFile,
+                start_time = job.StartTime,
+                end_time = job.EndTime,
+                results = job.Files.Select((f, i) => new
+                {
+                    file = f,
+                    success = i < job.ProcessedFiles && !job.Errors.ContainsKey(f),
+                    error = job.Errors.ContainsKey(f) ? job.Errors[f] : null
+                }).ToList()
+            });
         }
         catch (Exception ex)
         {
@@ -41,7 +58,7 @@ public class JobsController : ControllerBase
     }
 
     [HttpGet("~/api/active-job")]
-    public ActionResult<ProcessingJob> GetActiveJob()
+    public ActionResult<object> GetActiveJob()
     {
         try
         {
@@ -49,13 +66,41 @@ public class JobsController : ControllerBase
             if (job == null)
                 return Ok(new { active = false });
             
-            return Ok(job);
+            // Return in snake_case format expected by frontend
+            return Ok(new
+            {
+                job_id = job.JobId.ToString(),
+                job_title = DetermineJobTitle(job),
+                status = job.Status.ToString().ToLower(),
+                total_items = job.TotalFiles,
+                processed_items = job.ProcessedFiles,
+                failed_items = job.FailedFiles,
+                current_file = job.CurrentFile,
+                start_time = job.StartTime,
+                end_time = job.EndTime
+            });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error getting active job");
             return StatusCode(500, "Error retrieving active job");
         }
+    }
+
+    private string DetermineJobTitle(ProcessingJob job)
+    {
+        // Determine a user-friendly title based on job characteristics
+        if (job.ProcessedFiles == 0 && job.Status == JobStatus.Queued)
+            return "Processing Files...";
+        if (job.Status == JobStatus.Running)
+            return $"Processing {job.TotalFiles} files...";
+        if (job.Status == JobStatus.Completed)
+            return $"Completed {job.TotalFiles} files";
+        if (job.Status == JobStatus.Failed)
+            return "Processing Failed";
+        if (job.Status == JobStatus.Cancelled)
+            return "Processing Cancelled";
+        return "Processing...";
     }
 
     [HttpPost("process-all")]

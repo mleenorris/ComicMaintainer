@@ -190,7 +190,6 @@
                         // Update modal title and call completeProgress to show close button
                         document.getElementById('progressTitle').textContent = `Completed! All ${total} items processed (${successCount} succeeded, ${errorCount} failed)`;
                         completeProgress();
-                        await clearActiveJobOnServer();
                         hasActiveJob = false;
                         currentJobTitle = null;
                         // Clear selected files and refresh the file list
@@ -201,14 +200,12 @@
                     } else if (status === 'failed') {
                         document.getElementById('progressTitle').textContent = 'Failed - Job processing failed';
                         completeProgress();
-                        await clearActiveJobOnServer();
                         hasActiveJob = false;
                         currentJobTitle = null;
                         setTimeout(closeProgressModal, 3000);
                     } else if (status === 'cancelled') {
                         document.getElementById('progressTitle').textContent = 'Cancelled - Job was cancelled';
                         completeProgress();
-                        await clearActiveJobOnServer();
                         hasActiveJob = false;
                         currentJobTitle = null;
                         setTimeout(closeProgressModal, 2000);
@@ -310,35 +307,9 @@
             }
         }
         
-        async function setActiveJobOnServer(jobId, jobTitle) {
-            try {
-                const response = await fetch(apiUrl('/api/active-job'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ job_id: jobId, job_title: jobTitle })
-                });
-                if (!response.ok) {
-                    console.error('Failed to set active job:', response.status);
-                }
-            } catch (error) {
-                console.error('Error setting active job:', error);
-            }
-        }
-        
-        async function clearActiveJobOnServer() {
-            try {
-                const response = await fetch(apiUrl('/api/active-job'), {
-                    method: 'DELETE'
-                });
-                if (!response.ok) {
-                    console.error('Failed to clear active job:', response.status);
-                }
-            } catch (error) {
-                console.error('Error clearing active job:', error);
-            }
-        }
+        // Note: setActiveJobOnServer and clearActiveJobOnServer are no longer needed
+        // The server automatically tracks active jobs via GetActiveJob() which finds
+        // jobs with status Running or Queued in the in-memory job dictionary
         
         // Debounce function for search input
         function debouncedFilterFiles() {
@@ -1666,13 +1637,10 @@
             
             // Set active job state IMMEDIATELY to avoid race condition where
             // SSE events arrive before this completes. This ensures we don't
-            // miss any events that arrive while setActiveJobOnServer is in flight.
+            // Set active job state immediately to track progress
             hasActiveJob = true;
             currentJobId = jobId;  // Track for cancellation
             currentJobTitle = title;  // Track title for progress updates
-            
-            // Store active job ID on server (async, but job tracking already enabled)
-            await setActiveJobOnServer(jobId, title);
             
             // Fetch initial job state to display immediately
             await pollJobStatusOnce(jobId);
@@ -1736,8 +1704,7 @@
             // Validate job_id format (should be a UUID)
             const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
             if (!uuidRegex.test(activeJobId)) {
-                console.warn(`[JOB RESUME] Invalid job_id format: ${activeJobId} (expected UUID) - clearing stale job`);
-                await clearActiveJobOnServer();
+                console.warn(`[JOB RESUME] Invalid job_id format: ${activeJobId} (expected UUID) - ignoring`);
                 return;
             }
             
@@ -1755,7 +1722,6 @@
                     if (response.status === 404) {
                         // Job not found (was cleaned up or deleted)
                         console.warn(`[JOB RESUME] Job ${activeJobId} not found (404) - was cleaned up`);
-                        await clearActiveJobOnServer();
                         showMessage('Previous batch processing job is no longer available', 'warning');
                         return;
                     } else if (response.status >= 500) {
@@ -1766,7 +1732,6 @@
                     } else {
                         // Other client errors
                         console.warn(`[JOB RESUME] Error ${response.status} checking job ${activeJobId}`);
-                        await clearActiveJobOnServer();
                         showMessage('Previous batch processing job is no longer available', 'warning');
                         return;
                     }
@@ -1801,21 +1766,16 @@
                     const total = status.total_items || 0;
                     showMessage(`Batch processing completed: ${successCount} of ${total} files processed successfully${errorCount > 0 ? `, ${errorCount} failed` : ''}`, successCount > 0 ? 'success' : 'warning');
                     
-                    // Clear from server
-                    await clearActiveJobOnServer();
-                    
                     // Refresh file list to show updated status
                     await loadFiles(1, true);
                 } else if (status.status === 'failed') {
                     // Job failed while we were away
-                    console.error(`[JOB RESUME] Job ${activeJobId} already failed: ${status.error}`);
+                    console.error(`[JOB RESUME] Job ${activeJobId} already failed`);
                     showMessage(`Batch processing failed: ${status.error || 'Unknown error'}`, 'error');
-                    await clearActiveJobOnServer();
                 } else if (status.status === 'cancelled') {
                     // Job was cancelled
                     console.log(`[JOB RESUME] Job ${activeJobId} was cancelled`);
                     showMessage('Batch processing was cancelled', 'warning');
-                    await clearActiveJobOnServer();
                 }
             } catch (error) {
                 // Network error or other exception

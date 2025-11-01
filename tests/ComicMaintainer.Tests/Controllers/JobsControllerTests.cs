@@ -49,9 +49,10 @@ public class JobsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var returnedJob = Assert.IsType<ProcessingJob>(okResult.Value);
-        Assert.Equal(jobId, returnedJob.JobId);
-        Assert.Equal(JobStatus.Running, returnedJob.Status);
+        Assert.NotNull(okResult.Value);
+        var json = JObject.FromObject(okResult.Value);
+        Assert.Equal(jobId.ToString(), json["job_id"]!.ToString());
+        Assert.Equal("running", json["status"]!.ToString());
     }
 
     [Fact]
@@ -114,8 +115,10 @@ public class JobsControllerTests
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
-        var returnedJob = Assert.IsType<ProcessingJob>(okResult.Value);
-        Assert.Equal(job.JobId, returnedJob.JobId);
+        Assert.NotNull(okResult.Value);
+        var json = JObject.FromObject(okResult.Value);
+        Assert.Equal(job.JobId.ToString(), json["job_id"]!.ToString());
+        Assert.Equal("running", json["status"]!.ToString());
     }
 
     [Fact]

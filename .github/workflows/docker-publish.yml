@@ -34,11 +34,11 @@ jobs:
           
           if [ "$BRANCH_NAME" = "stable" ]; then
             # For stable branch, tag as stable
-            TAGS="iceburn1/comictagger-watcher:stable"
+            TAGS="mleenorris/comicmaintainer:stable"
           else
             # For master branch, tag as latest and with version number
-            TAGS="iceburn1/comictagger-watcher:latest
-          iceburn1/comictagger-watcher:${{ steps.get_version.outputs.version }}"
+            TAGS="mleenorris/comicmaintainer:latest
+          mleenorris/comicmaintainer:${{ steps.get_version.outputs.version }}"
           fi
           
           # Output tags in a format that can be used by docker/build-push-action

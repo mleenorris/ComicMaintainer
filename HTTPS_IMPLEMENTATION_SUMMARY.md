@@ -60,7 +60,7 @@ Added three new optional environment variables:
 # Generate certificate in /Config/ssl directory
 docker run --rm \
   -v /path/to/config:/Config \
-  iceburn1/comictagger-watcher:latest \
+  mleenorris/comicmaintainer:latest \
   /generate_self_signed_cert.sh /Config/ssl 365 localhost
 ```
 
@@ -129,7 +129,7 @@ End-to-end tests for HTTPS functionality:
 # Step 1: Generate certificate
 docker run --rm \
   -v /path/to/config:/Config \
-  iceburn1/comictagger-watcher:latest \
+  mleenorris/comicmaintainer:latest \
   /generate_self_signed_cert.sh /Config/ssl 365 localhost
 
 # Step 2: Run with HTTPS
@@ -140,7 +140,7 @@ docker run -d \
   -e SSL_CERTFILE=/Config/ssl/selfsigned.crt \
   -e SSL_KEYFILE=/Config/ssl/selfsigned.key \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 
 # Access at: https://localhost:5000
 ```
@@ -161,7 +161,7 @@ docker run -d \
   -e SSL_KEYFILE=/certs/live/your-domain.com/privkey.pem \
   -p 443:443 \
   -e WEB_PORT=443 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 
 # Access at: https://your-domain.com
 ```

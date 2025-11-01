@@ -127,7 +127,7 @@ docker run -d \
   -v /path/to/comics:/watched_dir \
   -v /path/to/config:/Config \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 **Result**: All URLs work correctly at domain root (no BASE_PATH needed)
@@ -142,7 +142,7 @@ docker run -d \
   -v /path/to/comics:/watched_dir \
   -v /path/to/config:/Config \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 **Nginx Configuration**:

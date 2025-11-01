@@ -95,7 +95,7 @@ docker run -d \
   -e WATCHED_DIR=/watched_dir \
   -e GUNICORN_WORKERS=4 \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 ## Migration Path

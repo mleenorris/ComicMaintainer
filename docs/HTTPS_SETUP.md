@@ -26,7 +26,7 @@ Using Docker (recommended):
 ```bash
 docker run --rm \
   -v /path/to/config:/Config \
-  iceburn1/comictagger-watcher:latest \
+  mleenorris/comicmaintainer:latest \
   /generate_self_signed_cert.sh /Config/ssl 365 localhost
 ```
 
@@ -54,7 +54,7 @@ docker run -d \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 **Docker Compose:**
@@ -63,7 +63,7 @@ version: '3.8'
 
 services:
   comictagger-watcher:
-    image: iceburn1/comictagger-watcher:latest
+    image: mleenorris/comicmaintainer:latest
     container_name: comictagger-watcher
     restart: unless-stopped
     
@@ -128,7 +128,7 @@ docker run -d \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 **Step 4: Set Up Automatic Renewal**
@@ -163,7 +163,7 @@ docker run -d \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 ### Using Standard HTTPS Port (443)
@@ -183,7 +183,7 @@ docker run -d \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -p 443:443 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 Access at: `https://your-domain.com` (no port number needed)

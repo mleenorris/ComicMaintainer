@@ -51,16 +51,16 @@ This service automatically watches a directory for new or changed comic archive 
 
 ### Build the Docker image
 ```sh
-docker build -t iceburn1/comictagger-watcher:latest .
+docker build -t mleenorris/comicmaintainer:latest .
 ```
 
 ### Docker Images
 
 Pre-built Docker images are available on Docker Hub:
 
-- **`iceburn1/comictagger-watcher:latest`** - Built from the `master` branch with the latest features and updates
-- **`iceburn1/comictagger-watcher:stable`** - Built from the `stable` branch, providing a tested baseline for production deployments
-- **`iceburn1/comictagger-watcher:<version>`** - Specific version tags (e.g., `1.0.23`) built from `master` branch releases
+- **`mleenorris/comicmaintainer:latest`** - Built from the `master` branch with the latest features and updates
+- **`mleenorris/comicmaintainer:stable`** - Built from the `stable` branch, providing a tested baseline for production deployments
+- **`mleenorris/comicmaintainer:<version>`** - Specific version tags (e.g., `1.0.23`) built from `master` branch releases
 
 For production environments, using the `stable` tag is recommended for a more reliable experience.
 
@@ -78,7 +78,7 @@ docker run -d \
   -e WATCHED_DIR=/watched_dir \
   -e DUPLICATE_DIR=/duplicates \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 **With custom user/group (recommended for host-mounted directories):**
@@ -92,7 +92,7 @@ docker run -d \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 - Replace `<host_dir_to_watch>` with the path to your comics folder.
@@ -158,7 +158,7 @@ docker run -d \
   -e GITHUB_TOKEN=ghp_your_token_here \
   -e GITHUB_ISSUE_ASSIGNEE=your_username \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 **Note:** GitHub issue creation creates detailed error reports automatically when errors occur.
@@ -418,7 +418,7 @@ docker run -d \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 **Important**: The `/host/config` directory on your host will contain the marker database, configuration, and logs. Make sure it's backed up if you want to preserve your processing history and settings.
@@ -460,7 +460,7 @@ docker run -d \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 Access the application at `https://your-domain:5000`
@@ -473,7 +473,7 @@ For development or testing, generate a self-signed certificate:
 ```sh
 docker run --rm \
   -v /path/to/config:/Config \
-  iceburn1/comictagger-watcher:latest \
+  mleenorris/comicmaintainer:latest \
   /generate_self_signed_cert.sh /Config/ssl 365 localhost
 ```
 
@@ -488,7 +488,7 @@ docker run -d \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -p 5000:5000 \
-  iceburn1/comictagger-watcher:latest
+  mleenorris/comicmaintainer:latest
 ```
 
 Access the application at `https://localhost:5000` (you'll need to accept the browser security warning for self-signed certificates)
@@ -498,7 +498,7 @@ Access the application at `https://localhost:5000` (you'll need to accept the br
 version: '3.8'
 services:
   comictagger-watcher:
-    image: iceburn1/comictagger-watcher:latest
+    image: mleenorris/comicmaintainer:latest
     environment:
       - WATCHED_DIR=/watched_dir
       - SSL_CERTFILE=/Config/ssl/selfsigned.crt

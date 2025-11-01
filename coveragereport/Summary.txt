@@ -1,0 +1,67 @@
+Summary
+  Generated on: 11/01/2025 - 09:06:28
+  Coverage date: 11/01/2025 - 09:04:21 - 11/01/2025 - 09:06:16
+  Parser: MultiReport (2x Cobertura)
+  Assemblies: 2
+  Classes: 43
+  Files: 36
+  Line coverage: 35.9%
+  Covered lines: 1222
+  Uncovered lines: 2178
+  Coverable lines: 3400
+  Total lines: 5164
+  Branch coverage: 51.8% (249 of 480)
+  Covered branches: 249
+  Total branches: 480
+  Method coverage: 64.8% (194 of 299)
+  Full method coverage: 53.8% (161 of 299)
+  Covered methods: 194
+  Fully covered methods: 161
+  Total methods: 299
+
+ComicMaintainer.Core                                                      34.2%
+  ComicMaintainer.Core.Configuration.AppSettings                          93.7%
+  ComicMaintainer.Core.Configuration.JwtSettings                           100%
+  ComicMaintainer.Core.Data.ComicFileEntity                                  0%
+  ComicMaintainer.Core.Data.ComicMaintainerDbContext                         0%
+  ComicMaintainer.Core.Data.ProcessingHistoryEntity                          0%
+  ComicMaintainer.Core.Migrations.AddIdentity                                0%
+  ComicMaintainer.Core.Migrations.ComicMaintainerDbContextModelSnapshot      0%
+  ComicMaintainer.Core.Migrations.InitialCreate                              0%
+  ComicMaintainer.Core.Models.Auth.ApplicationRole                           0%
+  ComicMaintainer.Core.Models.Auth.ApplicationUser                         100%
+  ComicMaintainer.Core.Models.ComicFile                                    100%
+  ComicMaintainer.Core.Models.ComicInfo                                   55.2%
+  ComicMaintainer.Core.Models.ComicMetadata                                100%
+  ComicMaintainer.Core.Models.ComicPageInfo                                  0%
+  ComicMaintainer.Core.Models.FileDto                                      100%
+  ComicMaintainer.Core.Models.ProcessingHistoryEntry                         0%
+  ComicMaintainer.Core.Models.ProcessingJob                                100%
+  ComicMaintainer.Core.Services.AuthService                               95.8%
+  ComicMaintainer.Core.Services.ComicArchive                              84.3%
+  ComicMaintainer.Core.Services.ComicFileProcessor                        84.5%
+  ComicMaintainer.Core.Services.ComicProcessorService                     72.2%
+  ComicMaintainer.Core.Services.FileStoreService                             0%
+  ComicMaintainer.Core.Services.FileWatcherService                        66.4%
+  ComicMaintainer.Core.Utilities.ComicFileExtensions                       100%
+  ComicMaintainer.Core.Utilities.LoggingHelper                            89.2%
+
+ComicMaintainer.WebApi                                                    39.9%
+  ComicMaintainer.WebApi.Controllers.AuthController                       51.1%
+  ComicMaintainer.WebApi.Controllers.ChangePasswordRequest                   0%
+  ComicMaintainer.WebApi.Controllers.EventsController                     70.9%
+  ComicMaintainer.WebApi.Controllers.FilesController                      44.9%
+  ComicMaintainer.WebApi.Controllers.JobsController                       47.7%
+  ComicMaintainer.WebApi.Controllers.LoginRequest                          100%
+  ComicMaintainer.WebApi.Controllers.LogsController                          0%
+  ComicMaintainer.WebApi.Controllers.PreferencesController                 100%
+  ComicMaintainer.WebApi.Controllers.ProcessController                    64.1%
+  ComicMaintainer.WebApi.Controllers.RegisterRequest                       100%
+  ComicMaintainer.WebApi.Controllers.SettingsController                   41.5%
+  ComicMaintainer.WebApi.Controllers.VersionController                     100%
+  ComicMaintainer.WebApi.Controllers.WatcherController                     100%
+  ComicMaintainer.WebApi.Hubs.ProgressHub                                    0%
+  ComicMaintainer.WebApi.Middleware.PathValidationMiddleware                 0%
+  ComicMaintainer.WebApi.Services.EventBroadcasterService                  100%
+  ComicMaintainer.WebApi.Services.FileWatcherHostedService                   0%
+  Program                                                                    0%

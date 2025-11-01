@@ -11,19 +11,19 @@ namespace ComicMaintainer.Tests.Controllers;
 public class EventsControllerTests
 {
     private readonly Mock<ILogger<EventsController>> _loggerMock;
-    private readonly Mock<EventBroadcasterService> _eventBroadcasterMock;
+    private readonly EventBroadcasterService _eventBroadcaster;
     private readonly EventsController _controller;
 
     public EventsControllerTests()
     {
         _loggerMock = new Mock<ILogger<EventsController>>();
         
-        // Create mock for EventBroadcasterService
+        // Create concrete EventBroadcasterService for testing
         var hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<ComicMaintainer.WebApi.Hubs.ProgressHub>>();
         var broadcasterLoggerMock = new Mock<ILogger<EventBroadcasterService>>();
-        _eventBroadcasterMock = new Mock<EventBroadcasterService>(broadcasterLoggerMock.Object, hubContextMock.Object);
+        _eventBroadcaster = new EventBroadcasterService(broadcasterLoggerMock.Object, hubContextMock.Object);
         
-        _controller = new EventsController(_loggerMock.Object, _eventBroadcasterMock.Object);
+        _controller = new EventsController(_loggerMock.Object, _eventBroadcaster);
         
         // Setup HTTP context
         var httpContext = new DefaultHttpContext();

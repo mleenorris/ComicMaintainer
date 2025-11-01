@@ -270,7 +270,10 @@
         // API helper functions for server-side preferences
         async function getPreferences() {
             try {
-                const response = await fetch(apiUrl('/api/preferences'));
+                const response = await fetch(apiUrl('/api/preferences'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return {};
                 if (!response.ok) {
                     console.error('Failed to get preferences:', response.status);
                     return {};
@@ -301,7 +304,10 @@
         
         async function getActiveJobFromServer() {
             try {
-                const response = await fetch(apiUrl('/api/active-job'));
+                const response = await fetch(apiUrl('/api/active-job'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return null;
                 if (!response.ok) {
                     console.error('Failed to get active job:', response.status);
                     return null;
@@ -436,7 +442,10 @@
         // Fetch and display version
         async function loadVersion() {
             try {
-                const response = await fetch(apiUrl('/api/version'));
+                const response = await fetch(apiUrl('/api/version'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -627,7 +636,10 @@
                     url += `&direction=${encodeURIComponent(sortDirection)}`;
                 }
                 
-                const response = await fetch(url);
+                const response = await fetch(url, {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -833,7 +845,13 @@
         async function scanUnmarkedFiles() {
             try {
                 showMessage('Scanning for unmarked files...', 'info');
-                const response = await fetch(apiUrl('/api/scan-unmarked'));
+                const response = await fetch(apiUrl('/api/scan-unmarked'), {
+                    method: 'POST',
+                    headers: getAuthHeaders()
+                });
+                
+                if (handleAuthError(response)) return;
+                
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -1299,7 +1317,10 @@
         
         async function viewTags(filepath) {
             try {
-                const response = await fetch(apiUrl(`/api/file/${encodeURIComponent(filepath)}/tags`));
+                const response = await fetch(apiUrl(`/api/file/${encodeURIComponent(filepath)}/tags`), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -1593,7 +1614,10 @@
             console.log(`[JOB ${jobId}] Polling job status once...`);
             
             try {
-                const response = await fetch(apiUrl(`/api/jobs/${jobId}`));
+                const response = await fetch(apiUrl(`/api/jobs/${jobId}`), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     console.warn(`[JOB ${jobId}] Could not fetch job status: ${response.status}`);
                     return;
@@ -1755,7 +1779,11 @@
             
             try {
                 // Check if job still exists and is active
-                const response = await fetch(apiUrl(`/api/jobs/${activeJobId}`));
+                const response = await fetch(apiUrl(`/api/jobs/${activeJobId}`), {
+                    headers: getAuthHeaders()
+                });
+                
+                if (handleAuthError(response)) return;
                 
                 if (!response.ok) {
                     if (response.status === 404) {
@@ -2373,7 +2401,10 @@
         async function openSettings() {
             try {
                 // Load filename format
-                const formatResponse = await fetch(apiUrl('/api/settings/filename-format'));
+                const formatResponse = await fetch(apiUrl('/api/settings/filename-format'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(formatResponse)) return;
                 if (!formatResponse.ok) {
                     throw new Error(`HTTP error! status: ${formatResponse.status}`);
                 }
@@ -2387,7 +2418,10 @@
                 document.getElementById('themeSelect').value = currentTheme;
                 
                 // Load watcher status
-                const watcherResponse = await fetch(apiUrl('/api/settings/watcher-enabled'));
+                const watcherResponse = await fetch(apiUrl('/api/settings/watcher-enabled'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(watcherResponse)) return;
                 if (!watcherResponse.ok) {
                     throw new Error(`HTTP error! status: ${watcherResponse.status}`);
                 }
@@ -2395,7 +2429,10 @@
                 document.getElementById('watcherToggleCheckbox').checked = watcherData.enabled;
                 
                 // Load log max size
-                const logResponse = await fetch(apiUrl('/api/settings/log-max-bytes'));
+                const logResponse = await fetch(apiUrl('/api/settings/log-max-bytes'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(logResponse)) return;
                 if (!logResponse.ok) {
                     throw new Error(`HTTP error! status: ${logResponse.status}`);
                 }
@@ -2403,7 +2440,10 @@
                 document.getElementById('logMaxSize').value = Math.round(logData.maxMB);
                 
                 // Load issue number padding
-                const paddingResponse = await fetch(apiUrl('/api/settings/issue-number-padding'));
+                const paddingResponse = await fetch(apiUrl('/api/settings/issue-number-padding'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(paddingResponse)) return;
                 if (!paddingResponse.ok) {
                     throw new Error(`HTTP error! status: ${paddingResponse.status}`);
                 }
@@ -2411,7 +2451,10 @@
                 document.getElementById('issueNumberPadding').value = paddingData.padding;
                 
                 // Load GitHub token (masked)
-                const tokenResponse = await fetch(apiUrl('/api/settings/github-token'));
+                const tokenResponse = await fetch(apiUrl('/api/settings/github-token'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(tokenResponse)) return;
                 if (!tokenResponse.ok) {
                     throw new Error(`HTTP error! status: ${tokenResponse.status}`);
                 }
@@ -2421,7 +2464,10 @@
                 document.getElementById('githubToken').value = ''; // Don't populate actual value for security
                 
                 // Load GitHub repository
-                const repoResponse = await fetch(apiUrl('/api/settings/github-repository'));
+                const repoResponse = await fetch(apiUrl('/api/settings/github-repository'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(repoResponse)) return;
                 if (!repoResponse.ok) {
                     throw new Error(`HTTP error! status: ${repoResponse.status}`);
                 }
@@ -2429,7 +2475,10 @@
                 document.getElementById('githubRepository').value = repoData.repository;
                 
                 // Load GitHub issue assignee
-                const assigneeResponse = await fetch(apiUrl('/api/settings/github-issue-assignee'));
+                const assigneeResponse = await fetch(apiUrl('/api/settings/github-issue-assignee'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(assigneeResponse)) return;
                 if (!assigneeResponse.ok) {
                     throw new Error(`HTTP error! status: ${assigneeResponse.status}`);
                 }
@@ -2477,7 +2526,11 @@
                 contentDiv.innerHTML = '';
                 
                 const offset = (historyCurrentPage - 1) * historyPerPage;
-                const response = await fetch(apiUrl(`/api/processing-history?limit=${historyPerPage}&offset=${offset}`));
+                const response = await fetch(apiUrl(`/api/processing-history?limit=${historyPerPage}&offset=${offset}`), {
+                    headers: getAuthHeaders()
+                });
+                
+                if (handleAuthError(response)) return;
                 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
@@ -2591,7 +2644,10 @@
         async function openAboutModal() {
             try {
                 // Load version
-                const response = await fetch(apiUrl('/api/version'));
+                const response = await fetch(apiUrl('/api/version'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -2896,7 +2952,10 @@
         
         async function resetFilenameFormat() {
             try {
-                const response = await fetch(apiUrl('/api/settings/filename-format'));
+                const response = await fetch(apiUrl('/api/settings/filename-format'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -3097,7 +3156,10 @@
         async function updateWatcherStatus() {
             // Fetch initial status on page load only, then rely on SSE for updates
             try {
-                const response = await fetch(apiUrl('/api/watcher/status'));
+                const response = await fetch(apiUrl('/api/watcher/status'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }

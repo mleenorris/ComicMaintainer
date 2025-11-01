@@ -141,14 +141,15 @@ public class JobsController : ControllerBase
     {
         try
         {
-            var jobId = Guid.NewGuid();
-            _logger.LogInformation("Rename unmarked files requested, job ID: {JobId}", jobId);
-            return Ok(new { jobId });
+            // TODO: Implement rename functionality
+            // For now, return not implemented error
+            _logger.LogWarning("Rename unmarked files requested but not implemented");
+            return StatusCode(501, new { error = "Rename functionality not yet implemented" });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error starting rename unmarked job");
-            return StatusCode(500, "Error starting job");
+            return StatusCode(500, new { error = "Error starting job" });
         }
     }
 
@@ -157,14 +158,15 @@ public class JobsController : ControllerBase
     {
         try
         {
-            var jobId = Guid.NewGuid();
-            _logger.LogInformation("Normalize unmarked files requested, job ID: {JobId}", jobId);
-            return Ok(new { jobId });
+            // TODO: Implement normalize functionality
+            // For now, return not implemented error
+            _logger.LogWarning("Normalize unmarked files requested but not implemented");
+            return StatusCode(501, new { error = "Normalize functionality not yet implemented" });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error starting normalize unmarked job");
-            return StatusCode(500, "Error starting job");
+            return StatusCode(500, new { error = "Error starting job" });
         }
     }
 

@@ -33,7 +33,7 @@ public class ProcessingHistoryController : ControllerBase
             // Convert to frontend format
             var historyItems = history.Select(h => new
             {
-                timestamp = new DateTimeOffset(h.Timestamp).ToUnixTimeSeconds(),
+                timestamp = new DateTimeOffset(DateTime.SpecifyKind(h.Timestamp, DateTimeKind.Utc)).ToUnixTimeSeconds(),
                 filepath = h.FilePath,
                 operation_type = h.Action,
                 success = h.Success,

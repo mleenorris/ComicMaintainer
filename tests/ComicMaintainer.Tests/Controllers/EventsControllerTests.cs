@@ -1,4 +1,5 @@
 using ComicMaintainer.WebApi.Controllers;
+using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -10,12 +11,19 @@ namespace ComicMaintainer.Tests.Controllers;
 public class EventsControllerTests
 {
     private readonly Mock<ILogger<EventsController>> _loggerMock;
+    private readonly EventBroadcasterService _eventBroadcaster;
     private readonly EventsController _controller;
 
     public EventsControllerTests()
     {
         _loggerMock = new Mock<ILogger<EventsController>>();
-        _controller = new EventsController(_loggerMock.Object);
+        
+        // Create concrete EventBroadcasterService for testing
+        var hubContextMock = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<ComicMaintainer.WebApi.Hubs.ProgressHub>>();
+        var broadcasterLoggerMock = new Mock<ILogger<EventBroadcasterService>>();
+        _eventBroadcaster = new EventBroadcasterService(broadcasterLoggerMock.Object, hubContextMock.Object);
+        
+        _controller = new EventsController(_loggerMock.Object, _eventBroadcaster);
         
         // Setup HTTP context
         var httpContext = new DefaultHttpContext();

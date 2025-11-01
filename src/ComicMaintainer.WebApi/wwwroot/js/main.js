@@ -172,11 +172,6 @@
                 return;
             }
             
-            // Reset watchdog timer on each update
-            if (window.resetJobWatchdog) {
-                window.resetJobWatchdog();
-            }
-            
             // Update progress UI in real-time
             const processed = progress.processed || 0;
             const total = progress.total || 0;
@@ -188,12 +183,6 @@
             // Handle job completion
             if (status === 'completed' || status === 'failed' || status === 'cancelled') {
                 console.log(`SSE: Job ${jobId} finished with status: ${status}`);
-                
-                // Clear watchdog timer on completion
-                if (window.currentJobWatchdog) {
-                    clearInterval(window.currentJobWatchdog);
-                    window.currentJobWatchdog = null;
-                }
                 
                 // Allow a brief moment for final updates, then finalize
                 setTimeout(async () => {
@@ -1671,8 +1660,7 @@
         }
         
         async function trackJobStatus(jobId, title) {
-            // Job progress updates via SSE only - no polling
-            // SSE provides real-time updates, polling has been completely removed
+            // Job progress updates via SSE only - purely event-based, no polling
             console.log(`[JOB ${jobId}] Tracking job status via SSE events: ${title}`);
             
             // Set active job state IMMEDIATELY to avoid race condition where
@@ -1689,37 +1677,8 @@
             await pollJobStatusOnce(jobId);
             
             // From this point on, all updates come from SSE events via handleJobUpdatedEvent
-            // No polling loop - we rely entirely on the SSE connection
-            console.log(`[JOB ${jobId}] Waiting for SSE updates...`);
-            
-            // Set up a watchdog timer to detect stuck jobs (no updates for 60 seconds)
-            // This catches cases where SSE silently fails or the backend stops sending updates
-            let lastUpdateTime = Date.now();
-            
-            const watchdogInterval = setInterval(async () => {
-                const timeSinceLastUpdate = Date.now() - lastUpdateTime;
-                
-                // If no update for 60 seconds and job is still active, poll status
-                if (hasActiveJob && currentJobId === jobId && timeSinceLastUpdate > 60000) {
-                    console.warn(`[JOB ${jobId}] No updates for ${Math.round(timeSinceLastUpdate / 1000)}s, polling status...`);
-                    await pollJobStatusOnce(jobId);
-                    lastUpdateTime = Date.now(); // Reset timer after manual poll
-                }
-                
-                // Clear interval if job is no longer active
-                if (!hasActiveJob || currentJobId !== jobId) {
-                    console.log(`[JOB ${jobId}] Watchdog timer cleared (job no longer active)`);
-                    clearInterval(watchdogInterval);
-                }
-            }, 15000); // Check every 15 seconds
-            
-            // Store watchdog interval so it can be cleared on job completion
-            window.currentJobWatchdog = watchdogInterval;
-            
-            // Create a progress update callback that resets the watchdog timer
-            window.resetJobWatchdog = () => {
-                lastUpdateTime = Date.now();
-            };
+            // Purely event-based - no polling, no watchdog timers
+            console.log(`[JOB ${jobId}] Waiting for real-time SSE updates...`);
         }
         
         async function cancelCurrentJob() {

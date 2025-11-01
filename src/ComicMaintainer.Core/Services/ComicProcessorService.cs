@@ -22,16 +22,19 @@ public class ComicProcessorService : IComicProcessorService
     private readonly AppSettings _settings;
     private readonly ILogger<ComicProcessorService> _logger;
     private readonly IFileStoreService _fileStore;
+    private readonly IEventBroadcaster? _eventBroadcaster;
     private readonly ConcurrentDictionary<Guid, ProcessingJob> _jobs = new();
 
     public ComicProcessorService(
         IOptions<AppSettings> settings,
         ILogger<ComicProcessorService> logger,
-        IFileStoreService fileStore)
+        IFileStoreService fileStore,
+        IEventBroadcaster? eventBroadcaster = null)
     {
         _settings = settings.Value;
         _logger = logger;
         _fileStore = fileStore;
+        _eventBroadcaster = eventBroadcaster;
     }
 
     public async Task<bool> ProcessFileAsync(string filePath, CancellationToken cancellationToken = default)
@@ -105,18 +108,23 @@ public class ComicProcessorService : IComicProcessorService
 
         _jobs[jobId] = job;
 
+        // Broadcast initial job status
+        _ = BroadcastJobStatusAsync(job);
+
         // Process files asynchronously
         _ = Task.Run(async () =>
         {
             try
             {
                 job.Status = JobStatus.Running;
+                await BroadcastJobStatusAsync(job);
 
                 foreach (var file in fileList)
                 {
                     if (cancellationToken.IsCancellationRequested)
                     {
                         job.Status = JobStatus.Cancelled;
+                        await BroadcastJobStatusAsync(job);
                         return;
                     }
 
@@ -132,20 +140,48 @@ public class ComicProcessorService : IComicProcessorService
                         job.FailedFiles++;
                         job.Errors[file] = "Processing failed";
                     }
+
+                    // Broadcast progress after each file
+                    await BroadcastJobStatusAsync(job);
+                    
+                    // Broadcast individual file processed event
+                    if (_eventBroadcaster != null)
+                    {
+                        await _eventBroadcaster.BroadcastFileProcessedAsync(
+                            Path.GetFileName(file), 
+                            success, 
+                            success ? null : "Processing failed");
+                    }
                 }
 
                 job.Status = JobStatus.Completed;
                 job.EndTime = DateTime.UtcNow;
+                await BroadcastJobStatusAsync(job);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing batch job: {JobId}", jobId);
                 job.Status = JobStatus.Failed;
                 job.EndTime = DateTime.UtcNow;
+                await BroadcastJobStatusAsync(job);
             }
         }, cancellationToken);
 
         return Task.FromResult(jobId);
+    }
+
+    private async Task BroadcastJobStatusAsync(ProcessingJob job)
+    {
+        if (_eventBroadcaster != null)
+        {
+            await _eventBroadcaster.BroadcastJobUpdateAsync(
+                job.JobId,
+                job.Status.ToString().ToLower(),
+                job.ProcessedFiles,
+                job.TotalFiles,
+                job.ProcessedFiles - job.FailedFiles,
+                job.FailedFiles);
+        }
     }
 
     public ProcessingJob? GetJob(Guid jobId)

@@ -58,7 +58,7 @@ public class FileWatcherService : IFileWatcherService
 
             _watcher = new FileSystemWatcher(_settings.WatchedDirectory)
             {
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
                 Filter = "*.*",
                 IncludeSubdirectories = true
             };
@@ -116,6 +116,53 @@ public class FileWatcherService : IFileWatcherService
         }
     }
 
+    /// <summary>
+    /// Scans a specific directory for comic files and processes them
+    /// </summary>
+    private async Task ScanDirectoryAsync(string directoryPath, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogInformation("Scanning directory for comic files: {Directory}", directoryPath);
+            
+            if (!Directory.Exists(directoryPath))
+            {
+                _logger.LogWarning("Directory no longer exists: {Directory}", directoryPath);
+                return;
+            }
+            
+            var comicFiles = Directory.EnumerateFiles(directoryPath, "*.*", SearchOption.AllDirectories)
+                .Where(IsComicFile)
+                .ToList();
+            
+            _logger.LogInformation("Found {Count} comic files in new directory: {Directory}", comicFiles.Count, directoryPath);
+            
+            foreach (var file in comicFiles)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+                    
+                try
+                {
+                    await _fileStore.AddFileAsync(file, cancellationToken);
+                    // Process each file after a delay to avoid overwhelming the system
+                    await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds), cancellationToken);
+                    await _processor.ProcessFileAsync(file, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing file from new directory: {File}", file);
+                }
+            }
+            
+            _logger.LogInformation("Directory scan completed: {Directory}", directoryPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error scanning directory: {Directory}", directoryPath);
+        }
+    }
+
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
         lock (_lock)
@@ -147,14 +194,25 @@ public class FileWatcherService : IFileWatcherService
 
     private void OnFileCreated(object sender, FileSystemEventArgs e)
     {
-        if (IsComicFile(e.FullPath))
+        // Check if it's a directory
+        if (Directory.Exists(e.FullPath))
+        {
+            _logger.LogInformation("Directory created: {Path}, scanning for comic files", e.FullPath);
+            _ = Task.Run(async () =>
+            {
+                // Give the system time to finish copying files into the directory
+                await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherDirectoryScanDelaySeconds));
+                await ScanDirectoryAsync(e.FullPath);
+            });
+        }
+        else if (IsComicFile(e.FullPath))
         {
             _logger.LogInformation("File created: {Path}", e.FullPath);
             _ = Task.Run(async () =>
             {
                 await _fileStore.AddFileAsync(e.FullPath);
                 // Debounce and process
-                await Task.Delay(TimeSpan.FromSeconds(30));
+                await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
                 await _processor.ProcessFileAsync(e.FullPath);
             });
         }
@@ -167,7 +225,7 @@ public class FileWatcherService : IFileWatcherService
             _logger.LogInformation("File changed: {Path}", e.FullPath);
             _ = Task.Run(async () =>
             {
-                await Task.Delay(TimeSpan.FromSeconds(30));
+                await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
                 await _processor.ProcessFileAsync(e.FullPath);
             });
         }

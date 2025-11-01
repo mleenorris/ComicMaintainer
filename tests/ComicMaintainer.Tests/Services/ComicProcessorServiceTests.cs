@@ -258,6 +258,55 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.Null(job);
     }
 
+    [Fact]
+    public async Task ProcessFilesAsync_WithEventBroadcaster_BroadcastsEvents()
+    {
+        // Arrange
+        var mockEventBroadcaster = new Mock<IEventBroadcaster>();
+        var serviceWithBroadcaster = new ComicProcessorService(
+            _mockOptions.Object, 
+            _mockLogger.Object, 
+            _mockFileStore.Object,
+            mockEventBroadcaster.Object);
+
+        var file1 = CreateTestComicArchive("Test Series", "1");
+        var files = new List<string> { file1 };
+
+        _mockFileStore.Setup(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var jobId = await serviceWithBroadcaster.ProcessFilesAsync(files);
+        
+        // Wait for async processing to complete
+        await Task.Delay(2000);
+
+        // Assert
+        var job = serviceWithBroadcaster.GetJob(jobId);
+        Assert.NotNull(job);
+        
+        // Verify that event broadcaster was called for job updates
+        mockEventBroadcaster.Verify(
+            b => b.BroadcastJobUpdateAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<int>()),
+            Times.AtLeastOnce);
+
+        // Verify that file processed event was broadcast
+        mockEventBroadcaster.Verify(
+            b => b.BroadcastFileProcessedAsync(
+                It.IsAny<string>(),
+                It.IsAny<bool>(),
+                It.IsAny<string?>()),
+            Times.AtLeastOnce);
+    }
+
     private string CreateTestComicArchive(string series, string issue, int? year = null)
     {
         var fileName = $"{series} - Chapter {issue}.cbz";

@@ -94,3 +94,4 @@ TestResults/
 coverage.cobertura.xml
 *.coverage
 *.coveragexml
+coveragereport/

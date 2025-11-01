@@ -41,6 +41,56 @@ public class FileStoreService : IFileStoreService
         return input.Replace("\r", "").Replace("\n", "");
     }
 
+    private bool IsPathWithinAllowedDirectories(string filePath)
+    {
+        try
+        {
+            // Get the full path to resolve any relative paths
+            var fullPath = Path.GetFullPath(filePath);
+            
+            // Check for path traversal attempts
+            if (fullPath.Contains(".."))
+            {
+                _logger.LogWarning("Path traversal attempt detected: {FilePath}", SanitizeForLogging(filePath));
+                return false;
+            }
+
+            // Ensure path is within allowed directories
+            var watchedDir = Path.GetFullPath(_settings.WatchedDirectory);
+            var duplicateDir = !string.IsNullOrEmpty(_settings.DuplicateDirectory) 
+                ? Path.GetFullPath(_settings.DuplicateDirectory) 
+                : string.Empty;
+
+            var isInWatchedDir = fullPath.StartsWith(watchedDir, StringComparison.OrdinalIgnoreCase);
+            var isInDuplicateDir = !string.IsNullOrEmpty(duplicateDir) && 
+                                  fullPath.StartsWith(duplicateDir, StringComparison.OrdinalIgnoreCase);
+
+            return isInWatchedDir || isInDuplicateDir;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error validating path: {FilePath}", SanitizeForLogging(filePath));
+            return false;
+        }
+    }
+
+    private ComicFileEntity CreateFileEntity(string filePath, bool? isProcessed = null, bool? isDuplicate = null)
+    {
+        var fileInfo = new FileInfo(filePath);
+        return new ComicFileEntity
+        {
+            FilePath = filePath,
+            FileName = fileInfo.Name,
+            Directory = fileInfo.DirectoryName ?? string.Empty,
+            FileSize = fileInfo.Length,
+            LastModified = fileInfo.LastWriteTime,
+            IsProcessed = isProcessed ?? _processedFiles.ContainsKey(filePath),
+            IsDuplicate = isDuplicate ?? _duplicateFiles.ContainsKey(filePath),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+    }
+
     public Task<IEnumerable<ComicFile>> GetAllFilesAsync(CancellationToken cancellationToken = default)
     {
         var files = _files.Values.ToList();
@@ -65,10 +115,17 @@ public class FileStoreService : IFileStoreService
         return Task.FromResult(files.ToList().AsEnumerable());
     }
 
-    public Task AddFileAsync(string filePath, CancellationToken cancellationToken = default)
+    public async Task AddFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
+        // Validate path is within allowed directories
+        if (!IsPathWithinAllowedDirectories(filePath))
+        {
+            _logger.LogWarning("Attempted to add file outside allowed directories: {FilePath}", SanitizeForLogging(filePath));
+            return;
+        }
+
         if (!File.Exists(filePath))
-            return Task.CompletedTask;
+            return;
 
         var fileInfo = new FileInfo(filePath);
         var comicFile = new ComicFile
@@ -83,15 +140,70 @@ public class FileStoreService : IFileStoreService
         };
 
         _files.AddOrUpdate(filePath, comicFile, (_, _) => comicFile);
-        return Task.CompletedTask;
+
+        // Persist to database
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            
+            var entity = await dbContext.ComicFiles
+                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+
+            if (entity == null)
+            {
+                // Create new entity
+                entity = CreateFileEntity(filePath);
+                dbContext.ComicFiles.Add(entity);
+                await dbContext.SaveChangesAsync(cancellationToken);
+                _logger.LogDebug("Added new file to database: {FilePath}", SanitizeForLogging(filePath));
+            }
+            else
+            {
+                // Update existing entity
+                entity.FileName = fileInfo.Name;
+                entity.Directory = fileInfo.DirectoryName ?? string.Empty;
+                entity.FileSize = fileInfo.Length;
+                entity.LastModified = fileInfo.LastWriteTime;
+                entity.IsProcessed = comicFile.IsProcessed;
+                entity.IsDuplicate = comicFile.IsDuplicate;
+                entity.UpdatedAt = DateTime.UtcNow;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                _logger.LogDebug("Updated existing file in database: {FilePath}", SanitizeForLogging(filePath));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error persisting file to database: {FilePath}", SanitizeForLogging(filePath));
+        }
     }
 
-    public Task RemoveFileAsync(string filePath, CancellationToken cancellationToken = default)
+    public async Task RemoveFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
         _files.TryRemove(filePath, out _);
         _processedFiles.TryRemove(filePath, out _);
         _duplicateFiles.TryRemove(filePath, out _);
-        return Task.CompletedTask;
+
+        // Remove from database
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            
+            var entity = await dbContext.ComicFiles
+                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+
+            if (entity != null)
+            {
+                dbContext.ComicFiles.Remove(entity);
+                await dbContext.SaveChangesAsync(cancellationToken);
+                _logger.LogDebug("Removed file from database: {FilePath}", SanitizeForLogging(filePath));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error removing file from database: {FilePath}", SanitizeForLogging(filePath));
+        }
     }
 
     public async Task MarkFileProcessedAsync(string filePath, bool processed, CancellationToken cancellationToken = default)
@@ -128,7 +240,18 @@ public class FileStoreService : IFileStoreService
             }
             else
             {
-                _logger.LogDebug("File {FilePath} not found in database, skipping status update", SanitizeForLogging(filePath));
+                // Create entity if it doesn't exist
+                if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
+                {
+                    entity = CreateFileEntity(filePath, isProcessed: processed);
+                    dbContext.ComicFiles.Add(entity);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    _logger.LogDebug("Created file entity and set processing status for {FilePath} to {Status}", SanitizeForLogging(filePath), processed);
+                }
+                else
+                {
+                    _logger.LogDebug("File {FilePath} not found on filesystem or outside allowed directories, skipping database creation", SanitizeForLogging(filePath));
+                }
             }
         }
         catch (Exception ex)
@@ -171,7 +294,18 @@ public class FileStoreService : IFileStoreService
             }
             else
             {
-                _logger.LogDebug("File {FilePath} not found in database, skipping duplicate status update", SanitizeForLogging(filePath));
+                // Create entity if it doesn't exist
+                if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
+                {
+                    entity = CreateFileEntity(filePath, isDuplicate: duplicate);
+                    dbContext.ComicFiles.Add(entity);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    _logger.LogDebug("Created file entity and set duplicate status for {FilePath} to {Status}", SanitizeForLogging(filePath), duplicate);
+                }
+                else
+                {
+                    _logger.LogDebug("File {FilePath} not found on filesystem or outside allowed directories, skipping database creation", SanitizeForLogging(filePath));
+                }
             }
         }
         catch (Exception ex)

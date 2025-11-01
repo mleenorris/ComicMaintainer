@@ -249,14 +249,14 @@ public class FilesController : ControllerBase
         {
             _logger.LogInformation("Scan unmarked files requested");
             
-            // Get file counts
-            var allFiles = await _fileStore.GetAllFilesAsync();
-            var unmarkedFiles = await _fileStore.GetFilteredFilesAsync("unprocessed");
-            var markedFiles = await _fileStore.GetFilteredFilesAsync("processed");
+            // Get file counts - materialize collections to avoid multiple enumerations
+            var allFilesList = (await _fileStore.GetAllFilesAsync()).ToList();
+            var unmarkedFilesList = (await _fileStore.GetFilteredFilesAsync("unprocessed")).ToList();
+            var markedFilesList = (await _fileStore.GetFilteredFilesAsync("processed")).ToList();
             
-            var totalCount = allFiles.Count();
-            var unmarkedCount = unmarkedFiles.Count();
-            var markedCount = markedFiles.Count();
+            var totalCount = allFilesList.Count;
+            var unmarkedCount = unmarkedFilesList.Count;
+            var markedCount = markedFilesList.Count;
             
             return Ok(new { 
                 total_count = totalCount,

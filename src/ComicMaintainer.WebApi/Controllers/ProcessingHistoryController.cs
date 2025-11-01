@@ -23,11 +23,12 @@ public class ProcessingHistoryController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<object>> GetProcessingHistory(
         [FromQuery] int limit = 50,
-        [FromQuery] int offset = 0)
+        [FromQuery] int offset = 0,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            var (history, total) = await _historyService.GetHistoryAsync(limit, offset);
+            var (history, total) = await _historyService.GetHistoryAsync(limit, offset, cancellationToken);
 
             // Convert to frontend format
             var historyItems = history.Select(h => new
@@ -60,6 +61,11 @@ public class ProcessingHistoryController : ControllerBase
                 history = historyItems,
                 total
             });
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            _logger.LogWarning(ex, "Invalid request parameters for processing history");
+            return BadRequest(ex.Message);
         }
         catch (Exception ex)
         {

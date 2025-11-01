@@ -39,36 +39,28 @@ public class ProcessingHistoryService : IProcessingHistoryService
             throw new ArgumentOutOfRangeException(nameof(offset), "Offset cannot be negative");
         }
 
-        try
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+
+        var total = await dbContext.ProcessingHistory.CountAsync(cancellationToken);
+
+        var entities = await dbContext.ProcessingHistory
+            .OrderByDescending(h => h.Timestamp)
+            .Skip(offset)
+            .Take(limit)
+            .ToListAsync(cancellationToken);
+
+        var history = entities.Select(e => new ProcessingHistoryEntry
         {
-            using var scope = _serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            Id = e.EntryId,
+            FilePath = e.FilePath,
+            Action = e.Action,
+            Timestamp = e.Timestamp,
+            Success = e.Success,
+            ErrorMessage = e.ErrorMessage
+        });
 
-            var total = await dbContext.ProcessingHistory.CountAsync(cancellationToken);
-
-            var entities = await dbContext.ProcessingHistory
-                .OrderByDescending(h => h.Timestamp)
-                .Skip(offset)
-                .Take(limit)
-                .ToListAsync(cancellationToken);
-
-            var history = entities.Select(e => new ProcessingHistoryEntry
-            {
-                Id = e.EntryId,
-                FilePath = e.FilePath,
-                Action = e.Action,
-                Timestamp = e.Timestamp,
-                Success = e.Success,
-                ErrorMessage = e.ErrorMessage
-            });
-
-            return (history, total);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving processing history");
-            return (Enumerable.Empty<ProcessingHistoryEntry>(), 0);
-        }
+        return (history, total);
     }
 
     public async Task AddHistoryEntryAsync(

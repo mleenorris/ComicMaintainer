@@ -133,8 +133,8 @@ public class ProcessingHistoryControllerTests
 
         // Assert
         var statusResult = Assert.IsType<ActionResult<object>>(result);
-        var objectResult = Assert.IsType<ObjectResult>(statusResult.Result);
-        Assert.Equal(500, objectResult.StatusCode);
+        var badRequestResult = Assert.IsType<BadRequestObjectResult>(statusResult.Result);
+        Assert.Equal(400, badRequestResult.StatusCode);
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public class ProcessingHistoryControllerTests
 
         // Assert
         var statusResult = Assert.IsType<ActionResult<object>>(result);
-        var objectResult = Assert.IsType<ObjectResult>(statusResult.Result);
-        Assert.Equal(500, objectResult.StatusCode);
+        var badRequestResult = Assert.IsType<BadRequestObjectResult>(statusResult.Result);
+        Assert.Equal(400, badRequestResult.StatusCode);
     }
 }

@@ -205,6 +205,7 @@ builder.Services.AddSingleton<IEventBroadcaster>(sp => sp.GetRequiredService<Eve
 builder.Services.AddSingleton<IFileStoreService, FileStoreService>();
 builder.Services.AddSingleton<IComicProcessorService, ComicProcessorService>();
 builder.Services.AddSingleton<IFileWatcherService, FileWatcherService>();
+builder.Services.AddSingleton<IProcessingHistoryService, ProcessingHistoryService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 
 // Add hosted service for file watcher

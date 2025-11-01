@@ -4,6 +4,7 @@ using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
+using System.Text.Json;
 
 namespace ComicMaintainer.Tests.Controllers;
 
@@ -361,10 +362,10 @@ public class FilesControllerTests
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
         Assert.NotNull(okResult.Value);
-        var successProperty = okResult.Value?.GetType().GetProperty("success");
-        Assert.NotNull(successProperty);
-        var success = (bool?)successProperty.GetValue(okResult.Value);
-        Assert.True(success);
+        var json = JsonSerializer.Serialize(okResult.Value);
+        var response = JsonSerializer.Deserialize<JsonElement>(json);
+        Assert.True(response.GetProperty("success").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, response.GetProperty("error").ValueKind);
     }
 
     [Fact]
@@ -381,9 +382,9 @@ public class FilesControllerTests
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
         Assert.NotNull(okResult.Value);
-        var successProperty = okResult.Value?.GetType().GetProperty("success");
-        Assert.NotNull(successProperty);
-        var success = (bool?)successProperty.GetValue(okResult.Value);
-        Assert.False(success);
+        var json = JsonSerializer.Serialize(okResult.Value);
+        var response = JsonSerializer.Deserialize<JsonElement>(json);
+        Assert.False(response.GetProperty("success").GetBoolean());
+        Assert.Equal("Failed to update tags", response.GetProperty("error").GetString());
     }
 }

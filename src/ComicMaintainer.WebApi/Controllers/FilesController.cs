@@ -382,7 +382,11 @@ public class FilesController : ControllerBase
         try
         {
             var success = await _processor.UpdateMetadataAsync(filepath, metadata);
-            return success ? Ok(new { success = true }) : Ok(new { success = false, error = "Failed to update tags" });
+            if (success)
+            {
+                return Ok(new { success = true, error = (string?)null });
+            }
+            return Ok(new { success = false, error = "Failed to update tags" });
         }
         catch (Exception ex)
         {

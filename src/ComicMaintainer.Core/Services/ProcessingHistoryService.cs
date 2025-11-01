@@ -28,6 +28,17 @@ public class ProcessingHistoryService : IProcessingHistoryService
         int offset = 0, 
         CancellationToken cancellationToken = default)
     {
+        // Validate input parameters
+        if (limit < 1 || limit > 1000)
+        {
+            throw new ArgumentOutOfRangeException(nameof(limit), "Limit must be between 1 and 1000");
+        }
+
+        if (offset < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(offset), "Offset cannot be negative");
+        }
+
         try
         {
             using var scope = _serviceProvider.CreateScope();

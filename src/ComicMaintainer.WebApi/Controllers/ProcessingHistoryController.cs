@@ -1,10 +1,12 @@
 using ComicMaintainer.Core.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
 [ApiController]
 [Route("api/processing-history")]
+[Authorize]
 public class ProcessingHistoryController : ControllerBase
 {
     private readonly IProcessingHistoryService _historyService;

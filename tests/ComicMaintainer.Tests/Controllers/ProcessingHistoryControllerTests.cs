@@ -119,4 +119,38 @@ public class ProcessingHistoryControllerTests
             s => s.GetHistoryAsync(expectedLimit, expectedOffset, It.IsAny<CancellationToken>()), 
             Times.Once);
     }
+
+    [Fact]
+    public async Task GetProcessingHistory_RejectsInvalidLimit()
+    {
+        // Arrange
+        _historyServiceMock
+            .Setup(s => s.GetHistoryAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentOutOfRangeException("limit"));
+
+        // Act
+        var result = await _controller.GetProcessingHistory(0, 0);
+
+        // Assert
+        var statusResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<ObjectResult>(statusResult.Result);
+        Assert.Equal(500, objectResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetProcessingHistory_RejectsNegativeOffset()
+    {
+        // Arrange
+        _historyServiceMock
+            .Setup(s => s.GetHistoryAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentOutOfRangeException("offset"));
+
+        // Act
+        var result = await _controller.GetProcessingHistory(50, -1);
+
+        // Assert
+        var statusResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<ObjectResult>(statusResult.Result);
+        Assert.Equal(500, objectResult.StatusCode);
+    }
 }

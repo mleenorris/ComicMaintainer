@@ -8,6 +8,7 @@ using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Middleware;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -88,10 +89,25 @@ builder.Services.Configure<JwtSettings>(options =>
 });
 
 // Configure database
+var configDirectory = builder.Configuration["AppSettings:ConfigDirectory"] ?? "/Config";
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
-    ?? $"Data Source={Path.Combine(builder.Configuration["AppSettings:ConfigDirectory"] ?? "/Config", "comicmaintainer.db")}";
+    ?? $"Data Source={Path.Combine(configDirectory, "comicmaintainer.db")}";
 builder.Services.AddDbContext<ComicMaintainerDbContext>(options =>
     options.UseSqlite(connectionString));
+
+// Configure Data Protection to persist keys in Config directory
+try
+{
+    var dataProtectionPath = Path.Combine(configDirectory, "DataProtection-Keys");
+    Directory.CreateDirectory(dataProtectionPath);
+    builder.Services.AddDataProtection()
+        .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionPath))
+        .SetApplicationName("ComicMaintainer");
+}
+catch (Exception ex)
+{
+    Log.Warning(ex, "Failed to configure DataProtection with persistent storage. Using temporary storage.");
+}
 
 // Configure Identity
 builder.Services.AddIdentity<ApplicationUser, ApplicationRole>(options =>
@@ -116,6 +132,15 @@ var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET") ?? jwtSettings.
 if (string.IsNullOrEmpty(jwtSecret))
 {
     throw new InvalidOperationException("JWT_SECRET must be configured in appsettings.json or environment variable");
+}
+
+// Warn if using default JWT secret
+var defaultSecret = "YourSecretKeyHere-ChangeInProduction-MustBeAtLeast32CharactersLong!";
+if (jwtSecret == defaultSecret)
+{
+    Log.Warning("⚠️ WARNING: Using default JWT secret! Please set JWT_SECRET environment variable for production.");
+    Log.Warning("⚠️ Current secret is stored in appsettings.json which is not persisted in /Config directory.");
+    Log.Warning("⚠️ Set JWT_SECRET environment variable to use a secure, persistent secret.");
 }
 
 builder.Services.AddAuthentication(options =>

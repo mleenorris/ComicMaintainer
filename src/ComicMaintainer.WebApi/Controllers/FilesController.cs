@@ -24,12 +24,84 @@ public class FilesController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<ComicFile>>> GetFiles([FromQuery] string? filter = null)
+    public async Task<ActionResult<object>> GetFiles(
+        [FromQuery] string? filter = null,
+        [FromQuery] string? search = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int per_page = 100,
+        [FromQuery] string? sort = "name",
+        [FromQuery] string? direction = "asc")
     {
         try
         {
-            var files = await _fileStore.GetFilteredFilesAsync(filter);
-            return Ok(files);
+            // Map filter values from frontend format
+            var mappedFilter = filter switch
+            {
+                "marked" => "processed",
+                "unmarked" => "unprocessed",
+                "duplicates" => "duplicates",
+                _ => null
+            };
+
+            var allFiles = await _fileStore.GetFilteredFilesAsync(mappedFilter);
+            
+            // Apply search if provided
+            if (!string.IsNullOrEmpty(search))
+            {
+                allFiles = allFiles.Where(f => 
+                    f.FileName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    f.FilePath.Contains(search, StringComparison.OrdinalIgnoreCase));
+            }
+
+            // Apply sorting
+            allFiles = (sort?.ToLower(), direction?.ToLower()) switch
+            {
+                ("name", "asc") => allFiles.OrderBy(f => f.FileName),
+                ("name", "desc") => allFiles.OrderByDescending(f => f.FileName),
+                ("date", "asc") => allFiles.OrderBy(f => f.LastModified),
+                ("date", "desc") => allFiles.OrderByDescending(f => f.LastModified),
+                ("size", "asc") => allFiles.OrderBy(f => f.FileSize),
+                ("size", "desc") => allFiles.OrderByDescending(f => f.FileSize),
+                _ => allFiles.OrderBy(f => f.FileName)
+            };
+
+            var filesList = allFiles.ToList();
+            var totalFiles = filesList.Count;
+            
+            // Get unmarked count (all unprocessed, non-duplicate files)
+            var allUnmarked = await _fileStore.GetFilteredFilesAsync("unprocessed");
+            var unmarkedCount = allUnmarked.Count();
+
+            // Handle pagination (-1 means return all)
+            if (per_page == -1)
+            {
+                return Ok(new
+                {
+                    files = filesList,
+                    page = 1,
+                    total_pages = 1,
+                    total_files = totalFiles,
+                    unmarked_count = unmarkedCount
+                });
+            }
+
+            // Calculate pagination
+            var totalPages = (int)Math.Ceiling((double)totalFiles / per_page);
+            page = Math.Max(1, Math.Min(page, totalPages == 0 ? 1 : totalPages));
+            
+            var pagedFiles = filesList
+                .Skip((page - 1) * per_page)
+                .Take(per_page)
+                .ToList();
+
+            return Ok(new
+            {
+                files = pagedFiles,
+                page,
+                total_pages = totalPages,
+                total_files = totalFiles,
+                unmarked_count = unmarkedCount
+            });
         }
         catch (Exception ex)
         {

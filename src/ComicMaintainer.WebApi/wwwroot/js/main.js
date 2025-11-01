@@ -38,7 +38,11 @@
         // Helper function to encode filepath for RESTful URL
         function encodeFilePathForUrl(filePath) {
             // Convert to base64 URL-safe encoding
-            const base64 = btoa(unescape(encodeURIComponent(filePath)));
+            // Use TextEncoder for proper UTF-8 encoding
+            const encoder = new TextEncoder();
+            const data = encoder.encode(filePath);
+            // Convert Uint8Array to regular array and then to base64
+            const base64 = btoa(String.fromCharCode(...data));
             return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         }
         

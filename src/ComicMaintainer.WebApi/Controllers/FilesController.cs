@@ -343,7 +343,8 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting tags for encoded path {EncodedPath}", encodedFilePath);
+            var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
+            _logger.LogError(ex, "Error getting tags for encoded path {EncodedPath}", sanitizedEncodedPath);
             return StatusCode(500, "Error getting tags");
         }
     }
@@ -363,18 +364,10 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating tags for encoded path {EncodedPath}", encodedFilePath);
+            var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
+            _logger.LogError(ex, "Error updating tags for encoded path {EncodedPath}", sanitizedEncodedPath);
             return StatusCode(500, "Error updating tags");
         }
-    }
-
-    private static string EncodeBase64UrlSafe(string input)
-    {
-        var bytes = System.Text.Encoding.UTF8.GetBytes(input);
-        return Convert.ToBase64String(bytes)
-            .Replace('+', '-')
-            .Replace('/', '_')
-            .TrimEnd('=');
     }
 
     private static string DecodeBase64UrlSafe(string input)

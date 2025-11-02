@@ -1347,6 +1347,12 @@
                 grid-template-columns: 30px 40px 1fr minmax(80px, auto);
             }
             
+            /* Hide empty placeholder columns in tablet */
+            .directory-header > *:nth-child(5),
+            .directory-header > *:nth-child(6) {
+                display: none;
+            }
+            
             .directory-name-section {
                 gap: 6px;
             }
@@ -1718,6 +1724,12 @@
                 overflow: hidden;
             }
             
+            /* Hide empty placeholder columns in mobile */
+            .directory-header > *:nth-child(5),
+            .directory-header > *:nth-child(6) {
+                display: none;
+            }
+            
             .directory-name-section {
                 gap: 6px;
                 font-size: 13px;
@@ -1838,6 +1850,12 @@
                 font-size: 12px;
                 grid-template-columns: 25px 25px 1fr 55px;
                 overflow: hidden;
+            }
+            
+            /* Hide empty placeholder columns in small mobile */
+            .directory-header > *:nth-child(5),
+            .directory-header > *:nth-child(6) {
+                display: none;
             }
             
             .directory-name-section {

@@ -936,6 +936,8 @@
                                 <span class="directory-path">${escapeHtml(dir)}</span>
                             </div>
                             <span class="directory-file-count">${fileCount} file${fileCount !== 1 ? 's' : ''}</span>
+                            <span></span>
+                            <span></span>
                         </div>
                     `;
                 }

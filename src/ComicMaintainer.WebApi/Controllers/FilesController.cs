@@ -13,17 +13,20 @@ public class FilesController : ControllerBase
 {
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
+    private readonly IProcessingHistoryService _historyService;
     private readonly ILogger<FilesController> _logger;
     private readonly AppSettings _settings;
 
     public FilesController(
         IFileStoreService fileStore,
         IComicProcessorService processor,
+        IProcessingHistoryService historyService,
         ILogger<FilesController> logger,
         IOptions<AppSettings> settings)
     {
         _fileStore = fileStore;
         _processor = processor;
+        _historyService = historyService;
         _logger = logger;
         _settings = settings.Value;
     }
@@ -180,13 +183,19 @@ public class FilesController : ControllerBase
 
             var success = await _processor.UpdateMetadataAsync(filePath, metadata);
             if (!success)
+            {
+                await LogHistoryAsync(filePath, "Update Metadata", false, "Failed to update metadata");
                 return BadRequest("Failed to update metadata");
+            }
+            
+            await LogHistoryAsync(filePath, "Update Metadata", true);
             
             return Ok();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating metadata for {FilePath}", filePath);
+            await LogHistoryAsync(filePath, "Update Metadata", false, ex.Message);
             return StatusCode(500, "Error updating metadata");
         }
     }
@@ -436,6 +445,10 @@ public class FilesController : ControllerBase
                 // This order prevents orphaned file store entries if file deletion fails
                 await _fileStore.RemoveFileAsync(filePath);
                 System.IO.File.Delete(filePath);
+                
+                // Log to processing history
+                await LogHistoryAsync(filePath, "Delete", true);
+                
                 return Ok();
             }
             return NotFound();
@@ -444,6 +457,11 @@ public class FilesController : ControllerBase
         {
             var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
             _logger.LogError(ex, "Error deleting file with encoded path {EncodedPath}", sanitizedEncodedPath);
+            
+            // Log to processing history
+            var filePath = DecodeBase64UrlSafe(encodedFilePath);
+            await LogHistoryAsync(filePath, "Delete", false, ex.Message);
+            
             return StatusCode(500, "Error deleting file");
         }
     }
@@ -467,6 +485,10 @@ public class FilesController : ControllerBase
                 // This order prevents orphaned file store entries if file deletion fails
                 await _fileStore.RemoveFileAsync(filePath);
                 System.IO.File.Delete(filePath);
+                
+                // Log to processing history
+                await LogHistoryAsync(filePath, "Delete", true);
+                
                 return Ok();
             }
             return NotFound();
@@ -475,6 +497,10 @@ public class FilesController : ControllerBase
         {
             var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
             _logger.LogError(ex, "Error deleting file {FilePath}", sanitizedPath);
+            
+            // Log to processing history
+            await LogHistoryAsync(filePath, "Delete", false, ex.Message);
+            
             return StatusCode(500, "Error deleting file");
         }
     }
@@ -543,6 +569,22 @@ public class FilesController : ControllerBase
     }
 
 
+
+    /// <summary>
+    /// Helper method to log processing history entries
+    /// </summary>
+    private async Task LogHistoryAsync(string filePath, string action, bool success, string? errorMessage = null)
+    {
+        await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+        {
+            Id = Guid.NewGuid(),
+            FilePath = filePath,
+            Action = action,
+            Timestamp = DateTime.UtcNow,
+            Success = success,
+            ErrorMessage = errorMessage
+        });
+    }
 
     public class UpdateTagsRequest
     {

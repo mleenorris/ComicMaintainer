@@ -796,7 +796,7 @@
         }
         
         .directory-header {
-            padding: 12px 15px;
+            padding: 15px;
             background: var(--bg-hover);
             border-bottom: 1px solid var(--border-tertiary);
             font-weight: 600;
@@ -1022,13 +1022,13 @@
             background: var(--bg-secondary);
             border: 1px solid var(--border-secondary);
             color: var(--text-primary);
-            padding: 5px 12px;
+            padding: 5px 8px;
             font-size: 12px;
             cursor: pointer;
             border-radius: 4px;
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 3px;
             transition: all 0.2s;
         }
         
@@ -1671,6 +1671,7 @@
                 align-items: center;
                 font-size: 0;
                 display: flex;
+                gap: 0;
             }
             
             .dropdown-toggle::before {

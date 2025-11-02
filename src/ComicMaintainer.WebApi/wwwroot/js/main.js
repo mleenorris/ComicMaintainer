@@ -165,6 +165,12 @@
         // Handle file processed events
         function handleFileProcessedEvent(data) {
             console.log('SSE: File processed:', data.filename, 'Success:', data.success);
+            
+            // Add to progress details if modal is active
+            if (hasActiveJob) {
+                addProgressDetail(data.filename, data.success, data.error);
+            }
+            
             // Refresh file list to show updated status
             loadFiles(currentPage, false);
         }

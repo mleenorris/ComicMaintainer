@@ -320,8 +320,10 @@ public class FilesController : ControllerBase
 
             if (System.IO.File.Exists(filePath))
             {
-                System.IO.File.Delete(filePath);
+                // Remove from file store first (unlikely to fail), then delete physical file
+                // This order prevents orphaned file store entries if file deletion fails
                 await _fileStore.RemoveFileAsync(filePath);
+                System.IO.File.Delete(filePath);
                 return Ok();
             }
             return NotFound();
@@ -342,8 +344,10 @@ public class FilesController : ControllerBase
         {
             if (System.IO.File.Exists(filePath))
             {
-                System.IO.File.Delete(filePath);
+                // Remove from file store first (unlikely to fail), then delete physical file
+                // This order prevents orphaned file store entries if file deletion fails
                 await _fileStore.RemoveFileAsync(filePath);
+                System.IO.File.Delete(filePath);
                 return Ok();
             }
             return NotFound();

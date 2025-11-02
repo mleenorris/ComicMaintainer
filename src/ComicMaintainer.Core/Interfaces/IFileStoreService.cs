@@ -51,4 +51,9 @@ public interface IFileStoreService
     /// Check if a file is already marked as processed
     /// </summary>
     Task<bool> IsFileProcessedAsync(string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Check if a file exists in the store
+    /// </summary>
+    Task<bool> FileExistsAsync(string filePath, CancellationToken cancellationToken = default);
 }

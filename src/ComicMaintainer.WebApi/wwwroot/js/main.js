@@ -972,7 +972,7 @@
                         : `<span class="file-name-content">${escapeHtml(filenameParts.start)}</span>`;
                     
                     html += `
-                        <div class="file-item ${dir ? 'indented' : ''} ${statusClass}">
+                        <div class="file-item ${statusClass}">
                             <input type="checkbox" 
                                    ${isSelected ? 'checked' : ''} 
                                    onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">

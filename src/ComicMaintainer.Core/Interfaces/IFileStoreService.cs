@@ -46,4 +46,9 @@ public interface IFileStoreService
     /// Initialize file store by loading existing processed/duplicate status from database
     /// </summary>
     Task InitializeFromDatabaseAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Check if a file is already marked as processed
+    /// </summary>
+    Task<bool> IsFileProcessedAsync(string filePath, CancellationToken cancellationToken = default);
 }

@@ -2719,13 +2719,14 @@
             const logsLoadingIndicator = document.getElementById('logsLoadingIndicator');
             const logStats = document.getElementById('logStats');
             const lines = document.getElementById('logLines').value;
+            const logType = document.getElementById('logType').value;
             
             try {
                 logsLoadingIndicator.style.display = 'block';
                 logsContent.textContent = '';
                 logStats.textContent = '';
                 
-                const response = await fetch(apiUrl(`/api/logs?lines=${lines}`), {
+                const response = await fetch(apiUrl(`/api/logs?lines=${lines}&type=${logType}`), {
                     headers: getAuthHeaders()
                 });
                 

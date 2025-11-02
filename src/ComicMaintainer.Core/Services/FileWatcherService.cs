@@ -159,6 +159,15 @@ public class FileWatcherService : IFileWatcherService
                 try
                 {
                     await _fileStore.AddFileAsync(file, cancellationToken);
+                    
+                    // Check if file is already processed before processing
+                    var isProcessed = await _fileStore.IsFileProcessedAsync(file, cancellationToken);
+                    if (isProcessed)
+                    {
+                        _logger.LogInformation("File already processed, skipping: {File}", file);
+                        continue;
+                    }
+                    
                     // Process each file after a delay to avoid overwhelming the system
                     await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds), cancellationToken);
                     await _processor.ProcessFileAsync(file, cancellationToken);
@@ -225,6 +234,15 @@ public class FileWatcherService : IFileWatcherService
             _ = Task.Run(async () =>
             {
                 await _fileStore.AddFileAsync(e.FullPath);
+                
+                // Check if file is already processed before processing
+                var isProcessed = await _fileStore.IsFileProcessedAsync(e.FullPath);
+                if (isProcessed)
+                {
+                    _logger.LogInformation("File already processed, skipping: {Path}", e.FullPath);
+                    return;
+                }
+                
                 // Debounce and process
                 await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
                 await _processor.ProcessFileAsync(e.FullPath);

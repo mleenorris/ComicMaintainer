@@ -280,6 +280,18 @@ public class FileWatcherService : IFileWatcherService
             {
                 await _fileStore.RemoveFileAsync(e.OldFullPath);
                 await _fileStore.AddFileAsync(e.FullPath);
+                
+                // Check if file is already processed before processing
+                var isProcessed = await _fileStore.IsFileProcessedAsync(e.FullPath);
+                if (isProcessed)
+                {
+                    _logger.LogInformation("File already processed, skipping: {Path}", e.FullPath);
+                    return;
+                }
+                
+                // Process the renamed file after a delay
+                await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
+                await _processor.ProcessFileAsync(e.FullPath);
             });
         }
     }

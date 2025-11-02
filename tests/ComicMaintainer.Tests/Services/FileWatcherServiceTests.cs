@@ -225,6 +225,100 @@ public class FileWatcherServiceTests : IDisposable
             "Subdirectory file should be found");
     }
 
+    [Fact]
+    public async Task OnFileRenamed_ProcessesRenamedComicFile()
+    {
+        // Arrange
+        var tempFile = Path.Combine(_testDirectory, ".temp_file.cbz.tmp123");
+        var renamedFile = Path.Combine(_testDirectory, "renamed_comic.cbz");
+        
+        // Setup mock to indicate file is not processed
+        _mockFileStore.Setup(fs => fs.IsFileProcessedAsync(renamedFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        
+        // Create the temporary file
+        File.WriteAllText(tempFile, "fake cbz content");
+        
+        // Start the watcher
+        await _service.StartAsync();
+        
+        // Wait a bit for watcher to initialize
+        await Task.Delay(100);
+
+        // Act - Rename the file to a proper comic file name
+        File.Move(tempFile, renamedFile);
+        
+        // Wait for file system events and processing (stability delay + processing time)
+        await Task.Delay(2000);
+
+        // Assert - File should be removed from old path and added to new path
+        _mockFileStore.Verify(
+            fs => fs.RemoveFileAsync(tempFile, It.IsAny<CancellationToken>()), 
+            Times.Once, 
+            "Old file path should be removed from file store");
+        
+        _mockFileStore.Verify(
+            fs => fs.AddFileAsync(renamedFile, It.IsAny<CancellationToken>()), 
+            Times.Once, 
+            "New file path should be added to file store");
+        
+        // Verify that processing status was checked
+        _mockFileStore.Verify(
+            fs => fs.IsFileProcessedAsync(renamedFile, It.IsAny<CancellationToken>()), 
+            Times.Once, 
+            "Should check if file is already processed");
+        
+        // Verify that file was processed
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(renamedFile, It.IsAny<CancellationToken>()), 
+            Times.Once, 
+            "Renamed file should be processed");
+    }
+
+    [Fact]
+    public async Task OnFileRenamed_SkipsProcessingIfAlreadyProcessed()
+    {
+        // Arrange
+        var tempFile = Path.Combine(_testDirectory, ".temp_file2.cbz.tmp456");
+        var renamedFile = Path.Combine(_testDirectory, "already_processed.cbz");
+        
+        // Setup mock to indicate file is already processed
+        _mockFileStore.Setup(fs => fs.IsFileProcessedAsync(renamedFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        
+        // Create the temporary file
+        File.WriteAllText(tempFile, "fake cbz content");
+        
+        // Start the watcher
+        await _service.StartAsync();
+        
+        // Wait a bit for watcher to initialize
+        await Task.Delay(100);
+
+        // Act - Rename the file
+        File.Move(tempFile, renamedFile);
+        
+        // Wait for file system events
+        await Task.Delay(2000);
+
+        // Assert - File should be added to store but NOT processed
+        _mockFileStore.Verify(
+            fs => fs.AddFileAsync(renamedFile, It.IsAny<CancellationToken>()), 
+            Times.Once, 
+            "New file path should be added to file store");
+        
+        _mockFileStore.Verify(
+            fs => fs.IsFileProcessedAsync(renamedFile, It.IsAny<CancellationToken>()), 
+            Times.Once, 
+            "Should check if file is already processed");
+        
+        // Verify that file was NOT processed since it's already marked as processed
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(renamedFile, It.IsAny<CancellationToken>()), 
+            Times.Never, 
+            "Already processed file should not be processed again");
+    }
+
     public void Dispose()
     {
         _service.StopAsync().Wait();

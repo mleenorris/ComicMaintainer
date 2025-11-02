@@ -58,20 +58,41 @@
                                            FontAttributes="Bold"
                                            LineBreakMode="TailTruncation" />
                                     
-                                    <Label Text="{Binding FolderName}"
+                                    <Label Text="{Binding Directory}"
                                            FontSize="12"
                                            TextColor="Gray"
                                            LineBreakMode="TailTruncation" />
                                     
-                                    <Label FontSize="12">
-                                        <Label.FormattedText>
-                                            <FormattedString>
-                                                <Span Text="Status: " />
-                                                <Span Text="{Binding Status}"
-                                                      TextColor="{Binding Status, Converter={StaticResource StatusToColorConverter}}" />
-                                            </FormattedString>
-                                        </Label.FormattedText>
-                                    </Label>
+                                    <HorizontalStackLayout Spacing="5">
+                                        <Label Text="Status:"
+                                               FontSize="12" />
+                                        <Label FontSize="12">
+                                            <Label.Text>
+                                                <MultiBinding StringFormat="{}{0}">
+                                                    <Binding Path="IsDuplicate" />
+                                                    <Binding Path="IsProcessed" />
+                                                </MultiBinding>
+                                            </Label.Text>
+                                            <Label.Triggers>
+                                                <DataTrigger TargetType="Label" Binding="{Binding IsDuplicate}" Value="True">
+                                                    <Setter Property="Text" Value="Duplicate" />
+                                                    <Setter Property="TextColor" Value="Red" />
+                                                </DataTrigger>
+                                                <DataTrigger TargetType="Label" Binding="{Binding IsProcessed}" Value="True">
+                                                    <Setter Property="Text" Value="Processed" />
+                                                    <Setter Property="TextColor" Value="Green" />
+                                                </DataTrigger>
+                                                <MultiTrigger TargetType="Label">
+                                                    <MultiTrigger.Conditions>
+                                                        <BindingCondition Binding="{Binding IsProcessed}" Value="False" />
+                                                        <BindingCondition Binding="{Binding IsDuplicate}" Value="False" />
+                                                    </MultiTrigger.Conditions>
+                                                    <Setter Property="Text" Value="Unprocessed" />
+                                                    <Setter Property="TextColor" Value="Orange" />
+                                                </MultiTrigger>
+                                            </Label.Triggers>
+                                        </Label>
+                                    </HorizontalStackLayout>
                                 </VerticalStackLayout>
 
                                 <Button Grid.Column="1"

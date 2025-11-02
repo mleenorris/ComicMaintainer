@@ -105,13 +105,29 @@ public partial class FilesViewModel : ObservableObject
         await LoadFiles();
     }
 
-    partial void OnSearchTextChanged(string value)
+    private CancellationTokenSource? _searchCts;
+
+    async partial void OnSearchTextChanged(string value)
     {
-        Task.Run(async () => await LoadFiles());
+        // Cancel any pending search
+        _searchCts?.Cancel();
+        _searchCts = new CancellationTokenSource();
+        
+        try
+        {
+            // Debounce search for 500ms
+            await Task.Delay(500, _searchCts.Token);
+            await LoadFiles();
+        }
+        catch (TaskCanceledException)
+        {
+            // Ignore cancellation
+        }
     }
 
-    partial void OnSelectedFilterChanged(string value)
+    async partial void OnSelectedFilterChanged(string value)
     {
-        Task.Run(async () => await LoadFiles());
+        CurrentPage = 1;
+        await LoadFiles();
     }
 }

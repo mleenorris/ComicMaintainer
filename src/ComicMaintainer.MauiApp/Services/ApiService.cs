@@ -6,40 +6,38 @@ namespace ComicMaintainer.MauiApp.Services;
 
 public class ApiService : IApiService
 {
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ISettingsService _settingsService;
     private readonly JsonSerializerOptions _jsonOptions;
 
-    public ApiService(ISettingsService settingsService)
+    public ApiService(IHttpClientFactory httpClientFactory, ISettingsService settingsService)
     {
+        _httpClientFactory = httpClientFactory;
         _settingsService = settingsService;
-        _httpClient = new HttpClient();
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true
         };
-        
-        UpdateBaseAddress();
     }
 
-    private void UpdateBaseAddress()
+    private HttpClient CreateClient()
     {
+        var client = _httpClientFactory.CreateClient();
         var serverUrl = _settingsService.ServerUrl;
         if (!string.IsNullOrWhiteSpace(serverUrl))
         {
-            _httpClient.BaseAddress = new Uri(serverUrl);
+            client.BaseAddress = new Uri(serverUrl);
         }
+        return client;
     }
 
     public async Task<bool> TestConnectionAsync(string serverUrl)
     {
         try
         {
-            var testClient = new HttpClient
-            {
-                BaseAddress = new Uri(serverUrl),
-                Timeout = TimeSpan.FromSeconds(5)
-            };
+            using var testClient = _httpClientFactory.CreateClient();
+            testClient.BaseAddress = new Uri(serverUrl);
+            testClient.Timeout = TimeSpan.FromSeconds(5);
 
             var response = await testClient.GetAsync("/api/version");
             return response.IsSuccessStatusCode;
@@ -52,7 +50,7 @@ public class ApiService : IApiService
 
     public async Task<IEnumerable<ComicFile>> GetFilesAsync(int page = 1, int pageSize = 100, string? filter = null, string? search = null)
     {
-        UpdateBaseAddress();
+        using var client = CreateClient();
         
         var queryParams = new List<string>
         {
@@ -67,7 +65,7 @@ public class ApiService : IApiService
             queryParams.Add($"search={Uri.EscapeDataString(search)}");
 
         var query = string.Join("&", queryParams);
-        var response = await _httpClient.GetAsync($"/api/files?{query}");
+        var response = await client.GetAsync($"/api/files?{query}");
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<FilesResponse>(_jsonOptions);
@@ -76,19 +74,19 @@ public class ApiService : IApiService
 
     public async Task<bool> ProcessFileAsync(string filePath)
     {
-        UpdateBaseAddress();
+        using var client = CreateClient();
         
         var content = JsonContent.Create(new { file_path = filePath });
-        var response = await _httpClient.PostAsync("/api/files/process", content);
+        var response = await client.PostAsync("/api/files/process", content);
         return response.IsSuccessStatusCode;
     }
 
     public async Task<string> StartBatchProcessAsync(List<string> files)
     {
-        UpdateBaseAddress();
+        using var client = CreateClient();
         
         var content = JsonContent.Create(new { files });
-        var response = await _httpClient.PostAsync("/api/jobs/process-selected", content);
+        var response = await client.PostAsync("/api/jobs/process-selected", content);
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<JobResponse>(_jsonOptions);
@@ -97,9 +95,9 @@ public class ApiService : IApiService
 
     public async Task<JobStatus?> GetJobStatusAsync(string jobId)
     {
-        UpdateBaseAddress();
+        using var client = CreateClient();
         
-        var response = await _httpClient.GetAsync($"/api/jobs/{jobId}");
+        var response = await client.GetAsync($"/api/jobs/{jobId}");
         if (!response.IsSuccessStatusCode)
             return null;
 

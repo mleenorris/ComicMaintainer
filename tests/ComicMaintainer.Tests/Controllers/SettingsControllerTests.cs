@@ -73,8 +73,10 @@ public class SettingsControllerTests
         var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
         
         var padding = objectResult.Value;
+        Assert.NotNull(padding);
         var paddingProperty = padding.GetType().GetProperty("padding");
-        Assert.Equal(4, paddingProperty?.GetValue(padding));
+        Assert.NotNull(paddingProperty);
+        Assert.Equal(4, paddingProperty.GetValue(padding));
     }
 
     [Fact]
@@ -88,8 +90,10 @@ public class SettingsControllerTests
         var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
         
         var enabled = objectResult.Value;
+        Assert.NotNull(enabled);
         var enabledProperty = enabled.GetType().GetProperty("enabled");
-        Assert.Equal(true, enabledProperty?.GetValue(enabled));
+        Assert.NotNull(enabledProperty);
+        Assert.Equal(true, enabledProperty.GetValue(enabled));
     }
 
     [Fact]
@@ -103,8 +107,10 @@ public class SettingsControllerTests
         var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
         
         var tokenInfo = objectResult.Value;
+        Assert.NotNull(tokenInfo);
         var hasTokenProperty = tokenInfo.GetType().GetProperty("hasToken");
-        Assert.Equal(true, hasTokenProperty?.GetValue(tokenInfo));
+        Assert.NotNull(hasTokenProperty);
+        Assert.Equal(true, hasTokenProperty.GetValue(tokenInfo));
     }
 
     [Fact]
@@ -118,8 +124,10 @@ public class SettingsControllerTests
         var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
         
         var repo = objectResult.Value;
+        Assert.NotNull(repo);
         var repoProperty = repo.GetType().GetProperty("repository");
-        Assert.Equal("test/repo", repoProperty?.GetValue(repo));
+        Assert.NotNull(repoProperty);
+        Assert.Equal("test/repo", repoProperty.GetValue(repo));
     }
 
     // New RESTful endpoint tests

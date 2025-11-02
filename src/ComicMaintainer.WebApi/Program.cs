@@ -326,3 +326,6 @@ logger.LogInformation("Watched Directory: {WatchedDir}", appSettingsValue.Watche
 logger.LogInformation("Watcher Status: {Status}", appSettingsValue.WatcherEnabled ? "Enabled" : "Disabled");
 
 app.Run();
+
+// Make the implicit Program class public so test projects can access it
+public partial class Program { }

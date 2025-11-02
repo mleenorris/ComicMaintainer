@@ -1,6 +1,8 @@
-# ComicMaintainer - .NET Version
+# ComicMaintainer - .NET Version (v2.0)
 
-This is the C# and .NET version of ComicMaintainer, converted from the original Python implementation. This version provides the same functionality as the Python version but is built on the .NET platform, making it deployable as a web application and as a mobile app (Android/iOS) using .NET MAUI.
+**This is the main version of ComicMaintainer**, built on .NET 9.0 and C#. It provides a robust, production-ready solution for managing comic archive files with extensive testing, performance optimizations, and modern web technologies.
+
+This version has been converted from the original Python implementation and offers the same functionality plus additional features, including improved performance, better test coverage, and the ability to be deployed as a web application or packaged as a mobile app (Android/iOS) using .NET MAUI.
 
 ## Overview
 

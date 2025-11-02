@@ -7,7 +7,7 @@ using Moq;
 
 namespace ComicMaintainer.Tests.Controllers;
 
-public class LogsControllerTests
+public class LogsControllerTests : IDisposable
 {
     private readonly Mock<IOptions<AppSettings>> _mockSettings;
     private readonly Mock<ILogger<LogsController>> _mockLogger;
@@ -202,10 +202,26 @@ public class LogsControllerTests
 
     public void Dispose()
     {
-        // Clean up test directory
-        if (Directory.Exists(_testLogDir))
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
         {
-            Directory.Delete(_testLogDir, true);
+            // Clean up test directory
+            try
+            {
+                if (Directory.Exists(_testLogDir))
+                {
+                    Directory.Delete(_testLogDir, true);
+                }
+            }
+            catch (Exception)
+            {
+                // Ignore cleanup errors to prevent test failures
+            }
         }
     }
 }

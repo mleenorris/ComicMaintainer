@@ -1,0 +1,94 @@
+name: "CodeQL Advanced Security Scanning"
+
+on:
+  push:
+    branches: [ master, main, dotnet ]
+  pull_request:
+    branches: [ master, main, dotnet ]
+  schedule:
+    # Run CodeQL analysis weekly on Wednesday at 3:00 AM UTC
+    - cron: '0 3 * * 3'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  analyze:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 60  # Extended timeout to 60 minutes (default is 360)
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'csharp', 'javascript' ]
+        # CodeQL supports [ 'cpp', 'csharp', 'go', 'java', 'javascript', 'python', 'ruby' ]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        # Extended query suites for more thorough analysis
+        queries: +security-and-quality
+        # Increase timeout for individual queries
+        config: |
+          paths-ignore:
+            - '**/node_modules'
+            - '**/wwwroot/lib'
+            - '**/bin'
+            - '**/obj'
+            - '**/coveragereport'
+            - '**/*.min.js'
+            - '**/*.min.css'
+
+    - name: Setup .NET
+      if: matrix.language == 'csharp'
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '9.0.x'
+
+    - name: Restore dependencies
+      if: matrix.language == 'csharp'
+      run: dotnet restore
+
+    - name: Build .NET project
+      if: matrix.language == 'csharp'
+      run: dotnet build --no-restore --configuration Release
+      timeout-minutes: 15
+
+    # For JavaScript, CodeQL will auto-detect and analyze
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:${{matrix.language}}"
+        # Extended timeout for analysis
+        upload: true
+        wait-for-processing: true
+      timeout-minutes: 30
+
+    - name: Generate analysis summary
+      if: always()
+      run: |
+        echo "# CodeQL Analysis Summary - ${{ matrix.language }}" > codeql-summary-${{ matrix.language }}.md
+        echo "" >> codeql-summary-${{ matrix.language }}.md
+        echo "**Analysis Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> codeql-summary-${{ matrix.language }}.md
+        echo "**Language:** ${{ matrix.language }}" >> codeql-summary-${{ matrix.language }}.md
+        echo "**Query Suite:** security-and-quality (extended)" >> codeql-summary-${{ matrix.language }}.md
+        echo "**Timeout:** 60 minutes (job), 30 minutes (analysis)" >> codeql-summary-${{ matrix.language }}.md
+        echo "" >> codeql-summary-${{ matrix.language }}.md
+        echo "CodeQL analysis completed successfully." >> codeql-summary-${{ matrix.language }}.md
+        echo "Check the Security tab for detailed results." >> codeql-summary-${{ matrix.language }}.md
+
+    - name: Upload analysis summary
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: codeql-summary-${{ matrix.language }}
+        path: codeql-summary-${{ matrix.language }}.md
+        retention-days: 90

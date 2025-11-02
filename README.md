@@ -1,6 +1,8 @@
 
 # ComicTagger Watcher Service
 
+> **Note:** This is the Python-based version of ComicMaintainer. For the **primary .NET version (v2.0)** with improved performance, extensive testing, and modern architecture, see [README.DOTNET.md](README.DOTNET.md).
+
 This service automatically watches a directory for new or changed comic archive files (`.cbz`/`.cbr`), tags them using ComicTagger, and manages duplicates. It is designed to run in a Docker container and is fully automated. **The container supports custom user and group IDs (PUID/PGID) to ensure proper file permissions when working with host-mounted directories.**
 
 ## Features

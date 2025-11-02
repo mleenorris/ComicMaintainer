@@ -41,8 +41,10 @@ public class VersionControllerTests
         var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
         
         var version = objectResult.Value;
+        Assert.NotNull(version);
         var versionProperty = version.GetType().GetProperty("version");
-        var versionValue = versionProperty?.GetValue(version)?.ToString();
+        Assert.NotNull(versionProperty);
+        var versionValue = versionProperty.GetValue(version)?.ToString();
 
         // Assert
         Assert.NotNull(versionValue);

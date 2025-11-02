@@ -68,8 +68,9 @@ public class ProcessControllerTests
         var okResult = Assert.IsType<ActionResult<object>>(result);
         var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
         
-        var jobIdProperty = objectResult.Value.GetType().GetProperty("jobId");
-        Assert.Equal(expectedJobId, jobIdProperty?.GetValue(objectResult.Value));
+        var jobIdProperty = objectResult.Value?.GetType().GetProperty("jobId");
+        Assert.NotNull(jobIdProperty);
+        Assert.Equal(expectedJobId, jobIdProperty.GetValue(objectResult.Value));
         
         _processorMock.Verify(x => x.ProcessFilesAsync(files, default), Times.Once);
     }

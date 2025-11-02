@@ -66,13 +66,9 @@
                                     <HorizontalStackLayout Spacing="5">
                                         <Label Text="Status:"
                                                FontSize="12" />
-                                        <Label FontSize="12">
-                                            <Label.Text>
-                                                <MultiBinding StringFormat="{}{0}">
-                                                    <Binding Path="IsDuplicate" />
-                                                    <Binding Path="IsProcessed" />
-                                                </MultiBinding>
-                                            </Label.Text>
+                                        <Label Text="Unprocessed"
+                                               TextColor="Orange"
+                                               FontSize="12">
                                             <Label.Triggers>
                                                 <DataTrigger TargetType="Label" Binding="{Binding IsDuplicate}" Value="True">
                                                     <Setter Property="Text" Value="Duplicate" />
@@ -82,14 +78,6 @@
                                                     <Setter Property="Text" Value="Processed" />
                                                     <Setter Property="TextColor" Value="Green" />
                                                 </DataTrigger>
-                                                <MultiTrigger TargetType="Label">
-                                                    <MultiTrigger.Conditions>
-                                                        <BindingCondition Binding="{Binding IsProcessed}" Value="False" />
-                                                        <BindingCondition Binding="{Binding IsDuplicate}" Value="False" />
-                                                    </MultiTrigger.Conditions>
-                                                    <Setter Property="Text" Value="Unprocessed" />
-                                                    <Setter Property="TextColor" Value="Orange" />
-                                                </MultiTrigger>
                                             </Label.Triggers>
                                         </Label>
                                     </HorizontalStackLayout>

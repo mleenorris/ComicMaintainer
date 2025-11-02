@@ -6,7 +6,7 @@ using ComicMaintainer.MauiApp.Services;
 
 namespace ComicMaintainer.MauiApp.ViewModels;
 
-public partial class FilesViewModel : ObservableObject
+public partial class FilesViewModel : ObservableObject, IDisposable
 {
     private readonly IApiService _apiService;
 
@@ -109,8 +109,9 @@ public partial class FilesViewModel : ObservableObject
 
     async partial void OnSearchTextChanged(string value)
     {
-        // Cancel any pending search
+        // Cancel any pending search and dispose the previous CancellationTokenSource
         _searchCts?.Cancel();
+        _searchCts?.Dispose();
         _searchCts = new CancellationTokenSource();
         
         try
@@ -129,5 +130,11 @@ public partial class FilesViewModel : ObservableObject
     {
         CurrentPage = 1;
         await LoadFiles();
+    }
+
+    public void Dispose()
+    {
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
     }
 }

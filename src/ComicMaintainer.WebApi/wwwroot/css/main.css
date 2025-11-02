@@ -763,6 +763,13 @@
             align-items: center;
         }
         
+        .file-list-header input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            justify-self: center;
+        }
+        
         .toggle-all-btn {
             background: none;
             border: none;
@@ -840,7 +847,11 @@
         }
         
         .directory-checkbox {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
             justify-self: center;
+            align-self: center;
         }
         
         .directory-content {
@@ -886,6 +897,7 @@
             width: 20px;
             height: 20px;
             cursor: pointer;
+            align-self: center;
         }
         
         .file-name {
@@ -958,6 +970,8 @@
             display: flex;
             gap: 5px;
             flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
         }
         
         .btn-small {
@@ -1613,6 +1627,7 @@
                 min-width: 32px;
                 padding: 6px;
                 justify-content: center;
+                align-items: center;
                 font-size: 0;
             }
             
@@ -1623,6 +1638,9 @@
             .dropdown-toggle::after {
                 margin-left: 0;
                 font-size: 14px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
             }
             
             .dropdown-menu {

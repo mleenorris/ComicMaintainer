@@ -202,10 +202,26 @@ public class LogsControllerTests : IDisposable
 
     public void Dispose()
     {
-        // Clean up test directory
-        if (Directory.Exists(_testLogDir))
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
         {
-            Directory.Delete(_testLogDir, true);
+            // Clean up test directory
+            try
+            {
+                if (Directory.Exists(_testLogDir))
+                {
+                    Directory.Delete(_testLogDir, true);
+                }
+            }
+            catch (Exception)
+            {
+                // Ignore cleanup errors to prevent test failures
+            }
         }
     }
 }

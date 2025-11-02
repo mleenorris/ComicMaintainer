@@ -1681,6 +1681,8 @@
                 margin: 0;
                 font-size: 14px;
                 line-height: 1;
+                display: block;
+                text-align: center;
             }
             
             .dropdown-menu {

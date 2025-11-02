@@ -342,8 +342,8 @@ public class FileStoreServiceTests
             var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
             var dbFiles = await dbContext.ComicFiles.ToListAsync();
             Assert.Equal(3, dbFiles.Count);
-            Assert.Single(dbFiles.Where(f => f.IsProcessed));
-            Assert.Single(dbFiles.Where(f => f.IsDuplicate));
+            Assert.Single(dbFiles, f => f.IsProcessed);
+            Assert.Single(dbFiles, f => f.IsDuplicate);
         }
         
         // Act

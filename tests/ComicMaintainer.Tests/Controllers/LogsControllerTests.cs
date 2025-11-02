@@ -7,7 +7,7 @@ using Moq;
 
 namespace ComicMaintainer.Tests.Controllers;
 
-public class LogsControllerTests
+public class LogsControllerTests : IDisposable
 {
     private readonly Mock<IOptions<AppSettings>> _mockSettings;
     private readonly Mock<ILogger<LogsController>> _mockLogger;

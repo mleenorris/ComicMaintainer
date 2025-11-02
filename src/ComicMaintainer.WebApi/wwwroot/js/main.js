@@ -2325,6 +2325,7 @@
                     headers: getAuthHeaders()
                 });
                 
+                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }

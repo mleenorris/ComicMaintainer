@@ -219,6 +219,28 @@ public class JobsController : ControllerBase
         }
     }
 
+    [HttpPost("normalize-selected")]
+    public async Task<ActionResult<object>> NormalizeSelected([FromBody] ProcessSelectedRequest request)
+    {
+        try
+        {
+            if (request.Files == null || request.Files.Count == 0)
+            {
+                return BadRequest(new { error = "No files specified" });
+            }
+            
+            var jobId = await _processor.NormalizeFilesAsync(request.Files);
+            _logger.LogInformation("Normalize selected files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, request.Files.Count);
+            
+            return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error starting normalize selected job");
+            return StatusCode(500, new { error = "Error starting job" });
+        }
+    }
+
     // RESTful endpoint: GET /api/jobs - List all jobs
     [HttpGet]
     public ActionResult<object> ListJobs()

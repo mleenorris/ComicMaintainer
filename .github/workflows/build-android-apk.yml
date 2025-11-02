@@ -1,0 +1,169 @@
+name: Build Android APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      packages: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      
+      - name: Install MAUI workload
+        run: dotnet workload install maui
+      
+      - name: Get version from tag or project
+        id: get_version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -match 'refs/tags/v(.+)') {
+            $version = $matches[1]
+          } else {
+            $version = (Select-Xml -Path "src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj" -XPath "//Version" | Select-Object -First 1).Node.InnerText
+          }
+          Write-Output "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version"
+      
+      - name: Restore dependencies
+        run: dotnet restore ComicMaintainer.sln
+      
+      - name: Build Android APK (Debug)
+        run: |
+          dotnet build src/ComicMaintainer.MauiApp/ComicMaintainer.MauiApp.csproj `
+            -c Release `
+            -f net9.0-android `
+            /p:AndroidPackageFormat=apk
+      
+      - name: Locate APK
+        id: locate_apk
+        shell: pwsh
+        run: |
+          $apkPath = Get-ChildItem -Path "src/ComicMaintainer.MauiApp/bin/Release/net9.0-android" -Filter "*.apk" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          if ($apkPath) {
+            Write-Host "Found APK at: $apkPath"
+            $apkName = "ComicMaintainer-v${{ steps.get_version.outputs.version }}-android.apk"
+            Copy-Item $apkPath -Destination $apkName
+            Write-Output "apk_file=$apkName" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Error "APK not found"
+            exit 1
+          }
+      
+      - name: Create README for Android release
+        shell: pwsh
+        run: |
+          $readmeContent = @"
+          # ComicMaintainer Android App
+          
+          ## Installation
+          
+          1. Download the APK file to your Android device
+          2. Enable "Install from Unknown Sources" in your device settings
+          3. Tap the APK file to install
+          4. Open the ComicMaintainer app
+          
+          ## Initial Setup
+          
+          1. Open the app and navigate to the Settings tab
+          2. Enter your ComicMaintainer server URL
+             - Example: http://192.168.1.100:5000
+             - Make sure to include http:// or https://
+          3. Tap "Test Connection" to verify connectivity
+          4. Tap "Save Settings"
+          5. Go to the Home tab and tap "Check Connection"
+          6. Once connected, you can browse and manage your files
+          
+          ## Server Requirements
+          
+          Your ComicMaintainer server must be:
+          - Running and accessible from your Android device
+          - On the same network (for local connections)
+          - Or accessible via a domain name (for remote connections)
+          
+          ## Network Configuration
+          
+          ### Local Network Access:
+          - Find your server's local IP address (e.g., 192.168.1.100)
+          - Use format: http://[IP-ADDRESS]:5000
+          - Ensure your Android device is on the same network
+          
+          ### Remote Access:
+          - Configure port forwarding on your router (if needed)
+          - Use HTTPS for secure remote connections
+          - Format: https://your-domain.com or https://your-ip:5000
+          
+          ## Features
+          
+          - Browse comic files on your server
+          - Process individual files
+          - Filter by processing status (all, unprocessed, processed, duplicates)
+          - Search for specific files
+          - Real-time connection status
+          
+          ## Troubleshooting
+          
+          ### Cannot connect to server:
+          - Verify server is running (check on computer)
+          - Check IP address is correct
+          - Ensure devices are on same network
+          - Check firewall settings on server
+          - Try http instead of https (or vice versa)
+          
+          ### App crashes or errors:
+          - Clear app cache in Android settings
+          - Reinstall the app
+          - Check server logs for errors
+          
+          ## System Requirements
+          
+          - Android 5.0 (API 21) or later
+          - Internet/network connectivity
+          - ~20MB storage space
+          
+          ## Security Notes
+          
+          - This APK is unsigned/self-signed
+          - Use HTTPS when accessing over the internet
+          - Keep your server URL private
+          - Only install APKs from trusted sources
+          
+          ## Support
+          
+          For issues and documentation, visit: https://github.com/mleenorris/ComicMaintainer
+          "@
+          
+          $readmeContent | Out-File -FilePath "ANDROID_README.txt" -Encoding UTF8
+      
+      - name: Upload Android APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ComicMaintainer-android-apk
+          path: |
+            ${{ steps.locate_apk.outputs.apk_file }}
+            ANDROID_README.txt
+      
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ${{ steps.locate_apk.outputs.apk_file }}
+            ANDROID_README.txt
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

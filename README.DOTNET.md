@@ -44,10 +44,12 @@ ASP.NET Core Web API application:
   - `JobsController`: Batch job status endpoints
   - `WatcherController`: File watcher control endpoints
 
-### ComicMaintainer.MauiApp (Future)
+### ComicMaintainer.MauiApp
 .NET MAUI application for Android/iOS:
 - Cross-platform mobile app
 - Native UI for mobile devices
+- Server connection configuration
+- Browse and manage files remotely
 - Uses the same Core library as the web API
 
 ## Getting Started
@@ -111,6 +113,56 @@ docker-compose -f docker-compose.dotnet.yml up -d
 ```
 
 3. Access the web interface at `http://localhost:5000`
+
+### Windows Installation (Native)
+
+For Windows users who prefer to run without Docker:
+
+1. Download the latest Windows release from [GitHub Releases](https://github.com/mleenorris/ComicMaintainer/releases)
+   - `ComicMaintainer-vX.X.X-win-x64.zip` (64-bit, recommended)
+   - `ComicMaintainer-vX.X.X-win-x86.zip` (32-bit)
+
+2. Extract to a folder (e.g., `C:\ComicMaintainer`)
+
+3. Create a `.env` file with your configuration:
+   ```
+   WATCHED_DIR=C:\Comics\ToProcess
+   DUPLICATE_DIR=C:\Comics\Duplicates
+   WEB_PORT=5000
+   ```
+
+4. Run `ComicMaintainer.WebApi.exe`
+
+5. Access the web interface at `http://localhost:5000`
+
+**Running as a Windows Service:**
+Use [NSSM](https://nssm.cc/) to run ComicMaintainer as a Windows service that starts automatically:
+```cmd
+nssm install ComicMaintainer "C:\ComicMaintainer\ComicMaintainer.WebApi.exe"
+nssm start ComicMaintainer
+```
+
+### Android App
+
+The .NET MAUI Android app allows you to manage your comics from your mobile device:
+
+1. Download `ComicMaintainer-vX.X.X-android.apk` from [GitHub Releases](https://github.com/mleenorris/ComicMaintainer/releases)
+
+2. Install the APK on your Android device (requires Android 5.0+)
+
+3. Configure the server URL in the app's Settings:
+   - Local network: `http://192.168.1.100:5000`
+   - Remote: `https://your-domain.com`
+
+4. Browse and manage your comic files remotely
+
+**App Features:**
+- Browse comic files
+- Process individual files
+- Filter by status (all, processed, unprocessed, duplicates)
+- Search functionality
+- Real-time connection status
+- Material Design UI
 
 ## Configuration
 

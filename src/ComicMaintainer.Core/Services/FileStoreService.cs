@@ -367,18 +367,9 @@ public class FileStoreService : IFileStoreService
 
     public Task<bool> IsFileProcessedAsync(string filePath, CancellationToken cancellationToken = default)
     {
-        // Check in-memory dictionary first for fast lookup
-        if (_processedFiles.ContainsKey(filePath))
-        {
-            return Task.FromResult(true);
-        }
-
-        // Check if file exists in the store with processed flag
-        if (_files.TryGetValue(filePath, out var file))
-        {
-            return Task.FromResult(file.IsProcessed);
-        }
-
-        return Task.FromResult(false);
+        // Check the authoritative source - the _processedFiles dictionary
+        // This dictionary is maintained by MarkFileProcessedAsync and InitializeFromDatabaseAsync
+        var isProcessed = _processedFiles.ContainsKey(filePath);
+        return Task.FromResult(isProcessed);
     }
 }

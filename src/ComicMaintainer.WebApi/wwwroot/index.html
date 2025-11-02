@@ -628,8 +628,9 @@
                 <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center; flex-wrap: wrap;">
                     <label for="logType" style="color: var(--text-secondary); font-weight: 500;">Log Type:</label>
                     <select id="logType" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                        <option value="debug" selected>Debug Logs</option>
+                        <option value="app" selected>Application Logs</option>
                         <option value="watcher">Watcher Logs</option>
+                        <option value="debug">Debug Logs</option>
                     </select>
                     <label for="logLines" style="color: var(--text-secondary); font-weight: 500; margin-left: 10px;">Lines to display:</label>
                     <select id="logLines" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">

@@ -31,6 +31,7 @@ public class LogsController : ControllerBase
             // Determine log file pattern based on type
             string logFilePattern = type.ToLower() switch
             {
+                "app" => "app*.log",
                 "watcher" => "watcher*.log",
                 "debug" => "debug*.log",
                 _ => "debug*.log"

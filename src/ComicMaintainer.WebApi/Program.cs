@@ -31,14 +31,27 @@ catch (UnauthorizedAccessException)
     Directory.CreateDirectory(configDir);
 }
 
-// Configure Serilog with multiple sinks: console, debug file, and watcher file
+// Configure Serilog with multiple sinks: console, basic/info file, debug file, and watcher file
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     // Console sink - only show Information and above, clean formatting
     .WriteTo.Console(
         restrictedToMinimumLevel: LogEventLevel.Information,
         outputTemplate: "[{Timestamp:HH:mm:ss}] [{Level:u3}] {Message:lj}{NewLine}{Exception}")
-    // File sink - capture everything at Debug level and above
+    // Basic/Info log file - Information level and above, excluding watcher logs
+    .WriteTo.Logger(lc => lc
+        .Filter.ByExcluding(e => 
+            e.Properties.ContainsKey("SourceContext") && 
+            (e.Properties["SourceContext"].ToString().Contains("FileWatcherService") ||
+             e.Properties["SourceContext"].ToString().Contains("FileWatcherHostedService")))
+        .WriteTo.File(
+            Path.Combine(configDir, "app.log"),
+            restrictedToMinimumLevel: LogEventLevel.Information,
+            rollingInterval: RollingInterval.Day,
+            retainedFileCountLimit: 7,
+            fileSizeLimitBytes: 10_485_760, // 10 MB
+            outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] {Message:lj}{NewLine}{Exception}"))
+    // Debug log file - capture everything at Debug level and above (including watcher)
     .WriteTo.File(
         Path.Combine(configDir, "debug.log"),
         restrictedToMinimumLevel: LogEventLevel.Debug,

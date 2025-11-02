@@ -763,6 +763,13 @@
             align-items: center;
         }
         
+        /* Center Size, Modified, and Actions columns */
+        .file-list-header > *:nth-child(4),
+        .file-list-header > *:nth-child(5),
+        .file-list-header > *:nth-child(6) {
+            text-align: center;
+        }
+        
         .file-list-header input[type="checkbox"] {
             width: 20px;
             height: 20px;
@@ -795,19 +802,39 @@
             font-weight: 600;
             color: var(--text-secondary);
             display: grid;
-            grid-template-columns: 40px 1fr;
+            grid-template-columns: 30px 40px 1fr minmax(100px, auto) minmax(150px, auto) minmax(200px, auto);
             gap: 10px;
             align-items: center;
             user-select: none;
             transition: background 0.2s;
         }
         
-        .directory-header-clickable {
+        .directory-toggle-btn {
+            background: none;
+            border: none;
             cursor: pointer;
-            display: grid;
-            grid-template-columns: 16px 16px 1fr minmax(100px, auto);
-            gap: 8px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            padding: 4px;
+            display: flex;
             align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            border-radius: 3px;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .directory-toggle-btn:hover {
+            background: var(--bg-hover-alt);
+        }
+        
+        .directory-name-section {
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
         }
         
         .directory-header:hover {
@@ -843,7 +870,7 @@
             font-size: 12px;
             color: var(--text-muted);
             font-weight: normal;
-            text-align: right;
+            text-align: center;
         }
         
         .directory-checkbox {
@@ -865,7 +892,6 @@
         /* Grid layout: checkbox (30px) + spacer for toggle button alignment (40px) + file info (1fr) + size + date + actions */
         .file-item {
             padding: 15px;
-            padding-left: 45px;
             display: grid;
             grid-template-columns: 30px 40px 1fr minmax(100px, auto) minmax(150px, auto) minmax(200px, auto);
             gap: 10px;
@@ -875,7 +901,7 @@
         }
         
         .file-item.indented {
-            padding-left: 65px;
+            padding-left: 35px;
             background: var(--bg-indented);
         }
         
@@ -897,7 +923,15 @@
             width: 20px;
             height: 20px;
             cursor: pointer;
+            justify-self: center;
             align-self: center;
+        }
+        
+        /* Center Size, Modified, and Actions columns in file items */
+        .file-item > *:nth-child(4),
+        .file-item > *:nth-child(5),
+        .file-item > *:nth-child(6) {
+            justify-self: center;
         }
         
         .file-name {
@@ -1309,11 +1343,17 @@
             }
             
             .directory-header {
-                grid-template-columns: 40px 1fr;
+                grid-template-columns: 30px 40px 1fr minmax(80px, auto);
             }
             
-            .directory-header-clickable {
-                grid-template-columns: 16px 16px 1fr minmax(80px, auto);
+            /* Hide empty placeholder columns in tablet */
+            .directory-header > *:nth-child(5),
+            .directory-header > *:nth-child(6) {
+                display: none;
+            }
+            
+            .directory-name-section {
+                gap: 6px;
             }
         }
         
@@ -1623,12 +1663,14 @@
             }
             
             .dropdown-toggle {
-                width: 32px;
-                min-width: 32px;
-                padding: 6px;
+                width: auto;
+                height: auto;
+                min-width: auto;
+                padding: 9px;
                 justify-content: center;
                 align-items: center;
                 font-size: 0;
+                display: flex;
             }
             
             .dropdown-toggle::before {
@@ -1636,11 +1678,11 @@
             }
             
             .dropdown-toggle::after {
-                margin-left: 0;
+                margin: 0;
                 font-size: 14px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
+                line-height: 1;
+                display: block;
+                text-align: center;
             }
             
             .dropdown-menu {
@@ -1678,13 +1720,18 @@
             .directory-header {
                 padding: 10px;
                 font-size: 13px;
-                grid-template-columns: 30px 1fr;
+                grid-template-columns: 30px 30px 1fr 60px;
                 gap: 8px;
                 overflow: hidden;
             }
             
-            .directory-header-clickable {
-                grid-template-columns: 14px 14px 1fr 60px;
+            /* Hide empty placeholder columns in mobile */
+            .directory-header > *:nth-child(5),
+            .directory-header > *:nth-child(6) {
+                display: none;
+            }
+            
+            .directory-name-section {
                 gap: 6px;
                 font-size: 13px;
                 overflow: hidden;
@@ -1700,12 +1747,15 @@
             
             .directory-file-count {
                 font-size: 11px;
-                text-align: right;
+                text-align: center;
             }
             
             .directory-toggle {
                 font-size: 12px;
-                width: 14px;
+            }
+            
+            .directory-toggle-btn {
+                padding: 2px;
             }
             
             .directory-icon {
@@ -1799,11 +1849,17 @@
             .directory-header {
                 padding: 8px;
                 font-size: 12px;
+                grid-template-columns: 25px 25px 1fr 55px;
                 overflow: hidden;
             }
             
-            .directory-header-clickable {
-                grid-template-columns: 12px 12px 1fr 55px;
+            /* Hide empty placeholder columns in small mobile */
+            .directory-header > *:nth-child(5),
+            .directory-header > *:nth-child(6) {
+                display: none;
+            }
+            
+            .directory-name-section {
                 gap: 5px;
             }
             
@@ -1817,7 +1873,6 @@
             
             .directory-toggle {
                 font-size: 11px;
-                width: 12px;
             }
             
             .directory-icon {

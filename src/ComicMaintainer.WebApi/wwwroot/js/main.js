@@ -928,12 +928,18 @@
                                    ${someSelected && !allSelected ? 'style="opacity: 0.5"' : ''}
                                    onchange="toggleDirectorySelection('${escapeJs(dir)}', this.checked)"
                                    onclick="event.stopPropagation()">
-                            <div class="directory-header-clickable" onclick="toggleDirectory('${escapeJs(dir)}')">
+                            <button class="directory-toggle-btn" onclick="toggleDirectory('${escapeJs(dir)}')">
                                 <span class="directory-toggle ${isCollapsed ? 'collapsed' : ''}">▼</span>
+                            </button>
+                            <div class="directory-name-section" onclick="toggleDirectory('${escapeJs(dir)}')">
                                 <span class="directory-icon">📁</span>
                                 <span class="directory-path">${escapeHtml(dir)}</span>
-                                <span class="directory-file-count">${fileCount} file${fileCount !== 1 ? 's' : ''}</span>
                             </div>
+                            <span class="directory-file-count">${fileCount} file${fileCount !== 1 ? 's' : ''}</span>
+                            <!-- Empty spans fill grid columns 5-6 to maintain 6-column alignment with file-list-header -->
+                            <!-- These are hidden in responsive views via CSS -->
+                            <span></span>
+                            <span></span>
                         </div>
                     `;
                 }

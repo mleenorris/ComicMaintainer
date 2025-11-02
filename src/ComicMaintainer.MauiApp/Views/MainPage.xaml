@@ -3,81 +3,229 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              xmlns:viewmodels="clr-namespace:ComicMaintainer.MauiApp.ViewModels"
              x:Class="ComicMaintainer.MauiApp.Views.MainPage"
-             x:DataType="viewmodels:MainViewModel"
-             Title="ComicMaintainer">
+             x:DataType="viewmodels:FilesViewModel"
+             Shell.NavBarIsVisible="False">
 
-    <ScrollView>
-        <VerticalStackLayout Padding="30" Spacing="25">
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+        
+        <!-- Header matching web interface -->
+        <Grid Grid.Row="0" BackgroundColor="#2c3e50" Padding="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
             
-            <!-- App Title -->
-            <Label Text="ComicMaintainer"
-                   FontSize="32"
+            <!-- Logo/Title -->
+            <Label Grid.Column="0" 
+                   Text="📚"
+                   FontSize="28"
+                   TextColor="White"
+                   VerticalOptions="Center" />
+            
+            <Label Grid.Column="1"
+                   Text="ComicMaintainer"
+                   FontSize="18"
                    FontAttributes="Bold"
-                   HorizontalOptions="Center" />
+                   TextColor="White"
+                   VerticalOptions="Center"
+                   Margin="10,0,0,0" />
+            
+            <!-- Settings Menu -->
+            <Button Grid.Column="2"
+                    Text="⋮"
+                    FontSize="24"
+                    TextColor="White"
+                    BackgroundColor="Transparent"
+                    Clicked="OnSettingsMenuClicked"
+                    VerticalOptions="Center" />
+        </Grid>
 
-            <!-- Connection Status -->
-            <Frame BorderColor="{Binding IsConnected, Converter={StaticResource BoolToColorConverter}}"
-                   Padding="20"
-                   CornerRadius="10">
-                <VerticalStackLayout Spacing="10">
-                    <Label Text="Server Connection"
-                           FontSize="18"
-                           FontAttributes="Bold" />
-                    
-                    <Label Text="{Binding ServerUrl}"
-                           FontSize="14"
-                           TextColor="Gray" />
-                    
-                    <Label Text="{Binding StatusMessage}"
-                           FontSize="14"
-                           TextColor="{Binding IsConnected, Converter={StaticResource BoolToColorConverter}}" />
-                    
-                    <Button Text="Check Connection"
-                            Command="{Binding CheckConnectionCommand}"
-                            HorizontalOptions="Center"
-                            Margin="0,10,0,0" />
-                </VerticalStackLayout>
-            </Frame>
+        <!-- Search and Filter Bar -->
+        <Grid Grid.Row="1" Padding="10" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="5">
+            <SearchBar Grid.Column="0"
+                       Placeholder="🔍 Search files..."
+                       Text="{Binding SearchText}"
+                       SearchCommand="{Binding LoadFilesCommand}"
+                       BackgroundColor="{AppThemeBinding Light=#f5f5f5, Dark=#1a1a1a}" />
+            
+            <Picker Grid.Column="1"
+                    SelectedItem="{Binding SelectedFilter}"
+                    BackgroundColor="{AppThemeBinding Light=#f5f5f5, Dark=#1a1a1a}"
+                    WidthRequest="120">
+                <Picker.Items>
+                    <x:String>📚 All</x:String>
+                    <x:String>⚠️ Unmarked</x:String>
+                    <x:String>✅ Marked</x:String>
+                    <x:String>🔁 Duplicates</x:String>
+                </Picker.Items>
+            </Picker>
 
-            <!-- Action Buttons -->
-            <Button Text="Browse Files"
-                    Command="{Binding NavigateToFilesCommand}"
-                    IsEnabled="{Binding IsConnected}"
-                    FontSize="16"
-                    Padding="20" />
+            <Button Grid.Column="2"
+                    Text="🔄"
+                    Command="{Binding RefreshFilesCommand}"
+                    BackgroundColor="{StaticResource Primary}"
+                    TextColor="White"
+                    WidthRequest="50" />
+        </Grid>
 
-            <Button Text="Settings"
-                    Command="{Binding NavigateToSettingsCommand}"
-                    FontSize="16"
-                    Padding="20" />
+        <!-- Files List matching web interface -->
+        <RefreshView Grid.Row="2"
+                     IsRefreshing="{Binding IsLoading}"
+                     Command="{Binding RefreshFilesCommand}">
+            <CollectionView ItemsSource="{Binding Files}"
+                           SelectionMode="Multiple"
+                           SelectedItems="{Binding SelectedFiles}">
+                <CollectionView.EmptyView>
+                    <VerticalStackLayout HorizontalOptions="Center"
+                                       VerticalOptions="Center"
+                                       Spacing="10"
+                                       Padding="20">
+                        <Label Text="No files found"
+                               FontSize="18"
+                               HorizontalOptions="Center"
+                               TextColor="{AppThemeBinding Light=#7f8c8d, Dark=#9ca3af}" />
+                        <Button Text="Refresh"
+                                Command="{Binding RefreshFilesCommand}"
+                                HorizontalOptions="Center"
+                                BackgroundColor="{StaticResource Primary}" />
+                    </VerticalStackLayout>
+                </CollectionView.EmptyView>
 
-            <!-- Info Section -->
-            <Frame BorderColor="LightGray"
-                   Padding="15"
-                   Margin="0,20,0,0">
-                <Label>
-                    <Label.FormattedText>
-                        <FormattedString>
-                            <Span Text="Welcome to ComicMaintainer!&#x0a;&#x0a;"
-                                  FontSize="16"
-                                  FontAttributes="Bold" />
-                            <Span Text="Manage your comic collection on the go. Connect to your ComicMaintainer server to browse, process, and organize your comic files.&#x0a;&#x0a;"
-                                  FontSize="14" />
-                            <Span Text="To get started:&#x0a;"
-                                  FontSize="14"
-                                  FontAttributes="Bold" />
-                            <Span Text="1. Configure your server URL in Settings&#x0a;"
-                                  FontSize="14" />
-                            <Span Text="2. Test the connection&#x0a;"
-                                  FontSize="14" />
-                            <Span Text="3. Browse and manage your files"
-                                  FontSize="14" />
-                        </FormattedString>
-                    </Label.FormattedText>
-                </Label>
-            </Frame>
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <SwipeView>
+                            <SwipeView.RightItems>
+                                <SwipeItems>
+                                    <SwipeItem Text="Process"
+                                              BackgroundColor="#28a745"
+                                              Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:FilesViewModel}}, Path=ProcessFileCommand}"
+                                              CommandParameter="{Binding .}" />
+                                    <SwipeItem Text="Delete"
+                                              BackgroundColor="#dc3545"
+                                              Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:FilesViewModel}}, Path=DeleteFileCommand}"
+                                              CommandParameter="{Binding .}" />
+                                </SwipeItems>
+                            </SwipeView.RightItems>
+                            
+                            <Grid Padding="10" ColumnDefinitions="Auto,*,Auto" RowDefinitions="Auto,Auto,Auto">
+                                <Grid.Triggers>
+                                    <DataTrigger TargetType="Grid" Binding="{Binding IsProcessed}" Value="True">
+                                        <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#d4edda, Dark=#1a3a1a}" />
+                                    </DataTrigger>
+                                    <DataTrigger TargetType="Grid" Binding="{Binding IsDuplicate}" Value="True">
+                                        <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#ffe5cc, Dark=#3d2b1a}" />
+                                    </DataTrigger>
+                                    <MultiTrigger TargetType="Grid">
+                                        <MultiTrigger.Conditions>
+                                            <BindingCondition Binding="{Binding IsProcessed}" Value="False" />
+                                            <BindingCondition Binding="{Binding IsDuplicate}" Value="False" />
+                                        </MultiTrigger.Conditions>
+                                        <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#fff3cd, Dark=#3d3419}" />
+                                    </MultiTrigger>
+                                </Grid.Triggers>
+                                
+                                <!-- Status Icon -->
+                                <Label Grid.Column="0" Grid.RowSpan="3"
+                                       FontSize="20"
+                                       VerticalOptions="Center"
+                                       Margin="0,0,10,0">
+                                    <Label.Text>
+                                        <MultiBinding StringFormat="{}{0}">
+                                            <Binding Path="IsDuplicate" />
+                                            <Binding Path="IsProcessed" />
+                                        </MultiBinding>
+                                    </Label.Text>
+                                    <Label.Triggers>
+                                        <DataTrigger TargetType="Label" Binding="{Binding IsDuplicate}" Value="True">
+                                            <Setter Property="Text" Value="🔁" />
+                                        </DataTrigger>
+                                        <DataTrigger TargetType="Label" Binding="{Binding IsProcessed}" Value="True">
+                                            <Setter Property="Text" Value="✅" />
+                                        </DataTrigger>
+                                        <MultiTrigger TargetType="Label">
+                                            <MultiTrigger.Conditions>
+                                                <BindingCondition Binding="{Binding IsProcessed}" Value="False" />
+                                                <BindingCondition Binding="{Binding IsDuplicate}" Value="False" />
+                                            </MultiTrigger.Conditions>
+                                            <Setter Property="Text" Value="⚠️" />
+                                        </MultiTrigger>
+                                    </Label.Triggers>
+                                </Label>
 
-        </VerticalStackLayout>
-    </ScrollView>
+                                <!-- File Name -->
+                                <Label Grid.Column="1" Grid.Row="0"
+                                       Text="{Binding FileName}"
+                                       FontSize="16"
+                                       FontAttributes="Bold"
+                                       LineBreakMode="TailTruncation"
+                                       TextColor="{AppThemeBinding Light=#333, Dark=#e5e5e5}" />
+                                
+                                <!-- Directory -->
+                                <Label Grid.Column="1" Grid.Row="1"
+                                       Text="{Binding Directory}"
+                                       FontSize="12"
+                                       TextColor="{AppThemeBinding Light=#7f8c8d, Dark=#9ca3af}"
+                                       LineBreakMode="TailTruncation" />
+                                
+                                <!-- File Size -->
+                                <Label Grid.Column="1" Grid.Row="2"
+                                       Text="{Binding FileSize, StringFormat='{0:N0} bytes'}"
+                                       FontSize="11"
+                                       TextColor="{AppThemeBinding Light=#95a5a6, Dark=#6b7280}" />
+
+                                <!-- Action Button -->
+                                <Button Grid.Column="2" Grid.RowSpan="3"
+                                        Text="⋮"
+                                        FontSize="20"
+                                        Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:FilesViewModel}}, Path=ShowFileActionsCommand}"
+                                        CommandParameter="{Binding .}"
+                                        BackgroundColor="Transparent"
+                                        TextColor="{AppThemeBinding Light=#333, Dark=#e5e5e5}"
+                                        VerticalOptions="Center"
+                                        Padding="10,0" />
+                            </Grid>
+                        </SwipeView>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+
+        <!-- Action Bar at Bottom (matching web interface) -->
+        <Grid Grid.Row="3" Padding="10" BackgroundColor="{AppThemeBinding Light=#f5f5f5, Dark=#1a1a1a}" ColumnDefinitions="Auto,Auto,*,Auto">
+            <Button Grid.Column="0"
+                    Text="🚀 Process"
+                    Command="{Binding ProcessSelectedFilesCommand}"
+                    IsEnabled="{Binding HasSelectedFiles}"
+                    BackgroundColor="#28a745"
+                    TextColor="White"
+                    FontSize="12"
+                    Padding="10,5"
+                    Margin="0,0,5,0" />
+            
+            <Button Grid.Column="1"
+                    Text="🗑️ Delete"
+                    Command="{Binding DeleteSelectedFilesCommand}"
+                    IsEnabled="{Binding HasSelectedFiles}"
+                    BackgroundColor="#dc3545"
+                    TextColor="White"
+                    FontSize="12"
+                    Padding="10,5"
+                    Margin="0,0,5,0" />
+            
+            <Label Grid.Column="2"
+                   Text="{Binding SelectionStatusText}"
+                   VerticalOptions="Center"
+                   FontSize="12"
+                   TextColor="{AppThemeBinding Light=#7f8c8d, Dark=#9ca3af}" />
+            
+            <Label Grid.Column="3"
+                   Text="{Binding CurrentPage, StringFormat='Page {0}'}"
+                   VerticalOptions="Center"
+                   FontSize="12"
+                   TextColor="{AppThemeBinding Light=#7f8c8d, Dark=#9ca3af}" />
+        </Grid>
+
+    </Grid>
 
 </ContentPage>

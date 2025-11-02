@@ -26,14 +26,12 @@ public static class MauiProgram
         builder.Services.AddSingleton<ISettingsService, SettingsService>();
 
         // Register ViewModels
-        builder.Services.AddTransient<MainViewModel>();
+        builder.Services.AddSingleton<FilesViewModel>();
         builder.Services.AddTransient<SettingsViewModel>();
-        builder.Services.AddTransient<FilesViewModel>();
 
         // Register Views
-        builder.Services.AddTransient<MainPage>();
+        builder.Services.AddSingleton<MainPage>();
         builder.Services.AddTransient<SettingsPage>();
-        builder.Services.AddTransient<FilesPage>();
 
 #if DEBUG
         builder.Logging.AddDebug();

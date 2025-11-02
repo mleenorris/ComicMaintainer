@@ -4,69 +4,76 @@
              xmlns:viewmodels="clr-namespace:ComicMaintainer.MauiApp.ViewModels"
              x:Class="ComicMaintainer.MauiApp.Views.SettingsPage"
              x:DataType="viewmodels:SettingsViewModel"
-             Title="Settings">
+             Title="⚙️ Settings"
+             BackgroundColor="{AppThemeBinding Light=#f5f5f5, Dark=#1a1a1a}">
 
     <ScrollView>
-        <VerticalStackLayout Padding="30" Spacing="25">
-            
-            <!-- Page Title -->
-            <Label Text="Settings"
-                   FontSize="32"
-                   FontAttributes="Bold"
-                   HorizontalOptions="Center" />
+        <VerticalStackLayout Padding="15" Spacing="15">
 
-            <!-- Server Configuration -->
-            <Frame BorderColor="LightGray"
-                   Padding="20"
-                   CornerRadius="10">
-                <VerticalStackLayout Spacing="15">
-                    <Label Text="Server Configuration"
-                           FontSize="20"
-                           FontAttributes="Bold" />
+            <!-- Server Configuration Card -->
+            <Frame BorderColor="{AppThemeBinding Light=#ecf0f1, Dark=#404040}"
+                   Padding="15"
+                   CornerRadius="8"
+                   BackgroundColor="{AppThemeBinding Light=White, Dark=#1a1a1a}"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="12">
+                    <Label Text="🌐 Server Configuration"
+                           FontSize="18"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#2c3e50, Dark=#d1d5db}" />
 
                     <Label Text="Server URL"
-                           FontSize="16" />
+                           FontSize="14"
+                           TextColor="{AppThemeBinding Light=#7f8c8d, Dark=#9ca3af}" />
                     
                     <Entry Text="{Binding ServerUrl}"
-                           Placeholder="http://your-server:5000"
+                           Placeholder="http://192.168.1.100:5000"
                            Keyboard="Url"
-                           FontSize="14" />
+                           FontSize="14"
+                           BackgroundColor="{AppThemeBinding Light=#f5f5f5, Dark=#252525}"
+                           TextColor="{AppThemeBinding Light=#333, Dark=#e5e5e5}" />
 
-                    <Label Text="Enter the URL of your ComicMaintainer server (including http:// or https://)"
+                    <Label Text="Enter the URL of your ComicMaintainer server"
                            FontSize="12"
-                           TextColor="Gray" />
+                           TextColor="{AppThemeBinding Light=#95a5a6, Dark=#6b7280}" />
 
-                    <!-- Test Connection Button -->
-                    <Button Text="Test Connection"
+                    <Button Text="🔗 Test Connection"
                             Command="{Binding TestConnectionCommand}"
                             IsEnabled="{Binding IsTesting, Converter={StaticResource InvertedBoolConverter}}"
-                            HorizontalOptions="Center"
-                            Margin="0,10,0,0" />
+                            BackgroundColor="#28a745"
+                            TextColor="White"
+                            HorizontalOptions="Fill"
+                            Margin="0,5,0,0" />
 
-                    <!-- Test Result -->
                     <Label Text="{Binding TestResult}"
                            FontSize="14"
                            HorizontalOptions="Center"
-                           IsVisible="{Binding TestResult, Converter={StaticResource StringNotEmptyConverter}}" />
+                           IsVisible="{Binding TestResult, Converter={StaticResource StringNotEmptyConverter}}"
+                           TextColor="{AppThemeBinding Light=#2c3e50, Dark=#d1d5db}" />
 
-                    <!-- Save Button -->
-                    <Button Text="Save Settings"
+                    <Button Text="💾 Save Settings"
                             Command="{Binding SaveSettingsCommand}"
                             BackgroundColor="{StaticResource Primary}"
-                            HorizontalOptions="Center"
-                            Margin="0,10,0,0" />
+                            TextColor="White"
+                            HorizontalOptions="Fill"
+                            Margin="0,5,0,0" />
                 </VerticalStackLayout>
             </Frame>
 
-            <!-- Examples Section -->
-            <Frame BorderColor="LightGray"
-                   Padding="15">
+            <!-- Examples Card -->
+            <Frame BorderColor="{AppThemeBinding Light=#ecf0f1, Dark=#404040}"
+                   Padding="15"
+                   CornerRadius="8"
+                   BackgroundColor="{AppThemeBinding Light=White, Dark=#1a1a1a}"
+                   HasShadow="True">
                 <VerticalStackLayout Spacing="10">
-                    <Label Text="Example Server URLs:"
+                    <Label Text="📝 Example Server URLs"
                            FontSize="16"
-                           FontAttributes="Bold" />
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#2c3e50, Dark=#d1d5db}" />
                     
-                    <Label FontSize="14">
+                    <Label FontSize="13"
+                           TextColor="{AppThemeBinding Light=#333, Dark=#e5e5e5}">
                         <Label.FormattedText>
                             <FormattedString>
                                 <Span Text="• Local: " FontAttributes="Bold" />
@@ -78,11 +85,47 @@
                             </FormattedString>
                         </Label.FormattedText>
                     </Label>
+                </VerticalStackLayout>
+            </Frame>
 
-                    <Label Text="Make sure your server is running and accessible from this device."
+            <!-- Theme Toggle Card -->
+            <Frame BorderColor="{AppThemeBinding Light=#ecf0f1, Dark=#404040}"
+                   Padding="15"
+                   CornerRadius="8"
+                   BackgroundColor="{AppThemeBinding Light=White, Dark=#1a1a1a}"
+                   HasShadow="True">
+                <HorizontalStackLayout Spacing="15">
+                    <Label Text="🌓 Dark Mode"
+                           FontSize="16"
+                           VerticalOptions="Center"
+                           HorizontalOptions="StartAndExpand"
+                           TextColor="{AppThemeBinding Light=#2c3e50, Dark=#d1d5db}" />
+                    <Switch IsToggled="{Binding IsDarkMode}"
+                            OnColor="#28a745"
+                            VerticalOptions="Center" />
+                </HorizontalStackLayout>
+            </Frame>
+
+            <!-- About Section -->
+            <Frame BorderColor="{AppThemeBinding Light=#ecf0f1, Dark=#404040}"
+                   Padding="15"
+                   CornerRadius="8"
+                   BackgroundColor="{AppThemeBinding Light=White, Dark=#1a1a1a}"
+                   HasShadow="True">
+                <VerticalStackLayout Spacing="8">
+                    <Label Text="ℹ️ About"
+                           FontSize="16"
+                           FontAttributes="Bold"
+                           TextColor="{AppThemeBinding Light=#2c3e50, Dark=#d1d5db}" />
+                    <Label Text="ComicMaintainer Mobile"
+                           FontSize="14"
+                           TextColor="{AppThemeBinding Light=#333, Dark=#e5e5e5}" />
+                    <Label Text="Version 2.0.1"
                            FontSize="12"
-                           TextColor="Gray"
-                           Margin="0,10,0,0" />
+                           TextColor="{AppThemeBinding Light=#7f8c8d, Dark=#9ca3af}" />
+                    <Label Text="Manage your comic collection on the go"
+                           FontSize="12"
+                           TextColor="{AppThemeBinding Light=#95a5a6, Dark=#6b7280}" />
                 </VerticalStackLayout>
             </Frame>
 

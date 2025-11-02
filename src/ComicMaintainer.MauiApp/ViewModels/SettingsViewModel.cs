@@ -18,11 +18,23 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private string _testResult = string.Empty;
 
+    [ObservableProperty]
+    private bool _isDarkMode;
+
     public SettingsViewModel(IApiService apiService, ISettingsService settingsService)
     {
         _apiService = apiService;
         _settingsService = settingsService;
         ServerUrl = _settingsService.ServerUrl;
+        IsDarkMode = Application.Current?.UserAppTheme == AppTheme.Dark;
+    }
+
+    partial void OnIsDarkModeChanged(bool value)
+    {
+        if (Application.Current != null)
+        {
+            Application.Current.UserAppTheme = value ? AppTheme.Dark : AppTheme.Light;
+        }
     }
 
     [RelayCommand]

@@ -22,14 +22,21 @@ public class LogsController : ControllerBase
     }
 
     [HttpGet]
-    public ActionResult<object> GetLogs([FromQuery] int lines = 500)
+    public ActionResult<object> GetLogs([FromQuery] int lines = 500, [FromQuery] string type = "debug")
     {
         try
         {
             var configDir = _settings.ConfigDirectory ?? "/Config";
             
+            // Determine log file pattern based on type
+            string logFilePattern = type.ToLower() switch
+            {
+                "watcher" => "watcher*.log",
+                "debug" => "debug*.log",
+                _ => "debug*.log"
+            };
+            
             // Find the most recent log file (Serilog uses rolling date suffix)
-            var logFilePattern = "debug*.log";
             var logFiles = Directory.GetFiles(configDir, logFilePattern)
                 .OrderByDescending(f => System.IO.File.GetLastWriteTime(f))
                 .ToArray();

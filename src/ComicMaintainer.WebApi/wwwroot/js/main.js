@@ -2232,21 +2232,19 @@
             showMessage('Processing file...', 'info');
             
             try {
-                const response = await fetch(apiUrl(`/api/process-file/${encodeURIComponent(filepath)}`), {
-                    method: 'POST'
+                const encodedPath = encodeFilePathForUrl(filepath);
+                const response = await fetch(apiUrl(`/api/files/${encodedPath}/process`), {
+                    method: 'POST',
+                    headers: getAuthHeaders()
                 });
                 
+                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const result = await response.json();
                 
-                if (result.success) {
-                    showMessage('File processed successfully!', 'success');
-                    await loadFiles(currentPage, true);
-                } else {
-                    showMessage(result.error || 'Failed to process file', 'error');
-                }
+                showMessage('File processed successfully!', 'success');
+                await loadFiles(currentPage, true);
             } catch (error) {
                 showMessage('Failed to process file: ' + error.message, 'error');
             }
@@ -2260,21 +2258,19 @@
             showMessage('Renaming file...', 'info');
             
             try {
-                const response = await fetch(apiUrl(`/api/rename-file/${encodeURIComponent(filepath)}`), {
-                    method: 'POST'
+                const encodedPath = encodeFilePathForUrl(filepath);
+                const response = await fetch(apiUrl(`/api/files/${encodedPath}/rename`), {
+                    method: 'POST',
+                    headers: getAuthHeaders()
                 });
                 
+                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const result = await response.json();
                 
-                if (result.success) {
-                    showMessage('File renamed successfully!', 'success');
-                    await loadFiles(currentPage, true);
-                } else {
-                    showMessage(result.error || 'Failed to rename file', 'error');
-                }
+                showMessage('File renamed successfully!', 'success');
+                await loadFiles(currentPage, true);
             } catch (error) {
                 showMessage('Failed to rename file: ' + error.message, 'error');
             }
@@ -2288,20 +2284,26 @@
             showMessage('Normalizing metadata...', 'info');
             
             try {
-                const response = await fetch(apiUrl(`/api/normalize-file/${encodeURIComponent(filepath)}`), {
-                    method: 'POST'
+                const response = await fetch(apiUrl('/api/jobs/normalize-selected'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ Files: [filepath] })
                 });
                 
+                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const result = await response.json();
                 
-                if (result.success) {
-                    showMessage('Metadata normalized successfully!', 'success');
+                const result = await response.json();
+                if (result.job_id) {
+                    showMessage('Metadata normalization started!', 'success');
                     await loadFiles(currentPage, true);
                 } else {
-                    showMessage(result.error || 'Failed to normalize metadata', 'error');
+                    throw new Error('No job ID returned');
                 }
             } catch (error) {
                 showMessage('Failed to normalize metadata: ' + error.message, 'error');
@@ -2323,6 +2325,7 @@
                     headers: getAuthHeaders()
                 });
                 
+                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }

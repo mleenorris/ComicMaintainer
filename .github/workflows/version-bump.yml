@@ -2,7 +2,7 @@ name: Automatic Version Bump
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, dotnet ]
     # Only run on merge commits, not on version bump commits
     paths-ignore:
       - '.github/workflows/version-bump.yml'
@@ -30,9 +30,17 @@ jobs:
       - name: Get current version
         id: current_version
         run: |
-          # Extract version from src/version.py
-          VERSION=$(python -c "import sys; sys.path.insert(0, 'src'); from version import __version__; print(__version__)")
-          echo "Current version: $VERSION"
+          # Extract version from .csproj file
+          if [ -f "src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj" ]; then
+            VERSION=$(grep -oP '(?<=<Version>)[^<]+' src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj | head -1)
+            echo "Current version (dotnet): $VERSION"
+          elif [ -f "src/version.py" ]; then
+            VERSION=$(python -c "import sys; sys.path.insert(0, 'src'); from version import __version__; print(__version__)")
+            echo "Current version (python): $VERSION"
+          else
+            echo "No version file found"
+            exit 1
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
       
       - name: Bump version
@@ -52,14 +60,27 @@ jobs:
           echo "New version: $NEW_VERSION"
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
       
-      - name: Update version.py
+      - name: Update version files
         run: |
           NEW_VERSION="${{ steps.bump_version.outputs.new_version }}"
-          sed -i "s/__version__ = \".*\"/__version__ = \"$NEW_VERSION\"/" src/version.py
           
-          # Verify the change
-          echo "Updated version.py:"
-          cat src/version.py
+          # Update .csproj file if it exists (dotnet project)
+          if [ -f "src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj" ]; then
+            sed -i "s|<Version>.*</Version>|<Version>$NEW_VERSION</Version>|" src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
+            sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$NEW_VERSION.0</AssemblyVersion>|" src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
+            sed -i "s|<FileVersion>.*</FileVersion>|<FileVersion>$NEW_VERSION.0</FileVersion>|" src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
+            echo "Updated .csproj file:"
+            grep -A 2 "<Version>" src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
+            git add src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
+          fi
+          
+          # Update version.py if it exists (python project)
+          if [ -f "src/version.py" ]; then
+            sed -i "s/__version__ = \".*\"/__version__ = \"$NEW_VERSION\"/" src/version.py
+            echo "Updated version.py:"
+            cat src/version.py
+            git add src/version.py
+          fi
       
       - name: Update CHANGELOG.md
         run: |
@@ -99,7 +120,7 @@ jobs:
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          git add src/version.py CHANGELOG.md
+          git add CHANGELOG.md
           git commit -m "Bump version to $NEW_VERSION [skip-version-bump]"
           git push
       

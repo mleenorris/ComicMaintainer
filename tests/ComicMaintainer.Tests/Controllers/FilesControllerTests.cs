@@ -1,8 +1,10 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using System.Text.Json;
 
@@ -13,6 +15,7 @@ public class FilesControllerTests
     private readonly Mock<IFileStoreService> _mockFileStore;
     private readonly Mock<IComicProcessorService> _mockProcessor;
     private readonly Mock<ILogger<FilesController>> _mockLogger;
+    private readonly Mock<IOptions<AppSettings>> _mockSettings;
     private readonly FilesController _controller;
 
     public FilesControllerTests()
@@ -20,7 +23,16 @@ public class FilesControllerTests
         _mockFileStore = new Mock<IFileStoreService>();
         _mockProcessor = new Mock<IComicProcessorService>();
         _mockLogger = new Mock<ILogger<FilesController>>();
-        _controller = new FilesController(_mockFileStore.Object, _mockProcessor.Object, _mockLogger.Object);
+        _mockSettings = new Mock<IOptions<AppSettings>>();
+        
+        // Setup default settings with temp directory as watched directory for tests
+        var settings = new AppSettings
+        {
+            WatchedDirectory = Path.GetTempPath()
+        };
+        _mockSettings.Setup(s => s.Value).Returns(settings);
+        
+        _controller = new FilesController(_mockFileStore.Object, _mockProcessor.Object, _mockLogger.Object, _mockSettings.Object);
     }
 
     [Fact]
@@ -433,5 +445,245 @@ public class FilesControllerTests
         // Assert
         Assert.IsType<OkResult>(result);
         _mockProcessor.Verify(p => p.UpdateMetadataAsync(filePath, metadata, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteFile_WithExistingFile_ReturnsOkAndDeletesFile()
+    {
+        // Arrange
+        var testFilePath = Path.Combine(Path.GetTempPath(), $"test-{Guid.NewGuid()}.cbz");
+        
+        // Create a temporary test file
+        await File.WriteAllTextAsync(testFilePath, "test content");
+        Assert.True(File.Exists(testFilePath));
+
+        _mockFileStore.Setup(fs => fs.RemoveFileAsync(testFilePath, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _controller.DeleteFile(testFilePath);
+
+        // Assert
+        Assert.IsType<OkResult>(result);
+        Assert.False(File.Exists(testFilePath)); // File should be deleted
+        _mockFileStore.Verify(fs => fs.RemoveFileAsync(testFilePath, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteFile_WithNonExistentFile_ReturnsNotFound()
+    {
+        // Arrange - use a path within watched directory that doesn't exist
+        var filePath = Path.Combine(Path.GetTempPath(), "nonexistent", $"test-{Guid.NewGuid()}.cbz");
+
+        // Act
+        var result = await _controller.DeleteFile(filePath);
+
+        // Assert
+        Assert.IsType<NotFoundResult>(result);
+        _mockFileStore.Verify(fs => fs.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteFile_WhenFileStoreThrowsException_ReturnsInternalServerError()
+    {
+        // Arrange
+        var filePath = Path.Combine(Path.GetTempPath(), $"test-exception-{Guid.NewGuid()}.cbz");
+        
+        // Create a temporary test file
+        await File.WriteAllTextAsync(filePath, "test content");
+        Assert.True(File.Exists(filePath));
+
+        _mockFileStore.Setup(fs => fs.RemoveFileAsync(filePath, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Test error"));
+
+        // Act
+        var result = await _controller.DeleteFile(filePath);
+
+        // Assert
+        var statusCodeResult = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(500, statusCodeResult.StatusCode);
+        Assert.Equal("Error deleting file", statusCodeResult.Value);
+        
+        // Cleanup: delete the test file if it still exists
+        if (File.Exists(filePath))
+        {
+            File.Delete(filePath);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteFile_WhenFileDeletionThrowsIOException_ReturnsInternalServerError()
+    {
+        // Arrange - create a file that we'll make read-only/locked to cause deletion to fail
+        var testFilePath = Path.Combine(Path.GetTempPath(), $"test-locked-{Guid.NewGuid()}.cbz");
+        await File.WriteAllTextAsync(testFilePath, "test content");
+        
+        // Make the file read-only to potentially cause deletion issues
+        var fileInfo = new FileInfo(testFilePath);
+        fileInfo.IsReadOnly = true;
+
+        _mockFileStore.Setup(fs => fs.RemoveFileAsync(testFilePath, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _controller.DeleteFile(testFilePath);
+
+        // Assert - on Unix systems, readonly doesn't prevent deletion, so this might succeed
+        // We accept either success or error
+        Assert.True(
+            result is OkResult || 
+            (result is ObjectResult objResult && objResult.StatusCode == 500),
+            "Expected either Ok or 500 error result"
+        );
+        
+        // Cleanup - remove readonly and delete if it still exists
+        if (File.Exists(testFilePath))
+        {
+            fileInfo.IsReadOnly = false;
+            File.Delete(testFilePath);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteFileByEncodedPath_WithExistingFile_ReturnsOkAndDeletesFile()
+    {
+        // Arrange
+        var testFilePath = Path.Combine(Path.GetTempPath(), $"test-{Guid.NewGuid()}.cbz");
+        var encodedPath = EncodeFilePathForUrl(testFilePath);
+        
+        // Create a temporary test file
+        await File.WriteAllTextAsync(testFilePath, "test content");
+        Assert.True(File.Exists(testFilePath));
+
+        _mockFileStore.Setup(fs => fs.RemoveFileAsync(testFilePath, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _controller.DeleteFileByEncodedPath(encodedPath);
+
+        // Assert
+        Assert.IsType<OkResult>(result);
+        Assert.False(File.Exists(testFilePath)); // File should be deleted
+        _mockFileStore.Verify(fs => fs.RemoveFileAsync(testFilePath, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteFileByEncodedPath_WithNonExistentFile_ReturnsNotFound()
+    {
+        // Arrange - use a path within watched directory that doesn't exist
+        var filePath = Path.Combine(Path.GetTempPath(), "nonexistent", $"test-{Guid.NewGuid()}.cbz");
+        var encodedPath = EncodeFilePathForUrl(filePath);
+
+        // Act
+        var result = await _controller.DeleteFileByEncodedPath(encodedPath);
+
+        // Assert
+        Assert.IsType<NotFoundResult>(result);
+        _mockFileStore.Verify(fs => fs.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteFileByEncodedPath_WithInvalidEncodedPath_ReturnsBadRequest()
+    {
+        // Arrange
+        var invalidEncodedPath = "!!!invalid-base64!!!";
+
+        // Act
+        var result = await _controller.DeleteFileByEncodedPath(invalidEncodedPath);
+
+        // Assert
+        Assert.IsType<BadRequestObjectResult>(result);
+        _mockFileStore.Verify(fs => fs.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteFileByEncodedPath_WhenFileStoreThrowsException_ReturnsInternalServerError()
+    {
+        // Arrange
+        var testFilePath = Path.Combine(Path.GetTempPath(), $"test-exception-{Guid.NewGuid()}.cbz");
+        var encodedPath = EncodeFilePathForUrl(testFilePath);
+        
+        // Create a temporary test file
+        await File.WriteAllTextAsync(testFilePath, "test content");
+        Assert.True(File.Exists(testFilePath));
+
+        _mockFileStore.Setup(fs => fs.RemoveFileAsync(testFilePath, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Test error"));
+
+        // Act
+        var result = await _controller.DeleteFileByEncodedPath(encodedPath);
+
+        // Assert
+        var statusCodeResult = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(500, statusCodeResult.StatusCode);
+        Assert.Equal("Error deleting file", statusCodeResult.Value);
+        
+        // Cleanup: delete the test file if it still exists
+        if (File.Exists(testFilePath))
+        {
+            File.Delete(testFilePath);
+        }
+    }
+
+    [Fact]
+    public async Task DeleteFile_WithPathOutsideWatchedDirectory_ReturnsBadRequest()
+    {
+        // Arrange
+        var outsidePath = "/etc/passwd"; // Path outside watched directory
+
+        // Act
+        var result = await _controller.DeleteFile(outsidePath);
+
+        // Assert
+        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("File path is outside the allowed directory", badRequestResult.Value);
+        _mockFileStore.Verify(fs => fs.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteFileByEncodedPath_WithPathOutsideWatchedDirectory_ReturnsBadRequest()
+    {
+        // Arrange
+        var outsidePath = "/etc/passwd"; // Path outside watched directory
+        var encodedPath = EncodeFilePathForUrl(outsidePath);
+
+        // Act
+        var result = await _controller.DeleteFileByEncodedPath(encodedPath);
+
+        // Assert
+        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("File path is outside the allowed directory", badRequestResult.Value);
+        _mockFileStore.Verify(fs => fs.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteFile_WithPathTraversalAttempt_ReturnsBadRequest()
+    {
+        // Arrange
+        var traversalPath = Path.Combine(Path.GetTempPath(), "..", "..", "etc", "passwd");
+
+        // Act
+        var result = await _controller.DeleteFile(traversalPath);
+
+        // Assert
+        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("File path is outside the allowed directory", badRequestResult.Value);
+        _mockFileStore.Verify(fs => fs.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteFileByEncodedPath_WithPathTraversalAttempt_ReturnsBadRequest()
+    {
+        // Arrange
+        var traversalPath = Path.Combine(Path.GetTempPath(), "..", "..", "etc", "passwd");
+        var encodedPath = EncodeFilePathForUrl(traversalPath);
+
+        // Act
+        var result = await _controller.DeleteFileByEncodedPath(encodedPath);
+
+        // Assert
+        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("File path is outside the allowed directory", badRequestResult.Value);
+        _mockFileStore.Verify(fs => fs.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

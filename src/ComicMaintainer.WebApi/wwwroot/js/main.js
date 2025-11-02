@@ -936,6 +936,8 @@
                                 <span class="directory-path">${escapeHtml(dir)}</span>
                             </div>
                             <span class="directory-file-count">${fileCount} file${fileCount !== 1 ? 's' : ''}</span>
+                            <!-- Empty spans fill grid columns 5-6 to maintain 6-column alignment with file-list-header -->
+                            <!-- These are hidden in responsive views via CSS -->
                             <span></span>
                             <span></span>
                         </div>

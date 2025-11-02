@@ -18,14 +18,31 @@ public class SettingsController : ControllerBase
         _logger = logger;
     }
 
+    // RESTful endpoint: GET /api/settings - Get all settings
+    [HttpGet]
+    public ActionResult<object> GetAllSettings()
+    {
+        return Ok(new
+        {
+            filename_format = _appSettings.Value.FilenameFormat,
+            issue_number_padding = _appSettings.Value.IssueNumberPadding,
+            watcher_enabled = _appSettings.Value.WatcherEnabled,
+            log_max_bytes = _appSettings.Value.LogMaxBytes,
+            github_token_configured = !string.IsNullOrEmpty(_appSettings.Value.GitHubToken),
+            github_repository = _appSettings.Value.GitHubRepository ?? "",
+            github_issue_assignee = _appSettings.Value.GitHubIssueAssignee ?? ""
+        });
+    }
+
     [HttpGet("filename-format")]
     public ActionResult<object> GetFilenameFormat()
     {
         return Ok(new { format = _appSettings.Value.FilenameFormat });
     }
 
-    [HttpPost("filename-format")]
-    public ActionResult SetFilenameFormat([FromBody] FilenameFormatRequest request)
+    // RESTful endpoint: PUT /api/settings/filename-format
+    [HttpPut("filename-format")]
+    public ActionResult UpdateFilenameFormat([FromBody] FilenameFormatRequest request)
     {
         var sanitizedFormat = LoggingHelper.SanitizeForLog(request.Format);
         _logger.LogInformation("Filename format update requested: {Format}", sanitizedFormat);
@@ -35,18 +52,31 @@ public class SettingsController : ControllerBase
         return Ok(new { message = "Setting received but not persisted (read-only)" });
     }
 
+    // Legacy endpoint for backward compatibility
+    [HttpPost("filename-format")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public ActionResult SetFilenameFormat([FromBody] FilenameFormatRequest request) 
+        => UpdateFilenameFormat(request);
+
     [HttpGet("issue-number-padding")]
     public ActionResult<object> GetIssueNumberPadding()
     {
         return Ok(new { padding = _appSettings.Value.IssueNumberPadding });
     }
 
-    [HttpPost("issue-number-padding")]
-    public ActionResult SetIssueNumberPadding([FromBody] IssueNumberPaddingRequest request)
+    // RESTful endpoint: PUT /api/settings/issue-number-padding
+    [HttpPut("issue-number-padding")]
+    public ActionResult UpdateIssueNumberPadding([FromBody] IssueNumberPaddingRequest request)
     {
         _logger.LogInformation("Issue number padding update requested: {Padding}", request.Padding);
         return Ok();
     }
+
+    // Legacy endpoint for backward compatibility
+    [HttpPost("issue-number-padding")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public ActionResult SetIssueNumberPadding([FromBody] IssueNumberPaddingRequest request)
+        => UpdateIssueNumberPadding(request);
 
     [HttpGet("watcher-enabled")]
     public ActionResult<object> GetWatcherEnabled()
@@ -54,12 +84,19 @@ public class SettingsController : ControllerBase
         return Ok(new { enabled = _appSettings.Value.WatcherEnabled });
     }
 
-    [HttpPost("watcher-enabled")]
-    public ActionResult SetWatcherEnabled([FromBody] WatcherEnabledRequest request)
+    // RESTful endpoint: PUT /api/settings/watcher-enabled
+    [HttpPut("watcher-enabled")]
+    public ActionResult UpdateWatcherEnabled([FromBody] WatcherEnabledRequest request)
     {
         _logger.LogInformation("Watcher enabled update requested: {Enabled}", request.Enabled);
         return Ok();
     }
+
+    // Legacy endpoint for backward compatibility
+    [HttpPost("watcher-enabled")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public ActionResult SetWatcherEnabled([FromBody] WatcherEnabledRequest request)
+        => UpdateWatcherEnabled(request);
 
     [HttpGet("log-max-bytes")]
     public ActionResult<object> GetLogMaxBytes()
@@ -67,12 +104,19 @@ public class SettingsController : ControllerBase
         return Ok(new { maxBytes = _appSettings.Value.LogMaxBytes });
     }
 
-    [HttpPost("log-max-bytes")]
-    public ActionResult SetLogMaxBytes([FromBody] LogMaxBytesRequest request)
+    // RESTful endpoint: PUT /api/settings/log-max-bytes
+    [HttpPut("log-max-bytes")]
+    public ActionResult UpdateLogMaxBytes([FromBody] LogMaxBytesRequest request)
     {
         _logger.LogInformation("Log max bytes update requested: {MaxBytes}", request.MaxBytes);
         return Ok();
     }
+
+    // Legacy endpoint for backward compatibility
+    [HttpPost("log-max-bytes")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public ActionResult SetLogMaxBytes([FromBody] LogMaxBytesRequest request)
+        => UpdateLogMaxBytes(request);
 
     [HttpGet("github-token")]
     public ActionResult<object> GetGitHubToken()
@@ -81,12 +125,19 @@ public class SettingsController : ControllerBase
         return Ok(new { hasToken = !string.IsNullOrEmpty(_appSettings.Value.GitHubToken) });
     }
 
-    [HttpPost("github-token")]
-    public ActionResult SetGitHubToken([FromBody] GitHubTokenRequest request)
+    // RESTful endpoint: PUT /api/settings/github-token
+    [HttpPut("github-token")]
+    public ActionResult UpdateGitHubToken([FromBody] GitHubTokenRequest request)
     {
         _logger.LogInformation("GitHub token update requested");
         return Ok();
     }
+
+    // Legacy endpoint for backward compatibility
+    [HttpPost("github-token")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public ActionResult SetGitHubToken([FromBody] GitHubTokenRequest request)
+        => UpdateGitHubToken(request);
 
     [HttpGet("github-repository")]
     public ActionResult<object> GetGitHubRepository()
@@ -94,13 +145,20 @@ public class SettingsController : ControllerBase
         return Ok(new { repository = _appSettings.Value.GitHubRepository ?? "" });
     }
 
-    [HttpPost("github-repository")]
-    public ActionResult SetGitHubRepository([FromBody] GitHubRepositoryRequest request)
+    // RESTful endpoint: PUT /api/settings/github-repository
+    [HttpPut("github-repository")]
+    public ActionResult UpdateGitHubRepository([FromBody] GitHubRepositoryRequest request)
     {
         var sanitizedRepo = LoggingHelper.SanitizeForLog(request.Repository);
         _logger.LogInformation("GitHub repository update requested: {Repository}", sanitizedRepo);
         return Ok();
     }
+
+    // Legacy endpoint for backward compatibility
+    [HttpPost("github-repository")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public ActionResult SetGitHubRepository([FromBody] GitHubRepositoryRequest request)
+        => UpdateGitHubRepository(request);
 
     [HttpGet("github-issue-assignee")]
     public ActionResult<object> GetGitHubIssueAssignee()
@@ -108,13 +166,20 @@ public class SettingsController : ControllerBase
         return Ok(new { assignee = _appSettings.Value.GitHubIssueAssignee ?? "" });
     }
 
-    [HttpPost("github-issue-assignee")]
-    public ActionResult SetGitHubIssueAssignee([FromBody] GitHubIssueAssigneeRequest request)
+    // RESTful endpoint: PUT /api/settings/github-issue-assignee
+    [HttpPut("github-issue-assignee")]
+    public ActionResult UpdateGitHubIssueAssignee([FromBody] GitHubIssueAssigneeRequest request)
     {
         var sanitizedAssignee = LoggingHelper.SanitizeForLog(request.Assignee);
         _logger.LogInformation("GitHub issue assignee update requested: {Assignee}", sanitizedAssignee);
         return Ok();
     }
+
+    // Legacy endpoint for backward compatibility
+    [HttpPost("github-issue-assignee")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public ActionResult SetGitHubIssueAssignee([FromBody] GitHubIssueAssigneeRequest request)
+        => UpdateGitHubIssueAssignee(request);
 
     public class FilenameFormatRequest
     {

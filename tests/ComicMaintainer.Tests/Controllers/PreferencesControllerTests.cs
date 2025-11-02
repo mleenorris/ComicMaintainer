@@ -45,4 +45,62 @@ public class PreferencesControllerTests
         // Assert
         Assert.IsType<OkResult>(result);
     }
+
+    // New RESTful endpoint tests
+
+    [Fact]
+    public void UpdatePreferences_WithValidPreferences_ReturnsOkWithMessage()
+    {
+        // Arrange
+        var request = new PreferencesController.PreferencesRequest
+        {
+            Theme = "light",
+            PerPage = 50,
+            FilenameFormat = "{series} #{issue}",
+            IssueNumberPadding = 3,
+            WatcherEnabled = false
+        };
+
+        // Act
+        var result = _controller.UpdatePreferences(request);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+        var message = okResult.Value.GetType().GetProperty("message");
+        Assert.NotNull(message);
+        Assert.Equal("Preferences updated successfully", message.GetValue(okResult.Value));
+    }
+
+    [Fact]
+    public void UpdatePreferences_WithPartialPreferences_ReturnsOk()
+    {
+        // Arrange - Only update theme and perPage
+        var request = new PreferencesController.PreferencesRequest
+        {
+            Theme = "light",
+            PerPage = 75
+        };
+
+        // Act
+        var result = _controller.UpdatePreferences(request);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+    }
+
+    [Fact]
+    public void UpdatePreferences_WithEmptyPreferences_ReturnsOk()
+    {
+        // Arrange - No preferences set (all null/default)
+        var request = new PreferencesController.PreferencesRequest();
+
+        // Act
+        var result = _controller.UpdatePreferences(request);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+    }
 }

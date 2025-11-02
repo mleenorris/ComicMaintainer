@@ -121,4 +121,117 @@ public class SettingsControllerTests
         var repoProperty = repo.GetType().GetProperty("repository");
         Assert.Equal("test/repo", repoProperty?.GetValue(repo));
     }
+
+    // New RESTful endpoint tests
+
+    [Fact]
+    public void GetAllSettings_ReturnsAllSettings()
+    {
+        // Act
+        var result = _controller.GetAllSettings();
+
+        // Assert
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
+        Assert.NotNull(objectResult.Value);
+        
+        var settings = objectResult.Value;
+        var filenameFormatProp = settings.GetType().GetProperty("filename_format");
+        Assert.NotNull(filenameFormatProp);
+        Assert.Equal("{series} - Chapter {issue}", filenameFormatProp.GetValue(settings));
+    }
+
+    [Fact]
+    public void UpdateFilenameFormat_ReturnsOk()
+    {
+        // Arrange
+        var request = new SettingsController.FilenameFormatRequest 
+        { 
+            Format = "{series} v{volume} #{issue}" 
+        };
+
+        // Act
+        var result = _controller.UpdateFilenameFormat(request);
+
+        // Assert
+        Assert.IsType<OkObjectResult>(result);
+    }
+
+    [Fact]
+    public void UpdateIssueNumberPadding_ReturnsOk()
+    {
+        // Arrange
+        var request = new SettingsController.IssueNumberPaddingRequest { Padding = 3 };
+
+        // Act
+        var result = _controller.UpdateIssueNumberPadding(request);
+
+        // Assert
+        Assert.IsType<OkResult>(result);
+    }
+
+    [Fact]
+    public void UpdateWatcherEnabled_ReturnsOk()
+    {
+        // Arrange
+        var request = new SettingsController.WatcherEnabledRequest { Enabled = false };
+
+        // Act
+        var result = _controller.UpdateWatcherEnabled(request);
+
+        // Assert
+        Assert.IsType<OkResult>(result);
+    }
+
+    [Fact]
+    public void UpdateLogMaxBytes_ReturnsOk()
+    {
+        // Arrange
+        var request = new SettingsController.LogMaxBytesRequest { MaxBytes = 20971520 };
+
+        // Act
+        var result = _controller.UpdateLogMaxBytes(request);
+
+        // Assert
+        Assert.IsType<OkResult>(result);
+    }
+
+    [Fact]
+    public void UpdateGitHubToken_ReturnsOk()
+    {
+        // Arrange
+        var request = new SettingsController.GitHubTokenRequest { Token = "new-token" };
+
+        // Act
+        var result = _controller.UpdateGitHubToken(request);
+
+        // Assert
+        Assert.IsType<OkResult>(result);
+    }
+
+    [Fact]
+    public void UpdateGitHubRepository_ReturnsOk()
+    {
+        // Arrange
+        var request = new SettingsController.GitHubRepositoryRequest { Repository = "newowner/newrepo" };
+
+        // Act
+        var result = _controller.UpdateGitHubRepository(request);
+
+        // Assert
+        Assert.IsType<OkResult>(result);
+    }
+
+    [Fact]
+    public void UpdateGitHubIssueAssignee_ReturnsOk()
+    {
+        // Arrange
+        var request = new SettingsController.GitHubIssueAssigneeRequest { Assignee = "newuser" };
+
+        // Act
+        var result = _controller.UpdateGitHubIssueAssignee(request);
+
+        // Assert
+        Assert.IsType<OkResult>(result);
+    }
 }

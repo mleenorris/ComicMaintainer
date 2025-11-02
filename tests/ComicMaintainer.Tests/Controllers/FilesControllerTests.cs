@@ -686,4 +686,153 @@ public class FilesControllerTests
         Assert.Equal("File path is outside the allowed directory", badRequestResult.Value);
         _mockFileStore.Verify(fs => fs.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
+
+    // New RESTful endpoint tests
+
+    [Fact]
+    public async Task ScanUnmarked_ReturnsOkWithCounts()
+    {
+        // Arrange
+        var allFiles = new List<ComicFile>
+        {
+            new() { FilePath = "/test/file1.cbz", IsProcessed = true },
+            new() { FilePath = "/test/file2.cbz", IsProcessed = false },
+            new() { FilePath = "/test/file3.cbz", IsProcessed = false }
+        };
+        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(allFiles);
+        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("unprocessed", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(allFiles.Where(f => !f.IsProcessed).ToList());
+        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("processed", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(allFiles.Where(f => f.IsProcessed).ToList());
+
+        // Act
+        var result = await _controller.ScanUnmarked();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+        var resultValue = okResult.Value;
+        var totalCountProp = resultValue?.GetType().GetProperty("total_count");
+        Assert.NotNull(totalCountProp);
+        var totalCount = (int?)totalCountProp.GetValue(resultValue);
+        Assert.Equal(3, totalCount);
+    }
+
+    [Fact]
+    public async Task ProcessFileByEncodedPath_WithValidPath_ReturnsOk()
+    {
+        // Arrange
+        var filePath = Path.Combine(Path.GetTempPath(), "test.cbz");
+        var encodedPath = EncodeFilePathForUrl(filePath);
+        _mockProcessor.Setup(p => p.ProcessFileAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _controller.ProcessFileByEncodedPath(encodedPath);
+
+        // Assert
+        Assert.IsType<OkResult>(result);
+    }
+
+    [Fact]
+    public async Task ProcessFileByEncodedPath_WithInvalidPath_ReturnsBadRequest()
+    {
+        // Arrange
+        var encodedPath = "invalid-base64";
+
+        // Act
+        var result = await _controller.ProcessFileByEncodedPath(encodedPath);
+
+        // Assert
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task RenameFileByEncodedPath_WithValidPath_ReturnsOk()
+    {
+        // Arrange
+        var filePath = Path.Combine(Path.GetTempPath(), "test.cbz");
+        var encodedPath = EncodeFilePathForUrl(filePath);
+        var metadata = new ComicMetadata { Series = "Batman", Issue = "1" };
+        _mockProcessor.Setup(p => p.GetMetadataAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(metadata);
+
+        // Act
+        var result = await _controller.RenameFileByEncodedPath(encodedPath);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+    }
+
+    [Fact]
+    public async Task RenameFileByEncodedPath_WithInvalidPath_ReturnsBadRequestOrNotFound()
+    {
+        // Arrange
+        // "invalid-base64" can still decode as base64, so it may decode to a string
+        // But the metadata will be null for a non-existent file
+        var encodedPath = "invalid-base64";
+        _mockProcessor.Setup(p => p.GetMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ComicMetadata?)null);
+
+        // Act
+        var result = await _controller.RenameFileByEncodedPath(encodedPath);
+
+        // Assert - Either BadRequest for truly invalid path, or NotFound for decoded but non-existent file
+        Assert.True(result is BadRequestObjectResult || result is NotFoundObjectResult);
+    }
+
+    [Fact]
+    public async Task RenameFileByEncodedPath_WhenMetadataNotFound_ReturnsNotFound()
+    {
+        // Arrange
+        var filePath = Path.Combine(Path.GetTempPath(), "test.cbz");
+        var encodedPath = EncodeFilePathForUrl(filePath);
+        _mockProcessor.Setup(p => p.GetMetadataAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ComicMetadata?)null);
+
+        // Act
+        var result = await _controller.RenameFileByEncodedPath(encodedPath);
+
+        // Assert
+        Assert.IsType<NotFoundObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task UpdateProcessedStatus_WithValidPath_ReturnsOk()
+    {
+        // Arrange
+        var filePath = Path.Combine(Path.GetTempPath(), "test.cbz");
+        var encodedPath = EncodeFilePathForUrl(filePath);
+        var request = new FilesController.ProcessedStatusRequest { Processed = true };
+        _mockFileStore.Setup(fs => fs.MarkFileProcessedAsync(filePath, true, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _controller.UpdateProcessedStatus(encodedPath, request);
+
+        // Assert
+        Assert.IsType<OkResult>(result);
+        _mockFileStore.Verify(fs => fs.MarkFileProcessedAsync(filePath, true, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateProcessedStatus_WithInvalidPath_CompletesSafely()
+    {
+        // Arrange
+        // "invalid-base64" can still decode as base64, resulting in some string
+        // The method will call MarkFileProcessedAsync with whatever path results
+        // This tests that the method handles gracefully
+        var encodedPath = "invalid-base64";
+        var request = new FilesController.ProcessedStatusRequest { Processed = true };
+        _mockFileStore.Setup(fs => fs.MarkFileProcessedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var result = await _controller.UpdateProcessedStatus(encodedPath, request);
+
+        // Assert - Method completes (the fileStore handles the invalid path internally)
+        Assert.True(result is OkResult || result is BadRequestObjectResult);
+    }
 }

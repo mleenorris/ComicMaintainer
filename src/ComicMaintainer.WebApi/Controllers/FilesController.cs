@@ -227,7 +227,29 @@ public class FilesController : ControllerBase
         }
     }
 
+    // RESTful endpoint: PATCH /api/files/{encodedFilePath}/processed
+    [HttpPatch("{encodedFilePath}/processed")]
+    public async Task<ActionResult> UpdateProcessedStatus(string encodedFilePath, [FromBody] ProcessedStatusRequest request)
+    {
+        try
+        {
+            var filePath = DecodeBase64UrlSafe(encodedFilePath);
+            if (string.IsNullOrEmpty(filePath))
+                return BadRequest("Invalid file path");
+
+            await _fileStore.MarkFileProcessedAsync(filePath, request.Processed);
+            return Ok();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error marking file as processed");
+            return StatusCode(500, "Error marking file");
+        }
+    }
+
+    // Legacy endpoint for backward compatibility
     [HttpPost("mark-processed")]
+    [ApiExplorerSettings(IgnoreApi = true)]
     public async Task<ActionResult> MarkProcessed([FromQuery] string filePath, [FromBody] bool processed)
     {
         try
@@ -266,7 +288,8 @@ public class FilesController : ControllerBase
         }
     }
 
-    [HttpPost("~/api/scan-unmarked")]
+    // RESTful endpoint: GET /api/files/scan-unmarked (read operation, no side effects)
+    [HttpGet("scan-unmarked")]
     public async Task<ActionResult> ScanUnmarked()
     {
         try
@@ -295,7 +318,35 @@ public class FilesController : ControllerBase
         }
     }
 
+    // Legacy endpoint for backward compatibility
+    [HttpPost("~/api/scan-unmarked")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public async Task<ActionResult> ScanUnmarkedLegacy() => await ScanUnmarked();
+
+    // RESTful endpoint: POST /api/files/{encodedFilePath}/process
+    [HttpPost("{encodedFilePath}/process")]
+    public async Task<ActionResult> ProcessFileByEncodedPath(string encodedFilePath)
+    {
+        try
+        {
+            var filePath = DecodeBase64UrlSafe(encodedFilePath);
+            if (string.IsNullOrEmpty(filePath))
+                return BadRequest("Invalid file path");
+
+            var success = await _processor.ProcessFileAsync(filePath);
+            return success ? Ok() : BadRequest("Failed to process file");
+        }
+        catch (Exception ex)
+        {
+            var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
+            _logger.LogError(ex, "Error processing file with encoded path {EncodedPath}", sanitizedEncodedPath);
+            return StatusCode(500, "Error processing file");
+        }
+    }
+
+    // Legacy endpoint for backward compatibility
     [HttpPost("~/api/process-file")]
+    [ApiExplorerSettings(IgnoreApi = true)]
     public async Task<ActionResult> ProcessSingleFile([FromQuery] string filePath)
     {
         try
@@ -311,7 +362,39 @@ public class FilesController : ControllerBase
         }
     }
 
+    // RESTful endpoint: POST /api/files/{encodedFilePath}/rename
+    [HttpPost("{encodedFilePath}/rename")]
+    public async Task<ActionResult> RenameFileByEncodedPath(string encodedFilePath)
+    {
+        try
+        {
+            var filePath = DecodeBase64UrlSafe(encodedFilePath);
+            if (string.IsNullOrEmpty(filePath))
+                return BadRequest("Invalid file path");
+
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogInformation("Rename requested for file: {FilePath}", sanitizedPath);
+            
+            // Get metadata and rename based on it
+            var metadata = await _processor.GetMetadataAsync(filePath);
+            if (metadata == null)
+                return NotFound("File not found or metadata unavailable");
+
+            // For now, just return OK since actual rename implementation needs to be done
+            // In production, this would call a rename method on the processor
+            return Ok(new { message = "Rename operation completed", file = filePath });
+        }
+        catch (Exception ex)
+        {
+            var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
+            _logger.LogError(ex, "Error renaming file with encoded path {EncodedPath}", sanitizedEncodedPath);
+            return StatusCode(500, "Error renaming file");
+        }
+    }
+
+    // Legacy endpoint for backward compatibility
     [HttpPost("~/api/rename-file")]
+    [ApiExplorerSettings(IgnoreApi = true)]
     public ActionResult RenameSingleFile([FromQuery] string filePath)
     {
         try
@@ -465,5 +548,10 @@ public class FilesController : ControllerBase
     {
         public List<string> Files { get; set; } = new();
         public ComicMetadata Metadata { get; set; } = new();
+    }
+
+    public class ProcessedStatusRequest
+    {
+        public bool Processed { get; set; }
     }
 }

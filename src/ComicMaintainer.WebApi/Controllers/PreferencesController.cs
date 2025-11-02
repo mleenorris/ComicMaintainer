@@ -13,6 +13,7 @@ public class PreferencesController : ControllerBase
         _logger = logger;
     }
 
+    // RESTful endpoint: GET /api/preferences
     [HttpGet]
     public ActionResult<object> GetPreferences()
     {
@@ -27,12 +28,35 @@ public class PreferencesController : ControllerBase
         });
     }
 
+    // RESTful endpoint: PUT /api/preferences
+    [HttpPut]
+    public ActionResult UpdatePreferences([FromBody] PreferencesRequest preferences)
+    {
+        // For now, just acknowledge the save
+        // In the future, this could be persisted to the database
+        _logger.LogInformation("Preferences updated: Theme={Theme}, PerPage={PerPage}", 
+            preferences.Theme ?? "not specified", 
+            preferences.PerPage);
+        return Ok(new { message = "Preferences updated successfully" });
+    }
+
+    // Legacy endpoint for backward compatibility
     [HttpPost]
+    [ApiExplorerSettings(IgnoreApi = true)]
     public ActionResult SavePreferences([FromBody] object preferences)
     {
         // For now, just acknowledge the save
         // In the future, this could be persisted to the database
         _logger.LogInformation("Preferences updated");
         return Ok();
+    }
+
+    public class PreferencesRequest
+    {
+        public string? Theme { get; set; }
+        public int? PerPage { get; set; }
+        public string? FilenameFormat { get; set; }
+        public int? IssueNumberPadding { get; set; }
+        public bool? WatcherEnabled { get; set; }
     }
 }

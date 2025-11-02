@@ -219,6 +219,53 @@ public class JobsController : ControllerBase
         }
     }
 
+    // RESTful endpoint: GET /api/jobs - List all jobs
+    [HttpGet]
+    public ActionResult<object> ListJobs()
+    {
+        try
+        {
+            var jobs = _processor.GetAllJobs();
+            var jobList = jobs.Select(j => new
+            {
+                job_id = j.JobId.ToString(),
+                status = j.Status.ToString().ToLower(),
+                total_items = j.TotalFiles,
+                processed_items = j.ProcessedFiles,
+                failed_items = j.FailedFiles,
+                start_time = j.StartTime,
+                end_time = j.EndTime
+            }).ToList();
+
+            return Ok(new { jobs = jobList, count = jobList.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error listing jobs");
+            return StatusCode(500, "Error retrieving jobs");
+        }
+    }
+
+    // RESTful endpoint: DELETE /api/jobs/{jobId} - Delete a job
+    [HttpDelete("{jobId}")]
+    public ActionResult DeleteJob(Guid jobId)
+    {
+        try
+        {
+            _logger.LogInformation("Delete requested for job {JobId}", jobId);
+            var deleted = _processor.DeleteJob(jobId);
+            if (!deleted)
+                return NotFound();
+            
+            return NoContent();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting job {JobId}", jobId);
+            return StatusCode(500, "Error deleting job");
+        }
+    }
+
     [HttpPost("{jobId}/cancel")]
     public ActionResult CancelJob(Guid jobId)
     {

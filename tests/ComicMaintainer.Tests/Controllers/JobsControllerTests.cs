@@ -296,4 +296,102 @@ public class JobsControllerTests
         Assert.Equal(Guid.Empty.ToString(), jobId);
         Assert.Equal(0, totalItems);
     }
+
+    // New RESTful endpoint tests
+
+    [Fact]
+    public void ListJobs_ReturnsOkWithJobsList()
+    {
+        // Arrange
+        var jobs = new List<ProcessingJob>
+        {
+            new() { JobId = Guid.NewGuid(), Status = JobStatus.Completed, TotalFiles = 5, ProcessedFiles = 5 },
+            new() { JobId = Guid.NewGuid(), Status = JobStatus.Running, TotalFiles = 10, ProcessedFiles = 3 }
+        };
+        _mockProcessor.Setup(p => p.GetAllJobs()).Returns(jobs);
+
+        // Act
+        var result = _controller.ListJobs();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var json = JObject.FromObject(okResult.Value);
+        Assert.Equal(2, json["count"]!.Value<int>());
+        Assert.NotNull(json["jobs"]);
+    }
+
+    [Fact]
+    public void ListJobs_WhenNoJobs_ReturnsEmptyList()
+    {
+        // Arrange
+        _mockProcessor.Setup(p => p.GetAllJobs()).Returns(new List<ProcessingJob>());
+
+        // Act
+        var result = _controller.ListJobs();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var json = JObject.FromObject(okResult.Value);
+        Assert.Equal(0, json["count"]!.Value<int>());
+    }
+
+    [Fact]
+    public void ListJobs_WhenExceptionThrown_ReturnsInternalServerError()
+    {
+        // Arrange
+        _mockProcessor.Setup(p => p.GetAllJobs()).Throws(new InvalidOperationException("Test error"));
+
+        // Act
+        var result = _controller.ListJobs();
+
+        // Assert
+        var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(500, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public void DeleteJob_ExistingJob_ReturnsNoContent()
+    {
+        // Arrange
+        var jobId = Guid.NewGuid();
+        _mockProcessor.Setup(p => p.DeleteJob(jobId)).Returns(true);
+
+        // Act
+        var result = _controller.DeleteJob(jobId);
+
+        // Assert
+        Assert.IsType<NoContentResult>(result);
+        _mockProcessor.Verify(p => p.DeleteJob(jobId), Times.Once);
+    }
+
+    [Fact]
+    public void DeleteJob_NonExistentJob_ReturnsNotFound()
+    {
+        // Arrange
+        var jobId = Guid.NewGuid();
+        _mockProcessor.Setup(p => p.DeleteJob(jobId)).Returns(false);
+
+        // Act
+        var result = _controller.DeleteJob(jobId);
+
+        // Assert
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public void DeleteJob_WhenExceptionThrown_ReturnsInternalServerError()
+    {
+        // Arrange
+        var jobId = Guid.NewGuid();
+        _mockProcessor.Setup(p => p.DeleteJob(jobId)).Throws(new InvalidOperationException("Test error"));
+
+        // Act
+        var result = _controller.DeleteJob(jobId);
+
+        // Assert
+        var statusCodeResult = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(500, statusCodeResult.StatusCode);
+    }
 }

@@ -438,4 +438,63 @@ public class FileStoreServiceTests
         // Assert
         Assert.False(isProcessed, "File should not be marked as processed after unmarking");
     }
+    
+    [Fact]
+    public async Task InitializeFromDatabaseAsync_LoadsFileList_WithoutFilesystemScan()
+    {
+        // Arrange - Add files to the first service instance
+        var file1 = Path.Combine(_testDirectory, "comic1.cbz");
+        var file2 = Path.Combine(_testDirectory, "comic2.cbz");
+        var file3 = Path.Combine(_testDirectory, "comic3.cbz");
+        
+        File.WriteAllText(file1, "test content 1");
+        File.WriteAllText(file2, "test content 2");
+        File.WriteAllText(file3, "test content 3");
+        
+        await _service.AddFileAsync(file1);
+        await _service.AddFileAsync(file2);
+        await _service.AddFileAsync(file3);
+        await _service.MarkFileProcessedAsync(file1, true);
+        await _service.MarkFileDuplicateAsync(file2, true);
+        
+        // Verify files are in the database
+        using (var scope = _serviceProvider.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            var dbFiles = await dbContext.ComicFiles.ToListAsync();
+            Assert.Equal(3, dbFiles.Count);
+        }
+        
+        // Act - Create a new service instance (simulating restart) and initialize from database
+        var settings = new AppSettings { WatchedDirectory = _testDirectory };
+        var options = Options.Create(settings);
+        var logger = new Mock<ILogger<FileStoreService>>().Object;
+        var newService = new FileStoreService(options, logger, _serviceProvider);
+        
+        await newService.InitializeFromDatabaseAsync();
+        
+        // Assert - Files should be loaded from database without needing to add them again
+        var files = (await newService.GetAllFilesAsync()).ToList();
+        Assert.Equal(3, files.Count);
+        
+        // Verify file details are preserved
+        var loadedFile1 = files.FirstOrDefault(f => f.FilePath == file1);
+        var loadedFile2 = files.FirstOrDefault(f => f.FilePath == file2);
+        var loadedFile3 = files.FirstOrDefault(f => f.FilePath == file3);
+        
+        Assert.NotNull(loadedFile1);
+        Assert.Equal("comic1.cbz", loadedFile1.FileName);
+        Assert.True(loadedFile1.IsProcessed, "File 1 should be marked as processed");
+        Assert.False(loadedFile1.IsDuplicate);
+        
+        Assert.NotNull(loadedFile2);
+        Assert.Equal("comic2.cbz", loadedFile2.FileName);
+        Assert.False(loadedFile2.IsProcessed);
+        Assert.True(loadedFile2.IsDuplicate, "File 2 should be marked as duplicate");
+        
+        Assert.NotNull(loadedFile3);
+        Assert.Equal("comic3.cbz", loadedFile3.FileName);
+        Assert.False(loadedFile3.IsProcessed);
+        Assert.False(loadedFile3.IsDuplicate);
+    }
 }

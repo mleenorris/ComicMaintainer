@@ -94,20 +94,30 @@ public class FileWatcherService : IFileWatcherService
     
     /// <summary>
     /// Scans the watched directory for existing comic files and adds them to the file store
+    /// Only scans for new files not already in the database
     /// </summary>
     private async Task ScanExistingFilesAsync(CancellationToken cancellationToken)
     {
         try
         {
-            _logger.LogInformation("Starting initial scan of directory: {Directory}", _settings.WatchedDirectory);
+            _logger.LogInformation("Starting incremental scan of directory: {Directory}", _settings.WatchedDirectory);
             
             var comicFiles = Directory.EnumerateFiles(_settings.WatchedDirectory, "*.*", SearchOption.AllDirectories)
                 .Where(IsComicFile)
                 .ToList();
             
-            _logger.LogInformation("Found {Count} comic files during initial scan", comicFiles.Count);
+            _logger.LogInformation("Found {Count} comic files on filesystem", comicFiles.Count);
             
-            foreach (var file in comicFiles)
+            // Get existing files from the store
+            var existingFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
+            var existingFilePaths = new HashSet<string>(existingFiles.Select(f => f.FilePath));
+            
+            // Only add new files that aren't in the database
+            var newFiles = comicFiles.Where(f => !existingFilePaths.Contains(f)).ToList();
+            
+            _logger.LogInformation("Found {NewCount} new files not in database", newFiles.Count);
+            
+            foreach (var file in newFiles)
             {
                 if (cancellationToken.IsCancellationRequested)
                     break;
@@ -118,15 +128,15 @@ public class FileWatcherService : IFileWatcherService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error adding file during initial scan: {File}", file);
+                    _logger.LogError(ex, "Error adding file during incremental scan: {File}", file);
                 }
             }
             
-            _logger.LogInformation("Initial scan completed. Added {Count} files", comicFiles.Count);
+            _logger.LogInformation("Incremental scan completed. Added {Count} new files", newFiles.Count);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during initial directory scan");
+            _logger.LogError(ex, "Error during incremental directory scan");
         }
     }
 

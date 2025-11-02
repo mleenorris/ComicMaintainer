@@ -393,30 +393,58 @@ public class FileStoreService : IFileStoreService
             using var scope = _serviceProvider.CreateScope();
             var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
             
-            // Load all processed and duplicate files from database
-            var processedFiles = await dbContext.ComicFiles
-                .Where(e => e.IsProcessed)
-                .Select(e => e.FilePath)
+            // Load all files from database
+            var fileEntities = await dbContext.ComicFiles
                 .ToListAsync(cancellationToken);
             
-            var duplicateFiles = await dbContext.ComicFiles
-                .Where(e => e.IsDuplicate)
-                .Select(e => e.FilePath)
-                .ToListAsync(cancellationToken);
+            _logger.LogInformation("Loading {Count} files from database", fileEntities.Count);
             
-            // Populate in-memory dictionaries
-            foreach (var filePath in processedFiles)
+            // Populate in-memory collections
+            foreach (var entity in fileEntities)
             {
-                _processedFiles.TryAdd(filePath, true);
+                // Only add file if it still exists on filesystem
+                if (File.Exists(entity.FilePath))
+                {
+                    var comicFile = new ComicFile
+                    {
+                        FilePath = entity.FilePath,
+                        FileName = entity.FileName,
+                        Directory = entity.Directory,
+                        FileSize = entity.FileSize,
+                        LastModified = entity.LastModified,
+                        IsProcessed = entity.IsProcessed,
+                        IsDuplicate = entity.IsDuplicate,
+                        Metadata = entity.Metadata
+                    };
+                    
+                    _files.AddOrUpdate(entity.FilePath, comicFile, (_, _) => comicFile);
+                    
+                    if (entity.IsProcessed)
+                    {
+                        _processedFiles.TryAdd(entity.FilePath, true);
+                    }
+                    
+                    if (entity.IsDuplicate)
+                    {
+                        _duplicateFiles.TryAdd(entity.FilePath, true);
+                    }
+                }
+                else
+                {
+                    // File no longer exists, remove from database
+                    _logger.LogDebug("File no longer exists, will be removed from database: {FilePath}", SanitizeForLogging(entity.FilePath));
+                    dbContext.ComicFiles.Remove(entity);
+                }
             }
             
-            foreach (var filePath in duplicateFiles)
-            {
-                _duplicateFiles.TryAdd(filePath, true);
-            }
+            await dbContext.SaveChangesAsync(cancellationToken);
             
-            _logger.LogInformation("Loaded {ProcessedCount} processed files and {DuplicateCount} duplicate files from database", 
-                processedFiles.Count, duplicateFiles.Count);
+            var loadedCount = _files.Count;
+            var processedCount = _processedFiles.Count;
+            var duplicateCount = _duplicateFiles.Count;
+            
+            _logger.LogInformation("Loaded {FileCount} files from database ({ProcessedCount} processed, {DuplicateCount} duplicates)", 
+                loadedCount, processedCount, duplicateCount);
         }
         catch (Exception ex)
         {

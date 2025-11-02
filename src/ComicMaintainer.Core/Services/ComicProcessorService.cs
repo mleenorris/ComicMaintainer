@@ -74,7 +74,13 @@ public class ComicProcessorService : IComicProcessorService
                 if (newFilePath != filePath && !File.Exists(newFilePath))
                 {
                     _logger.LogInformation("Renaming file from {OldPath} to {NewPath}", filePath, newFilePath);
+                    var oldFilePath = filePath;
                     File.Move(filePath, newFilePath);
+                    
+                    // Update file store with new path
+                    await _fileStore.RemoveFileAsync(oldFilePath, cancellationToken);
+                    await _fileStore.AddFileAsync(newFilePath, cancellationToken);
+                    
                     filePath = newFilePath;
                 }
             }

@@ -31,7 +31,7 @@ catch (UnauthorizedAccessException)
     Directory.CreateDirectory(configDir);
 }
 
-// Configure Serilog with two sinks: console and file
+// Configure Serilog with multiple sinks: console, debug file, and watcher file
 Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Debug()
     // Console sink - only show Information and above, clean formatting
@@ -46,6 +46,19 @@ Log.Logger = new LoggerConfiguration()
         retainedFileCountLimit: 3,
         fileSizeLimitBytes: 10_485_760, // 10 MB
         outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
+    // Watcher-specific log file - capture all watcher-related logs
+    .WriteTo.Logger(lc => lc
+        .Filter.ByIncludingOnly(e => 
+            e.Properties.ContainsKey("SourceContext") && 
+            (e.Properties["SourceContext"].ToString().Contains("FileWatcherService") ||
+             e.Properties["SourceContext"].ToString().Contains("FileWatcherHostedService")))
+        .WriteTo.File(
+            Path.Combine(configDir, "watcher.log"),
+            restrictedToMinimumLevel: LogEventLevel.Debug,
+            rollingInterval: RollingInterval.Day,
+            retainedFileCountLimit: 7,
+            fileSizeLimitBytes: 10_485_760, // 10 MB
+            outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] {Message:lj}{NewLine}{Exception}"))
     // Override specific namespaces to reduce console noise
     .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)

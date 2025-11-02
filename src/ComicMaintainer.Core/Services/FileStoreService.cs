@@ -152,11 +152,34 @@ public class FileStoreService : IFileStoreService
 
             if (entity == null)
             {
-                // Create new entity
-                entity = CreateFileEntity(filePath);
-                dbContext.ComicFiles.Add(entity);
-                await dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogDebug("Added new file to database: {FilePath}", SanitizeForLogging(filePath));
+                try
+                {
+                    // Create new entity
+                    entity = CreateFileEntity(filePath);
+                    dbContext.ComicFiles.Add(entity);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    _logger.LogDebug("Added new file to database: {FilePath}", SanitizeForLogging(filePath));
+                }
+                catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx && 
+                                                    sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
+                {
+                    // Race condition: entity was created by another thread between our check and insert
+                    // Retry by fetching and updating the existing entity
+                    _logger.LogDebug("File entity already exists (race condition), retrying update for {FilePath}", SanitizeForLogging(filePath));
+                    entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+                    if (entity != null)
+                    {
+                        entity.FileName = fileInfo.Name;
+                        entity.Directory = fileInfo.DirectoryName ?? string.Empty;
+                        entity.FileSize = fileInfo.Length;
+                        entity.LastModified = fileInfo.LastWriteTime;
+                        entity.IsProcessed = comicFile.IsProcessed;
+                        entity.IsDuplicate = comicFile.IsDuplicate;
+                        entity.UpdatedAt = DateTime.UtcNow;
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                        _logger.LogDebug("Updated existing file in database after retry: {FilePath}", SanitizeForLogging(filePath));
+                    }
+                }
             }
             else
             {
@@ -243,10 +266,28 @@ public class FileStoreService : IFileStoreService
                 // Create entity if it doesn't exist
                 if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
                 {
-                    entity = CreateFileEntity(filePath, isProcessed: processed);
-                    dbContext.ComicFiles.Add(entity);
-                    await dbContext.SaveChangesAsync(cancellationToken);
-                    _logger.LogDebug("Created file entity and set processing status for {FilePath} to {Status}", SanitizeForLogging(filePath), processed);
+                    try
+                    {
+                        entity = CreateFileEntity(filePath, isProcessed: processed);
+                        dbContext.ComicFiles.Add(entity);
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                        _logger.LogDebug("Created file entity and set processing status for {FilePath} to {Status}", SanitizeForLogging(filePath), processed);
+                    }
+                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx && 
+                                                        sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
+                    {
+                        // Race condition: entity was created by another thread between our check and insert
+                        // Retry by fetching and updating the existing entity
+                        _logger.LogDebug("File entity already exists (race condition), retrying update for {FilePath}", SanitizeForLogging(filePath));
+                        entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+                        if (entity != null)
+                        {
+                            entity.IsProcessed = processed;
+                            entity.UpdatedAt = DateTime.UtcNow;
+                            await dbContext.SaveChangesAsync(cancellationToken);
+                            _logger.LogDebug("Updated processing status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), processed);
+                        }
+                    }
                 }
                 else
                 {
@@ -297,10 +338,28 @@ public class FileStoreService : IFileStoreService
                 // Create entity if it doesn't exist
                 if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
                 {
-                    entity = CreateFileEntity(filePath, isDuplicate: duplicate);
-                    dbContext.ComicFiles.Add(entity);
-                    await dbContext.SaveChangesAsync(cancellationToken);
-                    _logger.LogDebug("Created file entity and set duplicate status for {FilePath} to {Status}", SanitizeForLogging(filePath), duplicate);
+                    try
+                    {
+                        entity = CreateFileEntity(filePath, isDuplicate: duplicate);
+                        dbContext.ComicFiles.Add(entity);
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                        _logger.LogDebug("Created file entity and set duplicate status for {FilePath} to {Status}", SanitizeForLogging(filePath), duplicate);
+                    }
+                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx && 
+                                                        sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
+                    {
+                        // Race condition: entity was created by another thread between our check and insert
+                        // Retry by fetching and updating the existing entity
+                        _logger.LogDebug("File entity already exists (race condition), retrying update for {FilePath}", SanitizeForLogging(filePath));
+                        entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+                        if (entity != null)
+                        {
+                            entity.IsDuplicate = duplicate;
+                            entity.UpdatedAt = DateTime.UtcNow;
+                            await dbContext.SaveChangesAsync(cancellationToken);
+                            _logger.LogDebug("Updated duplicate status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), duplicate);
+                        }
+                    }
                 }
                 else
                 {

@@ -18,8 +18,9 @@ public class WatcherController : ControllerBase
         _logger = logger;
     }
 
-    [HttpGet("status")]
-    public ActionResult<object> GetStatus()
+    // RESTful endpoint: GET /api/watcher
+    [HttpGet]
+    public ActionResult<object> GetWatcher()
     {
         try
         {
@@ -33,7 +34,30 @@ public class WatcherController : ControllerBase
         }
     }
 
+    // Legacy endpoint for backward compatibility
+    [HttpGet("status")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public ActionResult<object> GetStatus() => GetWatcher();
+
+    // RESTful endpoint: PUT /api/watcher
+    [HttpPut]
+    public ActionResult UpdateWatcher([FromBody] WatcherUpdateRequest request)
+    {
+        try
+        {
+            _watcher.SetEnabled(request.Enabled);
+            return Ok(new { enabled = request.Enabled });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error setting watcher status");
+            return StatusCode(500, "Error setting watcher status");
+        }
+    }
+
+    // Legacy endpoint for backward compatibility
     [HttpPost("enable")]
+    [ApiExplorerSettings(IgnoreApi = true)]
     public ActionResult EnableWatcher([FromBody] bool enabled)
     {
         try
@@ -46,5 +70,10 @@ public class WatcherController : ControllerBase
             _logger.LogError(ex, "Error setting watcher status");
             return StatusCode(500, "Error setting watcher status");
         }
+    }
+
+    public class WatcherUpdateRequest
+    {
+        public bool Enabled { get; set; }
     }
 }

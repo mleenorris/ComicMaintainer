@@ -46,4 +46,14 @@ public interface IComicProcessorService
     /// Normalize metadata for multiple comic files as a batch job
     /// </summary>
     Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get all jobs
+    /// </summary>
+    IEnumerable<ProcessingJob> GetAllJobs();
+
+    /// <summary>
+    /// Delete a job from the job history
+    /// </summary>
+    bool DeleteJob(Guid jobId);
 }

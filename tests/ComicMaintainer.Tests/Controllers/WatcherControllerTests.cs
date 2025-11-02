@@ -110,4 +110,89 @@ public class WatcherControllerTests
         var statusCodeResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, statusCodeResult.StatusCode);
     }
+
+    // New RESTful endpoint tests
+
+    [Fact]
+    public void GetWatcher_WatcherRunning_ReturnsOkWithEnabledTrue()
+    {
+        // Arrange
+        _mockWatcher.Setup(w => w.IsRunning).Returns(true);
+
+        // Act
+        var result = _controller.GetWatcher();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var value = okResult.Value;
+        Assert.NotNull(value);
+        var enabledProperty = value.GetType().GetProperty("enabled");
+        Assert.NotNull(enabledProperty);
+        Assert.True((bool)enabledProperty.GetValue(value)!);
+    }
+
+    [Fact]
+    public void GetWatcher_WatcherNotRunning_ReturnsOkWithEnabledFalse()
+    {
+        // Arrange
+        _mockWatcher.Setup(w => w.IsRunning).Returns(false);
+
+        // Act
+        var result = _controller.GetWatcher();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var value = okResult.Value;
+        Assert.NotNull(value);
+        var enabledProperty = value.GetType().GetProperty("enabled");
+        Assert.NotNull(enabledProperty);
+        Assert.False((bool)enabledProperty.GetValue(value)!);
+    }
+
+    [Fact]
+    public void UpdateWatcher_WithEnabled_ReturnsOkWithEnabledStatus()
+    {
+        // Arrange
+        var request = new WatcherController.WatcherUpdateRequest { Enabled = true };
+        _mockWatcher.Setup(w => w.SetEnabled(true));
+
+        // Act
+        var result = _controller.UpdateWatcher(request);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+        _mockWatcher.Verify(w => w.SetEnabled(true), Times.Once);
+    }
+
+    [Fact]
+    public void UpdateWatcher_WithDisabled_ReturnsOkWithDisabledStatus()
+    {
+        // Arrange
+        var request = new WatcherController.WatcherUpdateRequest { Enabled = false };
+        _mockWatcher.Setup(w => w.SetEnabled(false));
+
+        // Act
+        var result = _controller.UpdateWatcher(request);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+        _mockWatcher.Verify(w => w.SetEnabled(false), Times.Once);
+    }
+
+    [Fact]
+    public void UpdateWatcher_WhenExceptionThrown_ReturnsInternalServerError()
+    {
+        // Arrange
+        var request = new WatcherController.WatcherUpdateRequest { Enabled = true };
+        _mockWatcher.Setup(w => w.SetEnabled(It.IsAny<bool>())).Throws(new InvalidOperationException("Test error"));
+
+        // Act
+        var result = _controller.UpdateWatcher(request);
+
+        // Assert
+        var statusCodeResult = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(500, statusCodeResult.StatusCode);
+    }
 }

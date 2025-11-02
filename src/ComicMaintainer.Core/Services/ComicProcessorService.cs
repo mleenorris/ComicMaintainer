@@ -453,6 +453,16 @@ public class ComicProcessorService : IComicProcessorService
             .FirstOrDefault(j => j.Status == JobStatus.Running || j.Status == JobStatus.Queued);
     }
 
+    public IEnumerable<ProcessingJob> GetAllJobs()
+    {
+        return _jobs.Values.OrderByDescending(j => j.StartTime);
+    }
+
+    public bool DeleteJob(Guid jobId)
+    {
+        return _jobs.TryRemove(jobId, out _);
+    }
+
     public Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default)
     {
         try

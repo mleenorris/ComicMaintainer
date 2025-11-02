@@ -374,4 +374,68 @@ public class FileStoreServiceTests
         Assert.False(unprocessedFile.IsProcessed, "File 3 should not be marked as processed");
         Assert.False(unprocessedFile.IsDuplicate, "File 3 should not be marked as duplicate");
     }
+
+    [Fact]
+    public async Task IsFileProcessedAsync_WhenFileNotInStore_ReturnsFalse()
+    {
+        // Arrange
+        var nonExistentFile = Path.Combine(_testDirectory, "nonexistent.cbz");
+        
+        // Act
+        var isProcessed = await _service.IsFileProcessedAsync(nonExistentFile);
+        
+        // Assert
+        Assert.False(isProcessed, "Non-existent file should not be marked as processed");
+    }
+
+    [Fact]
+    public async Task IsFileProcessedAsync_WhenFileNotProcessed_ReturnsFalse()
+    {
+        // Arrange
+        var file = Path.Combine(_testDirectory, "unprocessed.cbz");
+        File.WriteAllText(file, "test content");
+        await _service.AddFileAsync(file);
+        
+        // Act
+        var isProcessed = await _service.IsFileProcessedAsync(file);
+        
+        // Assert
+        Assert.False(isProcessed, "Unprocessed file should return false");
+    }
+
+    [Fact]
+    public async Task IsFileProcessedAsync_WhenFileProcessed_ReturnsTrue()
+    {
+        // Arrange
+        var file = Path.Combine(_testDirectory, "processed.cbz");
+        File.WriteAllText(file, "test content");
+        await _service.AddFileAsync(file);
+        await _service.MarkFileProcessedAsync(file, true);
+        
+        // Act
+        var isProcessed = await _service.IsFileProcessedAsync(file);
+        
+        // Assert
+        Assert.True(isProcessed, "Processed file should return true");
+    }
+
+    [Fact]
+    public async Task IsFileProcessedAsync_AfterUnmarkingProcessed_ReturnsFalse()
+    {
+        // Arrange
+        var file = Path.Combine(_testDirectory, "toggled.cbz");
+        File.WriteAllText(file, "test content");
+        await _service.AddFileAsync(file);
+        await _service.MarkFileProcessedAsync(file, true);
+        
+        // Verify it's marked as processed
+        Assert.True(await _service.IsFileProcessedAsync(file));
+        
+        // Act - Unmark as processed
+        await _service.MarkFileProcessedAsync(file, false);
+        var isProcessed = await _service.IsFileProcessedAsync(file);
+        
+        // Assert
+        Assert.False(isProcessed, "File should not be marked as processed after unmarking");
+    }
 }

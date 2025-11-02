@@ -30,7 +30,8 @@ public class FileWatcherServiceTests : IDisposable
         _settings = new AppSettings
         {
             WatchedDirectory = _testDirectory,
-            WatcherEnabled = true
+            WatcherEnabled = true,
+            WatcherFileStabilityDelaySeconds = 1  // Use 1 second for tests
         };
 
         _mockOptions.Setup(o => o.Value).Returns(_settings);

@@ -459,4 +459,11 @@ public class FileStoreService : IFileStoreService
         var isProcessed = _processedFiles.ContainsKey(filePath);
         return Task.FromResult(isProcessed);
     }
+
+    public Task<bool> FileExistsAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        // Check in-memory store first for performance
+        var exists = _files.ContainsKey(filePath);
+        return Task.FromResult(exists);
+    }
 }

@@ -108,23 +108,21 @@ public class FileWatcherService : IFileWatcherService
             
             _logger.LogInformation("Found {Count} comic files on filesystem", comicFiles.Count);
             
-            // Get existing files from the store
-            var existingFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
-            var existingFilePaths = new HashSet<string>(existingFiles.Select(f => f.FilePath));
-            
-            // Only add new files that aren't in the database
-            var newFiles = comicFiles.Where(f => !existingFilePaths.Contains(f)).ToList();
-            
-            _logger.LogInformation("Found {NewCount} new files not in database", newFiles.Count);
-            
-            foreach (var file in newFiles)
+            // Check each file individually to avoid loading all files into memory
+            var newFileCount = 0;
+            foreach (var file in comicFiles)
             {
                 if (cancellationToken.IsCancellationRequested)
                     break;
                     
                 try
                 {
-                    await _fileStore.AddFileAsync(file, cancellationToken);
+                    // Only add if not already in the store
+                    if (!await _fileStore.FileExistsAsync(file, cancellationToken))
+                    {
+                        await _fileStore.AddFileAsync(file, cancellationToken);
+                        newFileCount++;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -132,7 +130,7 @@ public class FileWatcherService : IFileWatcherService
                 }
             }
             
-            _logger.LogInformation("Incremental scan completed. Added {Count} new files", newFiles.Count);
+            _logger.LogInformation("Incremental scan completed. Added {Count} new files", newFileCount);
         }
         catch (Exception ex)
         {

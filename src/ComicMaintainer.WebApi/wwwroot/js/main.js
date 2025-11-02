@@ -2316,21 +2316,19 @@
             showMessage('Deleting file...', 'info');
             
             try {
-                const response = await fetch(apiUrl(`/api/delete-file/${encodeURIComponent(filepath)}`), {
-                    method: 'DELETE'
+                // Use RESTful endpoint: DELETE /api/files/{encodedFilePath}
+                const encodedPath = encodeFilePathForUrl(filepath);
+                const response = await fetch(apiUrl(`/api/files/${encodedPath}`), {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
                 });
                 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const result = await response.json();
                 
-                if (result.success) {
-                    showMessage('File deleted successfully!', 'success');
-                    await loadFiles(currentPage, true);
-                } else {
-                    showMessage(result.error || 'Failed to delete file', 'error');
-                }
+                showMessage('File deleted successfully!', 'success');
+                await loadFiles(currentPage, true);
             } catch (error) {
                 showMessage('Failed to delete file: ' + error.message, 'error');
             }
@@ -3115,17 +3113,20 @@
                 updateProgress(i + 1, selectedFilesArray.length, successCount, failCount);
                 
                 try {
-                    const response = await fetch(apiUrl(`/api/delete-file/${encodeURIComponent(filepath)}`), {
-                        method: 'DELETE'
+                    // Use RESTful endpoint: DELETE /api/files/{encodedFilePath}
+                    const encodedPath = encodeFilePathForUrl(filepath);
+                    const response = await fetch(apiUrl(`/api/files/${encodedPath}`), {
+                        method: 'DELETE',
+                        headers: getAuthHeaders()
                     });
                     
                     if (response.ok) {
                         successCount++;
                         addProgressDetail(filepath, true);
                     } else {
-                        const data = await response.json();
+                        const errorText = await response.text();
                         failCount++;
-                        addProgressDetail(filepath, false, data.error || 'Unknown error');
+                        addProgressDetail(filepath, false, errorText || 'Unknown error');
                     }
                 } catch (error) {
                     failCount++;

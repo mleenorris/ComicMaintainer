@@ -307,6 +307,34 @@ public class FilesController : ControllerBase
         }
     }
 
+    // RESTful endpoint: DELETE /api/files/{encodedFilePath}
+    [HttpDelete("~/api/files/{encodedFilePath}")]
+    public async Task<ActionResult> DeleteFileByEncodedPath(string encodedFilePath)
+    {
+        try
+        {
+            // Decode the base64 URL-safe encoded file path
+            var filePath = DecodeBase64UrlSafe(encodedFilePath);
+            if (string.IsNullOrEmpty(filePath))
+                return BadRequest("Invalid file path");
+
+            if (System.IO.File.Exists(filePath))
+            {
+                System.IO.File.Delete(filePath);
+                await _fileStore.RemoveFileAsync(filePath);
+                return Ok();
+            }
+            return NotFound();
+        }
+        catch (Exception ex)
+        {
+            var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
+            _logger.LogError(ex, "Error deleting file with encoded path {EncodedPath}", sanitizedEncodedPath);
+            return StatusCode(500, "Error deleting file");
+        }
+    }
+
+    // Legacy endpoint for backward compatibility: DELETE /api/delete-file?filePath=...
     [HttpDelete("~/api/delete-file")]
     public async Task<ActionResult> DeleteFile([FromQuery] string filePath)
     {

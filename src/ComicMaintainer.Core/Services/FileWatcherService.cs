@@ -278,20 +278,27 @@ public class FileWatcherService : IFileWatcherService
             _logger.LogInformation("File renamed: {OldPath} -> {NewPath}", e.OldFullPath, e.FullPath);
             _ = Task.Run(async () =>
             {
-                await _fileStore.RemoveFileAsync(e.OldFullPath);
-                await _fileStore.AddFileAsync(e.FullPath);
-                
-                // Check if file is already processed before processing
-                var isProcessed = await _fileStore.IsFileProcessedAsync(e.FullPath);
-                if (isProcessed)
+                try
                 {
-                    _logger.LogInformation("File already processed, skipping: {Path}", e.FullPath);
-                    return;
+                    await _fileStore.RemoveFileAsync(e.OldFullPath);
+                    await _fileStore.AddFileAsync(e.FullPath);
+                    
+                    // Check if file is already processed before processing
+                    var isProcessed = await _fileStore.IsFileProcessedAsync(e.FullPath);
+                    if (isProcessed)
+                    {
+                        _logger.LogInformation("File already processed, skipping: {Path}", e.FullPath);
+                        return;
+                    }
+                    
+                    // Process the renamed file after a delay
+                    await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
+                    await _processor.ProcessFileAsync(e.FullPath);
                 }
-                
-                // Process the renamed file after a delay
-                await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
-                await _processor.ProcessFileAsync(e.FullPath);
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing renamed file: {Path}", e.FullPath);
+                }
             });
         }
     }

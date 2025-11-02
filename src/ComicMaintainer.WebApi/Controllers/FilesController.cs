@@ -184,44 +184,18 @@ public class FilesController : ControllerBase
             var success = await _processor.UpdateMetadataAsync(filePath, metadata);
             if (!success)
             {
-                await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
-                {
-                    Id = Guid.NewGuid(),
-                    FilePath = filePath,
-                    Action = "Update Metadata",
-                    Timestamp = DateTime.UtcNow,
-                    Success = false,
-                    ErrorMessage = "Failed to update metadata"
-                });
+                await LogHistoryAsync(filePath, "Update Metadata", false, "Failed to update metadata");
                 return BadRequest("Failed to update metadata");
             }
             
-            await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
-            {
-                Id = Guid.NewGuid(),
-                FilePath = filePath,
-                Action = "Update Metadata",
-                Timestamp = DateTime.UtcNow,
-                Success = true,
-                ErrorMessage = null
-            });
+            await LogHistoryAsync(filePath, "Update Metadata", true);
             
             return Ok();
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating metadata for {FilePath}", filePath);
-            
-            await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
-            {
-                Id = Guid.NewGuid(),
-                FilePath = filePath,
-                Action = "Update Metadata",
-                Timestamp = DateTime.UtcNow,
-                Success = false,
-                ErrorMessage = ex.Message
-            });
-            
+            await LogHistoryAsync(filePath, "Update Metadata", false, ex.Message);
             return StatusCode(500, "Error updating metadata");
         }
     }
@@ -473,15 +447,7 @@ public class FilesController : ControllerBase
                 System.IO.File.Delete(filePath);
                 
                 // Log to processing history
-                await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
-                {
-                    Id = Guid.NewGuid(),
-                    FilePath = filePath,
-                    Action = "Delete",
-                    Timestamp = DateTime.UtcNow,
-                    Success = true,
-                    ErrorMessage = null
-                });
+                await LogHistoryAsync(filePath, "Delete", true);
                 
                 return Ok();
             }
@@ -494,15 +460,7 @@ public class FilesController : ControllerBase
             
             // Log to processing history
             var filePath = DecodeBase64UrlSafe(encodedFilePath);
-            await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
-            {
-                Id = Guid.NewGuid(),
-                FilePath = filePath,
-                Action = "Delete",
-                Timestamp = DateTime.UtcNow,
-                Success = false,
-                ErrorMessage = ex.Message
-            });
+            await LogHistoryAsync(filePath, "Delete", false, ex.Message);
             
             return StatusCode(500, "Error deleting file");
         }
@@ -529,15 +487,7 @@ public class FilesController : ControllerBase
                 System.IO.File.Delete(filePath);
                 
                 // Log to processing history
-                await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
-                {
-                    Id = Guid.NewGuid(),
-                    FilePath = filePath,
-                    Action = "Delete",
-                    Timestamp = DateTime.UtcNow,
-                    Success = true,
-                    ErrorMessage = null
-                });
+                await LogHistoryAsync(filePath, "Delete", true);
                 
                 return Ok();
             }
@@ -549,15 +499,7 @@ public class FilesController : ControllerBase
             _logger.LogError(ex, "Error deleting file {FilePath}", sanitizedPath);
             
             // Log to processing history
-            await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
-            {
-                Id = Guid.NewGuid(),
-                FilePath = filePath,
-                Action = "Delete",
-                Timestamp = DateTime.UtcNow,
-                Success = false,
-                ErrorMessage = ex.Message
-            });
+            await LogHistoryAsync(filePath, "Delete", false, ex.Message);
             
             return StatusCode(500, "Error deleting file");
         }
@@ -627,6 +569,22 @@ public class FilesController : ControllerBase
     }
 
 
+
+    /// <summary>
+    /// Helper method to log processing history entries
+    /// </summary>
+    private async Task LogHistoryAsync(string filePath, string action, bool success, string? errorMessage = null)
+    {
+        await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+        {
+            Id = Guid.NewGuid(),
+            FilePath = filePath,
+            Action = action,
+            Timestamp = DateTime.UtcNow,
+            Success = success,
+            ErrorMessage = errorMessage
+        });
+    }
 
     public class UpdateTagsRequest
     {

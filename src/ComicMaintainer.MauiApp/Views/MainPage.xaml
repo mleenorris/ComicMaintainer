@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:ComicMaintainer.MauiApp.ViewModels"
+             x:Class="ComicMaintainer.MauiApp.Views.MainPage"
+             x:DataType="viewmodels:MainViewModel"
+             Title="ComicMaintainer">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="30" Spacing="25">
+            
+            <!-- App Title -->
+            <Label Text="ComicMaintainer"
+                   FontSize="32"
+                   FontAttributes="Bold"
+                   HorizontalOptions="Center" />
+
+            <!-- Connection Status -->
+            <Frame BorderColor="{Binding IsConnected, Converter={StaticResource BoolToColorConverter}}"
+                   Padding="20"
+                   CornerRadius="10">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Server Connection"
+                           FontSize="18"
+                           FontAttributes="Bold" />
+                    
+                    <Label Text="{Binding ServerUrl}"
+                           FontSize="14"
+                           TextColor="Gray" />
+                    
+                    <Label Text="{Binding StatusMessage}"
+                           FontSize="14"
+                           TextColor="{Binding IsConnected, Converter={StaticResource BoolToColorConverter}}" />
+                    
+                    <Button Text="Check Connection"
+                            Command="{Binding CheckConnectionCommand}"
+                            HorizontalOptions="Center"
+                            Margin="0,10,0,0" />
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Action Buttons -->
+            <Button Text="Browse Files"
+                    Command="{Binding NavigateToFilesCommand}"
+                    IsEnabled="{Binding IsConnected}"
+                    FontSize="16"
+                    Padding="20" />
+
+            <Button Text="Settings"
+                    Command="{Binding NavigateToSettingsCommand}"
+                    FontSize="16"
+                    Padding="20" />
+
+            <!-- Info Section -->
+            <Frame BorderColor="LightGray"
+                   Padding="15"
+                   Margin="0,20,0,0">
+                <Label>
+                    <Label.FormattedText>
+                        <FormattedString>
+                            <Span Text="Welcome to ComicMaintainer!&#x0a;&#x0a;"
+                                  FontSize="16"
+                                  FontAttributes="Bold" />
+                            <Span Text="Manage your comic collection on the go. Connect to your ComicMaintainer server to browse, process, and organize your comic files.&#x0a;&#x0a;"
+                                  FontSize="14" />
+                            <Span Text="To get started:&#x0a;"
+                                  FontSize="14"
+                                  FontAttributes="Bold" />
+                            <Span Text="1. Configure your server URL in Settings&#x0a;"
+                                  FontSize="14" />
+                            <Span Text="2. Test the connection&#x0a;"
+                                  FontSize="14" />
+                            <Span Text="3. Browse and manage your files"
+                                  FontSize="14" />
+                        </FormattedString>
+                    </Label.FormattedText>
+                </Label>
+            </Frame>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

@@ -1,0 +1,193 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      
+      - name: Get version from tag or project
+        id: get_version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -match 'refs/tags/v(.+)') {
+            $version = $matches[1]
+          } else {
+            $version = (Select-Xml -Path "src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj" -XPath "//Version" | Select-Object -First 1).Node.InnerText
+          }
+          Write-Output "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $version"
+      
+      - name: Restore dependencies
+        run: dotnet restore ComicMaintainer.sln
+      
+      - name: Build Windows x64 (Self-Contained)
+        run: |
+          dotnet publish src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:PublishTrimmed=false `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/win-x64
+      
+      - name: Build Windows x86 (Self-Contained)
+        run: |
+          dotnet publish src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj `
+            -c Release `
+            -r win-x86 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:PublishTrimmed=false `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -o publish/win-x86
+      
+      - name: Create README for Windows release
+        shell: pwsh
+        run: |
+          $readmeContent = @"
+          # ComicMaintainer Windows Installation
+          
+          ## Quick Start
+          
+          1. Extract the ZIP file to a folder of your choice
+          2. Double-click `ComicMaintainer.WebApi.exe` to start the application
+          3. Open your browser and go to http://localhost:5000
+          
+          ## Configuration
+          
+          The application uses environment variables for configuration. You can create a `.env` file
+          in the same directory as the executable, or set environment variables in Windows.
+          
+          ### Required Environment Variables:
+          - `WATCHED_DIR`: Directory to watch for comic files (required)
+          
+          ### Optional Environment Variables:
+          - `DUPLICATE_DIR`: Directory for duplicate files
+          - `WEB_PORT`: Port for web interface (default: 5000)
+          - `GUNICORN_WORKERS`: Number of worker processes (default: 2)
+          - `DEBUG_MODE`: Enable debug logging (default: false)
+          
+          ### Example .env file:
+          ```
+          WATCHED_DIR=C:\Comics\ToProcess
+          DUPLICATE_DIR=C:\Comics\Duplicates
+          WEB_PORT=5000
+          DEBUG_MODE=false
+          ```
+          
+          ## Running as a Windows Service
+          
+          To run ComicMaintainer as a Windows service, you can use NSSM (Non-Sucking Service Manager):
+          
+          1. Download NSSM from https://nssm.cc/download
+          2. Open Command Prompt as Administrator
+          3. Run: `nssm install ComicMaintainer "C:\path\to\ComicMaintainer.WebApi.exe"`
+          4. Configure environment variables in the NSSM GUI
+          5. Start the service: `nssm start ComicMaintainer`
+          
+          ## System Requirements
+          
+          - Windows 10 or later (x64 or x86)
+          - No .NET runtime installation required (self-contained)
+          - Minimum 2GB RAM recommended
+          - Disk space varies based on your comic collection
+          
+          ## Firewall Configuration
+          
+          If you want to access the web interface from other devices on your network:
+          
+          1. Open Windows Defender Firewall
+          2. Click "Advanced settings"
+          3. Create a new Inbound Rule for port 5000 (or your configured port)
+          
+          ## Troubleshooting
+          
+          - If the application doesn't start, check the logs in the `Config/Log` directory
+          - Ensure the WATCHED_DIR exists and you have read/write permissions
+          - Check Windows Event Viewer for system errors
+          
+          ## Support
+          
+          For issues and documentation, visit: https://github.com/mleenorris/ComicMaintainer
+          "@
+          
+          $readmeContent | Out-File -FilePath "publish/win-x64/README.txt" -Encoding UTF8
+          $readmeContent | Out-File -FilePath "publish/win-x86/README.txt" -Encoding UTF8
+      
+      - name: Create example .env file
+        shell: pwsh
+        run: |
+          $envContent = @"
+          # ComicMaintainer Configuration
+          # Copy this file to the same directory as ComicMaintainer.WebApi.exe
+          
+          # Required: Directory to watch for comic files
+          WATCHED_DIR=C:\Comics\ToProcess
+          
+          # Optional: Directory for duplicate files
+          DUPLICATE_DIR=C:\Comics\Duplicates
+          
+          # Optional: Web interface port (default: 5000)
+          WEB_PORT=5000
+          
+          # Optional: Number of worker processes (default: 2)
+          GUNICORN_WORKERS=2
+          
+          # Optional: Enable debug logging (default: false)
+          DEBUG_MODE=false
+          
+          # Optional: Maximum concurrent file processing workers (default: 4)
+          MAX_WORKERS=4
+          
+          # Optional: Database cache size in MB (default: 64)
+          DB_CACHE_SIZE_MB=64
+          "@
+          
+          $envContent | Out-File -FilePath "publish/win-x64/.env.example" -Encoding UTF8
+          $envContent | Out-File -FilePath "publish/win-x86/.env.example" -Encoding UTF8
+      
+      - name: Create ZIP archives
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "publish/win-x64/*" -DestinationPath "ComicMaintainer-v${{ steps.get_version.outputs.version }}-win-x64.zip"
+          Compress-Archive -Path "publish/win-x86/*" -DestinationPath "ComicMaintainer-v${{ steps.get_version.outputs.version }}-win-x86.zip"
+      
+      - name: Upload Windows x64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ComicMaintainer-win-x64
+          path: ComicMaintainer-v${{ steps.get_version.outputs.version }}-win-x64.zip
+      
+      - name: Upload Windows x86 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ComicMaintainer-win-x86
+          path: ComicMaintainer-v${{ steps.get_version.outputs.version }}-win-x86.zip
+      
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            ComicMaintainer-v${{ steps.get_version.outputs.version }}-win-x64.zip
+            ComicMaintainer-v${{ steps.get_version.outputs.version }}-win-x86.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

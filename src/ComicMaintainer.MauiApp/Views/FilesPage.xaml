@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:ComicMaintainer.MauiApp.ViewModels"
+             x:Class="ComicMaintainer.MauiApp.Views.FilesPage"
+             x:DataType="viewmodels:FilesViewModel"
+             Title="Files">
+
+    <Grid RowDefinitions="Auto,*,Auto" Padding="10">
+        
+        <!-- Search and Filter Bar -->
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="10" Margin="0,0,0,10">
+            <SearchBar Grid.Column="0"
+                       Placeholder="Search files..."
+                       Text="{Binding SearchText}"
+                       SearchCommand="{Binding LoadFilesCommand}" />
+            
+            <Picker Grid.Column="1"
+                    SelectedItem="{Binding SelectedFilter}"
+                    WidthRequest="120">
+                <Picker.Items>
+                    <x:String>all</x:String>
+                    <x:String>unprocessed</x:String>
+                    <x:String>processed</x:String>
+                    <x:String>duplicate</x:String>
+                </Picker.Items>
+            </Picker>
+        </Grid>
+
+        <!-- Files List -->
+        <RefreshView Grid.Row="1"
+                     IsRefreshing="{Binding IsLoading}"
+                     Command="{Binding RefreshFilesCommand}">
+            <CollectionView ItemsSource="{Binding Files}">
+                <CollectionView.EmptyView>
+                    <VerticalStackLayout HorizontalOptions="Center"
+                                       VerticalOptions="Center"
+                                       Spacing="10">
+                        <Label Text="No files found"
+                               FontSize="18"
+                               HorizontalOptions="Center" />
+                        <Button Text="Refresh"
+                                Command="{Binding RefreshFilesCommand}"
+                                HorizontalOptions="Center" />
+                    </VerticalStackLayout>
+                </CollectionView.EmptyView>
+
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Frame Margin="5"
+                               Padding="10"
+                               BorderColor="LightGray"
+                               CornerRadius="5">
+                            <Grid ColumnDefinitions="*,Auto">
+                                <VerticalStackLayout Grid.Column="0" Spacing="5">
+                                    <Label Text="{Binding FileName}"
+                                           FontSize="16"
+                                           FontAttributes="Bold"
+                                           LineBreakMode="TailTruncation" />
+                                    
+                                    <Label Text="{Binding FolderName}"
+                                           FontSize="12"
+                                           TextColor="Gray"
+                                           LineBreakMode="TailTruncation" />
+                                    
+                                    <Label FontSize="12">
+                                        <Label.FormattedText>
+                                            <FormattedString>
+                                                <Span Text="Status: " />
+                                                <Span Text="{Binding Status}"
+                                                      TextColor="{Binding Status, Converter={StaticResource StatusToColorConverter}}" />
+                                            </FormattedString>
+                                        </Label.FormattedText>
+                                    </Label>
+                                </VerticalStackLayout>
+
+                                <Button Grid.Column="1"
+                                        Text="Process"
+                                        Command="{Binding Source={RelativeSource AncestorType={x:Type viewmodels:FilesViewModel}}, Path=ProcessFileCommand}"
+                                        CommandParameter="{Binding .}"
+                                        VerticalOptions="Center"
+                                        FontSize="12"
+                                        Padding="10,5" />
+                            </Grid>
+                        </Frame>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </RefreshView>
+
+        <!-- Pagination -->
+        <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" Padding="10">
+            <Button Grid.Column="0"
+                    Text="Previous"
+                    Command="{Binding PreviousPageCommand}"
+                    IsEnabled="{Binding CurrentPage, Converter={StaticResource PageGreaterThanOneConverter}}" />
+            
+            <Label Grid.Column="1"
+                   Text="{Binding CurrentPage, StringFormat='Page {0}'}"
+                   HorizontalOptions="Center"
+                   VerticalOptions="Center"
+                   FontSize="16" />
+            
+            <Button Grid.Column="2"
+                    Text="Next"
+                    Command="{Binding NextPageCommand}" />
+        </Grid>
+
+    </Grid>
+
+</ContentPage>

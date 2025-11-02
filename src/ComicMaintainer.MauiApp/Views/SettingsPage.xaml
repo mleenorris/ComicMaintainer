@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:ComicMaintainer.MauiApp.ViewModels"
+             x:Class="ComicMaintainer.MauiApp.Views.SettingsPage"
+             x:DataType="viewmodels:SettingsViewModel"
+             Title="Settings">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="30" Spacing="25">
+            
+            <!-- Page Title -->
+            <Label Text="Settings"
+                   FontSize="32"
+                   FontAttributes="Bold"
+                   HorizontalOptions="Center" />
+
+            <!-- Server Configuration -->
+            <Frame BorderColor="LightGray"
+                   Padding="20"
+                   CornerRadius="10">
+                <VerticalStackLayout Spacing="15">
+                    <Label Text="Server Configuration"
+                           FontSize="20"
+                           FontAttributes="Bold" />
+
+                    <Label Text="Server URL"
+                           FontSize="16" />
+                    
+                    <Entry Text="{Binding ServerUrl}"
+                           Placeholder="http://your-server:5000"
+                           Keyboard="Url"
+                           FontSize="14" />
+
+                    <Label Text="Enter the URL of your ComicMaintainer server (including http:// or https://)"
+                           FontSize="12"
+                           TextColor="Gray" />
+
+                    <!-- Test Connection Button -->
+                    <Button Text="Test Connection"
+                            Command="{Binding TestConnectionCommand}"
+                            IsEnabled="{Binding IsTesting, Converter={StaticResource InvertedBoolConverter}}"
+                            HorizontalOptions="Center"
+                            Margin="0,10,0,0" />
+
+                    <!-- Test Result -->
+                    <Label Text="{Binding TestResult}"
+                           FontSize="14"
+                           HorizontalOptions="Center"
+                           IsVisible="{Binding TestResult, Converter={StaticResource StringNotEmptyConverter}}" />
+
+                    <!-- Save Button -->
+                    <Button Text="Save Settings"
+                            Command="{Binding SaveSettingsCommand}"
+                            BackgroundColor="{StaticResource Primary}"
+                            HorizontalOptions="Center"
+                            Margin="0,10,0,0" />
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- Examples Section -->
+            <Frame BorderColor="LightGray"
+                   Padding="15">
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Example Server URLs:"
+                           FontSize="16"
+                           FontAttributes="Bold" />
+                    
+                    <Label FontSize="14">
+                        <Label.FormattedText>
+                            <FormattedString>
+                                <Span Text="• Local: " FontAttributes="Bold" />
+                                <Span Text="http://localhost:5000&#x0a;" />
+                                <Span Text="• Network: " FontAttributes="Bold" />
+                                <Span Text="http://192.168.1.100:5000&#x0a;" />
+                                <Span Text="• Domain: " FontAttributes="Bold" />
+                                <Span Text="https://comics.example.com" />
+                            </FormattedString>
+                        </Label.FormattedText>
+                    </Label>
+
+                    <Label Text="Make sure your server is running and accessible from this device."
+                           FontSize="12"
+                           TextColor="Gray"
+                           Margin="0,10,0,0" />
+                </VerticalStackLayout>
+            </Frame>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

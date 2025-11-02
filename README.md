@@ -687,5 +687,87 @@ docker-compose logs -f
 docker-compose down
 ```
 
+## Windows Installation
+
+For users who prefer to run ComicMaintainer natively on Windows without Docker:
+
+### Download
+
+Download the latest Windows release from the [Releases page](https://github.com/mleenorris/ComicMaintainer/releases):
+- `ComicMaintainer-vX.X.X-win-x64.zip` - For 64-bit Windows (recommended)
+- `ComicMaintainer-vX.X.X-win-x86.zip` - For 32-bit Windows
+
+### Installation Steps
+
+1. Extract the ZIP file to a folder of your choice (e.g., `C:\ComicMaintainer`)
+2. Copy `.env.example` to `.env` and edit it to configure your settings:
+   ```
+   WATCHED_DIR=C:\Comics\ToProcess
+   DUPLICATE_DIR=C:\Comics\Duplicates
+   WEB_PORT=5000
+   ```
+3. Double-click `ComicMaintainer.WebApi.exe` to start the application
+4. Open your browser and navigate to `http://localhost:5000`
+
+### Running as a Windows Service
+
+To run ComicMaintainer as a Windows service (starts automatically with Windows):
+
+1. Download [NSSM (Non-Sucking Service Manager)](https://nssm.cc/download)
+2. Open Command Prompt as Administrator
+3. Install the service:
+   ```cmd
+   nssm install ComicMaintainer "C:\ComicMaintainer\ComicMaintainer.WebApi.exe"
+   ```
+4. Configure environment variables in the NSSM GUI
+5. Start the service:
+   ```cmd
+   nssm start ComicMaintainer
+   ```
+
+For more details, see the `README.txt` included in the Windows release.
+
+## Android App
+
+ComicMaintainer is also available as an Android mobile app that connects to your server:
+
+### Download
+
+Download the latest Android APK from the [Releases page](https://github.com/mleenorris/ComicMaintainer/releases):
+- `ComicMaintainer-vX.X.X-android.apk`
+
+### Installation
+
+1. Download the APK file to your Android device
+2. Enable "Install from Unknown Sources" in your device settings
+3. Tap the APK file to install
+4. Open the ComicMaintainer app
+
+### Setup
+
+1. Navigate to the **Settings** tab in the app
+2. Enter your ComicMaintainer server URL:
+   - Local network: `http://192.168.1.100:5000` (replace with your server's IP)
+   - Remote/domain: `https://comics.example.com`
+3. Tap **Test Connection** to verify
+4. Tap **Save Settings**
+5. Go to the **Home** tab and browse your files
+
+### Features
+
+- Browse and search comic files on your server
+- Process individual files
+- Filter by status (all, unprocessed, processed, duplicates)
+- Real-time connection monitoring
+- Modern Material Design UI
+
+### Requirements
+
+- Android 5.0 (API 21) or later
+- Network connectivity to your ComicMaintainer server
+- Your server must be accessible from your device
+
+For more details, see `ANDROID_README.txt` included with the APK release.
+
 ## License
 MIT

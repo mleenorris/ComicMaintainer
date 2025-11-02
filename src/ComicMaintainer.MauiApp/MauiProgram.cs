@@ -1,0 +1,41 @@
+using ComicMaintainer.MauiApp.Services;
+using ComicMaintainer.MauiApp.ViewModels;
+using ComicMaintainer.MauiApp.Views;
+using Microsoft.Extensions.Logging;
+
+namespace ComicMaintainer.MauiApp;
+
+public static class MauiProgram
+{
+    public static MauiApp CreateMauiApp()
+    {
+        var builder = MauiApp.CreateBuilder();
+        builder
+            .UseMauiApp<App>()
+            .ConfigureFonts(fonts =>
+            {
+                fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
+                fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
+            });
+
+        // Register services
+        builder.Services.AddSingleton<IApiService, ApiService>();
+        builder.Services.AddSingleton<ISettingsService, SettingsService>();
+
+        // Register ViewModels
+        builder.Services.AddTransient<MainViewModel>();
+        builder.Services.AddTransient<SettingsViewModel>();
+        builder.Services.AddTransient<FilesViewModel>();
+
+        // Register Views
+        builder.Services.AddTransient<MainPage>();
+        builder.Services.AddTransient<SettingsPage>();
+        builder.Services.AddTransient<FilesPage>();
+
+#if DEBUG
+        builder.Logging.AddDebug();
+#endif
+
+        return builder.Build();
+    }
+}

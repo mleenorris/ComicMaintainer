@@ -892,7 +892,6 @@
         /* Grid layout: checkbox (30px) + spacer for toggle button alignment (40px) + file info (1fr) + size + date + actions */
         .file-item {
             padding: 15px;
-            padding-left: 45px;
             display: grid;
             grid-template-columns: 30px 40px 1fr minmax(100px, auto) minmax(150px, auto) minmax(200px, auto);
             gap: 10px;
@@ -902,7 +901,7 @@
         }
         
         .file-item.indented {
-            padding-left: 65px;
+            padding-left: 35px;
             background: var(--bg-indented);
         }
         
@@ -1664,12 +1663,14 @@
             }
             
             .dropdown-toggle {
-                width: 32px;
-                min-width: 32px;
-                padding: 0;
+                width: auto;
+                height: auto;
+                min-width: auto;
+                padding: 9px;
                 justify-content: center;
                 align-items: center;
                 font-size: 0;
+                display: flex;
             }
             
             .dropdown-toggle::before {
@@ -1679,9 +1680,7 @@
             .dropdown-toggle::after {
                 margin: 0;
                 font-size: 14px;
-                display: flex;
-                align-items: center;
-                justify-content: center;
+                line-height: 1;
             }
             
             .dropdown-menu {

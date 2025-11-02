@@ -9,6 +9,9 @@ on:
 jobs:
   build-android:
     runs-on: windows-latest
+    permissions:
+      contents: write
+      packages: write
     
     steps:
       - name: Checkout code

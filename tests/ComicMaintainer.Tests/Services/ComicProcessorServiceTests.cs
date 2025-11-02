@@ -13,6 +13,7 @@ public class ComicProcessorServiceTests : IDisposable
 {
     private readonly Mock<ILogger<ComicProcessorService>> _mockLogger;
     private readonly Mock<IFileStoreService> _mockFileStore;
+    private readonly Mock<IProcessingHistoryService> _mockHistoryService;
     private readonly Mock<IOptions<AppSettings>> _mockOptions;
     private readonly AppSettings _settings;
     private readonly string _testDirectory;
@@ -22,6 +23,7 @@ public class ComicProcessorServiceTests : IDisposable
     {
         _mockLogger = new Mock<ILogger<ComicProcessorService>>();
         _mockFileStore = new Mock<IFileStoreService>();
+        _mockHistoryService = new Mock<IProcessingHistoryService>();
         _mockOptions = new Mock<IOptions<AppSettings>>();
         
         _testDirectory = Path.Combine(Path.GetTempPath(), $"comic_tests_{Guid.NewGuid()}");
@@ -37,7 +39,7 @@ public class ComicProcessorServiceTests : IDisposable
         
         _mockOptions.Setup(o => o.Value).Returns(_settings);
         
-        _service = new ComicProcessorService(_mockOptions.Object, _mockLogger.Object, _mockFileStore.Object);
+        _service = new ComicProcessorService(_mockOptions.Object, _mockLogger.Object, _mockFileStore.Object, _mockHistoryService.Object);
     }
 
     [Fact]
@@ -267,6 +269,7 @@ public class ComicProcessorServiceTests : IDisposable
             _mockOptions.Object, 
             _mockLogger.Object, 
             _mockFileStore.Object,
+            _mockHistoryService.Object,
             mockEventBroadcaster.Object);
 
         var file1 = CreateTestComicArchive("Test Series", "1");
@@ -341,6 +344,83 @@ public class ComicProcessorServiceTests : IDisposable
         }
 
         return filePath;
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AddsHistoryEntry_OnSuccess()
+    {
+        // Arrange
+        var file = CreateTestComicArchive("Test Series", "1");
+        
+        _mockFileStore.Setup(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var result = await _service.ProcessFileAsync(file);
+
+        // Assert
+        Assert.True(result);
+        _mockHistoryService.Verify(
+            h => h.AddHistoryEntryAsync(
+                It.Is<ProcessingHistoryEntry>(e => 
+                    e.Action == "Process" && 
+                    e.Success == true &&
+                    e.ErrorMessage == null),
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AddsHistoryEntry_OnFileNotFound()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
+
+        // Act
+        var result = await _service.ProcessFileAsync(filePath);
+
+        // Assert
+        Assert.False(result);
+        _mockHistoryService.Verify(
+            h => h.AddHistoryEntryAsync(
+                It.Is<ProcessingHistoryEntry>(e => 
+                    e.Action == "Process" && 
+                    e.Success == false &&
+                    e.ErrorMessage == "File not found"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_AddsHistoryEntry_ForRename()
+    {
+        // Arrange
+        var file = CreateTestComicArchive("Original Series", "1");
+        
+        // Change metadata to cause rename
+        _mockFileStore.Setup(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockFileStore.Setup(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockFileStore.Setup(f => f.AddFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var result = await _service.ProcessFileAsync(file);
+
+        // Assert
+        Assert.True(result);
+        _mockHistoryService.Verify(
+            h => h.AddHistoryEntryAsync(
+                It.Is<ProcessingHistoryEntry>(e => 
+                    e.Action == "Rename" && 
+                    e.Success == true),
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
     }
 
     public void Dispose()

@@ -23,17 +23,20 @@ public class ComicProcessorService : IComicProcessorService
     private readonly ILogger<ComicProcessorService> _logger;
     private readonly IFileStoreService _fileStore;
     private readonly IEventBroadcaster? _eventBroadcaster;
+    private readonly IProcessingHistoryService _historyService;
     private readonly ConcurrentDictionary<Guid, ProcessingJob> _jobs = new();
 
     public ComicProcessorService(
         IOptions<AppSettings> settings,
         ILogger<ComicProcessorService> logger,
         IFileStoreService fileStore,
+        IProcessingHistoryService historyService,
         IEventBroadcaster? eventBroadcaster = null)
     {
         _settings = settings.Value;
         _logger = logger;
         _fileStore = fileStore;
+        _historyService = historyService;
         _eventBroadcaster = eventBroadcaster;
     }
 
@@ -46,6 +49,15 @@ public class ComicProcessorService : IComicProcessorService
             if (!File.Exists(filePath))
             {
                 _logger.LogWarning("File not found: {FilePath}", filePath);
+                await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+                {
+                    Id = Guid.NewGuid(),
+                    FilePath = filePath,
+                    Action = "Process",
+                    Timestamp = DateTime.UtcNow,
+                    Success = false,
+                    ErrorMessage = "File not found"
+                }, cancellationToken);
                 return false;
             }
 
@@ -53,6 +65,15 @@ public class ComicProcessorService : IComicProcessorService
             if (!IsComicArchive(filePath))
             {
                 _logger.LogWarning("File is not a comic archive: {FilePath}", filePath);
+                await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+                {
+                    Id = Guid.NewGuid(),
+                    FilePath = filePath,
+                    Action = "Process",
+                    Timestamp = DateTime.UtcNow,
+                    Success = false,
+                    ErrorMessage = "File is not a comic archive"
+                }, cancellationToken);
                 return false;
             }
 
@@ -64,6 +85,15 @@ public class ComicProcessorService : IComicProcessorService
             {
                 _logger.LogInformation("Duplicate detected: {FilePath}", filePath);
                 await MoveToDuplicatesAsync(filePath, cancellationToken);
+                await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+                {
+                    Id = Guid.NewGuid(),
+                    FilePath = filePath,
+                    Action = "Duplicate Detection",
+                    Timestamp = DateTime.UtcNow,
+                    Success = true,
+                    ErrorMessage = null
+                }, cancellationToken);
                 return true;
             }
 
@@ -81,6 +111,16 @@ public class ComicProcessorService : IComicProcessorService
                     await _fileStore.RemoveFileAsync(oldFilePath, cancellationToken);
                     await _fileStore.AddFileAsync(newFilePath, cancellationToken);
                     
+                    await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+                    {
+                        Id = Guid.NewGuid(),
+                        FilePath = newFilePath,
+                        Action = "Rename",
+                        Timestamp = DateTime.UtcNow,
+                        Success = true,
+                        ErrorMessage = null
+                    }, cancellationToken);
+                    
                     filePath = newFilePath;
                 }
             }
@@ -89,11 +129,30 @@ public class ComicProcessorService : IComicProcessorService
             await _fileStore.MarkFileProcessedAsync(filePath, true, cancellationToken);
             _logger.LogInformation("File processed successfully: {FilePath}", filePath);
 
+            await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+            {
+                Id = Guid.NewGuid(),
+                FilePath = filePath,
+                Action = "Process",
+                Timestamp = DateTime.UtcNow,
+                Success = true,
+                ErrorMessage = null
+            }, cancellationToken);
+
             return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing file: {FilePath}", filePath);
+            await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+            {
+                Id = Guid.NewGuid(),
+                FilePath = filePath,
+                Action = "Process",
+                Timestamp = DateTime.UtcNow,
+                Success = false,
+                ErrorMessage = ex.Message
+            }, cancellationToken);
             return false;
         }
     }
@@ -341,6 +400,15 @@ public class ComicProcessorService : IComicProcessorService
             if (!File.Exists(filePath) || !IsComicArchive(filePath))
             {
                 _logger.LogWarning("File not found or not a comic archive: {FilePath}", filePath);
+                await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+                {
+                    Id = Guid.NewGuid(),
+                    FilePath = filePath,
+                    Action = "Rename",
+                    Timestamp = DateTime.UtcNow,
+                    Success = false,
+                    ErrorMessage = "File not found or not a comic archive"
+                }, cancellationToken);
                 return false;
             }
 
@@ -354,6 +422,15 @@ public class ComicProcessorService : IComicProcessorService
                 if (newFilePath == filePath)
                 {
                     _logger.LogInformation("File already has correct name: {FilePath}", filePath);
+                    await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+                    {
+                        Id = Guid.NewGuid(),
+                        FilePath = filePath,
+                        Action = "Rename",
+                        Timestamp = DateTime.UtcNow,
+                        Success = true,
+                        ErrorMessage = null
+                    }, cancellationToken);
                     return true;
                 }
                 
@@ -369,23 +446,59 @@ public class ComicProcessorService : IComicProcessorService
                     await _fileStore.AddFileAsync(newFilePath, cancellationToken);
                     
                     _logger.LogInformation("File renamed successfully: {NewPath}", newFilePath);
+                    await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+                    {
+                        Id = Guid.NewGuid(),
+                        FilePath = newFilePath,
+                        Action = "Rename",
+                        Timestamp = DateTime.UtcNow,
+                        Success = true,
+                        ErrorMessage = null
+                    }, cancellationToken);
                     return true;
                 }
                 catch (IOException ex) when (File.Exists(newFilePath))
                 {
                     _logger.LogWarning(ex, "Target file already exists: {NewPath}", newFilePath);
+                    await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+                    {
+                        Id = Guid.NewGuid(),
+                        FilePath = filePath,
+                        Action = "Rename",
+                        Timestamp = DateTime.UtcNow,
+                        Success = false,
+                        ErrorMessage = "Target file already exists"
+                    }, cancellationToken);
                     return false;
                 }
             }
             else
             {
                 _logger.LogWarning("No metadata or series information found for: {FilePath}", filePath);
+                await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+                {
+                    Id = Guid.NewGuid(),
+                    FilePath = filePath,
+                    Action = "Rename",
+                    Timestamp = DateTime.UtcNow,
+                    Success = false,
+                    ErrorMessage = "No metadata or series information found"
+                }, cancellationToken);
                 return false;
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error renaming file: {FilePath}", filePath);
+            await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+            {
+                Id = Guid.NewGuid(),
+                FilePath = filePath,
+                Action = "Rename",
+                Timestamp = DateTime.UtcNow,
+                Success = false,
+                ErrorMessage = ex.Message
+            }, cancellationToken);
             return false;
         }
     }
@@ -399,6 +512,15 @@ public class ComicProcessorService : IComicProcessorService
             if (!File.Exists(filePath) || !IsComicArchive(filePath))
             {
                 _logger.LogWarning("File not found or not a comic archive: {FilePath}", filePath);
+                await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+                {
+                    Id = Guid.NewGuid(),
+                    FilePath = filePath,
+                    Action = "Normalize",
+                    Timestamp = DateTime.UtcNow,
+                    Success = false,
+                    ErrorMessage = "File not found or not a comic archive"
+                }, cancellationToken);
                 return false;
             }
 
@@ -408,6 +530,15 @@ public class ComicProcessorService : IComicProcessorService
             if (metadata == null)
             {
                 _logger.LogWarning("No metadata found for: {FilePath}", filePath);
+                await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+                {
+                    Id = Guid.NewGuid(),
+                    FilePath = filePath,
+                    Action = "Normalize",
+                    Timestamp = DateTime.UtcNow,
+                    Success = false,
+                    ErrorMessage = "No metadata found"
+                }, cancellationToken);
                 return false;
             }
 
@@ -417,6 +548,27 @@ public class ComicProcessorService : IComicProcessorService
             if (success)
             {
                 _logger.LogInformation("File normalized successfully: {FilePath}", filePath);
+                await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+                {
+                    Id = Guid.NewGuid(),
+                    FilePath = filePath,
+                    Action = "Normalize",
+                    Timestamp = DateTime.UtcNow,
+                    Success = true,
+                    ErrorMessage = null
+                }, cancellationToken);
+            }
+            else
+            {
+                await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+                {
+                    Id = Guid.NewGuid(),
+                    FilePath = filePath,
+                    Action = "Normalize",
+                    Timestamp = DateTime.UtcNow,
+                    Success = false,
+                    ErrorMessage = "Failed to update metadata"
+                }, cancellationToken);
             }
             
             return success;
@@ -424,6 +576,15 @@ public class ComicProcessorService : IComicProcessorService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error normalizing file: {FilePath}", filePath);
+            await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+            {
+                Id = Guid.NewGuid(),
+                FilePath = filePath,
+                Action = "Normalize",
+                Timestamp = DateTime.UtcNow,
+                Success = false,
+                ErrorMessage = ex.Message
+            }, cancellationToken);
             return false;
         }
     }

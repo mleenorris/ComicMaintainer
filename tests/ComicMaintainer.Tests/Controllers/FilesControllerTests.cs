@@ -14,6 +14,7 @@ public class FilesControllerTests
 {
     private readonly Mock<IFileStoreService> _mockFileStore;
     private readonly Mock<IComicProcessorService> _mockProcessor;
+    private readonly Mock<IProcessingHistoryService> _mockHistoryService;
     private readonly Mock<ILogger<FilesController>> _mockLogger;
     private readonly Mock<IOptions<AppSettings>> _mockSettings;
     private readonly FilesController _controller;
@@ -22,6 +23,7 @@ public class FilesControllerTests
     {
         _mockFileStore = new Mock<IFileStoreService>();
         _mockProcessor = new Mock<IComicProcessorService>();
+        _mockHistoryService = new Mock<IProcessingHistoryService>();
         _mockLogger = new Mock<ILogger<FilesController>>();
         _mockSettings = new Mock<IOptions<AppSettings>>();
         
@@ -32,7 +34,7 @@ public class FilesControllerTests
         };
         _mockSettings.Setup(s => s.Value).Returns(settings);
         
-        _controller = new FilesController(_mockFileStore.Object, _mockProcessor.Object, _mockLogger.Object, _mockSettings.Object);
+        _controller = new FilesController(_mockFileStore.Object, _mockProcessor.Object, _mockHistoryService.Object, _mockLogger.Object, _mockSettings.Object);
     }
 
     [Fact]

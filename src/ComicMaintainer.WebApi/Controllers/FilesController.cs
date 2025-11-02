@@ -1,7 +1,9 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.Core.Configuration;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
@@ -12,15 +14,35 @@ public class FilesController : ControllerBase
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly ILogger<FilesController> _logger;
+    private readonly AppSettings _settings;
 
     public FilesController(
         IFileStoreService fileStore,
         IComicProcessorService processor,
-        ILogger<FilesController> logger)
+        ILogger<FilesController> logger,
+        IOptions<AppSettings> settings)
     {
         _fileStore = fileStore;
         _processor = processor;
         _logger = logger;
+        _settings = settings.Value;
+    }
+
+    /// <summary>
+    /// Validates that a file path is within the watched directory to prevent path traversal attacks
+    /// </summary>
+    private bool IsPathSafe(string filePath)
+    {
+        try
+        {
+            var fullPath = Path.GetFullPath(filePath);
+            var watchedDir = Path.GetFullPath(_settings.WatchedDirectory);
+            return fullPath.StartsWith(watchedDir, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     [HttpGet]
@@ -318,6 +340,13 @@ public class FilesController : ControllerBase
             if (string.IsNullOrEmpty(filePath))
                 return BadRequest("Invalid file path");
 
+            // Validate path is within watched directory to prevent path traversal attacks
+            if (!IsPathSafe(filePath))
+            {
+                _logger.LogWarning("Attempt to delete file outside watched directory: {EncodedPath}", LoggingHelper.SanitizeForLog(encodedFilePath));
+                return BadRequest("File path is outside the allowed directory");
+            }
+
             if (System.IO.File.Exists(filePath))
             {
                 // Remove from file store first (unlikely to fail), then delete physical file
@@ -342,6 +371,13 @@ public class FilesController : ControllerBase
     {
         try
         {
+            // Validate path is within watched directory to prevent path traversal attacks
+            if (!IsPathSafe(filePath))
+            {
+                _logger.LogWarning("Attempt to delete file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                return BadRequest("File path is outside the allowed directory");
+            }
+
             if (System.IO.File.Exists(filePath))
             {
                 // Remove from file store first (unlikely to fail), then delete physical file

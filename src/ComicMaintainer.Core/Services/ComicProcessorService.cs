@@ -663,7 +663,7 @@ public class ComicProcessorService : IComicProcessorService
                 }
                 
                 // Give a brief moment for any file handles to be fully released
-                await Task.Delay(100, cancellationToken);
+                await Task.Delay(FileHandleReleaseDelayMs, cancellationToken);
                 
                 // Replace original file with updated one using retry logic
                 // to handle transient file locks from file system watchers or antivirus
@@ -699,6 +699,21 @@ public class ComicProcessorService : IComicProcessorService
     /// Maximum number of retry attempts for file replacement operations
     /// </summary>
     private const int MaxFileReplaceRetries = 5;
+    
+    /// <summary>
+    /// Delay in milliseconds to allow file handles to be fully released after archive disposal
+    /// </summary>
+    private const int FileHandleReleaseDelayMs = 100;
+    
+    /// <summary>
+    /// Initial delay in milliseconds for exponential backoff retry logic
+    /// </summary>
+    private const int RetryInitialDelayMs = 100;
+    
+    /// <summary>
+    /// Delay in milliseconds before attempting to restore from backup
+    /// </summary>
+    private const int BackupRestoreDelayMs = 200;
 
     private async Task ReplaceFileWithRetryAsync(string tempFile, string targetFile, CancellationToken cancellationToken)
     {
@@ -726,7 +741,7 @@ public class ComicProcessorService : IComicProcessorService
                 _logger.LogWarning(ex, "File replace attempt {Attempt} failed for {File}, retrying...", attempt + 1, targetFile);
                 
                 // Exponential backoff: 100ms, 200ms, 400ms, 800ms
-                var delayMs = 100 * (int)Math.Pow(2, attempt);
+                var delayMs = RetryInitialDelayMs * (int)Math.Pow(2, attempt);
                 await Task.Delay(delayMs, cancellationToken);
             }
             catch (Exception ex)
@@ -739,7 +754,7 @@ public class ComicProcessorService : IComicProcessorService
                     try
                     {
                         // Wait a moment before attempting restore
-                        await Task.Delay(200, cancellationToken);
+                        await Task.Delay(BackupRestoreDelayMs, cancellationToken);
                         
                         // Use Move instead of Copy for restore as it's more reliable
                         if (File.Exists(targetFile))

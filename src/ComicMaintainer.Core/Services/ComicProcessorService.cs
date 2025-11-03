@@ -261,8 +261,8 @@ public class ComicProcessorService : IComicProcessorService
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
 
-        // Process files asynchronously using LongRunning for potentially long batch operations
-        _ = Task.Factory.StartNew(async () =>
+        // Process files asynchronously in background
+        _ = Task.Run(async () =>
         {
             try
             {
@@ -342,7 +342,7 @@ public class ComicProcessorService : IComicProcessorService
                 _jobCancellationTokens.TryRemove(jobId, out _);
                 jobCts.Dispose();
             }
-        }, jobCts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+        }, jobCts.Token);
 
         return Task.FromResult(jobId);
     }
@@ -370,8 +370,8 @@ public class ComicProcessorService : IComicProcessorService
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
 
-        // Rename files asynchronously using LongRunning for potentially long batch operations
-        _ = Task.Factory.StartNew(async () =>
+        // Rename files asynchronously in background
+        _ = Task.Run(async () =>
         {
             try
             {
@@ -438,7 +438,7 @@ public class ComicProcessorService : IComicProcessorService
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
-        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+        }, cancellationToken);
 
         return Task.FromResult(jobId);
     }
@@ -466,8 +466,8 @@ public class ComicProcessorService : IComicProcessorService
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
 
-        // Normalize files asynchronously using LongRunning for potentially long batch operations
-        _ = Task.Factory.StartNew(async () =>
+        // Normalize files asynchronously in background
+        _ = Task.Run(async () =>
         {
             try
             {
@@ -534,7 +534,7 @@ public class ComicProcessorService : IComicProcessorService
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
-        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+        }, cancellationToken);
 
         return Task.FromResult(jobId);
     }

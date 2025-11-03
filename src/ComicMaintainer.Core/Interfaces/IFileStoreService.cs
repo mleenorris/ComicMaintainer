@@ -28,9 +28,19 @@ public interface IFileStoreService
     Task RemoveFileAsync(string filePath, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Mark a file as processed
+    /// Mark a file as processed (only when both renamed and normalized)
     /// </summary>
     Task MarkFileProcessedAsync(string filePath, bool processed, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Mark a file as renamed
+    /// </summary>
+    Task MarkFileRenamedAsync(string filePath, bool renamed, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Mark a file as normalized
+    /// </summary>
+    Task MarkFileNormalizedAsync(string filePath, bool normalized, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Mark a file as duplicate
@@ -51,6 +61,16 @@ public interface IFileStoreService
     /// Check if a file is already marked as processed
     /// </summary>
     Task<bool> IsFileProcessedAsync(string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Check if a file is already marked as renamed
+    /// </summary>
+    Task<bool> IsFileRenamedAsync(string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Check if a file is already marked as normalized
+    /// </summary>
+    Task<bool> IsFileNormalizedAsync(string filePath, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Check if a file exists in the store

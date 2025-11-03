@@ -31,6 +31,8 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.Directory).IsRequired().HasMaxLength(2048);
             entity.HasIndex(e => e.FilePath).IsUnique();
             entity.HasIndex(e => e.IsProcessed);
+            entity.HasIndex(e => e.IsRenamed);
+            entity.HasIndex(e => e.IsNormalized);
             entity.HasIndex(e => e.IsDuplicate);
             
             // Configure owned type for metadata
@@ -77,6 +79,8 @@ public class ComicFileEntity
     public long FileSize { get; set; }
     public DateTime LastModified { get; set; }
     public bool IsProcessed { get; set; }
+    public bool IsRenamed { get; set; }
+    public bool IsNormalized { get; set; }
     public bool IsDuplicate { get; set; }
     public ComicMetadata? Metadata { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

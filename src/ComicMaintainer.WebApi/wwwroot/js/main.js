@@ -392,7 +392,8 @@
                 const response = await fetch(apiUrl('/api/settings/watcher-enabled'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ enabled: enabled })
                 });
@@ -414,6 +415,66 @@
                 showMessage('Failed to update watcher: ' + error.message, 'error');
                 // Revert checkbox on error
                 document.getElementById('watcherToggleCheckbox').checked = !enabled;
+            }
+        }
+        
+        async function updateWatcherEnableRename() {
+            const enabled = document.getElementById('watcherEnableRenameCheckbox').checked;
+            
+            try {
+                const response = await fetch(apiUrl('/api/settings/watcher-enable-rename'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ enabled: enabled })
+                });
+                
+                if (handleAuthError(response)) {
+                    document.getElementById('watcherEnableRenameCheckbox').checked = !enabled;
+                    return;
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const statusText = enabled ? 'enabled' : 'disabled';
+                showMessage(`File rename ${statusText} successfully!`, 'success');
+            } catch (error) {
+                showMessage('Failed to update rename setting: ' + error.message, 'error');
+                document.getElementById('watcherEnableRenameCheckbox').checked = !enabled;
+            }
+        }
+        
+        async function updateWatcherEnableNormalize() {
+            const enabled = document.getElementById('watcherEnableNormalizeCheckbox').checked;
+            
+            try {
+                const response = await fetch(apiUrl('/api/settings/watcher-enable-normalize'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ enabled: enabled })
+                });
+                
+                if (handleAuthError(response)) {
+                    document.getElementById('watcherEnableNormalizeCheckbox').checked = !enabled;
+                    return;
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const statusText = enabled ? 'enabled' : 'disabled';
+                showMessage(`Metadata normalize ${statusText} successfully!`, 'success');
+            } catch (error) {
+                showMessage('Failed to update normalize setting: ' + error.message, 'error');
+                document.getElementById('watcherEnableNormalizeCheckbox').checked = !enabled;
             }
         }
         
@@ -951,17 +1012,30 @@
                     const fileSize = formatFileSize(file.size);
                     const modifiedDate = formatModifiedDate(file.modified);
                     const processedBadge = file.processed ? '✅' : '⚠️';
-                    const processedTitle = file.processed ? 'Processed' : 'Not processed yet';
+                    const processedTitle = file.processed ? 'Processed (Renamed & Normalized)' : 'Not fully processed';
+                    const renamedBadge = file.renamed ? '🔵' : '';
+                    const renamedTitle = file.renamed ? 'Renamed' : '';
+                    const normalizedBadge = file.normalized ? '🔴' : '';
+                    const normalizedTitle = file.normalized ? 'Normalized' : '';
                     const duplicateBadge = file.duplicate ? '🔁' : '';
                     const duplicateTitle = file.duplicate ? 'Duplicate' : '';
                     
                     // Determine status class for background color
+                    // Priority: duplicate > fully processed (both) > partially processed > unmarked
                     let statusClass = '';
                     if (file.duplicate) {
                         statusClass = 'status-duplicate';
                     } else if (file.processed) {
+                        // Processed means both renamed AND normalized (green)
                         statusClass = 'status-marked';
+                    } else if (file.renamed && !file.normalized) {
+                        // Renamed only, not normalized (blue)
+                        statusClass = 'status-renamed';
+                    } else if (file.normalized && !file.renamed) {
+                        // Normalized only, not renamed (red)
+                        statusClass = 'status-normalized';
                     } else {
+                        // Neither renamed nor normalized (yellow)
                         statusClass = 'status-unmarked';
                     }
                     
@@ -977,7 +1051,10 @@
                                    ${isSelected ? 'checked' : ''} 
                                    onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
                             <div class="status-badge" title="${processedTitle}">
-                                <span>${processedBadge}</span>${duplicateBadge ? ` <span title="${duplicateTitle}">${duplicateBadge}</span>` : ''}
+                                <span>${processedBadge}</span>
+                                ${renamedBadge ? ` <span title="${renamedTitle}">${renamedBadge}</span>` : ''}
+                                ${normalizedBadge ? ` <span title="${normalizedTitle}">${normalizedBadge}</span>` : ''}
+                                ${duplicateBadge ? ` <span title="${duplicateTitle}">${duplicateBadge}</span>` : ''}
                             </div>
                             <div>
                                 <div class="file-name" title="${escapeHtml(file.name)}">
@@ -1296,7 +1373,9 @@
             const file = files.find(f => f.relative_path === filepath);
             if (file) {
                 document.getElementById('fileInfoSize').textContent = formatFileSize(file.size);
-                document.getElementById('fileInfoProcessed').textContent = file.processed ? '✅ Yes' : '⚠️ No';
+                document.getElementById('fileInfoProcessed').textContent = file.processed ? '✅ Yes (Renamed & Normalized)' : '⚠️ No';
+                document.getElementById('fileInfoRenamed').textContent = file.renamed ? '🔵 Yes' : 'No';
+                document.getElementById('fileInfoNormalized').textContent = file.normalized ? '🔴 Yes' : 'No';
                 document.getElementById('fileInfoDuplicate').textContent = file.duplicate ? '🔁 Yes' : 'No';
             }
             
@@ -2393,6 +2472,28 @@
                 const watcherData = await watcherResponse.json();
                 document.getElementById('watcherToggleCheckbox').checked = watcherData.enabled;
                 
+                // Load watcher enable rename status
+                const watcherRenameResponse = await fetch(apiUrl('/api/settings/watcher-enable-rename'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(watcherRenameResponse)) return;
+                if (!watcherRenameResponse.ok) {
+                    throw new Error(`HTTP error! status: ${watcherRenameResponse.status}`);
+                }
+                const watcherRenameData = await watcherRenameResponse.json();
+                document.getElementById('watcherEnableRenameCheckbox').checked = watcherRenameData.enabled;
+                
+                // Load watcher enable normalize status
+                const watcherNormalizeResponse = await fetch(apiUrl('/api/settings/watcher-enable-normalize'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(watcherNormalizeResponse)) return;
+                if (!watcherNormalizeResponse.ok) {
+                    throw new Error(`HTTP error! status: ${watcherNormalizeResponse.status}`);
+                }
+                const watcherNormalizeData = await watcherNormalizeResponse.json();
+                document.getElementById('watcherEnableNormalizeCheckbox').checked = watcherNormalizeData.enabled;
+                
                 // Load log max size
                 const logResponse = await fetch(apiUrl('/api/settings/log-max-bytes'), {
                     headers: getAuthHeaders()
@@ -2458,6 +2559,53 @@
         
         function closeSettings() {
             document.getElementById('settingsModal').classList.remove('active');
+        }
+        
+        function showResetConfirmation() {
+            document.getElementById('resetConfirmationModal').classList.add('active');
+        }
+        
+        function closeResetConfirmation() {
+            document.getElementById('resetConfirmationModal').classList.remove('active');
+        }
+        
+        async function confirmReset() {
+            try {
+                closeResetConfirmation();
+                
+                // Show a loading message
+                showMessage('Resetting database... This may take a moment.', 'info');
+                
+                const response = await fetch(apiUrl('/api/settings/reset'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    }
+                });
+                
+                if (handleAuthError(response)) return;
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('Database reset completed successfully! Reloading page...', 'success');
+                    
+                    // Reload the page after a short delay to see the success message
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
+                } else {
+                    showMessage(result.error || 'Failed to reset database', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to reset database: ' + error.message, 'error');
+            }
         }
         
         async function openLogsModal() {

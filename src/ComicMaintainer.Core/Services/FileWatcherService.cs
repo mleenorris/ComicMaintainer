@@ -168,11 +168,10 @@ public class FileWatcherService : IFileWatcherService
                 {
                     await _fileStore.AddFileAsync(file, cancellationToken);
                     
-                    // Check if file is already processed before processing
-                    var isProcessed = await _fileStore.IsFileProcessedAsync(file, cancellationToken);
-                    if (isProcessed)
+                    // Check if file should be processed based on settings and current state
+                    var shouldProcess = await ShouldProcessFileAsync(file, cancellationToken);
+                    if (!shouldProcess)
                     {
-                        _logger.LogInformation("File already processed, skipping: {File}", file);
                         continue;
                     }
                     
@@ -243,11 +242,10 @@ public class FileWatcherService : IFileWatcherService
             {
                 await _fileStore.AddFileAsync(e.FullPath);
                 
-                // Check if file is already processed before processing
-                var isProcessed = await _fileStore.IsFileProcessedAsync(e.FullPath);
-                if (isProcessed)
+                // Check if file should be processed based on settings and current state
+                var shouldProcess = await ShouldProcessFileAsync(e.FullPath);
+                if (!shouldProcess)
                 {
-                    _logger.LogInformation("File already processed, skipping: {Path}", e.FullPath);
                     return;
                 }
                 
@@ -283,11 +281,10 @@ public class FileWatcherService : IFileWatcherService
                     await _fileStore.RemoveFileAsync(e.OldFullPath);
                     await _fileStore.AddFileAsync(e.FullPath);
                     
-                    // Check if file is already processed before processing
-                    var isProcessed = await _fileStore.IsFileProcessedAsync(e.FullPath);
-                    if (isProcessed)
+                    // Check if file should be processed based on settings and current state
+                    var shouldProcess = await ShouldProcessFileAsync(e.FullPath);
+                    if (!shouldProcess)
                     {
-                        _logger.LogInformation("File already processed, skipping: {Path}", e.FullPath);
                         return;
                     }
                     
@@ -315,5 +312,64 @@ public class FileWatcherService : IFileWatcherService
     private static bool IsComicFile(string path)
     {
         return ComicFileExtensions.IsComicArchive(path);
+    }
+
+    /// <summary>
+    /// Determine if a file should be processed based on watcher settings and file state
+    /// </summary>
+    private async Task<bool> ShouldProcessFileAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var renameEnabled = _settings.WatcherEnableRename;
+            var normalizeEnabled = _settings.WatcherEnableNormalize;
+
+            // If both are enabled, only process if not already fully processed
+            if (renameEnabled && normalizeEnabled)
+            {
+                var isProcessed = await _fileStore.IsFileProcessedAsync(filePath, cancellationToken);
+                if (isProcessed)
+                {
+                    _logger.LogInformation("File already fully processed (renamed and normalized), skipping: {File}", filePath);
+                    return false;
+                }
+                return true;
+            }
+
+            // If only normalize is enabled, skip if already normalized
+            if (!renameEnabled && normalizeEnabled)
+            {
+                var isProcessed = await _fileStore.IsFileProcessedAsync(filePath, cancellationToken);
+                var isNormalized = await _fileStore.IsFileNormalizedAsync(filePath, cancellationToken);
+                if (isProcessed || isNormalized)
+                {
+                    _logger.LogInformation("File already processed or normalized, skipping: {File}", filePath);
+                    return false;
+                }
+                return true;
+            }
+
+            // If only rename is enabled, skip if already renamed
+            if (renameEnabled && !normalizeEnabled)
+            {
+                var isProcessed = await _fileStore.IsFileProcessedAsync(filePath, cancellationToken);
+                var isRenamed = await _fileStore.IsFileRenamedAsync(filePath, cancellationToken);
+                if (isProcessed || isRenamed)
+                {
+                    _logger.LogInformation("File already processed or renamed, skipping: {File}", filePath);
+                    return false;
+                }
+                return true;
+            }
+
+            // If both are disabled, no processing needed
+            _logger.LogInformation("Both rename and normalize are disabled, skipping: {File}", filePath);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking if file should be processed: {File}", filePath);
+            return false;
+        }
     }
 }

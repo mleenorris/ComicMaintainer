@@ -29,4 +29,6 @@ public class AppSettings
     // File watcher settings
     public int WatcherFileStabilityDelaySeconds { get; set; } = 30;
     public int WatcherDirectoryScanDelaySeconds { get; set; } = 2;
+    public bool WatcherEnableRename { get; set; } = true;
+    public bool WatcherEnableNormalize { get; set; } = true;
 }

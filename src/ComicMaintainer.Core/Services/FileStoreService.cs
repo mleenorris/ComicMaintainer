@@ -85,6 +85,8 @@ public class FileStoreService : IFileStoreService
             FileSize = fileInfo.Length,
             LastModified = fileInfo.LastWriteTime,
             IsProcessed = isProcessed ?? _processedFiles.ContainsKey(filePath),
+            IsRenamed = false, // Initialize to false by default
+            IsNormalized = false, // Initialize to false by default
             IsDuplicate = isDuplicate ?? _duplicateFiles.ContainsKey(filePath),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -373,6 +375,144 @@ public class FileStoreService : IFileStoreService
         }
     }
 
+    public async Task MarkFileRenamedAsync(string filePath, bool renamed, CancellationToken cancellationToken = default)
+    {
+        if (_files.TryGetValue(filePath, out var file))
+        {
+            file.IsRenamed = renamed;
+            // Update IsProcessed based on both renamed and normalized states
+            file.IsProcessed = file.IsRenamed && file.IsNormalized;
+        }
+
+        // Persist to database
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            
+            var entity = await dbContext.ComicFiles
+                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+
+            if (entity != null)
+            {
+                entity.IsRenamed = renamed;
+                // Update IsProcessed based on both states
+                entity.IsProcessed = entity.IsRenamed && entity.IsNormalized;
+                entity.UpdatedAt = DateTime.UtcNow;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                _logger.LogDebug("Updated renamed status for {FilePath} to {Status}", SanitizeForLogging(filePath), renamed);
+            }
+            else
+            {
+                // Create entity if it doesn't exist
+                if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
+                {
+                    try
+                    {
+                        entity = CreateFileEntity(filePath);
+                        entity.IsRenamed = renamed;
+                        entity.IsProcessed = renamed && entity.IsNormalized; // Only processed if both are true
+                        dbContext.ComicFiles.Add(entity);
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                        _logger.LogDebug("Created file entity and set renamed status for {FilePath} to {Status}", SanitizeForLogging(filePath), renamed);
+                    }
+                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx && 
+                                                        sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
+                    {
+                        // Race condition: entity was created by another thread between our check and insert
+                        _logger.LogDebug("File entity already exists (race condition), retrying update for {FilePath}", SanitizeForLogging(filePath));
+                        entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+                        if (entity != null)
+                        {
+                            entity.IsRenamed = renamed;
+                            entity.IsProcessed = entity.IsRenamed && entity.IsNormalized;
+                            entity.UpdatedAt = DateTime.UtcNow;
+                            await dbContext.SaveChangesAsync(cancellationToken);
+                            _logger.LogDebug("Updated renamed status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), renamed);
+                        }
+                    }
+                }
+                else
+                {
+                    _logger.LogDebug("File {FilePath} not found on filesystem or outside allowed directories, skipping database creation", SanitizeForLogging(filePath));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating renamed status in database for {FilePath}", SanitizeForLogging(filePath));
+        }
+    }
+
+    public async Task MarkFileNormalizedAsync(string filePath, bool normalized, CancellationToken cancellationToken = default)
+    {
+        if (_files.TryGetValue(filePath, out var file))
+        {
+            file.IsNormalized = normalized;
+            // Update IsProcessed based on both renamed and normalized states
+            file.IsProcessed = file.IsRenamed && file.IsNormalized;
+        }
+
+        // Persist to database
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            
+            var entity = await dbContext.ComicFiles
+                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+
+            if (entity != null)
+            {
+                entity.IsNormalized = normalized;
+                // Update IsProcessed based on both states
+                entity.IsProcessed = entity.IsRenamed && entity.IsNormalized;
+                entity.UpdatedAt = DateTime.UtcNow;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                _logger.LogDebug("Updated normalized status for {FilePath} to {Status}", SanitizeForLogging(filePath), normalized);
+            }
+            else
+            {
+                // Create entity if it doesn't exist
+                if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
+                {
+                    try
+                    {
+                        entity = CreateFileEntity(filePath);
+                        entity.IsNormalized = normalized;
+                        entity.IsProcessed = entity.IsRenamed && normalized; // Only processed if both are true
+                        dbContext.ComicFiles.Add(entity);
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                        _logger.LogDebug("Created file entity and set normalized status for {FilePath} to {Status}", SanitizeForLogging(filePath), normalized);
+                    }
+                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx && 
+                                                        sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
+                    {
+                        // Race condition: entity was created by another thread between our check and insert
+                        _logger.LogDebug("File entity already exists (race condition), retrying update for {FilePath}", SanitizeForLogging(filePath));
+                        entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+                        if (entity != null)
+                        {
+                            entity.IsNormalized = normalized;
+                            entity.IsProcessed = entity.IsRenamed && entity.IsNormalized;
+                            entity.UpdatedAt = DateTime.UtcNow;
+                            await dbContext.SaveChangesAsync(cancellationToken);
+                            _logger.LogDebug("Updated normalized status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), normalized);
+                        }
+                    }
+                }
+                else
+                {
+                    _logger.LogDebug("File {FilePath} not found on filesystem or outside allowed directories, skipping database creation", SanitizeForLogging(filePath));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating normalized status in database for {FilePath}", SanitizeForLogging(filePath));
+        }
+    }
+
     public Task<(int total, int processed, int unprocessed, int duplicates)> GetFileCountsAsync(CancellationToken cancellationToken = default)
     {
         var files = _files.Values.ToList();
@@ -413,6 +553,8 @@ public class FileStoreService : IFileStoreService
                         FileSize = entity.FileSize,
                         LastModified = entity.LastModified,
                         IsProcessed = entity.IsProcessed,
+                        IsRenamed = entity.IsRenamed,
+                        IsNormalized = entity.IsNormalized,
                         IsDuplicate = entity.IsDuplicate,
                         Metadata = entity.Metadata
                     };
@@ -458,6 +600,26 @@ public class FileStoreService : IFileStoreService
         // This dictionary is maintained by MarkFileProcessedAsync and InitializeFromDatabaseAsync
         var isProcessed = _processedFiles.ContainsKey(filePath);
         return Task.FromResult(isProcessed);
+    }
+
+    public Task<bool> IsFileRenamedAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        // Check if file is already renamed
+        if (_files.TryGetValue(filePath, out var file))
+        {
+            return Task.FromResult(file.IsRenamed);
+        }
+        return Task.FromResult(false);
+    }
+
+    public Task<bool> IsFileNormalizedAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        // Check if file is already normalized
+        if (_files.TryGetValue(filePath, out var file))
+        {
+            return Task.FromResult(file.IsNormalized);
+        }
+        return Task.FromResult(false);
     }
 
     public Task<bool> FileExistsAsync(string filePath, CancellationToken cancellationToken = default)

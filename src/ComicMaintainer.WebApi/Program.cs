@@ -31,8 +31,13 @@ catch (UnauthorizedAccessException)
     Directory.CreateDirectory(configDir);
 }
 
-// Configure Serilog with multiple sinks: console, basic/info file, debug file, and watcher file
-Log.Logger = new LoggerConfiguration()
+var builder = WebApplication.CreateBuilder(args);
+
+// Use Serilog for logging - configure with the builder context to ensure proper integration
+builder.Host.UseSerilog((context, services, configuration) => configuration
+    .ReadFrom.Configuration(context.Configuration)
+    .ReadFrom.Services(services)
+    .Enrich.FromLogContext()
     .MinimumLevel.Debug()
     // Console sink - only show Information and above, clean formatting
     .WriteTo.Console(
@@ -76,13 +81,7 @@ Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Migrations", LogEventLevel.Warning)
-    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Model.Validation", LogEventLevel.Error)
-    .CreateLogger();
-
-var builder = WebApplication.CreateBuilder(args);
-
-// Use Serilog for logging
-builder.Host.UseSerilog();
+    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Model.Validation", LogEventLevel.Error));
 
 // Configure settings from environment variables and appsettings
 builder.Services.Configure<AppSettings>(options =>

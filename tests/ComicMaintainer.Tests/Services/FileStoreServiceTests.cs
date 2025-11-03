@@ -246,6 +246,46 @@ public class FileStoreServiceTests
     }
 
     [Fact]
+    public async Task GetFilteredFilesAsync_RenamedFilter_ReturnsOnlyRenamed()
+    {
+        // Arrange
+        var file1 = Path.Combine(_testDirectory, "test1.cbz");
+        var file2 = Path.Combine(_testDirectory, "test2.cbz");
+        File.WriteAllText(file1, "test");
+        File.WriteAllText(file2, "test");
+        await _service.AddFileAsync(file1);
+        await _service.AddFileAsync(file2);
+        await _service.MarkFileRenamedAsync(file1, true);
+
+        // Act
+        var files = await _service.GetFilteredFilesAsync("renamed");
+
+        // Assert
+        Assert.Single(files);
+        Assert.Equal(file1, files.First().FilePath);
+    }
+
+    [Fact]
+    public async Task GetFilteredFilesAsync_NormalizedFilter_ReturnsOnlyNormalized()
+    {
+        // Arrange
+        var file1 = Path.Combine(_testDirectory, "test1.cbz");
+        var file2 = Path.Combine(_testDirectory, "test2.cbz");
+        File.WriteAllText(file1, "test");
+        File.WriteAllText(file2, "test");
+        await _service.AddFileAsync(file1);
+        await _service.AddFileAsync(file2);
+        await _service.MarkFileNormalizedAsync(file1, true);
+
+        // Act
+        var files = await _service.GetFilteredFilesAsync("normalized");
+
+        // Assert
+        Assert.Single(files);
+        Assert.Equal(file1, files.First().FilePath);
+    }
+
+    [Fact]
     public async Task GetFileCountsAsync_WithVariousFiles_ReturnsCorrectCounts()
     {
         // Arrange

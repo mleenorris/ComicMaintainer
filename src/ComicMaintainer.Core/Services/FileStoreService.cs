@@ -110,6 +110,8 @@ public class FileStoreService : IFileStoreService
                 "processed" => files.Where(f => f.IsProcessed),
                 "unprocessed" => files.Where(f => !f.IsProcessed && !f.IsDuplicate),
                 "duplicates" => files.Where(f => f.IsDuplicate),
+                "renamed" => files.Where(f => f.IsRenamed),
+                "normalized" => files.Where(f => f.IsNormalized),
                 _ => files
             };
         }

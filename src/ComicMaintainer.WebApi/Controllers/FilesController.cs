@@ -65,6 +65,8 @@ public class FilesController : ControllerBase
                 "marked" => "processed",
                 "unmarked" => "unprocessed",
                 "duplicates" => "duplicates",
+                "renamed" => "renamed",
+                "normalized" => "normalized",
                 _ => null
             };
 

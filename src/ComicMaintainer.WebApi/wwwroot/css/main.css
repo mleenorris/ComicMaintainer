@@ -1605,7 +1605,7 @@
             }
             
             .file-item {
-                grid-template-columns: 30px 1fr 60px;
+                grid-template-columns: 30px 40px 1fr 60px;
                 padding: 10px;
                 gap: 8px;
                 overflow: hidden;
@@ -1615,11 +1615,17 @@
                 padding-left: 25px;
             }
             
-            /* Hide spacer, Size, and Modified columns on mobile */
-            .file-item > *:nth-child(2),
+            /* Hide Size and Modified columns on mobile */
             .file-item > *:nth-child(4),
             .file-item > *:nth-child(5) {
                 display: none;
+            }
+            
+            .status-badge {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 18px;
             }
             
             .file-actions {
@@ -1836,7 +1842,7 @@
             }
             
             .file-item {
-                grid-template-columns: 25px 1fr 55px;
+                grid-template-columns: 25px 35px 1fr 55px;
                 padding: 8px;
                 gap: 6px;
                 overflow: hidden;

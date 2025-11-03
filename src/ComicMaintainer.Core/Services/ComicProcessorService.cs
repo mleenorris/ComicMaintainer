@@ -77,20 +77,46 @@ public class ComicProcessorService : IComicProcessorService
             if (metadata != null && !string.IsNullOrEmpty(metadata.Series))
             {
                 var newFilePath = GenerateFileName(metadata, filePath);
-                if (newFilePath != filePath && !File.Exists(newFilePath))
+                if (newFilePath == filePath)
                 {
-                    _logger.LogInformation("Renaming file from {OldPath} to {NewPath}", filePath, newFilePath);
-                    var oldFilePath = filePath;
-                    File.Move(filePath, newFilePath);
-                    
-                    // Update file store with new path
-                    await _fileStore.RemoveFileAsync(oldFilePath, cancellationToken);
-                    await _fileStore.AddFileAsync(newFilePath, cancellationToken);
-                    
-                    await LogHistoryAsync(newFilePath, "Rename", true, null, cancellationToken);
-                    
-                    filePath = newFilePath;
+                    // File already has correct name, no rename needed
+                    _logger.LogDebug("File already has correct name: {FilePath}", filePath);
+                    await LogHistoryAsync(filePath, "Rename", true, "File already correctly named", cancellationToken);
                 }
+                else if (File.Exists(newFilePath))
+                {
+                    // Target file already exists
+                    _logger.LogWarning("Cannot rename file, target already exists: {NewPath}", newFilePath);
+                    await LogHistoryAsync(filePath, "Rename", false, "Target file already exists", cancellationToken);
+                }
+                else
+                {
+                    try
+                    {
+                        _logger.LogInformation("Renaming file from {OldPath} to {NewPath}", filePath, newFilePath);
+                        var oldFilePath = filePath;
+                        File.Move(filePath, newFilePath);
+                        
+                        // Update file store with new path
+                        await _fileStore.RemoveFileAsync(oldFilePath, cancellationToken);
+                        await _fileStore.AddFileAsync(newFilePath, cancellationToken);
+                        
+                        await LogHistoryAsync(newFilePath, "Rename", true, null, cancellationToken);
+                        
+                        filePath = newFilePath;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to rename file: {FilePath}", filePath);
+                        await LogHistoryAsync(filePath, "Rename", false, ex.Message, cancellationToken);
+                    }
+                }
+            }
+            else
+            {
+                // No metadata or series info available
+                _logger.LogDebug("No metadata or series information for rename: {FilePath}", filePath);
+                await LogHistoryAsync(filePath, "Rename", false, "No metadata or series information", cancellationToken);
             }
 
             // Normalize metadata (update ComicInfo.xml)

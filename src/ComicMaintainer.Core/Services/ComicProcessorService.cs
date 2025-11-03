@@ -1069,15 +1069,17 @@ public class ComicProcessorService : IComicProcessorService
 
             var allFiles = await _fileStore.GetFilteredFilesAsync(null, cancellationToken);
             var fileInfo = new FileInfo(filePath);
-            var generatedFileName = GenerateFileName(metadata, filePath);
+            
+            _logger.LogDebug("IsDuplicateAsync: Checking {FileCount} files for duplicates of {FilePath}", allFiles.Count(), LoggingHelper.SanitizePathForLog(filePath));
             
             // Check for files with same series/issue but different path
+            // Only use cached metadata to avoid O(n) disk I/O operations
             foreach (var file in allFiles)
             {
                 if (file.FilePath == filePath)
                     continue;
 
-                // Check 1: Compare metadata if available in cache
+                // Compare metadata if available in cache
                 if (file.Metadata?.Series == metadata.Series && 
                     file.Metadata?.Issue == metadata.Issue &&
                     Math.Abs(file.FileSize - fileInfo.Length) < 1024 * 10) // Within 10KB
@@ -1085,24 +1087,9 @@ public class ComicProcessorService : IComicProcessorService
                     _logger.LogInformation("Found duplicate by metadata: {File1} matches {File2}", filePath, file.FilePath);
                     return true;
                 }
-                
-                // Check 2: Compare generated filenames (only if metadata not in cache to avoid O(n²) performance issue)
-                // This check reads metadata from disk which is slow - only do it if we don't have cached metadata
-                if (file.Metadata == null && File.Exists(file.FilePath))
-                {
-                    var existingMetadata = await GetMetadataAsync(file.FilePath, cancellationToken);
-                    if (existingMetadata != null && !string.IsNullOrEmpty(existingMetadata.Series))
-                    {
-                        var existingGeneratedFileName = GenerateFileName(existingMetadata, file.FilePath);
-                        if (generatedFileName == existingGeneratedFileName &&
-                            Math.Abs(file.FileSize - fileInfo.Length) < 1024 * 10) // Within 10KB
-                        {
-                            _logger.LogInformation("Found duplicate by generated filename: {File1} matches {File2}", filePath, file.FilePath);
-                            return true;
-                        }
-                    }
-                }
             }
+            
+            _logger.LogDebug("IsDuplicateAsync: No duplicate found for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             return false;
         }

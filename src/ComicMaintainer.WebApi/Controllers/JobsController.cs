@@ -127,6 +127,62 @@ public class JobsController : ControllerBase
         }
     }
 
+    [HttpPost("rename-all")]
+    public async Task<ActionResult<object>> RenameAll()
+    {
+        try
+        {
+            // Get all files from the file store
+            var allFiles = await _fileStore.GetAllFilesAsync();
+            var filePaths = allFiles.Select(f => f.FilePath).ToList();
+            
+            if (filePaths.Count == 0)
+            {
+                _logger.LogInformation("No files found to rename");
+                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
+            }
+            
+            // Start the rename job
+            var jobId = await _processor.RenameFilesAsync(filePaths);
+            _logger.LogInformation("Rename all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            
+            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error starting rename all job");
+            return StatusCode(500, new { error = "Error starting job" });
+        }
+    }
+
+    [HttpPost("normalize-all")]
+    public async Task<ActionResult<object>> NormalizeAll()
+    {
+        try
+        {
+            // Get all files from the file store
+            var allFiles = await _fileStore.GetAllFilesAsync();
+            var filePaths = allFiles.Select(f => f.FilePath).ToList();
+            
+            if (filePaths.Count == 0)
+            {
+                _logger.LogInformation("No files found to normalize");
+                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
+            }
+            
+            // Start the normalize job
+            var jobId = await _processor.NormalizeFilesAsync(filePaths);
+            _logger.LogInformation("Normalize all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            
+            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error starting normalize all job");
+            return StatusCode(500, new { error = "Error starting job" });
+        }
+    }
+
     [HttpPost("process-selected")]
     public async Task<ActionResult<object>> ProcessSelected([FromBody] ProcessSelectedRequest request)
     {
@@ -215,6 +271,28 @@ public class JobsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error starting normalize unmarked job");
+            return StatusCode(500, new { error = "Error starting job" });
+        }
+    }
+
+    [HttpPost("rename-selected")]
+    public async Task<ActionResult<object>> RenameSelected([FromBody] ProcessSelectedRequest request)
+    {
+        try
+        {
+            if (request.Files == null || request.Files.Count == 0)
+            {
+                return BadRequest(new { error = "No files specified" });
+            }
+            
+            var jobId = await _processor.RenameFilesAsync(request.Files);
+            _logger.LogInformation("Rename selected files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, request.Files.Count);
+            
+            return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error starting rename selected job");
             return StatusCode(500, new { error = "Error starting job" });
         }
     }

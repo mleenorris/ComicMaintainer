@@ -593,9 +593,8 @@ public class ComicProcessorService : IComicProcessorService
 
             using var archive = ArchiveFactory.Open(filePath);
             
-            // Look for ComicInfo.xml
-            var comicInfoEntry = archive.Entries.FirstOrDefault(e => 
-                e.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) == true);
+            // Look for ComicInfo.xml using shared helper
+            var comicInfoEntry = FindComicInfoEntry(archive);
 
             if (comicInfoEntry != null)
             {
@@ -619,6 +618,9 @@ public class ComicProcessorService : IComicProcessorService
         }
     }
 
+    /// <summary>
+    /// Checks if a comic archive file already contains ComicInfo.xml
+    /// </summary>
     private bool HasComicInfoXml(string filePath)
     {
         try
@@ -627,16 +629,22 @@ public class ComicProcessorService : IComicProcessorService
                 return false;
 
             using var archive = ArchiveFactory.Open(filePath);
-            
-            // Check if ComicInfo.xml exists
-            return archive.Entries.Any(e => 
-                e.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) == true);
+            return FindComicInfoEntry(archive) != null;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error checking for ComicInfo.xml in {FilePath}", filePath);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Finds the ComicInfo.xml entry in an archive
+    /// </summary>
+    private static SharpCompress.Archives.IArchiveEntry? FindComicInfoEntry(IArchive archive)
+    {
+        return archive.Entries.FirstOrDefault(e => 
+            e.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) == true);
     }
 
     public Task<bool> UpdateMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default)

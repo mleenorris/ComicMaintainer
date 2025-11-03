@@ -446,11 +446,10 @@ public class ComicProcessorServiceTests : IDisposable
         // Act
         var jobId = await _service.NormalizeFilesAsync(files);
         
-        // Wait for async processing to complete
-        await Task.Delay(1000);
+        // Wait for async processing to complete with polling
+        var job = await WaitForJobCompletionAsync(jobId);
 
         // Assert
-        var job = _service.GetJob(jobId);
         Assert.NotNull(job);
         Assert.Equal(JobStatus.Completed, job.Status);
         Assert.Equal(1, job.ProcessedFiles);
@@ -487,11 +486,10 @@ public class ComicProcessorServiceTests : IDisposable
         // Act
         var jobId = await _service.NormalizeFilesAsync(files);
         
-        // Wait for async processing to complete
-        await Task.Delay(1000);
+        // Wait for async processing to complete with polling
+        var job = await WaitForJobCompletionAsync(jobId);
 
         // Assert
-        var job = _service.GetJob(jobId);
         Assert.NotNull(job);
         Assert.Equal(JobStatus.Completed, job.Status);
         Assert.Equal(1, job.ProcessedFiles);
@@ -540,11 +538,10 @@ public class ComicProcessorServiceTests : IDisposable
         // Act
         var jobId = await _service.RenameFilesAsync(files);
         
-        // Wait for async processing to complete
-        await Task.Delay(1000);
+        // Wait for async processing to complete with polling
+        var job = await WaitForJobCompletionAsync(jobId);
 
         // Assert
-        var job = _service.GetJob(jobId);
         Assert.NotNull(job);
         Assert.Equal(JobStatus.Completed, job.Status);
         Assert.Equal(1, job.ProcessedFiles);
@@ -563,6 +560,26 @@ public class ComicProcessorServiceTests : IDisposable
                     e.Success == true),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    /// <summary>
+    /// Helper method to wait for a job to complete by polling its status
+    /// </summary>
+    private async Task<ProcessingJob?> WaitForJobCompletionAsync(Guid jobId, int maxWaitMs = 5000, int pollIntervalMs = 50)
+    {
+        var startTime = DateTime.UtcNow;
+        while ((DateTime.UtcNow - startTime).TotalMilliseconds < maxWaitMs)
+        {
+            var job = _service.GetJob(jobId);
+            if (job != null && (job.Status == JobStatus.Completed || job.Status == JobStatus.Failed || job.Status == JobStatus.Cancelled))
+            {
+                return job;
+            }
+            await Task.Delay(pollIntervalMs);
+        }
+        
+        // Return the job even if not completed (test will fail on assertion)
+        return _service.GetJob(jobId);
     }
 
     public void Dispose()

@@ -131,27 +131,33 @@ public class FileWatcherServiceTests : IDisposable
     }
 
     [Fact]
-    public void SetEnabled_WithTrue_StartsWatcher()
+    public void SetEnabled_WithTrue_IsDeprecated()
     {
+        // SetEnabled is now deprecated and does nothing
         // Act
+        #pragma warning disable CS0618 // Type or member is obsolete
         _service.SetEnabled(true);
+        #pragma warning restore CS0618 // Type or member is obsolete
 
-        // Assert
-        Assert.True(_service.IsRunning);
+        // Assert - Should not start watcher (SetEnabled is now a no-op)
+        Assert.False(_service.IsRunning, "SetEnabled is deprecated and should not start watcher");
     }
 
     [Fact]
-    public async Task SetEnabled_WithFalse_StopsWatcher()
+    public async Task SetEnabled_WithFalse_IsDeprecated()
     {
         // Arrange
         await _service.StartAsync();
         Assert.True(_service.IsRunning);
 
+        // SetEnabled is now deprecated and does nothing
         // Act
+        #pragma warning disable CS0618 // Type or member is obsolete
         _service.SetEnabled(false);
+        #pragma warning restore CS0618 // Type or member is obsolete
 
-        // Assert
-        Assert.False(_service.IsRunning);
+        // Assert - Should not stop watcher (SetEnabled is now a no-op)
+        Assert.True(_service.IsRunning, "SetEnabled is deprecated and should not stop watcher");
     }
 
     [Fact]

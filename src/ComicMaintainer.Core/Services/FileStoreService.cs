@@ -131,6 +131,33 @@ public class FileStoreService : IFileStoreService
             return;
 
         var fileInfo = new FileInfo(filePath);
+        
+        // Check if file exists in database to preserve status
+        bool isRenamed = false;
+        bool isNormalized = false;
+        bool isDuplicate = _duplicateFiles.ContainsKey(filePath);
+        
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            
+            var entity = await dbContext.ComicFiles
+                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+                
+            if (entity != null)
+            {
+                // Preserve existing status from database
+                isRenamed = entity.IsRenamed;
+                isNormalized = entity.IsNormalized;
+                isDuplicate = entity.IsDuplicate;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reading file status from database: {FilePath}", SanitizeForLogging(filePath));
+        }
+        
         var comicFile = new ComicFile
         {
             FilePath = filePath,
@@ -138,8 +165,10 @@ public class FileStoreService : IFileStoreService
             Directory = fileInfo.DirectoryName ?? string.Empty,
             FileSize = fileInfo.Length,
             LastModified = fileInfo.LastWriteTime,
-            IsProcessed = false, // Will be set from database if exists, or computed from renamed && normalized
-            IsDuplicate = _duplicateFiles.ContainsKey(filePath)
+            IsRenamed = isRenamed,
+            IsNormalized = isNormalized,
+            IsProcessed = isRenamed && isNormalized, // Computed from renamed && normalized
+            IsDuplicate = isDuplicate
         };
 
         _files.AddOrUpdate(filePath, comicFile, (_, _) => comicFile);
@@ -176,7 +205,7 @@ public class FileStoreService : IFileStoreService
                         entity.Directory = fileInfo.DirectoryName ?? string.Empty;
                         entity.FileSize = fileInfo.Length;
                         entity.LastModified = fileInfo.LastWriteTime;
-                        entity.IsProcessed = comicFile.IsProcessed;
+                        entity.IsProcessed = entity.IsRenamed && entity.IsNormalized; // Recompute from renamed && normalized
                         entity.IsDuplicate = comicFile.IsDuplicate;
                         entity.UpdatedAt = DateTime.UtcNow;
                         await dbContext.SaveChangesAsync(cancellationToken);
@@ -186,12 +215,12 @@ public class FileStoreService : IFileStoreService
             }
             else
             {
-                // Update existing entity
+                // Update existing entity (preserving renamed/normalized status)
                 entity.FileName = fileInfo.Name;
                 entity.Directory = fileInfo.DirectoryName ?? string.Empty;
                 entity.FileSize = fileInfo.Length;
                 entity.LastModified = fileInfo.LastWriteTime;
-                entity.IsProcessed = comicFile.IsProcessed;
+                entity.IsProcessed = entity.IsRenamed && entity.IsNormalized; // Recompute from renamed && normalized
                 entity.IsDuplicate = comicFile.IsDuplicate;
                 entity.UpdatedAt = DateTime.UtcNow;
                 await dbContext.SaveChangesAsync(cancellationToken);

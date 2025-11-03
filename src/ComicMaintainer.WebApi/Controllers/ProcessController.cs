@@ -8,29 +8,34 @@ namespace ComicMaintainer.WebApi.Controllers;
 public class ProcessController : ControllerBase
 {
     private readonly IComicProcessorService _processor;
+    private readonly IFileStoreService _fileStore;
     private readonly ILogger<ProcessController> _logger;
 
     public ProcessController(
         IComicProcessorService processor,
+        IFileStoreService fileStore,
         ILogger<ProcessController> logger)
     {
         _processor = processor;
+        _fileStore = fileStore;
         _logger = logger;
     }
 
     [HttpPost("process-all")]
-    public ActionResult<object> ProcessAll([FromQuery] bool stream = false)
+    public async Task<ActionResult<object>> ProcessAll([FromQuery] bool stream = false, CancellationToken cancellationToken = default)
     {
         try
         {
-            // TODO: Implement actual processing logic to get all unprocessed files
-            // For now, returning a stub job ID. Full implementation would:
-            // 1. Query file store for all unprocessed files
-            // 2. Call ProcessFilesAsync with the file list
-            var jobId = Guid.NewGuid();
-            _logger.LogInformation("Process all files requested (stub implementation), job ID: {JobId}", jobId);
+            // Get all files from the file store
+            var allFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
+            var filePaths = allFiles.Select(f => f.FilePath).ToList();
             
-            return Ok(new { jobId, streaming = stream });
+            _logger.LogInformation("Process all files requested, processing {Count} files", filePaths.Count);
+            
+            // Start processing job
+            var jobId = await _processor.ProcessFilesAsync(filePaths, cancellationToken);
+            
+            return Ok(new { jobId, streaming = stream, totalFiles = filePaths.Count });
         }
         catch (Exception ex)
         {
@@ -55,13 +60,20 @@ public class ProcessController : ControllerBase
     }
 
     [HttpPost("rename-all")]
-    public ActionResult<object> RenameAll([FromQuery] bool stream = false)
+    public async Task<ActionResult<object>> RenameAll([FromQuery] bool stream = false, CancellationToken cancellationToken = default)
     {
         try
         {
-            var jobId = Guid.NewGuid();
-            _logger.LogInformation("Rename all files requested, job ID: {JobId}", jobId);
-            return Ok(new { jobId, streaming = stream });
+            // Get all files from the file store
+            var allFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
+            var filePaths = allFiles.Select(f => f.FilePath).ToList();
+            
+            _logger.LogInformation("Rename all files requested, processing {Count} files", filePaths.Count);
+            
+            // Start rename job
+            var jobId = await _processor.RenameFilesAsync(filePaths, cancellationToken);
+            
+            return Ok(new { jobId, streaming = stream, totalFiles = filePaths.Count });
         }
         catch (Exception ex)
         {
@@ -71,13 +83,16 @@ public class ProcessController : ControllerBase
     }
 
     [HttpPost("rename-selected")]
-    public ActionResult<object> RenameSelected([FromBody] ProcessRequest request, [FromQuery] bool stream = false)
+    public async Task<ActionResult<object>> RenameSelected([FromBody] ProcessRequest request, [FromQuery] bool stream = false, CancellationToken cancellationToken = default)
     {
         try
         {
-            var jobId = Guid.NewGuid();
-            _logger.LogInformation("Rename selected files requested, job ID: {JobId}", jobId);
-            return Ok(new { jobId, streaming = stream });
+            _logger.LogInformation("Rename selected files requested, processing {Count} files", request.Files.Count);
+            
+            // Start rename job
+            var jobId = await _processor.RenameFilesAsync(request.Files, cancellationToken);
+            
+            return Ok(new { jobId, streaming = stream, totalFiles = request.Files.Count });
         }
         catch (Exception ex)
         {
@@ -87,13 +102,20 @@ public class ProcessController : ControllerBase
     }
 
     [HttpPost("normalize-all")]
-    public ActionResult<object> NormalizeAll([FromQuery] bool stream = false)
+    public async Task<ActionResult<object>> NormalizeAll([FromQuery] bool stream = false, CancellationToken cancellationToken = default)
     {
         try
         {
-            var jobId = Guid.NewGuid();
-            _logger.LogInformation("Normalize all files requested, job ID: {JobId}", jobId);
-            return Ok(new { jobId, streaming = stream });
+            // Get all files from the file store
+            var allFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
+            var filePaths = allFiles.Select(f => f.FilePath).ToList();
+            
+            _logger.LogInformation("Normalize all files requested, processing {Count} files", filePaths.Count);
+            
+            // Start normalize job
+            var jobId = await _processor.NormalizeFilesAsync(filePaths, cancellationToken);
+            
+            return Ok(new { jobId, streaming = stream, totalFiles = filePaths.Count });
         }
         catch (Exception ex)
         {
@@ -103,13 +125,16 @@ public class ProcessController : ControllerBase
     }
 
     [HttpPost("normalize-selected")]
-    public ActionResult<object> NormalizeSelected([FromBody] ProcessRequest request, [FromQuery] bool stream = false)
+    public async Task<ActionResult<object>> NormalizeSelected([FromBody] ProcessRequest request, [FromQuery] bool stream = false, CancellationToken cancellationToken = default)
     {
         try
         {
-            var jobId = Guid.NewGuid();
-            _logger.LogInformation("Normalize selected files requested, job ID: {JobId}", jobId);
-            return Ok(new { jobId, streaming = stream });
+            _logger.LogInformation("Normalize selected files requested, processing {Count} files", request.Files.Count);
+            
+            // Start normalize job
+            var jobId = await _processor.NormalizeFilesAsync(request.Files, cancellationToken);
+            
+            return Ok(new { jobId, streaming = stream, totalFiles = request.Files.Count });
         }
         catch (Exception ex)
         {

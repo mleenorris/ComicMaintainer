@@ -147,7 +147,7 @@ public class JobsControllerTests
     public async Task ProcessAll_WithUnprocessedFiles_ReturnsJobIdAndTotalItems()
     {
         // Arrange
-        var unprocessedFiles = new List<ComicFile>
+        var allFiles = new List<ComicFile>
         {
             new() { FilePath = "/path/file1.cbz", IsProcessed = false },
             new() { FilePath = "/path/file2.cbz", IsProcessed = false }
@@ -155,8 +155,8 @@ public class JobsControllerTests
         var expectedJobId = Guid.NewGuid();
         
         _mockFileStore
-            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
-            .ReturnsAsync(unprocessedFiles);
+            .Setup(fs => fs.GetAllFilesAsync(default))
+            .ReturnsAsync(allFiles);
         
         _mockProcessor
             .Setup(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), default))
@@ -169,7 +169,7 @@ public class JobsControllerTests
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
         var (jobId, totalItems) = GetJobResponse(okResult);
         Assert.Equal(expectedJobId.ToString(), jobId);
-        Assert.Equal(unprocessedFiles.Count, totalItems);
+        Assert.Equal(allFiles.Count, totalItems);
     }
     
     [Fact]
@@ -177,7 +177,7 @@ public class JobsControllerTests
     {
         // Arrange
         _mockFileStore
-            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .Setup(fs => fs.GetAllFilesAsync(default))
             .ReturnsAsync(new List<ComicFile>());
 
         // Act
@@ -195,6 +195,7 @@ public class JobsControllerTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
+        _mockProcessor.Setup(p => p.CancelJob(jobId)).Returns(true);
 
         // Act
         var result = _controller.CancelJob(jobId);

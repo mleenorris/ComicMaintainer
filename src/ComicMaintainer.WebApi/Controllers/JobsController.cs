@@ -118,7 +118,21 @@ public class JobsController : ControllerBase
     {
         try
         {
-            return await ProcessUnprocessedFilesAsync("Process all files");
+            // Get all files from the file store
+            var allFiles = await _fileStore.GetAllFilesAsync();
+            var filePaths = allFiles.Select(f => f.FilePath).ToList();
+            
+            if (filePaths.Count == 0)
+            {
+                _logger.LogInformation("No files found to process");
+                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
+            }
+            
+            // Start the process job
+            var jobId = await _processor.ProcessFilesAsync(filePaths);
+            _logger.LogInformation("Process all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            
+            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
         catch (Exception ex)
         {
@@ -372,8 +386,16 @@ public class JobsController : ControllerBase
         try
         {
             _logger.LogInformation("Cancel requested for job {JobId}", jobId);
-            // In the future, implement job cancellation
-            return Ok(new { success = true });
+            var cancelled = _processor.CancelJob(jobId);
+            
+            if (cancelled)
+            {
+                return Ok(new { success = true });
+            }
+            else
+            {
+                return NotFound(new { success = false, error = "Job not found or already completed" });
+            }
         }
         catch (Exception ex)
         {

@@ -25,6 +25,7 @@ public class ComicProcessorService : IComicProcessorService
     private readonly IEventBroadcaster? _eventBroadcaster;
     private readonly IProcessingHistoryService _historyService;
     private readonly ConcurrentDictionary<Guid, ProcessingJob> _jobs = new();
+    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _jobCancellationTokens = new();
 
     public ComicProcessorService(
         IOptions<AppSettings> settings,
@@ -213,6 +214,10 @@ public class ComicProcessorService : IComicProcessorService
         };
 
         _jobs[jobId] = job;
+        
+        // Create a CancellationTokenSource for this job that can be cancelled independently
+        var jobCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _jobCancellationTokens[jobId] = jobCts;
 
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
@@ -227,15 +232,16 @@ public class ComicProcessorService : IComicProcessorService
 
                 foreach (var file in fileList)
                 {
-                    if (cancellationToken.IsCancellationRequested)
+                    if (jobCts.Token.IsCancellationRequested)
                     {
                         job.Status = JobStatus.Cancelled;
                         await BroadcastJobStatusAsync(job);
+                        _jobCancellationTokens.TryRemove(jobId, out _);
                         return;
                     }
 
                     job.CurrentFile = file;
-                    var success = await ProcessFileAsync(file, cancellationToken);
+                    var success = await ProcessFileAsync(file, jobCts.Token);
 
                     if (success)
                     {
@@ -264,6 +270,13 @@ public class ComicProcessorService : IComicProcessorService
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Processing job cancelled: {JobId}", jobId);
+                job.Status = JobStatus.Cancelled;
+                job.EndTime = DateTime.UtcNow;
+                await BroadcastJobStatusAsync(job);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing batch job: {JobId}", jobId);
@@ -271,7 +284,12 @@ public class ComicProcessorService : IComicProcessorService
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
-        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+            finally
+            {
+                _jobCancellationTokens.TryRemove(jobId, out _);
+                jobCts.Dispose();
+            }
+        }, jobCts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         return Task.FromResult(jobId);
     }
@@ -594,6 +612,19 @@ public class ComicProcessorService : IComicProcessorService
     public bool DeleteJob(Guid jobId)
     {
         return _jobs.TryRemove(jobId, out _);
+    }
+
+    public bool CancelJob(Guid jobId)
+    {
+        if (_jobCancellationTokens.TryGetValue(jobId, out var cts))
+        {
+            _logger.LogInformation("Cancelling job: {JobId}", jobId);
+            cts.Cancel();
+            return true;
+        }
+        
+        _logger.LogWarning("Cannot cancel job {JobId}: no active cancellation token found", jobId);
+        return false;
     }
 
     public Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default)

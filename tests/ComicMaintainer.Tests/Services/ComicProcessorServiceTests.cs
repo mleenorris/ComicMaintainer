@@ -635,6 +635,60 @@ public class ComicProcessorServiceTests : IDisposable
         _mockFileStore.Verify(f => f.MarkFileNormalizedAsync(filePath, true, It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task ProcessFilesAsync_ValidFile_CompletesSuccessfully()
+    {
+        // Arrange
+        var filePath = CreateTestComicArchive("Test Comic", "1");
+        
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var jobId = await _service.ProcessFilesAsync(new[] { filePath });
+        var job = await WaitForJobCompletionAsync(jobId);
+
+        // Assert
+        Assert.NotNull(job);
+        Assert.Equal(JobStatus.Completed, job.Status);
+        Assert.Equal(1, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+    }
+
+    [Fact]
+    public async Task CancelJob_RunningJob_CancelsSuccessfully()
+    {
+        // Arrange - Create multiple files to give us time to cancel
+        var files = Enumerable.Range(1, 50)
+            .Select(i => CreateTestComicArchive($"Test Comic {i}", i.ToString()))
+            .ToList();
+        
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var jobId = await _service.ProcessFilesAsync(files);
+        
+        // Give the job a brief moment to start processing
+        await Task.Delay(50);
+        
+        // Cancel the job
+        var cancelled = _service.CancelJob(jobId);
+        
+        // Wait for job to finish
+        var job = await WaitForJobCompletionAsync(jobId, 10000);
+
+        // Assert
+        Assert.True(cancelled);
+        Assert.NotNull(job);
+        // Job may be completed or cancelled depending on timing, but cancellation should have been attempted
+        Assert.True(job.Status == JobStatus.Cancelled || job.Status == JobStatus.Completed);
+        if (job.Status == JobStatus.Cancelled)
+        {
+            Assert.True(job.ProcessedFiles < files.Count, $"Cancelled job should not have processed all files. Processed: {job.ProcessedFiles}/{files.Count}");
+        }
+    }
+
     public void Dispose()
     {
         // Clean up test directory

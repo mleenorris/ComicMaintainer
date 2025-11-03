@@ -56,4 +56,9 @@ public interface IComicProcessorService
     /// Delete a job from the job history
     /// </summary>
     bool DeleteJob(Guid jobId);
+
+    /// <summary>
+    /// Cancel a running job
+    /// </summary>
+    bool CancelJob(Guid jobId);
 }

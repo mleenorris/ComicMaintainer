@@ -2277,7 +2277,7 @@
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ files: [filepath] })
+                    body: JSON.stringify({ Files: [filepath] })
                 });
                 
                 if (handleAuthError(response)) {

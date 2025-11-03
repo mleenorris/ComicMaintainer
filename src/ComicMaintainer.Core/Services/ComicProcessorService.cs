@@ -982,8 +982,13 @@ public class ComicProcessorService : IComicProcessorService
     }
 
     /// <summary>
-    /// Helper method to check if metadata is already normalized
+    /// Helper method to check if metadata is already normalized.
+    /// Verifies that the file has ComicInfo.xml with minimum required fields to identify the comic.
+    /// A file is considered normalized if it has either a Series name OR both Title and Issue number.
+    /// This avoids unnecessary re-writing of metadata when the file already has valid comic information.
     /// </summary>
+    /// <param name="metadata">The metadata to check</param>
+    /// <returns>True if the metadata meets minimum normalization requirements, false otherwise</returns>
     private bool IsMetadataNormalized(ComicMetadata metadata)
     {
         // Metadata is considered normalized if it has at least Series OR (Title AND Issue)

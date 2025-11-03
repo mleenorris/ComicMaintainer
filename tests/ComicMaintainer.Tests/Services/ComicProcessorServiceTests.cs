@@ -308,6 +308,8 @@ public class ComicProcessorServiceTests : IDisposable
             Times.AtLeastOnce);
     }
 
+    private const int JobPollingIntervalMs = 50;
+
     private async Task<ProcessingJob?> WaitForJobCompletionAsync(Guid jobId, int timeoutMs = 5000)
     {
         return await WaitForJobCompletionAsync(_service, jobId, timeoutMs);
@@ -315,16 +317,27 @@ public class ComicProcessorServiceTests : IDisposable
 
     private static async Task<ProcessingJob?> WaitForJobCompletionAsync(ComicProcessorService service, Guid jobId, int timeoutMs = 5000)
     {
-        var startTime = DateTime.UtcNow;
-        while ((DateTime.UtcNow - startTime).TotalMilliseconds < timeoutMs)
+        using var cts = new CancellationTokenSource(timeoutMs);
+        
+        while (!cts.Token.IsCancellationRequested)
         {
             var job = service.GetJob(jobId);
             if (job != null && job.Status != JobStatus.Running && job.Status != JobStatus.Queued)
             {
                 return job;
             }
-            await Task.Delay(50); // Poll every 50ms
+            
+            try
+            {
+                await Task.Delay(JobPollingIntervalMs, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Timeout reached, return current job state
+                break;
+            }
         }
+        
         return service.GetJob(jobId); // Return whatever state we're in after timeout
     }
 

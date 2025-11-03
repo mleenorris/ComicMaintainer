@@ -504,6 +504,15 @@ public class ComicProcessorService : IComicProcessorService
                 return false;
             }
 
+            // Check if file already has ComicInfo.xml (already normalized)
+            if (HasComicInfoXml(filePath))
+            {
+                _logger.LogInformation("File already has ComicInfo.xml: {FilePath}", filePath);
+                await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
+                await LogHistoryAsync(filePath, "Normalize", true, "File already normalized", cancellationToken);
+                return true;
+            }
+
             // Extract metadata from the archive
             var metadata = await GetMetadataAsync(filePath, cancellationToken);
             
@@ -607,6 +616,26 @@ public class ComicProcessorService : IComicProcessorService
         {
             _logger.LogError(ex, "Error reading metadata from {FilePath}", filePath);
             return Task.FromResult<ComicMetadata?>(null);
+        }
+    }
+
+    private bool HasComicInfoXml(string filePath)
+    {
+        try
+        {
+            if (!File.Exists(filePath) || !IsComicArchive(filePath))
+                return false;
+
+            using var archive = ArchiveFactory.Open(filePath);
+            
+            // Check if ComicInfo.xml exists
+            return archive.Entries.Any(e => 
+                e.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) == true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error checking for ComicInfo.xml in {FilePath}", filePath);
+            return false;
         }
     }
 

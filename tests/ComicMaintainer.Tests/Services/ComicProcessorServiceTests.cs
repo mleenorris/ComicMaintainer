@@ -74,7 +74,13 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var filePath = CreateTestComicArchive("Test Series", "1");
-        _mockFileStore.Setup(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
+        _mockFileStore.Setup(f => f.MarkFileRenamedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockFileStore.Setup(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockFileStore.Setup(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockFileStore.Setup(f => f.AddFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
@@ -84,7 +90,9 @@ public class ComicProcessorServiceTests : IDisposable
 
         // Assert
         Assert.True(result);
-        _mockFileStore.Verify(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
+        // Verify that both rename and normalize were marked
+        _mockFileStore.Verify(f => f.MarkFileRenamedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+        _mockFileStore.Verify(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -421,6 +429,140 @@ public class ComicProcessorServiceTests : IDisposable
                     e.Success == true),
                 It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task NormalizeFilesAsync_FileAlreadyNormalized_MarksAsNormalized()
+    {
+        // Arrange - file already has ComicInfo.xml
+        var file = CreateTestComicArchive("Test Series", "1");
+        var files = new List<string> { file };
+        
+        _mockFileStore.Setup(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockFileStore.Setup(f => f.MarkFileRenamedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var jobId = await _service.NormalizeFilesAsync(files);
+        
+        // Wait for async processing to complete
+        await Task.Delay(1000);
+
+        // Assert
+        var job = _service.GetJob(jobId);
+        Assert.NotNull(job);
+        Assert.Equal(JobStatus.Completed, job.Status);
+        Assert.Equal(1, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+        
+        // Verify file was marked as normalized
+        _mockFileStore.Verify(
+            f => f.MarkFileNormalizedAsync(file, true, It.IsAny<CancellationToken>()),
+            Times.Once);
+        
+        // Verify history was logged
+        _mockHistoryService.Verify(
+            h => h.AddHistoryEntryAsync(
+                It.Is<ProcessingHistoryEntry>(e => 
+                    e.Action == "Normalize" && 
+                    e.Success == true &&
+                    e.ErrorMessage == "File already normalized"),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task NormalizeFilesAsync_FileWithoutComicInfo_Normalizes()
+    {
+        // Arrange - file without ComicInfo.xml
+        var file = CreateTestComicArchiveNoMetadata("Test - Chapter 001.cbz");
+        var files = new List<string> { file };
+        
+        _mockFileStore.Setup(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockFileStore.Setup(f => f.MarkFileRenamedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var jobId = await _service.NormalizeFilesAsync(files);
+        
+        // Wait for async processing to complete
+        await Task.Delay(1000);
+
+        // Assert
+        var job = _service.GetJob(jobId);
+        Assert.NotNull(job);
+        Assert.Equal(JobStatus.Completed, job.Status);
+        Assert.Equal(1, job.ProcessedFiles);
+        
+        // Verify file was marked as normalized
+        _mockFileStore.Verify(
+            f => f.MarkFileNormalizedAsync(file, true, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task RenameFilesAsync_FileAlreadyMatchesTemplate_MarksAsRenamed()
+    {
+        // Arrange - file name already matches template with correct padding
+        var fileName = "Test Series - Chapter 0001.cbz";
+        var filePath = Path.Combine(_testDirectory, fileName);
+        
+        // Create ComicInfo.xml content
+        var comicInfoXml = @"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>Test Series</Series>
+    <Number>1</Number>
+    <Title>Test Issue</Title>
+</ComicInfo>";
+
+        // Create a CBZ (ZIP) archive with ComicInfo.xml
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+        
+        var files = new List<string> { filePath };
+        
+        _mockFileStore.Setup(f => f.MarkFileRenamedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var jobId = await _service.RenameFilesAsync(files);
+        
+        // Wait for async processing to complete
+        await Task.Delay(1000);
+
+        // Assert
+        var job = _service.GetJob(jobId);
+        Assert.NotNull(job);
+        Assert.Equal(JobStatus.Completed, job.Status);
+        Assert.Equal(1, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+        
+        // Verify file was marked as renamed (with the same path since no rename needed)
+        _mockFileStore.Verify(
+            f => f.MarkFileRenamedAsync(filePath, true, It.IsAny<CancellationToken>()),
+            Times.Once);
+        
+        // Verify history was logged
+        _mockHistoryService.Verify(
+            h => h.AddHistoryEntryAsync(
+                It.Is<ProcessingHistoryEntry>(e => 
+                    e.Action == "Rename" && 
+                    e.Success == true),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     public void Dispose()

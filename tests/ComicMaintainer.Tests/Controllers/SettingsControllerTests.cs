@@ -1,6 +1,8 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -11,6 +13,9 @@ public class SettingsControllerTests
 {
     private readonly Mock<IOptions<AppSettings>> _appSettingsMock;
     private readonly Mock<ILogger<SettingsController>> _loggerMock;
+    private readonly Mock<IServiceProvider> _serviceProviderMock;
+    private readonly Mock<IComicProcessorService> _processorServiceMock;
+    private readonly Mock<IFileStoreService> _fileStoreMock;
     private readonly SettingsController _controller;
     private readonly AppSettings _appSettings;
 
@@ -31,7 +36,16 @@ public class SettingsControllerTests
         _appSettingsMock.Setup(x => x.Value).Returns(_appSettings);
         
         _loggerMock = new Mock<ILogger<SettingsController>>();
-        _controller = new SettingsController(_appSettingsMock.Object, _loggerMock.Object);
+        _serviceProviderMock = new Mock<IServiceProvider>();
+        _processorServiceMock = new Mock<IComicProcessorService>();
+        _fileStoreMock = new Mock<IFileStoreService>();
+        
+        _controller = new SettingsController(
+            _appSettingsMock.Object, 
+            _loggerMock.Object, 
+            _serviceProviderMock.Object,
+            _processorServiceMock.Object,
+            _fileStoreMock.Object);
     }
 
     [Fact]

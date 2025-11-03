@@ -88,8 +88,9 @@ public class FileStoreServiceIntegrationTests : IDisposable
         // Add file to database first
         await AddFileToDatabase(serviceProvider, filePath, "test.cbz", _testDirectory);
 
-        // Act - Mark file as processed
-        await fileStoreService.MarkFileProcessedAsync(filePath, true);
+        // Act - Mark file as processed (renamed AND normalized)
+        await fileStoreService.MarkFileRenamedAsync(filePath, true);
+        await fileStoreService.MarkFileNormalizedAsync(filePath, true);
 
         // Assert - Verify in database
         using (var scope = serviceProvider.CreateScope())
@@ -99,6 +100,8 @@ public class FileStoreServiceIntegrationTests : IDisposable
             
             Assert.NotNull(entity);
             Assert.True(entity.IsProcessed, "IsProcessed should be true in database");
+            Assert.True(entity.IsRenamed, "IsRenamed should be true in database");
+            Assert.True(entity.IsNormalized, "IsNormalized should be true in database");
         }
     }
 
@@ -167,10 +170,12 @@ public class FileStoreServiceIntegrationTests : IDisposable
 
         var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
 
-        // Act - Mark non-existent file as processed (should not throw)
+        // Act - Mark non-existent file as processed (should not throw - it's now a no-op)
+        #pragma warning disable CS0618 // Type or member is obsolete
         await fileStoreService.MarkFileProcessedAsync(filePath, true);
+        #pragma warning restore CS0618 // Type or member is obsolete
 
-        // Assert - Verify nothing was added to database
+        // Assert - Verify nothing was added to database (MarkFileProcessedAsync is now a no-op)
         using (var scope = serviceProvider.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();

@@ -32,7 +32,8 @@ public class FileWatcherService : IFileWatcherService
         _logger = logger;
         _fileStore = fileStore;
         _processor = processor;
-        _enabled = _settings.WatcherEnabled;
+        // Watcher is enabled if either rename or normalize is enabled
+        _enabled = _settings.WatcherEnableRename || _settings.WatcherEnableNormalize;
     }
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -41,9 +42,12 @@ public class FileWatcherService : IFileWatcherService
         
         lock (_lock)
         {
+            // Watcher is enabled if either rename or normalize is enabled
+            _enabled = _settings.WatcherEnableRename || _settings.WatcherEnableNormalize;
+            
             if (!_enabled)
             {
-                _logger.LogInformation("Watcher is disabled, not starting");
+                _logger.LogInformation("Watcher is disabled (both rename and normalize are disabled), not starting");
                 return;
             }
 
@@ -209,17 +213,16 @@ public class FileWatcherService : IFileWatcherService
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// DEPRECATED: Direct watcher enable/disable is no longer supported.
+    /// Watcher is now controlled by WatcherEnableRename and WatcherEnableNormalize settings.
+    /// This method is kept for backward compatibility but does nothing.
+    /// </summary>
+    [Obsolete("Direct watcher enable/disable is deprecated. Use WatcherEnableRename and WatcherEnableNormalize settings instead.")]
     public void SetEnabled(bool enabled)
     {
-        _enabled = enabled;
-        if (!enabled)
-        {
-            StopAsync().Wait();
-        }
-        else if (enabled && !IsRunning)
-        {
-            StartAsync().Wait();
-        }
+        _logger.LogWarning("SetEnabled is deprecated. Watcher is now controlled by WatcherEnableRename and WatcherEnableNormalize settings.");
+        // No-op: watcher is now controlled by rename/normalize settings
     }
 
     private void OnFileCreated(object sender, FileSystemEventArgs e)

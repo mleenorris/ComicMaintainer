@@ -24,7 +24,8 @@ public class SettingsControllerTests
         {
             FilenameFormat = "{series} - Chapter {issue}",
             IssueNumberPadding = 4,
-            WatcherEnabled = true,
+            WatcherEnableRename = true,
+            WatcherEnableNormalize = true,
             LogMaxBytes = 10485760,
             GitHubToken = "test-token",
             GitHubRepository = "test/repo",
@@ -92,11 +93,13 @@ public class SettingsControllerTests
         Assert.Equal(4, paddingProperty.GetValue(padding));
     }
 
+    // GetWatcherEnabled removed - watcher is now enabled when rename or normalize is enabled
+    
     [Fact]
-    public void GetWatcherEnabled_ReturnsCorrectValue()
+    public void GetWatcherEnableRename_ReturnsCorrectValue()
     {
         // Act
-        var result = _controller.GetWatcherEnabled();
+        var result = _controller.GetWatcherEnableRename();
 
         // Assert
         var okResult = Assert.IsType<ActionResult<object>>(result);
@@ -191,18 +194,7 @@ public class SettingsControllerTests
         Assert.IsType<OkResult>(result);
     }
 
-    [Fact]
-    public void UpdateWatcherEnabled_ReturnsOk()
-    {
-        // Arrange
-        var request = new SettingsController.WatcherEnabledRequest { Enabled = false };
-
-        // Act
-        var result = _controller.UpdateWatcherEnabled(request);
-
-        // Assert
-        Assert.IsType<OkResult>(result);
-    }
+    // UpdateWatcherEnabled removed - use UpdateWatcherEnableRename and UpdateWatcherEnableNormalize instead
 
     [Fact]
     public void UpdateLogMaxBytes_ReturnsOk()

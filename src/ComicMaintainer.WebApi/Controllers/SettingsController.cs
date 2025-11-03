@@ -42,7 +42,6 @@ public class SettingsController : ControllerBase
         {
             filename_format = _appSettings.Value.FilenameFormat,
             issue_number_padding = _appSettings.Value.IssueNumberPadding,
-            watcher_enabled = _appSettings.Value.WatcherEnabled,
             watcher_enable_rename = _appSettings.Value.WatcherEnableRename,
             watcher_enable_normalize = _appSettings.Value.WatcherEnableNormalize,
             log_max_bytes = _appSettings.Value.LogMaxBytes,
@@ -96,25 +95,8 @@ public class SettingsController : ControllerBase
     public ActionResult SetIssueNumberPadding([FromBody] IssueNumberPaddingRequest request)
         => UpdateIssueNumberPadding(request);
 
-    [HttpGet("watcher-enabled")]
-    public ActionResult<object> GetWatcherEnabled()
-    {
-        return Ok(new { enabled = _appSettings.Value.WatcherEnabled });
-    }
-
-    // RESTful endpoint: PUT /api/settings/watcher-enabled
-    [HttpPut("watcher-enabled")]
-    public ActionResult UpdateWatcherEnabled([FromBody] WatcherEnabledRequest request)
-    {
-        _logger.LogInformation("Watcher enabled update requested: {Enabled}", request.Enabled);
-        return Ok();
-    }
-
-    // Legacy endpoint for backward compatibility
-    [HttpPost("watcher-enabled")]
-    [ApiExplorerSettings(IgnoreApi = true)]
-    public ActionResult SetWatcherEnabled([FromBody] WatcherEnabledRequest request)
-        => UpdateWatcherEnabled(request);
+    // Note: Master watcher enabled has been removed. Watcher is now enabled
+    // when either WatcherEnableRename or WatcherEnableNormalize is true.
 
     [HttpGet("log-max-bytes")]
     public ActionResult<object> GetLogMaxBytes()
@@ -288,11 +270,6 @@ public class SettingsController : ControllerBase
     public class IssueNumberPaddingRequest
     {
         public int Padding { get; set; }
-    }
-
-    public class WatcherEnabledRequest
-    {
-        public bool Enabled { get; set; }
     }
 
     public class LogMaxBytesRequest

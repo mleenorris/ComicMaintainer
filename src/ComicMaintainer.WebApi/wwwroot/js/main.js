@@ -1013,31 +1013,35 @@
                     const isSelected = selectedFiles.has(file.relative_path);
                     const fileSize = formatFileSize(file.size);
                     const modifiedDate = formatModifiedDate(file.modified);
-                    const processedBadge = file.processed ? '✅' : '⚠️';
-                    const processedTitle = file.processed ? 'Processed (Renamed & Normalized)' : 'Not fully processed';
-                    const renamedBadge = file.renamed ? '🔵' : '';
-                    const renamedTitle = file.renamed ? 'Renamed' : '';
-                    const normalizedBadge = file.normalized ? '🔴' : '';
-                    const normalizedTitle = file.normalized ? 'Normalized' : '';
-                    const duplicateBadge = file.duplicate ? '🔁' : '';
-                    const duplicateTitle = file.duplicate ? 'Duplicate' : '';
-                    
-                    // Determine status class for background color
-                    // Priority: duplicate > fully processed (both) > partially processed > unmarked
+                    // Determine status icon and class based on processing state
+                    // Priority: duplicate > fully processed (both) > renamed only > normalized only > unmarked
+                    let statusIcon = '';
+                    let statusTitle = '';
                     let statusClass = '';
+                    
                     if (file.duplicate) {
+                        statusIcon = '🔁';
+                        statusTitle = 'Duplicate';
                         statusClass = 'status-duplicate';
-                    } else if (file.processed) {
-                        // Processed means both renamed AND normalized (green)
+                    } else if (file.renamed && file.normalized) {
+                        // Both renamed AND normalized = processed
+                        statusIcon = '✅';
+                        statusTitle = 'Processed (Renamed & Normalized)';
                         statusClass = 'status-marked';
                     } else if (file.renamed && !file.normalized) {
-                        // Renamed only, not normalized (blue)
+                        // Renamed only
+                        statusIcon = '🔵';
+                        statusTitle = 'Renamed';
                         statusClass = 'status-renamed';
                     } else if (file.normalized && !file.renamed) {
-                        // Normalized only, not renamed (red)
+                        // Normalized only
+                        statusIcon = '🔴';
+                        statusTitle = 'Normalized';
                         statusClass = 'status-normalized';
                     } else {
-                        // Neither renamed nor normalized (yellow)
+                        // Neither renamed nor normalized = unmarked
+                        statusIcon = '⚠️';
+                        statusTitle = 'Unmarked';
                         statusClass = 'status-unmarked';
                     }
                     
@@ -1052,11 +1056,8 @@
                             <input type="checkbox" 
                                    ${isSelected ? 'checked' : ''} 
                                    onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
-                            <div class="status-badge" title="${processedTitle}">
-                                <span>${processedBadge}</span>
-                                ${renamedBadge ? ` <span title="${renamedTitle}">${renamedBadge}</span>` : ''}
-                                ${normalizedBadge ? ` <span title="${normalizedTitle}">${normalizedBadge}</span>` : ''}
-                                ${duplicateBadge ? ` <span title="${duplicateTitle}">${duplicateBadge}</span>` : ''}
+                            <div class="status-badge" title="${statusTitle}">
+                                <span>${statusIcon}</span>
                             </div>
                             <div>
                                 <div class="file-name" title="${escapeHtml(file.name)}">

@@ -98,15 +98,16 @@ public class FileStoreServiceTests
     }
 
     [Fact]
-    public async Task MarkFileProcessedAsync_SetTrue_MarksAsProcessed()
+    public async Task MarkFileProcessed_WhenBothRenamedAndNormalized_MarksAsProcessed()
     {
         // Arrange
         var filePath = Path.Combine(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
 
-        // Act
-        await _service.MarkFileProcessedAsync(filePath, true);
+        // Act - processed is computed from renamed && normalized
+        await _service.MarkFileRenamedAsync(filePath, true);
+        await _service.MarkFileNormalizedAsync(filePath, true);
         var files = await _service.GetAllFilesAsync();
 
         // Assert
@@ -115,21 +116,22 @@ public class FileStoreServiceTests
     }
 
     [Fact]
-    public async Task MarkFileProcessedAsync_SetFalse_UnmarksAsProcessed()
+    public async Task MarkFileProcessed_WhenOnlyRenamed_NotMarkedAsProcessed()
     {
         // Arrange
         var filePath = Path.Combine(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
         await _service.AddFileAsync(filePath);
-        await _service.MarkFileProcessedAsync(filePath, true);
 
-        // Act
-        await _service.MarkFileProcessedAsync(filePath, false);
+        // Act - only renamed, not normalized
+        await _service.MarkFileRenamedAsync(filePath, true);
         var files = await _service.GetAllFilesAsync();
 
         // Assert
         var file = files.First();
         Assert.False(file.IsProcessed);
+        Assert.True(file.IsRenamed);
+        Assert.False(file.IsNormalized);
     }
 
     [Fact]
@@ -195,7 +197,9 @@ public class FileStoreServiceTests
         File.WriteAllText(file2, "test");
         await _service.AddFileAsync(file1);
         await _service.AddFileAsync(file2);
-        await _service.MarkFileProcessedAsync(file1, true);
+        // Mark as processed (renamed AND normalized)
+        await _service.MarkFileRenamedAsync(file1, true);
+        await _service.MarkFileNormalizedAsync(file1, true);
 
         // Act
         var files = await _service.GetFilteredFilesAsync("processed");
@@ -215,7 +219,9 @@ public class FileStoreServiceTests
         File.WriteAllText(file2, "test");
         await _service.AddFileAsync(file1);
         await _service.AddFileAsync(file2);
-        await _service.MarkFileProcessedAsync(file1, true);
+        // Mark as processed (renamed AND normalized)
+        await _service.MarkFileRenamedAsync(file1, true);
+        await _service.MarkFileNormalizedAsync(file1, true);
 
         // Act
         var files = await _service.GetFilteredFilesAsync("unprocessed");
@@ -298,7 +304,9 @@ public class FileStoreServiceTests
         await _service.AddFileAsync(file1);
         await _service.AddFileAsync(file2);
         await _service.AddFileAsync(file3);
-        await _service.MarkFileProcessedAsync(file1, true);
+        // Mark as processed (renamed AND normalized)
+        await _service.MarkFileRenamedAsync(file1, true);
+        await _service.MarkFileNormalizedAsync(file1, true);
         await _service.MarkFileDuplicateAsync(file2, true);
 
         // Act
@@ -339,6 +347,8 @@ public class FileStoreServiceTests
                 FileSize = fileInfo1.Length,
                 LastModified = fileInfo1.LastWriteTime,
                 IsProcessed = true,
+                IsRenamed = true,  // Both need to be true for IsProcessed = true
+                IsNormalized = true,
                 IsDuplicate = false
             });
             
@@ -450,7 +460,9 @@ public class FileStoreServiceTests
         var file = Path.Combine(_testDirectory, "processed.cbz");
         File.WriteAllText(file, "test content");
         await _service.AddFileAsync(file);
-        await _service.MarkFileProcessedAsync(file, true);
+        // Mark as processed (renamed AND normalized)
+        await _service.MarkFileRenamedAsync(file, true);
+        await _service.MarkFileNormalizedAsync(file, true);
         
         // Act
         var isProcessed = await _service.IsFileProcessedAsync(file);
@@ -466,17 +478,19 @@ public class FileStoreServiceTests
         var file = Path.Combine(_testDirectory, "toggled.cbz");
         File.WriteAllText(file, "test content");
         await _service.AddFileAsync(file);
-        await _service.MarkFileProcessedAsync(file, true);
+        // Mark as processed (renamed AND normalized)
+        await _service.MarkFileRenamedAsync(file, true);
+        await _service.MarkFileNormalizedAsync(file, true);
         
         // Verify it's marked as processed
         Assert.True(await _service.IsFileProcessedAsync(file));
         
-        // Act - Unmark as processed
-        await _service.MarkFileProcessedAsync(file, false);
+        // Act - Unmark renamed (which makes it unprocessed)
+        await _service.MarkFileRenamedAsync(file, false);
         var isProcessed = await _service.IsFileProcessedAsync(file);
         
         // Assert
-        Assert.False(isProcessed, "File should not be marked as processed after unmarking");
+        Assert.False(isProcessed, "File should not be marked as processed after unmarking renamed");
     }
     
     [Fact]
@@ -494,7 +508,9 @@ public class FileStoreServiceTests
         await _service.AddFileAsync(file1);
         await _service.AddFileAsync(file2);
         await _service.AddFileAsync(file3);
-        await _service.MarkFileProcessedAsync(file1, true);
+        // Mark file1 as processed (renamed AND normalized)
+        await _service.MarkFileRenamedAsync(file1, true);
+        await _service.MarkFileNormalizedAsync(file1, true);
         await _service.MarkFileDuplicateAsync(file2, true);
         
         // Verify files are in the database

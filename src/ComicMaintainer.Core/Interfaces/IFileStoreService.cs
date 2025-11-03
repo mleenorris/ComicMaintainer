@@ -28,8 +28,11 @@ public interface IFileStoreService
     Task RemoveFileAsync(string filePath, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Mark a file as processed (only when both renamed and normalized)
+    /// DEPRECATED: Mark a file as processed (only when both renamed and normalized)
+    /// Processed status is now computed automatically from renamed and normalized states.
+    /// This method is kept for backward compatibility but does nothing.
     /// </summary>
+    [Obsolete("Processed status is now computed from renamed and normalized states. Use MarkFileRenamedAsync and MarkFileNormalizedAsync instead.")]
     Task MarkFileProcessedAsync(string filePath, bool processed, CancellationToken cancellationToken = default);
 
     /// <summary>

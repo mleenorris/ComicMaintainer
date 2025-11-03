@@ -7,6 +7,10 @@ on:
     types: [closed]
     branches: [master]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   create-stable-branch:
     # Only run if this is the PR that creates the stable branch or if manually triggered

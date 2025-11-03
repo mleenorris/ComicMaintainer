@@ -7,6 +7,10 @@ on:
     paths-ignore:
       - '.github/workflows/version-bump.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   bump-version:
     # Skip if commit message contains [skip-version-bump] or is a version bump commit

@@ -537,4 +537,34 @@ public class FileStoreServiceTests
         Assert.False(loadedFile3.IsProcessed);
         Assert.False(loadedFile3.IsDuplicate);
     }
+
+    [Fact]
+    public async Task MarkFileProcessedAsync_UnmarkFile_AlsoResetsRenamedAndNormalized()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+        
+        // Mark file as renamed and normalized
+        await _service.MarkFileRenamedAsync(filePath, true);
+        await _service.MarkFileNormalizedAsync(filePath, true);
+        
+        // Verify file is processed (both renamed and normalized)
+        var filesBeforeUnmark = await _service.GetAllFilesAsync();
+        var fileBeforeUnmark = filesBeforeUnmark.First();
+        Assert.True(fileBeforeUnmark.IsProcessed);
+        Assert.True(fileBeforeUnmark.IsRenamed);
+        Assert.True(fileBeforeUnmark.IsNormalized);
+
+        // Act - Unmark the file
+        await _service.MarkFileProcessedAsync(filePath, false);
+        var filesAfterUnmark = await _service.GetAllFilesAsync();
+
+        // Assert - File should be unmarked, and renamed/normalized should be false
+        var fileAfterUnmark = filesAfterUnmark.First();
+        Assert.False(fileAfterUnmark.IsProcessed, "File should not be processed after unmarking");
+        Assert.False(fileAfterUnmark.IsRenamed, "File should not be marked as renamed after unmarking");
+        Assert.False(fileAfterUnmark.IsNormalized, "File should not be marked as normalized after unmarking");
+    }
 }

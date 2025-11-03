@@ -1015,9 +1015,10 @@
                     const modifiedDate = formatModifiedDate(file.modified);
                     const processedBadge = file.processed ? '✅' : '⚠️';
                     const processedTitle = file.processed ? 'Processed (Renamed & Normalized)' : 'Not fully processed';
-                    const renamedBadge = file.renamed ? '🔵' : '';
+                    // Only show individual badges when not fully processed
+                    const renamedBadge = (file.renamed && !file.processed) ? '🔵' : '';
                     const renamedTitle = file.renamed ? 'Renamed' : '';
-                    const normalizedBadge = file.normalized ? '🔴' : '';
+                    const normalizedBadge = (file.normalized && !file.processed) ? '🔴' : '';
                     const normalizedTitle = file.normalized ? 'Normalized' : '';
                     const duplicateBadge = file.duplicate ? '🔁' : '';
                     const duplicateTitle = file.duplicate ? 'Duplicate' : '';

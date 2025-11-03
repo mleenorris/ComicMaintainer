@@ -247,6 +247,13 @@ public class FileStoreService : IFileStoreService
         if (_files.TryGetValue(filePath, out var file))
         {
             file.IsProcessed = processed;
+            // When unmarking a file, also unmark renamed and normalized to maintain consistency
+            // A file should only be unmarked if it's not renamed AND not normalized
+            if (!processed)
+            {
+                file.IsRenamed = false;
+                file.IsNormalized = false;
+            }
         }
 
         // Persist to database
@@ -261,6 +268,12 @@ public class FileStoreService : IFileStoreService
             if (entity != null)
             {
                 entity.IsProcessed = processed;
+                // When unmarking a file, also unmark renamed and normalized to maintain consistency
+                if (!processed)
+                {
+                    entity.IsRenamed = false;
+                    entity.IsNormalized = false;
+                }
                 entity.UpdatedAt = DateTime.UtcNow;
                 await dbContext.SaveChangesAsync(cancellationToken);
                 _logger.LogDebug("Updated processing status for {FilePath} to {Status}", SanitizeForLogging(filePath), processed);
@@ -287,6 +300,12 @@ public class FileStoreService : IFileStoreService
                         if (entity != null)
                         {
                             entity.IsProcessed = processed;
+                            // When unmarking a file, also unmark renamed and normalized to maintain consistency
+                            if (!processed)
+                            {
+                                entity.IsRenamed = false;
+                                entity.IsNormalized = false;
+                            }
                             entity.UpdatedAt = DateTime.UtcNow;
                             await dbContext.SaveChangesAsync(cancellationToken);
                             _logger.LogDebug("Updated processing status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), processed);

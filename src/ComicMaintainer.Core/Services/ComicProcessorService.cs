@@ -220,7 +220,7 @@ public class ComicProcessorService : IComicProcessorService
 
         // Process files asynchronously using LongRunning for potentially long batch operations
         // Store task reference to ensure it runs to completion and doesn't get garbage collected
-        var backgroundTask = Task.Run(async () =>
+        var backgroundTask = Task.Factory.StartNew(async () =>
         {
             try
             {
@@ -278,7 +278,7 @@ public class ComicProcessorService : IComicProcessorService
                 // Clean up task reference when done
                 _runningTasks.TryRemove(jobId, out _);
             }
-        }, cancellationToken);
+        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         // Store the task to ensure it doesn't get garbage collected
         _runningTasks[jobId] = backgroundTask;
@@ -307,7 +307,7 @@ public class ComicProcessorService : IComicProcessorService
 
         // Rename files asynchronously using LongRunning for potentially long batch operations
         // Store task reference to ensure it runs to completion and doesn't get garbage collected
-        var backgroundTask = Task.Run(async () =>
+        var backgroundTask = Task.Factory.StartNew(async () =>
         {
             try
             {
@@ -365,7 +365,7 @@ public class ComicProcessorService : IComicProcessorService
                 // Clean up task reference when done
                 _runningTasks.TryRemove(jobId, out _);
             }
-        }, cancellationToken);
+        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         // Store the task to ensure it doesn't get garbage collected
         _runningTasks[jobId] = backgroundTask;
@@ -394,7 +394,7 @@ public class ComicProcessorService : IComicProcessorService
 
         // Normalize files asynchronously using LongRunning for potentially long batch operations
         // Store task reference to ensure it runs to completion and doesn't get garbage collected
-        var backgroundTask = Task.Run(async () =>
+        var backgroundTask = Task.Factory.StartNew(async () =>
         {
             try
             {
@@ -452,7 +452,7 @@ public class ComicProcessorService : IComicProcessorService
                 // Clean up task reference when done
                 _runningTasks.TryRemove(jobId, out _);
             }
-        }, cancellationToken);
+        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         // Store the task to ensure it doesn't get garbage collected
         _runningTasks[jobId] = backgroundTask;

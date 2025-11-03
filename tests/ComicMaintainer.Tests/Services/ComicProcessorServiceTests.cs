@@ -202,32 +202,85 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ProcessFileAsync_WithDuplicate_MovesToDuplicateFolder()
+    public async Task ProcessFileAsync_WithDuplicate_MarksAsDuplicate()
     {
         // Arrange
-        var file1 = CreateTestComicArchive("Same Series", "1");
-        var file2 = CreateTestComicArchive("Same Series 2", "1");
+        var series = "Same Series";
+        var issue = "1";
         
-        var existingFiles = new List<ComicFile>
-        {
-            new()
-            {
-                FilePath = file1,
-                FileSize = new FileInfo(file1).Length,
-                Metadata = new ComicMetadata { Series = "Same Series", Issue = "1" }
-            }
-        };
-
+        // Create first file with the expected target name
+        var file1 = CreateTestComicArchiveWithTargetName(series, issue);
+        
+        // Create second file that will have same target name when renamed
+        var file2 = CreateTestComicArchive(series, issue);
+        
         _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(existingFiles);
-        _mockFileStore.Setup(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new List<ComicFile>());
 
         // Act
         var result = await _service.ProcessFileAsync(file2);
 
         // Assert
         Assert.True(result);
+        // Verify that file2 was marked as duplicate (renamed=false since it couldn't be renamed)
+        _mockFileStore.Verify(f => f.MarkFileRenamedAsync(file2, false, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RenameFileAsync_TargetExists_MarksAsDuplicate()
+    {
+        // Arrange
+        var series = "Test Series";
+        var issue = "1";
+        
+        // Create first file with the expected target name
+        var file1 = CreateTestComicArchiveWithTargetName(series, issue);
+        
+        // Create second file that will have same target name when renamed
+        var file2 = CreateTestComicArchive(series, issue);
+        
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var jobId = await _service.RenameFilesAsync(new[] { file2 });
+        var job = await WaitForJobCompletionAsync(jobId);
+
+        // Assert
+        Assert.NotNull(job);
+        Assert.Equal(0, job.ProcessedFiles);
+        Assert.Equal(1, job.FailedFiles);
+        // Verify file was marked as duplicate (renamed=false)
+        _mockFileStore.Verify(f => f.MarkFileRenamedAsync(file2, false, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private string CreateTestComicArchiveWithTargetName(string series, string issue)
+    {
+        var targetFileName = $"{series} - Chapter {issue.PadLeft(4, '0')}.cbz";
+        var filePath = Path.Combine(_testDirectory, targetFileName);
+        
+        using (var archive = System.IO.Compression.ZipFile.Open(filePath, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            var comicInfoXml = $@"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>{series}</Series>
+    <Number>{issue}</Number>
+</ComicInfo>";
+
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+        
+        return filePath;
     }
 
     private string CreateTestComicArchiveNoMetadata(string fileName)

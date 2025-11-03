@@ -292,44 +292,8 @@ public class FilesControllerTests
         Assert.Equal(500, statusCodeResult.StatusCode);
     }
 
-    [Fact]
-    public async Task MarkProcessed_WithValidPath_ReturnsOk()
-    {
-        // Arrange
-        _mockFileStore.Setup(fs => fs.MarkFileProcessedAsync("/test/file.cbz", true, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await _controller.MarkProcessed("/test/file.cbz", true);
-
-        // Assert
-        Assert.IsType<OkResult>(result);
-    }
-
-    [Fact]
-    public async Task MarkProcessed_WithEmptyPath_ReturnsBadRequest()
-    {
-        // Act
-        var result = await _controller.MarkProcessed("", true);
-
-        // Assert
-        Assert.IsType<BadRequestObjectResult>(result);
-    }
-
-    [Fact]
-    public async Task MarkProcessed_WhenExceptionThrown_ReturnsInternalServerError()
-    {
-        // Arrange
-        _mockFileStore.Setup(fs => fs.MarkFileProcessedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("Test error"));
-
-        // Act
-        var result = await _controller.MarkProcessed("/test/file.cbz", true);
-
-        // Assert
-        var statusCodeResult = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
-    }
+    // MarkProcessed tests removed - processed state is now computed from renamed && normalized
+    // Use MarkFileRenamedAsync and MarkFileNormalizedAsync instead
 
     // Helper method to encode file path to base64 URL-safe format
     private static string EncodeFilePathForUrl(string filePath)
@@ -810,40 +774,6 @@ public class FilesControllerTests
             Times.Once);
     }
 
-    [Fact]
-    public async Task UpdateProcessedStatus_WithValidPath_ReturnsOk()
-    {
-        // Arrange
-        var filePath = Path.Combine(Path.GetTempPath(), "test.cbz");
-        var encodedPath = EncodeFilePathForUrl(filePath);
-        var request = new FilesController.ProcessedStatusRequest { Processed = true };
-        _mockFileStore.Setup(fs => fs.MarkFileProcessedAsync(filePath, true, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await _controller.UpdateProcessedStatus(encodedPath, request);
-
-        // Assert
-        Assert.IsType<OkResult>(result);
-        _mockFileStore.Verify(fs => fs.MarkFileProcessedAsync(filePath, true, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task UpdateProcessedStatus_WithInvalidPath_CompletesSafely()
-    {
-        // Arrange
-        // "invalid-base64" can still decode as base64, resulting in some string
-        // The method will call MarkFileProcessedAsync with whatever path results
-        // This tests that the method handles gracefully
-        var encodedPath = "invalid-base64";
-        var request = new FilesController.ProcessedStatusRequest { Processed = true };
-        _mockFileStore.Setup(fs => fs.MarkFileProcessedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-
-        // Act
-        var result = await _controller.UpdateProcessedStatus(encodedPath, request);
-
-        // Assert - Method completes (the fileStore handles the invalid path internally)
-        Assert.True(result is OkResult || result is BadRequestObjectResult);
-    }
+    // UpdateProcessedStatus tests removed - processed state is now computed from renamed && normalized
+    // Processed status cannot be set directly anymore
 }

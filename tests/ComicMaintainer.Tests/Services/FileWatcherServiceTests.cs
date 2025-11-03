@@ -30,7 +30,8 @@ public class FileWatcherServiceTests : IDisposable
         _settings = new AppSettings
         {
             WatchedDirectory = _testDirectory,
-            WatcherEnabled = true,
+            WatcherEnableRename = true,
+            WatcherEnableNormalize = true,
             WatcherFileStabilityDelaySeconds = 1  // Use 1 second for tests
         };
 
@@ -84,11 +85,12 @@ public class FileWatcherServiceTests : IDisposable
     [Fact]
     public async Task StartAsync_WhenDisabled_DoesNotStart()
     {
-        // Arrange - create a new service with disabled watcher
+        // Arrange - create a new service with disabled watcher (both rename and normalize disabled)
         var disabledSettings = new AppSettings
         {
             WatchedDirectory = _testDirectory,
-            WatcherEnabled = false
+            WatcherEnableRename = false,
+            WatcherEnableNormalize = false
         };
         var mockDisabledOptions = new Mock<IOptions<AppSettings>>();
         mockDisabledOptions.Setup(o => o.Value).Returns(disabledSettings);

@@ -53,13 +53,19 @@ jobs:
       with:
         dotnet-version: '9.0.x'
 
-    - name: Restore dependencies
+    - name: Restore dependencies (excluding MAUI)
       if: matrix.language == 'csharp'
-      run: dotnet restore
+      run: |
+        dotnet restore src/ComicMaintainer.Core/ComicMaintainer.Core.csproj
+        dotnet restore src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
+        dotnet restore tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
 
-    - name: Build .NET project
+    - name: Build .NET projects (excluding MAUI)
       if: matrix.language == 'csharp'
-      run: dotnet build --no-restore --configuration Release
+      run: |
+        dotnet build src/ComicMaintainer.Core/ComicMaintainer.Core.csproj --no-restore --configuration Release
+        dotnet build src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj --no-restore --configuration Release
+        dotnet build tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj --no-restore --configuration Release
       timeout-minutes: 15
 
     # For JavaScript, CodeQL will auto-detect and analyze

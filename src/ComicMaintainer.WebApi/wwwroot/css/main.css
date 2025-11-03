@@ -1591,22 +1591,21 @@
             }
             
             .file-list-header {
-                grid-template-columns: 30px 1fr 60px;
+                grid-template-columns: 30px 40px 1fr 60px;
                 padding: 10px;
                 font-size: 13px;
                 overflow: hidden;
                 gap: 8px;
             }
             
-            /* Hide toggle-all button, Size column, and Modified column on mobile */
-            .file-list-header > *:nth-child(2),
+            /* Hide Size column and Modified column on mobile */
             .file-list-header > *:nth-child(4),
             .file-list-header > *:nth-child(5) {
                 display: none;
             }
             
             .file-item {
-                grid-template-columns: 30px 1fr 60px;
+                grid-template-columns: 30px 40px 1fr 60px;
                 padding: 10px;
                 gap: 8px;
                 overflow: hidden;
@@ -1830,14 +1829,14 @@
             }
             
             .file-list-header {
-                grid-template-columns: 25px 1fr 55px;
+                grid-template-columns: 25px 35px 1fr 55px;
                 padding: 8px;
                 gap: 6px;
                 overflow: hidden;
             }
             
             .file-item {
-                grid-template-columns: 25px 1fr 55px;
+                grid-template-columns: 25px 35px 1fr 55px;
                 padding: 8px;
                 gap: 6px;
                 overflow: hidden;

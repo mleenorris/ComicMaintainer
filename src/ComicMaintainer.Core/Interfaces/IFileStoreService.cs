@@ -63,6 +63,16 @@ public interface IFileStoreService
     Task<bool> IsFileProcessedAsync(string filePath, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Check if a file is already marked as renamed
+    /// </summary>
+    Task<bool> IsFileRenamedAsync(string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Check if a file is already marked as normalized
+    /// </summary>
+    Task<bool> IsFileNormalizedAsync(string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Check if a file exists in the store
     /// </summary>
     Task<bool> FileExistsAsync(string filePath, CancellationToken cancellationToken = default);

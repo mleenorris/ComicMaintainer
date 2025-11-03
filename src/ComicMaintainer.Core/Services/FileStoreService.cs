@@ -602,6 +602,26 @@ public class FileStoreService : IFileStoreService
         return Task.FromResult(isProcessed);
     }
 
+    public Task<bool> IsFileRenamedAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        // Check if file is already renamed
+        if (_files.TryGetValue(filePath, out var file))
+        {
+            return Task.FromResult(file.IsRenamed);
+        }
+        return Task.FromResult(false);
+    }
+
+    public Task<bool> IsFileNormalizedAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        // Check if file is already normalized
+        if (_files.TryGetValue(filePath, out var file))
+        {
+            return Task.FromResult(file.IsNormalized);
+        }
+        return Task.FromResult(false);
+    }
+
     public Task<bool> FileExistsAsync(string filePath, CancellationToken cancellationToken = default)
     {
         // Check in-memory store first for performance

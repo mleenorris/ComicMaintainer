@@ -45,42 +45,65 @@ public class ComicProcessorService : IComicProcessorService
     {
         try
         {
-            _logger.LogInformation("Processing file: {FilePath}", filePath);
+            _logger.LogInformation("ProcessFileAsync: Starting processing for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            _logger.LogDebug("ProcessFileAsync: Checking if file exists: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             if (!File.Exists(filePath))
             {
-                _logger.LogWarning("File not found: {FilePath}", filePath);
+                _logger.LogWarning("ProcessFileAsync: File not found: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await LogHistoryAsync(filePath, "Process", false, "File not found", cancellationToken);
                 return false;
             }
 
+            _logger.LogDebug("ProcessFileAsync: Verifying file is a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            
             // Verify it's a comic archive
             if (!IsComicArchive(filePath))
             {
-                _logger.LogWarning("File is not a comic archive: {FilePath}", filePath);
+                _logger.LogWarning("ProcessFileAsync: File is not a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await LogHistoryAsync(filePath, "Process", false, "File is not a comic archive", cancellationToken);
                 return false;
             }
 
+            _logger.LogDebug("ProcessFileAsync: Extracting metadata from archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            
             // Extract metadata from the archive
             var metadata = await GetMetadataAsync(filePath, cancellationToken);
+            
+            if (metadata != null)
+            {
+                _logger.LogDebug("ProcessFileAsync: Metadata extracted - Series: {Series}, Issue: {Issue}, Title: {Title}", 
+                    metadata.Series, metadata.Issue, metadata.Title);
+            }
+            else
+            {
+                _logger.LogDebug("ProcessFileAsync: No metadata extracted from file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            }
+            
+            _logger.LogDebug("ProcessFileAsync: Checking for duplicates: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             
             // Check for duplicates based on metadata
             if (await IsDuplicateAsync(filePath, metadata, cancellationToken))
             {
-                _logger.LogInformation("Duplicate detected: {FilePath}", filePath);
+                _logger.LogInformation("ProcessFileAsync: Duplicate detected: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await MoveToDuplicatesAsync(filePath, cancellationToken);
                 await LogHistoryAsync(filePath, "Duplicate Detection", true, null, cancellationToken);
                 return true;
             }
+            
+            _logger.LogDebug("ProcessFileAsync: No duplicate detected, continuing with processing: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             // Track rename and normalize separately
             bool renameSuccess = false;
             bool normalizeSuccess = false;
 
+            _logger.LogDebug("ProcessFileAsync: Starting rename phase - WatcherEnableRename: {RenameEnabled}, Has Metadata: {HasMetadata}, Has Series: {HasSeries}",
+                _settings.WatcherEnableRename, metadata != null, metadata?.Series != null);
+
             // Rename file based on template if metadata is available and rename is enabled
             if (_settings.WatcherEnableRename && metadata != null && !string.IsNullOrEmpty(metadata.Series))
             {
+                _logger.LogDebug("ProcessFileAsync: Attempting to rename file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 var newFilePath = GenerateFileName(metadata, filePath);
                 if (newFilePath == filePath)
                 {
@@ -145,9 +168,13 @@ public class ComicProcessorService : IComicProcessorService
                 }
             }
 
+            _logger.LogDebug("ProcessFileAsync: Starting normalize phase - WatcherEnableNormalize: {NormalizeEnabled}, Has Metadata: {HasMetadata}",
+                _settings.WatcherEnableNormalize, metadata != null);
+
             // Normalize metadata (update ComicInfo.xml) if enabled
             if (_settings.WatcherEnableNormalize && metadata != null)
             {
+                _logger.LogDebug("ProcessFileAsync: Attempting to normalize file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 // Check if metadata is already normalized (has ComicInfo.xml with valid data)
                 if (IsMetadataNormalized(metadata))
                 {
@@ -189,18 +216,19 @@ public class ComicProcessorService : IComicProcessorService
 
             // IsProcessed is automatically computed in MarkFileRenamedAsync and MarkFileNormalizedAsync
             // It will only be true when both rename and normalize are successful
-            _logger.LogInformation("File processing completed: {FilePath} (Renamed: {Renamed}, Normalized: {Normalized})", 
-                filePath, renameSuccess, normalizeSuccess);
+            var isFullyProcessed = renameSuccess && normalizeSuccess;
+            _logger.LogInformation("ProcessFileAsync: File processing completed: {FilePath} (Renamed: {Renamed}, Normalized: {Normalized}, Fully Processed: {FullyProcessed})", 
+                LoggingHelper.SanitizePathForLog(filePath), renameSuccess, normalizeSuccess, isFullyProcessed);
 
-            await LogHistoryAsync(filePath, "Process", renameSuccess && normalizeSuccess, 
-                renameSuccess && normalizeSuccess ? null : "File not fully processed (rename or normalize incomplete)", 
+            await LogHistoryAsync(filePath, "Process", isFullyProcessed, 
+                isFullyProcessed ? null : "File not fully processed (rename or normalize incomplete)", 
                 cancellationToken);
 
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing file: {FilePath}", filePath);
+            _logger.LogError(ex, "ProcessFileAsync: Error processing file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             await LogHistoryAsync(filePath, "Process", false, ex.Message, cancellationToken);
             return false;
         }
@@ -210,6 +238,8 @@ public class ComicProcessorService : IComicProcessorService
     {
         var jobId = Guid.NewGuid();
         var fileList = filePaths.ToList();
+
+        _logger.LogDebug("ProcessFilesAsync: Creating new processing job {JobId} for {FileCount} files", jobId, fileList.Count);
 
         var job = new ProcessingJob
         {
@@ -226,6 +256,8 @@ public class ComicProcessorService : IComicProcessorService
         var jobCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _jobCancellationTokens[jobId] = jobCts;
 
+        _logger.LogDebug("ProcessFilesAsync: Job {JobId} created and queued with {FileCount} files", jobId, fileList.Count);
+
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
 
@@ -234,13 +266,21 @@ public class ComicProcessorService : IComicProcessorService
         {
             try
             {
+                _logger.LogDebug("ProcessFilesAsync: Job {JobId} starting execution", jobId);
                 job.Status = JobStatus.Running;
                 await BroadcastJobStatusAsync(job);
 
+                var fileIndex = 0;
                 foreach (var file in fileList)
                 {
+                    fileIndex++;
+                    _logger.LogDebug("ProcessFilesAsync: Job {JobId} processing file {FileIndex}/{TotalFiles}: {FilePath}", 
+                        jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
+                    
                     if (jobCts.Token.IsCancellationRequested)
                     {
+                        _logger.LogInformation("ProcessFilesAsync: Job {JobId} cancellation requested at file {FileIndex}/{TotalFiles}", 
+                            jobId, fileIndex, fileList.Count);
                         job.Status = JobStatus.Cancelled;
                         await BroadcastJobStatusAsync(job);
                         _jobCancellationTokens.TryRemove(jobId, out _);
@@ -253,11 +293,15 @@ public class ComicProcessorService : IComicProcessorService
                     if (success)
                     {
                         job.ProcessedFiles++;
+                        _logger.LogDebug("ProcessFilesAsync: Job {JobId} successfully processed file {FileIndex}/{TotalFiles}: {FilePath}", 
+                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
                     }
                     else
                     {
                         job.FailedFiles++;
                         job.Errors[file] = "Processing failed";
+                        _logger.LogDebug("ProcessFilesAsync: Job {JobId} failed to process file {FileIndex}/{TotalFiles}: {FilePath}", 
+                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
                     }
 
                     // Broadcast progress after each file
@@ -275,18 +319,20 @@ public class ComicProcessorService : IComicProcessorService
 
                 job.Status = JobStatus.Completed;
                 job.EndTime = DateTime.UtcNow;
+                _logger.LogInformation("ProcessFilesAsync: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
+                    jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
                 await BroadcastJobStatusAsync(job);
             }
             catch (OperationCanceledException)
             {
-                _logger.LogInformation("Processing job cancelled: {JobId}", jobId);
+                _logger.LogInformation("ProcessFilesAsync: Processing job cancelled: {JobId}", jobId);
                 job.Status = JobStatus.Cancelled;
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing batch job: {JobId}", jobId);
+                _logger.LogError(ex, "ProcessFilesAsync: Error processing batch job: {JobId}", jobId);
                 job.Status = JobStatus.Failed;
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
@@ -306,6 +352,8 @@ public class ComicProcessorService : IComicProcessorService
         var jobId = Guid.NewGuid();
         var fileList = filePaths.ToList();
 
+        _logger.LogDebug("RenameFilesAsync: Creating new rename job {JobId} for {FileCount} files", jobId, fileList.Count);
+
         var job = new ProcessingJob
         {
             JobId = jobId,
@@ -317,6 +365,8 @@ public class ComicProcessorService : IComicProcessorService
 
         _jobs[jobId] = job;
 
+        _logger.LogDebug("RenameFilesAsync: Job {JobId} created and queued with {FileCount} files", jobId, fileList.Count);
+
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
 
@@ -325,13 +375,21 @@ public class ComicProcessorService : IComicProcessorService
         {
             try
             {
+                _logger.LogDebug("RenameFilesAsync: Job {JobId} starting execution", jobId);
                 job.Status = JobStatus.Running;
                 await BroadcastJobStatusAsync(job);
 
+                var fileIndex = 0;
                 foreach (var file in fileList)
                 {
+                    fileIndex++;
+                    _logger.LogDebug("RenameFilesAsync: Job {JobId} renaming file {FileIndex}/{TotalFiles}: {FilePath}", 
+                        jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
+                    
                     if (cancellationToken.IsCancellationRequested)
                     {
+                        _logger.LogInformation("RenameFilesAsync: Job {JobId} cancellation requested at file {FileIndex}/{TotalFiles}", 
+                            jobId, fileIndex, fileList.Count);
                         job.Status = JobStatus.Cancelled;
                         await BroadcastJobStatusAsync(job);
                         return;
@@ -343,11 +401,15 @@ public class ComicProcessorService : IComicProcessorService
                     if (success)
                     {
                         job.ProcessedFiles++;
+                        _logger.LogDebug("RenameFilesAsync: Job {JobId} successfully renamed file {FileIndex}/{TotalFiles}: {FilePath}", 
+                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
                     }
                     else
                     {
                         job.FailedFiles++;
                         job.Errors[file] = "Rename failed";
+                        _logger.LogDebug("RenameFilesAsync: Job {JobId} failed to rename file {FileIndex}/{TotalFiles}: {FilePath}", 
+                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
                     }
 
                     // Broadcast progress after each file
@@ -365,11 +427,13 @@ public class ComicProcessorService : IComicProcessorService
 
                 job.Status = JobStatus.Completed;
                 job.EndTime = DateTime.UtcNow;
+                _logger.LogInformation("RenameFilesAsync: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
+                    jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
                 await BroadcastJobStatusAsync(job);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing rename job: {JobId}", jobId);
+                _logger.LogError(ex, "RenameFilesAsync: Error processing rename job: {JobId}", jobId);
                 job.Status = JobStatus.Failed;
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
@@ -384,6 +448,8 @@ public class ComicProcessorService : IComicProcessorService
         var jobId = Guid.NewGuid();
         var fileList = filePaths.ToList();
 
+        _logger.LogDebug("NormalizeFilesAsync: Creating new normalize job {JobId} for {FileCount} files", jobId, fileList.Count);
+
         var job = new ProcessingJob
         {
             JobId = jobId,
@@ -395,6 +461,8 @@ public class ComicProcessorService : IComicProcessorService
 
         _jobs[jobId] = job;
 
+        _logger.LogDebug("NormalizeFilesAsync: Job {JobId} created and queued with {FileCount} files", jobId, fileList.Count);
+
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
 
@@ -403,13 +471,21 @@ public class ComicProcessorService : IComicProcessorService
         {
             try
             {
+                _logger.LogDebug("NormalizeFilesAsync: Job {JobId} starting execution", jobId);
                 job.Status = JobStatus.Running;
                 await BroadcastJobStatusAsync(job);
 
+                var fileIndex = 0;
                 foreach (var file in fileList)
                 {
+                    fileIndex++;
+                    _logger.LogDebug("NormalizeFilesAsync: Job {JobId} normalizing file {FileIndex}/{TotalFiles}: {FilePath}", 
+                        jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
+                    
                     if (cancellationToken.IsCancellationRequested)
                     {
+                        _logger.LogInformation("NormalizeFilesAsync: Job {JobId} cancellation requested at file {FileIndex}/{TotalFiles}", 
+                            jobId, fileIndex, fileList.Count);
                         job.Status = JobStatus.Cancelled;
                         await BroadcastJobStatusAsync(job);
                         return;
@@ -421,11 +497,15 @@ public class ComicProcessorService : IComicProcessorService
                     if (success)
                     {
                         job.ProcessedFiles++;
+                        _logger.LogDebug("NormalizeFilesAsync: Job {JobId} successfully normalized file {FileIndex}/{TotalFiles}: {FilePath}", 
+                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
                     }
                     else
                     {
                         job.FailedFiles++;
                         job.Errors[file] = "Normalize failed";
+                        _logger.LogDebug("NormalizeFilesAsync: Job {JobId} failed to normalize file {FileIndex}/{TotalFiles}: {FilePath}", 
+                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
                     }
 
                     // Broadcast progress after each file
@@ -443,11 +523,13 @@ public class ComicProcessorService : IComicProcessorService
 
                 job.Status = JobStatus.Completed;
                 job.EndTime = DateTime.UtcNow;
+                _logger.LogInformation("NormalizeFilesAsync: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
+                    jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
                 await BroadcastJobStatusAsync(job);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing normalize job: {JobId}", jobId);
+                _logger.LogError(ex, "NormalizeFilesAsync: Error processing normalize job: {JobId}", jobId);
                 job.Status = JobStatus.Failed;
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
@@ -461,25 +543,42 @@ public class ComicProcessorService : IComicProcessorService
     {
         try
         {
-            _logger.LogInformation("Renaming file: {FilePath}", filePath);
+            _logger.LogInformation("RenameFileAsync: Starting rename for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            _logger.LogDebug("RenameFileAsync: Checking if file exists and is a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             if (!File.Exists(filePath) || !IsComicArchive(filePath))
             {
-                _logger.LogWarning("File not found or not a comic archive: {FilePath}", filePath);
+                _logger.LogWarning("RenameFileAsync: File not found or not a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await LogHistoryAsync(filePath, "Rename", false, "File not found or not a comic archive", cancellationToken);
                 return false;
             }
 
+            _logger.LogDebug("RenameFileAsync: Extracting metadata from archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            
             // Extract metadata from the archive
             var metadata = await GetMetadataAsync(filePath, cancellationToken);
+            
+            if (metadata != null)
+            {
+                _logger.LogDebug("RenameFileAsync: Metadata extracted - Series: {Series}, Issue: {Issue}", 
+                    metadata.Series, metadata.Issue);
+            }
+            else
+            {
+                _logger.LogDebug("RenameFileAsync: No metadata extracted from file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            }
             
             // Rename file based on template if metadata is available
             if (metadata != null && !string.IsNullOrEmpty(metadata.Series))
             {
+                _logger.LogDebug("RenameFileAsync: Generating new filename for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 var newFilePath = GenerateFileName(metadata, filePath);
+                _logger.LogDebug("RenameFileAsync: Generated filename: {NewFilePath} (Original: {OriginalFilePath})", 
+                    LoggingHelper.SanitizePathForLog(newFilePath), LoggingHelper.SanitizePathForLog(filePath));
+                
                 if (newFilePath == filePath)
                 {
-                    _logger.LogInformation("File already has correct name: {FilePath}", filePath);
+                    _logger.LogInformation("RenameFileAsync: File already has correct name: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                     await _fileStore.MarkFileRenamedAsync(filePath, true, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", true, null, cancellationToken);
                     return true;
@@ -517,7 +616,7 @@ public class ComicProcessorService : IComicProcessorService
             }
             else
             {
-                _logger.LogWarning("No metadata or series information found for: {FilePath}", filePath);
+                _logger.LogWarning("RenameFileAsync: No metadata or series information found for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                 await LogHistoryAsync(filePath, "Rename", false, "No metadata or series information found", cancellationToken);
                 return false;
@@ -525,7 +624,7 @@ public class ComicProcessorService : IComicProcessorService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error renaming file: {FilePath}", filePath);
+            _logger.LogError(ex, "RenameFileAsync: Error renaming file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
             await LogHistoryAsync(filePath, "Rename", false, ex.Message, cancellationToken);
             return false;
@@ -536,36 +635,47 @@ public class ComicProcessorService : IComicProcessorService
     {
         try
         {
-            _logger.LogInformation("Normalizing file: {FilePath}", filePath);
+            _logger.LogInformation("NormalizeFileAsync: Starting normalize for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            _logger.LogDebug("NormalizeFileAsync: Checking if file exists and is a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             if (!File.Exists(filePath) || !IsComicArchive(filePath))
             {
-                _logger.LogWarning("File not found or not a comic archive: {FilePath}", filePath);
+                _logger.LogWarning("NormalizeFileAsync: File not found or not a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
                 await LogHistoryAsync(filePath, "Normalize", false, "File not found or not a comic archive", cancellationToken);
                 return false;
             }
 
+            _logger.LogDebug("NormalizeFileAsync: Extracting metadata from archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            
             // Extract metadata from the archive
             var metadata = await GetMetadataAsync(filePath, cancellationToken);
             
             if (metadata == null)
             {
-                _logger.LogWarning("No metadata found for: {FilePath}", filePath);
+                _logger.LogWarning("NormalizeFileAsync: No metadata found for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
                 await LogHistoryAsync(filePath, "Normalize", false, "No metadata found", cancellationToken);
                 return false;
             }
 
+            _logger.LogDebug("NormalizeFileAsync: Metadata extracted - Series: {Series}, Issue: {Issue}, Title: {Title}", 
+                metadata.Series, metadata.Issue, metadata.Title);
+
             // Check if metadata is already normalized (has ComicInfo.xml with valid data)
             // If we successfully read metadata, it means ComicInfo.xml exists and is parseable
-            if (IsMetadataNormalized(metadata))
+            var isNormalized = IsMetadataNormalized(metadata);
+            _logger.LogDebug("NormalizeFileAsync: Metadata normalization check - IsNormalized: {IsNormalized}", isNormalized);
+            
+            if (isNormalized)
             {
-                _logger.LogInformation("File already has normalized metadata: {FilePath}", filePath);
+                _logger.LogInformation("NormalizeFileAsync: File already has normalized metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
                 await LogHistoryAsync(filePath, "Normalize", true, "File already normalized", cancellationToken);
                 return true;
             }
+            
+            _logger.LogDebug("NormalizeFileAsync: File needs normalization, updating metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             // Capture before metadata state (current metadata)
             var beforeMetadata = metadata;
@@ -576,7 +686,7 @@ public class ComicProcessorService : IComicProcessorService
             
             if (success)
             {
-                _logger.LogInformation("File normalized successfully: {FilePath}", filePath);
+                _logger.LogInformation("NormalizeFileAsync: File normalized successfully: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 var filename = Path.GetFileName(filePath);
                 // For normalize operations, we log the same metadata as before/after since we're ensuring
                 // the existing metadata is written properly to ComicInfo.xml
@@ -585,6 +695,7 @@ public class ComicProcessorService : IComicProcessorService
             }
             else
             {
+                _logger.LogWarning("NormalizeFileAsync: Failed to normalize file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await LogHistoryAsync(filePath, "Normalize", false, "Failed to update metadata", cancellationToken);
             }
             
@@ -592,7 +703,7 @@ public class ComicProcessorService : IComicProcessorService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error normalizing file: {FilePath}", filePath);
+            _logger.LogError(ex, "NormalizeFileAsync: Error normalizing file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
             await LogHistoryAsync(filePath, "Normalize", false, ex.Message, cancellationToken);
             return false;

@@ -118,25 +118,30 @@ public class JobsController : ControllerBase
     {
         try
         {
+            _logger.LogDebug("ProcessAll: Starting process all files request");
+            
             // Get all files from the file store
             var allFiles = await _fileStore.GetAllFilesAsync();
             var filePaths = allFiles.Select(f => f.FilePath).ToList();
             
+            _logger.LogDebug("ProcessAll: Retrieved {TotalFiles} files from file store", filePaths.Count);
+            
             if (filePaths.Count == 0)
             {
-                _logger.LogInformation("No files found to process");
+                _logger.LogInformation("ProcessAll: No files found to process");
                 return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
             }
             
             // Start the process job
             var jobId = await _processor.ProcessFilesAsync(filePaths);
-            _logger.LogInformation("Process all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            _logger.LogInformation("ProcessAll: Process all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            _logger.LogDebug("ProcessAll: Job created successfully with ID: {JobId}", jobId);
             
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error starting process all job");
+            _logger.LogError(ex, "ProcessAll: Error starting process all job");
             return StatusCode(500, new { error = "Error starting job" });
         }
     }
@@ -146,25 +151,30 @@ public class JobsController : ControllerBase
     {
         try
         {
+            _logger.LogDebug("RenameAll: Starting rename all files request");
+            
             // Get all files from the file store
             var allFiles = await _fileStore.GetAllFilesAsync();
             var filePaths = allFiles.Select(f => f.FilePath).ToList();
             
+            _logger.LogDebug("RenameAll: Retrieved {TotalFiles} files from file store", filePaths.Count);
+            
             if (filePaths.Count == 0)
             {
-                _logger.LogInformation("No files found to rename");
+                _logger.LogInformation("RenameAll: No files found to rename");
                 return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
             }
             
             // Start the rename job
             var jobId = await _processor.RenameFilesAsync(filePaths);
-            _logger.LogInformation("Rename all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            _logger.LogInformation("RenameAll: Rename all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            _logger.LogDebug("RenameAll: Job created successfully with ID: {JobId}", jobId);
             
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error starting rename all job");
+            _logger.LogError(ex, "RenameAll: Error starting rename all job");
             return StatusCode(500, new { error = "Error starting job" });
         }
     }
@@ -174,25 +184,30 @@ public class JobsController : ControllerBase
     {
         try
         {
+            _logger.LogDebug("NormalizeAll: Starting normalize all files request");
+            
             // Get all files from the file store
             var allFiles = await _fileStore.GetAllFilesAsync();
             var filePaths = allFiles.Select(f => f.FilePath).ToList();
             
+            _logger.LogDebug("NormalizeAll: Retrieved {TotalFiles} files from file store", filePaths.Count);
+            
             if (filePaths.Count == 0)
             {
-                _logger.LogInformation("No files found to normalize");
+                _logger.LogInformation("NormalizeAll: No files found to normalize");
                 return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
             }
             
             // Start the normalize job
             var jobId = await _processor.NormalizeFilesAsync(filePaths);
-            _logger.LogInformation("Normalize all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            _logger.LogInformation("NormalizeAll: Normalize all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            _logger.LogDebug("NormalizeAll: Job created successfully with ID: {JobId}", jobId);
             
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error starting normalize all job");
+            _logger.LogError(ex, "NormalizeAll: Error starting normalize all job");
             return StatusCode(500, new { error = "Error starting job" });
         }
     }
@@ -202,19 +217,25 @@ public class JobsController : ControllerBase
     {
         try
         {
+            _logger.LogDebug("ProcessSelected: Starting process selected files request");
+            
             if (request.Files == null || request.Files.Count == 0)
             {
+                _logger.LogDebug("ProcessSelected: No files specified in request");
                 return BadRequest(new { error = "No files specified" });
             }
             
+            _logger.LogDebug("ProcessSelected: Processing {SelectedCount} selected files", request.Files.Count);
+            
             var jobId = await _processor.ProcessFilesAsync(request.Files);
-            _logger.LogInformation("Process selected files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, request.Files.Count);
+            _logger.LogInformation("ProcessSelected: Process selected files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, request.Files.Count);
+            _logger.LogDebug("ProcessSelected: Job created successfully with ID: {JobId}", jobId);
             
             return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error starting process selected job");
+            _logger.LogError(ex, "ProcessSelected: Error starting process selected job");
             return StatusCode(500, new { error = "Error starting job" });
         }
     }
@@ -238,25 +259,30 @@ public class JobsController : ControllerBase
     {
         try
         {
+            _logger.LogDebug("RenameUnmarked: Starting rename unmarked files request");
+            
             // Get all unprocessed files
             var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
             var filePaths = files.Select(f => f.FilePath).ToList();
             
+            _logger.LogDebug("RenameUnmarked: Retrieved {UnprocessedCount} unprocessed files after filtering", filePaths.Count);
+            
             if (filePaths.Count == 0)
             {
-                _logger.LogInformation("No unmarked files found to rename");
+                _logger.LogInformation("RenameUnmarked: No unmarked files found to rename");
                 return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
             }
             
             // Start the rename job
             var jobId = await _processor.RenameFilesAsync(filePaths);
-            _logger.LogInformation("Rename unmarked files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            _logger.LogInformation("RenameUnmarked: Rename unmarked files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            _logger.LogDebug("RenameUnmarked: Job created successfully with ID: {JobId}", jobId);
             
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error starting rename unmarked job");
+            _logger.LogError(ex, "RenameUnmarked: Error starting rename unmarked job");
             return StatusCode(500, new { error = "Error starting job" });
         }
     }
@@ -266,25 +292,30 @@ public class JobsController : ControllerBase
     {
         try
         {
+            _logger.LogDebug("NormalizeUnmarked: Starting normalize unmarked files request");
+            
             // Get all unprocessed files
             var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
             var filePaths = files.Select(f => f.FilePath).ToList();
             
+            _logger.LogDebug("NormalizeUnmarked: Retrieved {UnprocessedCount} unprocessed files after filtering", filePaths.Count);
+            
             if (filePaths.Count == 0)
             {
-                _logger.LogInformation("No unmarked files found to normalize");
+                _logger.LogInformation("NormalizeUnmarked: No unmarked files found to normalize");
                 return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
             }
             
             // Start the normalize job
             var jobId = await _processor.NormalizeFilesAsync(filePaths);
-            _logger.LogInformation("Normalize unmarked files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            _logger.LogInformation("NormalizeUnmarked: Normalize unmarked files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
+            _logger.LogDebug("NormalizeUnmarked: Job created successfully with ID: {JobId}", jobId);
             
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error starting normalize unmarked job");
+            _logger.LogError(ex, "NormalizeUnmarked: Error starting normalize unmarked job");
             return StatusCode(500, new { error = "Error starting job" });
         }
     }
@@ -406,19 +437,24 @@ public class JobsController : ControllerBase
 
     private async Task<ActionResult<object>> ProcessUnprocessedFilesAsync(string logMessage)
     {
+        _logger.LogDebug("ProcessUnprocessedFilesAsync: Starting request - {LogMessage}", logMessage);
+        
         // Get all unprocessed files
         var files = await _fileStore.GetFilteredFilesAsync("unprocessed");
         var filePaths = files.Select(f => f.FilePath).ToList();
         
+        _logger.LogDebug("ProcessUnprocessedFilesAsync: Retrieved {UnprocessedCount} unprocessed files after filtering", filePaths.Count);
+        
         if (filePaths.Count == 0)
         {
-            _logger.LogInformation("{LogMessage}: No unprocessed files found", logMessage);
+            _logger.LogInformation("ProcessUnprocessedFilesAsync: {LogMessage} - No unprocessed files found", logMessage);
             return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
         }
         
         // Start the processing job
         var jobId = await _processor.ProcessFilesAsync(filePaths);
-        _logger.LogInformation("{LogMessage} requested, job ID: {JobId}, total files: {TotalFiles}", logMessage, jobId, filePaths.Count);
+        _logger.LogInformation("ProcessUnprocessedFilesAsync: {LogMessage} requested, job ID: {JobId}, total files: {TotalFiles}", logMessage, jobId, filePaths.Count);
+        _logger.LogDebug("ProcessUnprocessedFilesAsync: Job created successfully with ID: {JobId}", jobId);
         
         return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
     }

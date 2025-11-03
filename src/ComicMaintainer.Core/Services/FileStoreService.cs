@@ -108,11 +108,17 @@ public class FileStoreService : IFileStoreService
 
     public Task<IEnumerable<ComicFile>> GetFilteredFilesAsync(string? filter = null, CancellationToken cancellationToken = default)
     {
+        var totalFileCount = _files.Count;
+        _logger.LogDebug("GetFilteredFilesAsync: Starting with {TotalFiles} files in store, filter: '{Filter}'", totalFileCount, filter ?? "none");
+        
         var files = _files.Values.AsEnumerable();
 
         if (!string.IsNullOrEmpty(filter))
         {
-            files = filter.ToLower() switch
+            var filterLower = filter.ToLower();
+            _logger.LogDebug("GetFilteredFilesAsync: Applying filter: '{Filter}'", filterLower);
+            
+            files = filterLower switch
             {
                 "processed" => files.Where(f => f.IsProcessed),
                 "unprocessed" => files.Where(f => !f.IsProcessed && !f.IsDuplicate),
@@ -121,8 +127,27 @@ public class FileStoreService : IFileStoreService
                 "normalized" => files.Where(f => f.IsNormalized),
                 _ => files
             };
+            
+            var filteredList = files.ToList();
+            _logger.LogDebug("GetFilteredFilesAsync: Filter '{Filter}' resulted in {FilteredCount} files (reduced from {TotalFiles})", 
+                filterLower, filteredList.Count, totalFileCount);
+            
+            // Log breakdown of file states for unprocessed filter
+            if (filterLower == "unprocessed")
+            {
+                var allFilesList = _files.Values.ToList();
+                var processedCount = allFilesList.Count(f => f.IsProcessed);
+                var duplicateCount = allFilesList.Count(f => f.IsDuplicate);
+                var unprocessedNonDuplicateCount = allFilesList.Count(f => !f.IsProcessed && !f.IsDuplicate);
+                
+                _logger.LogDebug("GetFilteredFilesAsync: File state breakdown - Total: {Total}, Processed: {Processed}, Duplicates: {Duplicates}, Unprocessed (non-duplicate): {Unprocessed}",
+                    totalFileCount, processedCount, duplicateCount, unprocessedNonDuplicateCount);
+            }
+            
+            return Task.FromResult(filteredList.AsEnumerable());
         }
 
+        _logger.LogDebug("GetFilteredFilesAsync: No filter applied, returning all {TotalFiles} files", totalFileCount);
         return Task.FromResult(files.ToList().AsEnumerable());
     }
 

@@ -1595,9 +1595,14 @@
                 console.log('[BATCH] Starting process all files request...');
                 // Start the job
                 const response = await fetch(apiUrl('/api/jobs/process-all'), {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: getAuthHeaders()
                 });
                 
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
                 if (!response.ok) {
                     console.error(`[BATCH] Failed to start processing (HTTP ${response.status})`);
                     throw new Error('Failed to start processing job');
@@ -1640,13 +1645,18 @@
                 const response = await fetch(apiUrl('/api/jobs/process-selected'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({
                         files: files
                     })
                 });
                 
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
                 if (!response.ok) {
                     console.error(`[BATCH] Failed to start processing (HTTP ${response.status})`);
                     throw new Error('Failed to start processing job');
@@ -1983,9 +1993,14 @@
                 console.log('[BATCH] Starting process unmarked files request...');
                 // Start the job
                 const response = await fetch(apiUrl('/api/jobs/process-unmarked'), {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: getAuthHeaders()
                 });
                 
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
                 if (!response.ok) {
                     console.error(`[BATCH] Failed to start processing unmarked files (HTTP ${response.status})`);
                     throw new Error('Failed to start processing job');
@@ -2019,9 +2034,14 @@
                 console.log('[BATCH] Starting rename unmarked files request...');
                 // Start the job
                 const response = await fetch(apiUrl('/api/jobs/rename-unmarked'), {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: getAuthHeaders()
                 });
                 
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
                 if (!response.ok) {
                     console.error(`[BATCH] Failed to start renaming unmarked files (HTTP ${response.status})`);
                     throw new Error('Failed to start renaming job');
@@ -2055,9 +2075,14 @@
                 console.log('[BATCH] Starting normalize unmarked files request...');
                 // Start the job
                 const response = await fetch(apiUrl('/api/jobs/normalize-unmarked'), {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: getAuthHeaders()
                 });
                 
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
                 if (!response.ok) {
                     console.error(`[BATCH] Failed to start normalizing unmarked files (HTTP ${response.status})`);
                     throw new Error('Failed to start normalizing job');
@@ -2252,7 +2277,7 @@
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ Files: [filepath] })
+                    body: JSON.stringify({ files: [filepath] })
                 });
                 
                 if (handleAuthError(response)) {

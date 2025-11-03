@@ -105,7 +105,7 @@ public class ComicProcessorService : IComicProcessorService
                 else if (File.Exists(newFilePath))
                 {
                     // Target file already exists - treat as duplicate
-                    _logger.LogInformation("ProcessFileAsync: Duplicate detected - target file already exists: {NewPath}", newFilePath);
+                    _logger.LogInformation("ProcessFileAsync: Duplicate detected - target file already exists: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
                     renameSuccess = false;
@@ -135,7 +135,7 @@ public class ComicProcessorService : IComicProcessorService
                     catch (IOException ex) when (File.Exists(newFilePath))
                     {
                         // Target file already exists - treat as duplicate
-                        _logger.LogInformation(ex, "ProcessFileAsync: Duplicate detected - target file already exists during move: {NewPath}", newFilePath);
+                        _logger.LogInformation(ex, "ProcessFileAsync: Duplicate detected - target file already exists during move: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));
                         await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                         await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
                         renameSuccess = false;
@@ -607,7 +607,7 @@ public class ComicProcessorService : IComicProcessorService
                 catch (IOException ex) when (File.Exists(newFilePath))
                 {
                     // Target file already exists - treat as duplicate
-                    _logger.LogInformation(ex, "RenameFileAsync: Duplicate detected - target file already exists: {NewPath}", newFilePath);
+                    _logger.LogInformation(ex, "RenameFileAsync: Duplicate detected - target file already exists: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
                     return false;

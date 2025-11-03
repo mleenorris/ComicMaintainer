@@ -2103,7 +2103,7 @@
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ Files: files })
+                    body: JSON.stringify({ files: files })
                 });
                 
                 if (handleAuthError(response)) {
@@ -2155,7 +2155,7 @@
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ Files: files })
+                    body: JSON.stringify({ files: files })
                 });
                 
                 if (handleAuthError(response)) {
@@ -2207,7 +2207,7 @@
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ Files: files })
+                    body: JSON.stringify({ files: files })
                 });
                 
                 if (handleAuthError(response)) {

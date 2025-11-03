@@ -986,11 +986,12 @@ public class ComicProcessorService : IComicProcessorService
     /// </summary>
     private bool IsMetadataNormalized(ComicMetadata metadata)
     {
-        // Metadata is considered normalized if it has essential fields populated
-        // A file with ComicInfo.xml that was successfully parsed is considered normalized
-        return !string.IsNullOrEmpty(metadata.Series) || 
-               !string.IsNullOrEmpty(metadata.Title) || 
-               !string.IsNullOrEmpty(metadata.Issue);
+        // Metadata is considered normalized if it has at least Series OR (Title AND Issue)
+        // This ensures we have enough information to identify the comic
+        var hasSeries = !string.IsNullOrEmpty(metadata.Series);
+        var hasTitleAndIssue = !string.IsNullOrEmpty(metadata.Title) && !string.IsNullOrEmpty(metadata.Issue);
+        
+        return hasSeries || hasTitleAndIssue;
     }
 
     /// <summary>

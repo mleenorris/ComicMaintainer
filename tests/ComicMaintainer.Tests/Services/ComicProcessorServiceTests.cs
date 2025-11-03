@@ -161,10 +161,9 @@ public class ComicProcessorServiceTests : IDisposable
         // Assert
         Assert.NotEqual(Guid.Empty, jobId);
         
-        // Wait a bit for async processing
-        await Task.Delay(1000);
+        // Wait for async processing to complete
+        var job = await WaitForJobCompletionAsync(jobId);
         
-        var job = _service.GetJob(jobId);
         Assert.NotNull(job);
         Assert.Equal(2, job.TotalFiles);
     }
@@ -284,10 +283,9 @@ public class ComicProcessorServiceTests : IDisposable
         var jobId = await serviceWithBroadcaster.ProcessFilesAsync(files);
         
         // Wait for async processing to complete
-        await Task.Delay(2000);
+        var job = await WaitForJobCompletionAsync(serviceWithBroadcaster, jobId);
 
         // Assert
-        var job = serviceWithBroadcaster.GetJob(jobId);
         Assert.NotNull(job);
         
         // Verify that event broadcaster was called for job updates
@@ -308,6 +306,26 @@ public class ComicProcessorServiceTests : IDisposable
                 It.IsAny<bool>(),
                 It.IsAny<string?>()),
             Times.AtLeastOnce);
+    }
+
+    private async Task<ProcessingJob?> WaitForJobCompletionAsync(Guid jobId, int timeoutMs = 5000)
+    {
+        return await WaitForJobCompletionAsync(_service, jobId, timeoutMs);
+    }
+
+    private static async Task<ProcessingJob?> WaitForJobCompletionAsync(ComicProcessorService service, Guid jobId, int timeoutMs = 5000)
+    {
+        var startTime = DateTime.UtcNow;
+        while ((DateTime.UtcNow - startTime).TotalMilliseconds < timeoutMs)
+        {
+            var job = service.GetJob(jobId);
+            if (job != null && job.Status != JobStatus.Running && job.Status != JobStatus.Queued)
+            {
+                return job;
+            }
+            await Task.Delay(50); // Poll every 50ms
+        }
+        return service.GetJob(jobId); // Return whatever state we're in after timeout
     }
 
     private string CreateTestComicArchive(string series, string issue, int? year = null)
@@ -575,8 +593,7 @@ public class ComicProcessorServiceTests : IDisposable
 
         // Act
         var jobId = await _service.RenameFilesAsync(new[] { filePath });
-        await Task.Delay(1000); // Wait for async processing
-        var job = _service.GetJob(jobId);
+        var job = await WaitForJobCompletionAsync(jobId);
 
         // Assert
         Assert.NotNull(job);
@@ -596,8 +613,7 @@ public class ComicProcessorServiceTests : IDisposable
 
         // Act
         var jobId = await _service.NormalizeFilesAsync(new[] { filePath });
-        await Task.Delay(1000); // Wait for async processing
-        var job = _service.GetJob(jobId);
+        var job = await WaitForJobCompletionAsync(jobId);
 
         // Assert
         Assert.NotNull(job);

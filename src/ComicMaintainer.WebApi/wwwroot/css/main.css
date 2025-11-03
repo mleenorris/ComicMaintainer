@@ -31,6 +31,10 @@
             --status-unmarked-hover: #ffeaa7;
             --status-duplicate: #ffe5cc;
             --status-duplicate-hover: #ffd9b3;
+            --status-renamed: #cce5ff;
+            --status-renamed-hover: #b3d9ff;
+            --status-normalized: #ffcccc;
+            --status-normalized-hover: #ffb3b3;
         }
         
         [data-theme="dark"] {
@@ -66,6 +70,10 @@
             --status-unmarked-hover: #4d4320;
             --status-duplicate: #3d2b1a;
             --status-duplicate-hover: #4d3720;
+            --status-renamed: #1a2a3d;
+            --status-renamed-hover: #203548;
+            --status-normalized: #3d1a1a;
+            --status-normalized-hover: #4d2020;
         }
         
         * {
@@ -998,6 +1006,26 @@
         .file-item.status-duplicate:hover,
         .file-item.indented.status-duplicate:hover {
             background: var(--status-duplicate-hover);
+        }
+        
+        .file-item.status-renamed,
+        .file-item.indented.status-renamed {
+            background: var(--status-renamed);
+        }
+        
+        .file-item.status-renamed:hover,
+        .file-item.indented.status-renamed:hover {
+            background: var(--status-renamed-hover);
+        }
+        
+        .file-item.status-normalized,
+        .file-item.indented.status-normalized {
+            background: var(--status-normalized);
+        }
+        
+        .file-item.status-normalized:hover,
+        .file-item.indented.status-normalized:hover {
+            background: var(--status-normalized-hover);
         }
         
         .file-actions {

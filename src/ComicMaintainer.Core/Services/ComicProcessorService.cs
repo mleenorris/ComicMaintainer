@@ -77,8 +77,8 @@ public class ComicProcessorService : IComicProcessorService
             bool renameSuccess = false;
             bool normalizeSuccess = false;
 
-            // Rename file based on template if metadata is available
-            if (metadata != null && !string.IsNullOrEmpty(metadata.Series))
+            // Rename file based on template if metadata is available and rename is enabled
+            if (_settings.WatcherEnableRename && metadata != null && !string.IsNullOrEmpty(metadata.Series))
             {
                 var newFilePath = GenerateFileName(metadata, filePath);
                 if (newFilePath == filePath)
@@ -124,14 +124,24 @@ public class ComicProcessorService : IComicProcessorService
             }
             else
             {
-                // No metadata or series info available
-                _logger.LogDebug("No metadata or series information for rename: {FilePath}", filePath);
-                await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
-                await LogHistoryAsync(filePath, "Rename", false, "No metadata or series information", cancellationToken);
+                // No metadata or series info available, or rename disabled
+                if (!_settings.WatcherEnableRename)
+                {
+                    _logger.LogDebug("Rename disabled in settings: {FilePath}", filePath);
+                    await _fileStore.MarkFileRenamedAsync(filePath, true, cancellationToken); // Mark as "renamed" (skipped)
+                    await LogHistoryAsync(filePath, "Rename", true, "Rename disabled", cancellationToken);
+                    renameSuccess = true;
+                }
+                else
+                {
+                    _logger.LogDebug("No metadata or series information for rename: {FilePath}", filePath);
+                    await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
+                    await LogHistoryAsync(filePath, "Rename", false, "No metadata or series information", cancellationToken);
+                }
             }
 
-            // Normalize metadata (update ComicInfo.xml)
-            if (metadata != null)
+            // Normalize metadata (update ComicInfo.xml) if enabled
+            if (_settings.WatcherEnableNormalize && metadata != null)
             {
                 normalizeSuccess = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
                 await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
@@ -144,6 +154,14 @@ public class ComicProcessorService : IComicProcessorService
                     _logger.LogWarning("Failed to normalize metadata for: {FilePath}", filePath);
                     await LogHistoryAsync(filePath, "Normalize", false, "Failed to update metadata", cancellationToken);
                 }
+            }
+            else if (!_settings.WatcherEnableNormalize)
+            {
+                // Normalize disabled in settings
+                _logger.LogDebug("Normalize disabled in settings: {FilePath}", filePath);
+                await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken); // Mark as "normalized" (skipped)
+                await LogHistoryAsync(filePath, "Normalize", true, "Normalize disabled", cancellationToken);
+                normalizeSuccess = true;
             }
             else
             {

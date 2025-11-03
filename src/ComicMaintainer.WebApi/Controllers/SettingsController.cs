@@ -27,6 +27,8 @@ public class SettingsController : ControllerBase
             filename_format = _appSettings.Value.FilenameFormat,
             issue_number_padding = _appSettings.Value.IssueNumberPadding,
             watcher_enabled = _appSettings.Value.WatcherEnabled,
+            watcher_enable_rename = _appSettings.Value.WatcherEnableRename,
+            watcher_enable_normalize = _appSettings.Value.WatcherEnableNormalize,
             log_max_bytes = _appSettings.Value.LogMaxBytes,
             github_token_configured = !string.IsNullOrEmpty(_appSettings.Value.GitHubToken),
             github_repository = _appSettings.Value.GitHubRepository ?? "",
@@ -181,6 +183,42 @@ public class SettingsController : ControllerBase
     public ActionResult SetGitHubIssueAssignee([FromBody] GitHubIssueAssigneeRequest request)
         => UpdateGitHubIssueAssignee(request);
 
+    [HttpGet("watcher-enable-rename")]
+    public ActionResult<object> GetWatcherEnableRename()
+    {
+        return Ok(new { enabled = _appSettings.Value.WatcherEnableRename });
+    }
+
+    [HttpPut("watcher-enable-rename")]
+    public ActionResult UpdateWatcherEnableRename([FromBody] WatcherEnableRenameRequest request)
+    {
+        _logger.LogInformation("Watcher enable rename update requested: {Enabled}", request.Enabled);
+        return Ok();
+    }
+
+    [HttpPost("watcher-enable-rename")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public ActionResult SetWatcherEnableRename([FromBody] WatcherEnableRenameRequest request)
+        => UpdateWatcherEnableRename(request);
+
+    [HttpGet("watcher-enable-normalize")]
+    public ActionResult<object> GetWatcherEnableNormalize()
+    {
+        return Ok(new { enabled = _appSettings.Value.WatcherEnableNormalize });
+    }
+
+    [HttpPut("watcher-enable-normalize")]
+    public ActionResult UpdateWatcherEnableNormalize([FromBody] WatcherEnableNormalizeRequest request)
+    {
+        _logger.LogInformation("Watcher enable normalize update requested: {Enabled}", request.Enabled);
+        return Ok();
+    }
+
+    [HttpPost("watcher-enable-normalize")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public ActionResult SetWatcherEnableNormalize([FromBody] WatcherEnableNormalizeRequest request)
+        => UpdateWatcherEnableNormalize(request);
+
     public class FilenameFormatRequest
     {
         public string Format { get; set; } = string.Empty;
@@ -214,5 +252,15 @@ public class SettingsController : ControllerBase
     public class GitHubIssueAssigneeRequest
     {
         public string Assignee { get; set; } = string.Empty;
+    }
+
+    public class WatcherEnableRenameRequest
+    {
+        public bool Enabled { get; set; }
+    }
+
+    public class WatcherEnableNormalizeRequest
+    {
+        public bool Enabled { get; set; }
     }
 }

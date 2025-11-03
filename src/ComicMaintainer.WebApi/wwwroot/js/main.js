@@ -951,7 +951,11 @@
                     const fileSize = formatFileSize(file.size);
                     const modifiedDate = formatModifiedDate(file.modified);
                     const processedBadge = file.processed ? '✅' : '⚠️';
-                    const processedTitle = file.processed ? 'Processed' : 'Not processed yet';
+                    const processedTitle = file.processed ? 'Processed (Renamed & Normalized)' : 'Not fully processed';
+                    const renamedBadge = file.renamed ? '🔵' : '';
+                    const renamedTitle = file.renamed ? 'Renamed' : '';
+                    const normalizedBadge = file.normalized ? '🔴' : '';
+                    const normalizedTitle = file.normalized ? 'Normalized' : '';
                     const duplicateBadge = file.duplicate ? '🔁' : '';
                     const duplicateTitle = file.duplicate ? 'Duplicate' : '';
                     
@@ -961,6 +965,10 @@
                         statusClass = 'status-duplicate';
                     } else if (file.processed) {
                         statusClass = 'status-marked';
+                    } else if (file.renamed && !file.normalized) {
+                        statusClass = 'status-renamed';
+                    } else if (file.normalized && !file.renamed) {
+                        statusClass = 'status-normalized';
                     } else {
                         statusClass = 'status-unmarked';
                     }
@@ -977,7 +985,7 @@
                                    ${isSelected ? 'checked' : ''} 
                                    onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
                             <div class="status-badge" title="${processedTitle}">
-                                <span>${processedBadge}</span>${duplicateBadge ? ` <span title="${duplicateTitle}">${duplicateBadge}</span>` : ''}
+                                <span>${processedBadge}</span>${renamedBadge ? ` <span title="${renamedTitle}">${renamedBadge}</span>` : ''}${normalizedBadge ? ` <span title="${normalizedTitle}">${normalizedBadge}</span>` : ''}${duplicateBadge ? ` <span title="${duplicateTitle}">${duplicateBadge}</span>` : ''}
                             </div>
                             <div>
                                 <div class="file-name" title="${escapeHtml(file.name)}">
@@ -1296,7 +1304,9 @@
             const file = files.find(f => f.relative_path === filepath);
             if (file) {
                 document.getElementById('fileInfoSize').textContent = formatFileSize(file.size);
-                document.getElementById('fileInfoProcessed').textContent = file.processed ? '✅ Yes' : '⚠️ No';
+                document.getElementById('fileInfoProcessed').textContent = file.processed ? '✅ Yes (Renamed & Normalized)' : '⚠️ No';
+                document.getElementById('fileInfoRenamed').textContent = file.renamed ? '🔵 Yes' : 'No';
+                document.getElementById('fileInfoNormalized').textContent = file.normalized ? '🔴 Yes' : 'No';
                 document.getElementById('fileInfoDuplicate').textContent = file.duplicate ? '🔁 Yes' : 'No';
             }
             

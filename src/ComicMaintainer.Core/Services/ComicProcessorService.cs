@@ -198,7 +198,7 @@ public class ComicProcessorService : IComicProcessorService
         }
     }
 
-    public Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    public async Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
     {
         var jobId = Guid.NewGuid();
         var fileList = filePaths.ToList();
@@ -214,8 +214,8 @@ public class ComicProcessorService : IComicProcessorService
 
         _jobs[jobId] = job;
 
-        // Broadcast initial job status
-        _ = BroadcastJobStatusAsync(job);
+        // Broadcast initial job status and wait for it to complete
+        await BroadcastJobStatusAsync(job);
 
         // Process files asynchronously using LongRunning for potentially long batch operations
         _ = Task.Factory.StartNew(async () =>
@@ -273,10 +273,10 @@ public class ComicProcessorService : IComicProcessorService
             }
         }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
-        return Task.FromResult(jobId);
+        return jobId;
     }
 
-    public Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    public async Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
     {
         var jobId = Guid.NewGuid();
         var fileList = filePaths.ToList();
@@ -292,8 +292,8 @@ public class ComicProcessorService : IComicProcessorService
 
         _jobs[jobId] = job;
 
-        // Broadcast initial job status
-        _ = BroadcastJobStatusAsync(job);
+        // Broadcast initial job status and wait for it to complete
+        await BroadcastJobStatusAsync(job);
 
         // Rename files asynchronously using LongRunning for potentially long batch operations
         _ = Task.Factory.StartNew(async () =>
@@ -351,10 +351,10 @@ public class ComicProcessorService : IComicProcessorService
             }
         }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
-        return Task.FromResult(jobId);
+        return jobId;
     }
 
-    public Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    public async Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
     {
         var jobId = Guid.NewGuid();
         var fileList = filePaths.ToList();
@@ -370,8 +370,8 @@ public class ComicProcessorService : IComicProcessorService
 
         _jobs[jobId] = job;
 
-        // Broadcast initial job status
-        _ = BroadcastJobStatusAsync(job);
+        // Broadcast initial job status and wait for it to complete
+        await BroadcastJobStatusAsync(job);
 
         // Normalize files asynchronously using LongRunning for potentially long batch operations
         _ = Task.Factory.StartNew(async () =>
@@ -429,7 +429,7 @@ public class ComicProcessorService : IComicProcessorService
             }
         }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
-        return Task.FromResult(jobId);
+        return jobId;
     }
 
     private async Task<bool> RenameFileAsync(string filePath, CancellationToken cancellationToken)

@@ -578,9 +578,10 @@ public class ComicProcessorService : IComicProcessorService
             {
                 _logger.LogInformation("File normalized successfully: {FilePath}", filePath);
                 var filename = Path.GetFileName(filePath);
-                // After metadata is the same as before for normalize (we're just ensuring it's written properly)
+                // For normalize operations, we log the same metadata as before/after since we're ensuring
+                // the existing metadata is written properly to ComicInfo.xml
                 await LogHistoryWithChangesAsync(filePath, "Normalize", true, null, 
-                    filename, filename, beforeMetadata, metadata, cancellationToken);
+                    filename, filename, metadata, metadata, cancellationToken);
             }
             else
             {

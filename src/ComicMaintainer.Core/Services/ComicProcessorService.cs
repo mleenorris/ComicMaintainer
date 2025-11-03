@@ -627,10 +627,12 @@ public class ComicProcessorService : IComicProcessorService
             
             try
             {
-                // Create new archive with updated metadata
-                using (var sourceArchive = ArchiveFactory.Open(filePath))
-                using (var writer = ZipArchive.Create())
+                // Create new archive with updated metadata in a separate scope
+                // to ensure all file handles are released before file replacement
                 {
+                    using var sourceArchive = ArchiveFactory.Open(filePath);
+                    using var writer = ZipArchive.Create();
+                    
                     // Add all existing entries except ComicInfo.xml
                     foreach (var entry in sourceArchive.Entries.Where(e => !e.IsDirectory))
                     {
@@ -660,26 +662,12 @@ public class ComicProcessorService : IComicProcessorService
                     writer.SaveTo(tempFile, new WriterOptions(CompressionType.Deflate));
                 }
                 
-                // Replace original file with updated one using atomic operation
-                // File.Replace is safer as it creates a backup and ensures atomicity
-                var backupPath = $"{filePath}.backup";
-                try
-                {
-                    File.Replace(tempFile, filePath, backupPath);
-                    // Clean up backup if replace succeeded
-                    if (File.Exists(backupPath))
-                        File.Delete(backupPath);
-                }
-                catch (Exception)
-                {
-                    // If Replace fails, restore from backup
-                    if (File.Exists(backupPath))
-                    {
-                        File.Copy(backupPath, filePath, true);
-                        File.Delete(backupPath);
-                    }
-                    throw;
-                }
+                // Give a brief moment for any file handles to be fully released
+                System.Threading.Thread.Sleep(100);
+                
+                // Replace original file with updated one using retry logic
+                // to handle transient file locks from file system watchers or antivirus
+                ReplaceFileWithRetry(tempFile, filePath);
                 
                 _logger.LogInformation("Successfully updated metadata for: {FilePath}", filePath);
                 return Task.FromResult(true);
@@ -688,13 +676,89 @@ public class ComicProcessorService : IComicProcessorService
             {
                 // Clean up temp file if it still exists
                 if (File.Exists(tempFile))
-                    File.Delete(tempFile);
+                {
+                    try
+                    {
+                        File.Delete(tempFile);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete temp file: {TempFile}", tempFile);
+                    }
+                }
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating metadata for {FilePath}", filePath);
             return Task.FromResult(false);
+        }
+    }
+
+    private void ReplaceFileWithRetry(string tempFile, string targetFile, int maxRetries = 5)
+    {
+        var backupPath = $"{targetFile}.backup";
+        Exception? lastException = null;
+        
+        for (int attempt = 0; attempt < maxRetries; attempt++)
+        {
+            try
+            {
+                // Attempt to replace the file
+                File.Replace(tempFile, targetFile, backupPath);
+                
+                // Clean up backup if replace succeeded
+                if (File.Exists(backupPath))
+                {
+                    File.Delete(backupPath);
+                }
+                
+                return; // Success
+            }
+            catch (IOException ex) when (attempt < maxRetries - 1)
+            {
+                lastException = ex;
+                _logger.LogWarning(ex, "File replace attempt {Attempt} failed for {File}, retrying...", attempt + 1, targetFile);
+                
+                // Exponential backoff: 100ms, 200ms, 400ms, 800ms
+                var delayMs = 100 * (int)Math.Pow(2, attempt);
+                System.Threading.Thread.Sleep(delayMs);
+            }
+            catch (Exception ex)
+            {
+                // For non-IOException or final attempt, try to restore from backup if it exists
+                _logger.LogError(ex, "File replace failed for {File}, attempting restore from backup", targetFile);
+                
+                if (File.Exists(backupPath))
+                {
+                    try
+                    {
+                        // Wait a moment before attempting restore
+                        System.Threading.Thread.Sleep(200);
+                        
+                        // Use Move instead of Copy for restore as it's more reliable
+                        if (File.Exists(targetFile))
+                        {
+                            File.Delete(targetFile);
+                        }
+                        File.Move(backupPath, targetFile);
+                        
+                        _logger.LogWarning("Restored backup file after failed replacement: {File}", targetFile);
+                    }
+                    catch (Exception restoreEx)
+                    {
+                        _logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", backupPath);
+                    }
+                }
+                throw;
+            }
+        }
+        
+        // If we exhausted all retries, throw the last exception
+        if (lastException != null)
+        {
+            _logger.LogError(lastException, "Failed to replace file after {MaxRetries} attempts: {File}", maxRetries, targetFile);
+            throw lastException;
         }
     }
 

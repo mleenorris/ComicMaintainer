@@ -80,18 +80,7 @@ public class ComicProcessorService : IComicProcessorService
                 _logger.LogDebug("ProcessFileAsync: No metadata extracted from file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             }
             
-            _logger.LogDebug("ProcessFileAsync: Checking for duplicates: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            
-            // Check for duplicates based on metadata
-            if (await IsDuplicateAsync(filePath, metadata, cancellationToken))
-            {
-                _logger.LogInformation("ProcessFileAsync: Duplicate detected: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                await MoveToDuplicatesAsync(filePath, cancellationToken);
-                await LogHistoryAsync(filePath, "Duplicate Detection", true, null, cancellationToken);
-                return true;
-            }
-            
-            _logger.LogDebug("ProcessFileAsync: No duplicate detected, continuing with processing: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            _logger.LogDebug("ProcessFileAsync: Continuing with processing: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             // Track rename and normalize separately
             bool renameSuccess = false;
@@ -115,10 +104,11 @@ public class ComicProcessorService : IComicProcessorService
                 }
                 else if (File.Exists(newFilePath))
                 {
-                    // Target file already exists
-                    _logger.LogWarning("Cannot rename file, target already exists: {NewPath}", newFilePath);
-                    await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
-                    await LogHistoryAsync(filePath, "Rename", false, "Target file already exists", cancellationToken);
+                    // Target file already exists - treat as duplicate
+                    _logger.LogInformation("ProcessFileAsync: Duplicate detected - target file already exists: {NewPath}", newFilePath);
+                    await MoveToDuplicatesAsync(filePath, cancellationToken);
+                    await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
+                    renameSuccess = true;
                 }
                 else
                 {
@@ -140,6 +130,14 @@ public class ComicProcessorService : IComicProcessorService
                             beforeFilename, afterFilename, metadata, metadata, cancellationToken);
                         
                         filePath = newFilePath;
+                        renameSuccess = true;
+                    }
+                    catch (IOException ex) when (File.Exists(newFilePath))
+                    {
+                        // Target file already exists - treat as duplicate
+                        _logger.LogInformation(ex, "ProcessFileAsync: Duplicate detected - target file already exists during move: {NewPath}", newFilePath);
+                        await MoveToDuplicatesAsync(filePath, cancellationToken);
+                        await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
                         renameSuccess = true;
                     }
                     catch (Exception ex)
@@ -608,10 +606,11 @@ public class ComicProcessorService : IComicProcessorService
                 }
                 catch (IOException ex) when (File.Exists(newFilePath))
                 {
-                    _logger.LogWarning(ex, "Target file already exists: {NewPath}", newFilePath);
-                    await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
-                    await LogHistoryAsync(filePath, "Rename", false, "Target file already exists", cancellationToken);
-                    return false;
+                    // Target file already exists - treat as duplicate
+                    _logger.LogInformation(ex, "RenameFileAsync: Duplicate detected - target file already exists: {NewPath}", newFilePath);
+                    await MoveToDuplicatesAsync(filePath, cancellationToken);
+                    await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
+                    return true;
                 }
             }
             else
@@ -1057,59 +1056,6 @@ public class ComicProcessorService : IComicProcessorService
         {
             _logger.LogError(ex, "Error generating filename");
             return originalPath;
-        }
-    }
-
-    private async Task<bool> IsDuplicateAsync(string filePath, ComicMetadata? metadata, CancellationToken cancellationToken)
-    {
-        try
-        {
-            if (metadata == null || string.IsNullOrEmpty(metadata.Series))
-                return false;
-
-            var allFiles = await _fileStore.GetFilteredFilesAsync(null, cancellationToken);
-            var fileInfo = new FileInfo(filePath);
-            var generatedFileName = GenerateFileName(metadata, filePath);
-            
-            // Check for files with same series/issue but different path
-            foreach (var file in allFiles)
-            {
-                if (file.FilePath == filePath)
-                    continue;
-
-                // Check 1: Compare metadata if available in cache
-                if (file.Metadata?.Series == metadata.Series && 
-                    file.Metadata?.Issue == metadata.Issue &&
-                    Math.Abs(file.FileSize - fileInfo.Length) < 1024 * 10) // Within 10KB
-                {
-                    _logger.LogInformation("Found duplicate by metadata: {File1} matches {File2}", filePath, file.FilePath);
-                    return true;
-                }
-                
-                // Check 2: Compare generated filenames (only if metadata not in cache to avoid O(n²) performance issue)
-                // This check reads metadata from disk which is slow - only do it if we don't have cached metadata
-                if (file.Metadata == null && File.Exists(file.FilePath))
-                {
-                    var existingMetadata = await GetMetadataAsync(file.FilePath, cancellationToken);
-                    if (existingMetadata != null && !string.IsNullOrEmpty(existingMetadata.Series))
-                    {
-                        var existingGeneratedFileName = GenerateFileName(existingMetadata, file.FilePath);
-                        if (generatedFileName == existingGeneratedFileName &&
-                            Math.Abs(file.FileSize - fileInfo.Length) < 1024 * 10) // Within 10KB
-                        {
-                            _logger.LogInformation("Found duplicate by generated filename: {File1} matches {File2}", filePath, file.FilePath);
-                            return true;
-                        }
-                    }
-                }
-            }
-
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error checking for duplicates");
-            return false;
         }
     }
 

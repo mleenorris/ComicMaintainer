@@ -205,29 +205,99 @@ public class ComicProcessorServiceTests : IDisposable
     public async Task ProcessFileAsync_WithDuplicate_MovesToDuplicateFolder()
     {
         // Arrange
-        var file1 = CreateTestComicArchive("Same Series", "1");
-        var file2 = CreateTestComicArchive("Same Series 2", "1");
+        // Create first file with the expected target name
+        var series = "Same Series";
+        var issue = "0001";
+        var targetFileName = $"{series} - Chapter {issue}.cbz";
+        var file1 = Path.Combine(_testDirectory, targetFileName);
         
-        var existingFiles = new List<ComicFile>
+        // Create file1 first
+        using (var archive = System.IO.Compression.ZipFile.Open(file1, System.IO.Compression.ZipArchiveMode.Create))
         {
-            new()
-            {
-                FilePath = file1,
-                FileSize = new FileInfo(file1).Length,
-                Metadata = new ComicMetadata { Series = "Same Series", Issue = "1" }
-            }
-        };
+            var comicInfoXml = $@"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>{series}</Series>
+    <Number>1</Number>
+</ComicInfo>";
 
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+        
+        // Create second file that will have same target name when renamed
+        var file2 = CreateTestComicArchive(series, "1");
+        
         _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(existingFiles);
-        _mockFileStore.Setup(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new List<ComicFile>());
 
         // Act
         var result = await _service.ProcessFileAsync(file2);
 
         // Assert
         Assert.True(result);
+        // Verify that file2 was moved to duplicates directory (renamed=true since it was handled)
+        _mockFileStore.Verify(f => f.MarkFileRenamedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RenameFileAsync_TargetExists_MovesToDuplicateFolder()
+    {
+        // Arrange
+        // Create first file with the expected target name
+        var series = "Test Series";
+        var issue = "0001";
+        var targetFileName = $"{series} - Chapter {issue}.cbz";
+        var file1 = Path.Combine(_testDirectory, targetFileName);
+        
+        // Create file1 first
+        using (var archive = System.IO.Compression.ZipFile.Open(file1, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            var comicInfoXml = $@"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>{series}</Series>
+    <Number>1</Number>
+</ComicInfo>";
+
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+        
+        // Create second file that will have same target name when renamed
+        var file2 = CreateTestComicArchive(series, "1");
+        
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var jobId = await _service.RenameFilesAsync(new[] { file2 });
+        var job = await WaitForJobCompletionAsync(jobId);
+
+        // Assert
+        Assert.NotNull(job);
+        Assert.Equal(1, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+        // Verify file was moved to duplicates directory
+        var duplicatesDir = Path.Combine(_testDirectory, "duplicates");
+        Assert.True(Directory.Exists(duplicatesDir));
+        Assert.True(Directory.GetFiles(duplicatesDir).Length > 0);
     }
 
     private string CreateTestComicArchiveNoMetadata(string fileName)

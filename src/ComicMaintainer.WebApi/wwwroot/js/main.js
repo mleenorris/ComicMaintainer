@@ -1046,7 +1046,10 @@
                                    ${isSelected ? 'checked' : ''} 
                                    onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
                             <div class="status-badge" title="${processedTitle}">
-                                <span>${processedBadge}</span>${renamedBadge ? ` <span title="${renamedTitle}">${renamedBadge}</span>` : ''}${normalizedBadge ? ` <span title="${normalizedTitle}">${normalizedBadge}</span>` : ''}${duplicateBadge ? ` <span title="${duplicateTitle}">${duplicateBadge}</span>` : ''}
+                                <span>${processedBadge}</span>
+                                ${renamedBadge ? ` <span title="${renamedTitle}">${renamedBadge}</span>` : ''}
+                                ${normalizedBadge ? ` <span title="${normalizedTitle}">${normalizedBadge}</span>` : ''}
+                                ${duplicateBadge ? ` <span title="${duplicateTitle}">${duplicateBadge}</span>` : ''}
                             </div>
                             <div>
                                 <div class="file-name" title="${escapeHtml(file.name)}">

@@ -215,7 +215,8 @@ public class ComicProcessorService : IComicProcessorService
 
         _jobs[jobId] = job;
 
-        // Broadcast initial job status
+        // Broadcast initial job status and log it
+        _logger.LogInformation("Creating job {JobId} for {TotalFiles} files", jobId, fileList.Count);
         _ = BroadcastJobStatusAsync(job);
 
         // Process files asynchronously using LongRunning for potentially long batch operations
@@ -264,6 +265,8 @@ public class ComicProcessorService : IComicProcessorService
 
                 job.Status = JobStatus.Completed;
                 job.EndTime = DateTime.UtcNow;
+                _logger.LogInformation("Completed processing job {JobId}: {Processed}/{Total} files processed, {Failed} failed", 
+                    jobId, job.ProcessedFiles, job.TotalFiles, job.FailedFiles);
                 await BroadcastJobStatusAsync(job);
             }
             catch (Exception ex)
@@ -593,13 +596,26 @@ public class ComicProcessorService : IComicProcessorService
     {
         if (_eventBroadcaster != null)
         {
-            await _eventBroadcaster.BroadcastJobUpdateAsync(
-                job.JobId,
-                job.Status.ToString().ToLower(),
-                job.ProcessedFiles,
-                job.TotalFiles,
-                job.ProcessedFiles - job.FailedFiles,
-                job.FailedFiles);
+            try
+            {
+                await _eventBroadcaster.BroadcastJobUpdateAsync(
+                    job.JobId,
+                    job.Status.ToString().ToLower(),
+                    job.ProcessedFiles,
+                    job.TotalFiles,
+                    job.ProcessedFiles - job.FailedFiles,
+                    job.FailedFiles);
+                _logger.LogDebug("Broadcasted job status: {JobId} - {Status} ({Processed}/{Total})", 
+                    job.JobId, job.Status, job.ProcessedFiles, job.TotalFiles);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error broadcasting job status for {JobId}", job.JobId);
+            }
+        }
+        else
+        {
+            _logger.LogWarning("Event broadcaster is null, cannot broadcast job status for {JobId}", job.JobId);
         }
     }
 

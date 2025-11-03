@@ -87,6 +87,11 @@ public class ProcessController : ControllerBase
     {
         try
         {
+            if (request?.Files == null || request.Files.Count == 0)
+            {
+                return BadRequest("No files specified");
+            }
+            
             _logger.LogInformation("Rename selected files requested, processing {Count} files", request.Files.Count);
             
             // Start rename job
@@ -129,6 +134,11 @@ public class ProcessController : ControllerBase
     {
         try
         {
+            if (request?.Files == null || request.Files.Count == 0)
+            {
+                return BadRequest("No files specified");
+            }
+            
             _logger.LogInformation("Normalize selected files requested, processing {Count} files", request.Files.Count);
             
             // Start normalize job

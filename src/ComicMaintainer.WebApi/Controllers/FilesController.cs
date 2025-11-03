@@ -373,7 +373,7 @@ public class FilesController : ControllerBase
 
     // RESTful endpoint: POST /api/files/{encodedFilePath}/rename
     [HttpPost("{encodedFilePath}/rename")]
-    public async Task<ActionResult> RenameFileByEncodedPath(string encodedFilePath)
+    public async Task<ActionResult> RenameFileByEncodedPath(string encodedFilePath, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -388,7 +388,7 @@ public class FilesController : ControllerBase
             _logger.LogInformation("Rename requested for file: {FilePath}", sanitizedPath);
             
             // Use the batch rename method with a single file
-            var jobId = await _processor.RenameFilesAsync(new[] { filePath });
+            var jobId = await _processor.RenameFilesAsync(new[] { filePath }, cancellationToken);
             
             return Ok(new { message = "Rename job started", jobId });
         }
@@ -403,7 +403,7 @@ public class FilesController : ControllerBase
     // Legacy endpoint for backward compatibility
     [HttpPost("~/api/rename-file")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public async Task<ActionResult> RenameSingleFile([FromQuery] string filePath)
+    public async Task<ActionResult> RenameSingleFile([FromQuery] string filePath, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -414,7 +414,7 @@ public class FilesController : ControllerBase
             _logger.LogInformation("Rename requested for file: {FilePath}", sanitizedPath);
             
             // Use the batch rename method with a single file
-            var jobId = await _processor.RenameFilesAsync(new[] { filePath });
+            var jobId = await _processor.RenameFilesAsync(new[] { filePath }, cancellationToken);
             
             return Ok(new { jobId });
         }

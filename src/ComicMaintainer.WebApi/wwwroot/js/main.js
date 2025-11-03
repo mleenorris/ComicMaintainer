@@ -785,7 +785,9 @@
                 'all': '📚 All',
                 'unmarked': '⚠️ Unmarked',
                 'marked': '✅ Marked',
-                'duplicates': '🔁 Duplicates'
+                'duplicates': '🔁 Duplicates',
+                'renamed': '📝 Renamed',
+                'normalized': '📋 Normalized'
             };
             
             document.getElementById('headerFilterLabel').textContent = filterLabels[mode];

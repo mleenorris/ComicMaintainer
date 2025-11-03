@@ -379,11 +379,23 @@ public class FileStoreService : IFileStoreService
 
     public async Task MarkFileRenamedAsync(string filePath, bool renamed, CancellationToken cancellationToken = default)
     {
+        bool isProcessed = false;
         if (_files.TryGetValue(filePath, out var file))
         {
             file.IsRenamed = renamed;
-            // Update IsProcessed based on both renamed and normalized states
-            file.IsProcessed = file.IsRenamed && file.IsNormalized;
+            // Update IsProcessed - file is processed if either renamed OR normalized
+            file.IsProcessed = file.IsRenamed || file.IsNormalized;
+            isProcessed = file.IsProcessed;
+        }
+
+        // Update the processed files dictionary
+        if (isProcessed)
+        {
+            _processedFiles.TryAdd(filePath, true);
+        }
+        else
+        {
+            _processedFiles.TryRemove(filePath, out _);
         }
 
         // Persist to database
@@ -398,8 +410,8 @@ public class FileStoreService : IFileStoreService
             if (entity != null)
             {
                 entity.IsRenamed = renamed;
-                // Update IsProcessed based on both states
-                entity.IsProcessed = entity.IsRenamed && entity.IsNormalized;
+                // Update IsProcessed - file is processed if either renamed OR normalized
+                entity.IsProcessed = entity.IsRenamed || entity.IsNormalized;
                 entity.UpdatedAt = DateTime.UtcNow;
                 await dbContext.SaveChangesAsync(cancellationToken);
                 _logger.LogDebug("Updated renamed status for {FilePath} to {Status}", SanitizeForLogging(filePath), renamed);
@@ -413,7 +425,7 @@ public class FileStoreService : IFileStoreService
                     {
                         entity = CreateFileEntity(filePath);
                         entity.IsRenamed = renamed;
-                        entity.IsProcessed = renamed && entity.IsNormalized; // Only processed if both are true
+                        entity.IsProcessed = renamed || entity.IsNormalized; // Processed if either renamed OR normalized
                         dbContext.ComicFiles.Add(entity);
                         await dbContext.SaveChangesAsync(cancellationToken);
                         _logger.LogDebug("Created file entity and set renamed status for {FilePath} to {Status}", SanitizeForLogging(filePath), renamed);
@@ -427,7 +439,7 @@ public class FileStoreService : IFileStoreService
                         if (entity != null)
                         {
                             entity.IsRenamed = renamed;
-                            entity.IsProcessed = entity.IsRenamed && entity.IsNormalized;
+                            entity.IsProcessed = entity.IsRenamed || entity.IsNormalized;
                             entity.UpdatedAt = DateTime.UtcNow;
                             await dbContext.SaveChangesAsync(cancellationToken);
                             _logger.LogDebug("Updated renamed status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), renamed);
@@ -448,11 +460,23 @@ public class FileStoreService : IFileStoreService
 
     public async Task MarkFileNormalizedAsync(string filePath, bool normalized, CancellationToken cancellationToken = default)
     {
+        bool isProcessed = false;
         if (_files.TryGetValue(filePath, out var file))
         {
             file.IsNormalized = normalized;
-            // Update IsProcessed based on both renamed and normalized states
-            file.IsProcessed = file.IsRenamed && file.IsNormalized;
+            // Update IsProcessed - file is processed if either renamed OR normalized
+            file.IsProcessed = file.IsRenamed || file.IsNormalized;
+            isProcessed = file.IsProcessed;
+        }
+
+        // Update the processed files dictionary
+        if (isProcessed)
+        {
+            _processedFiles.TryAdd(filePath, true);
+        }
+        else
+        {
+            _processedFiles.TryRemove(filePath, out _);
         }
 
         // Persist to database
@@ -467,8 +491,8 @@ public class FileStoreService : IFileStoreService
             if (entity != null)
             {
                 entity.IsNormalized = normalized;
-                // Update IsProcessed based on both states
-                entity.IsProcessed = entity.IsRenamed && entity.IsNormalized;
+                // Update IsProcessed - file is processed if either renamed OR normalized
+                entity.IsProcessed = entity.IsRenamed || entity.IsNormalized;
                 entity.UpdatedAt = DateTime.UtcNow;
                 await dbContext.SaveChangesAsync(cancellationToken);
                 _logger.LogDebug("Updated normalized status for {FilePath} to {Status}", SanitizeForLogging(filePath), normalized);
@@ -482,7 +506,7 @@ public class FileStoreService : IFileStoreService
                     {
                         entity = CreateFileEntity(filePath);
                         entity.IsNormalized = normalized;
-                        entity.IsProcessed = entity.IsRenamed && normalized; // Only processed if both are true
+                        entity.IsProcessed = entity.IsRenamed || normalized; // Processed if either renamed OR normalized
                         dbContext.ComicFiles.Add(entity);
                         await dbContext.SaveChangesAsync(cancellationToken);
                         _logger.LogDebug("Created file entity and set normalized status for {FilePath} to {Status}", SanitizeForLogging(filePath), normalized);
@@ -496,7 +520,7 @@ public class FileStoreService : IFileStoreService
                         if (entity != null)
                         {
                             entity.IsNormalized = normalized;
-                            entity.IsProcessed = entity.IsRenamed && entity.IsNormalized;
+                            entity.IsProcessed = entity.IsRenamed || entity.IsNormalized;
                             entity.UpdatedAt = DateTime.UtcNow;
                             await dbContext.SaveChangesAsync(cancellationToken);
                             _logger.LogDebug("Updated normalized status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), normalized);

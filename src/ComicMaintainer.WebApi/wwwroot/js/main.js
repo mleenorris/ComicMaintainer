@@ -1014,7 +1014,7 @@
                     const fileSize = formatFileSize(file.size);
                     const modifiedDate = formatModifiedDate(file.modified);
                     const processedBadge = file.processed ? '✅' : '⚠️';
-                    const processedTitle = file.processed ? 'Processed (Renamed & Normalized)' : 'Not fully processed';
+                    const processedTitle = file.processed ? 'Processed (Renamed or Normalized)' : 'Not processed';
                     const renamedBadge = file.renamed ? '🔵' : '';
                     const renamedTitle = file.renamed ? 'Renamed' : '';
                     const normalizedBadge = file.normalized ? '🔴' : '';
@@ -1023,12 +1023,12 @@
                     const duplicateTitle = file.duplicate ? 'Duplicate' : '';
                     
                     // Determine status class for background color
-                    // Priority: duplicate > fully processed (both) > partially processed > unmarked
+                    // Priority: duplicate > processed (renamed or normalized or both) > unmarked
                     let statusClass = '';
                     if (file.duplicate) {
                         statusClass = 'status-duplicate';
                     } else if (file.processed) {
-                        // Processed means both renamed AND normalized (green)
+                        // Processed means renamed OR normalized (or both) (green)
                         statusClass = 'status-marked';
                     } else if (file.renamed && !file.normalized) {
                         // Renamed only, not normalized (blue)
@@ -1375,7 +1375,7 @@
             const file = files.find(f => f.relative_path === filepath);
             if (file) {
                 document.getElementById('fileInfoSize').textContent = formatFileSize(file.size);
-                document.getElementById('fileInfoProcessed').textContent = file.processed ? '✅ Yes (Renamed & Normalized)' : '⚠️ No';
+                document.getElementById('fileInfoProcessed').textContent = file.processed ? '✅ Yes (Renamed or Normalized)' : '⚠️ No';
                 document.getElementById('fileInfoRenamed').textContent = file.renamed ? '🔵 Yes' : 'No';
                 document.getElementById('fileInfoNormalized').textContent = file.normalized ? '🔴 Yes' : 'No';
                 document.getElementById('fileInfoDuplicate').textContent = file.duplicate ? '🔁 Yes' : 'No';

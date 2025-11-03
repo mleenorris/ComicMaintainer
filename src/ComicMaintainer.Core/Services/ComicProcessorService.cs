@@ -169,7 +169,7 @@ public class ComicProcessorService : IComicProcessorService
             }
 
             // IsProcessed is automatically computed in MarkFileRenamedAsync and MarkFileNormalizedAsync
-            // It will only be true when both rename and normalize are successful
+            // It will be true when either rename or normalize (or both) are successful
             _logger.LogInformation("File processing completed: {FilePath} (Renamed: {Renamed}, Normalized: {Normalized})", 
                 filePath, renameSuccess, normalizeSuccess);
 

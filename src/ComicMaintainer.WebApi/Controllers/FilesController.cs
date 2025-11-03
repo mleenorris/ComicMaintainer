@@ -59,6 +59,9 @@ public class FilesController : ControllerBase
     {
         try
         {
+            _logger.LogDebug("GetFiles: Request received - Filter: {Filter}, Search: {Search}, Page: {Page}, PerPage: {PerPage}, Sort: {Sort}, Direction: {Direction}", 
+                filter, search, page, per_page, sort, direction);
+            
             // Map filter values from frontend format
             var mappedFilter = filter switch
             {
@@ -70,7 +73,10 @@ public class FilesController : ControllerBase
                 _ => null
             };
 
+            _logger.LogDebug("GetFiles: Mapped filter from '{OriginalFilter}' to '{MappedFilter}'", filter, mappedFilter);
+
             var allFiles = await _fileStore.GetFilteredFilesAsync(mappedFilter);
+            _logger.LogDebug("GetFiles: Retrieved {FileCount} files after applying filter '{MappedFilter}'", allFiles.Count(), mappedFilter);
             
             // Apply search if provided
             if (!string.IsNullOrEmpty(search))
@@ -268,16 +274,25 @@ public class FilesController : ControllerBase
     {
         try
         {
-            _logger.LogInformation("Scan unmarked files requested");
+            _logger.LogInformation("ScanUnmarked: Scan unmarked files requested");
+            _logger.LogDebug("ScanUnmarked: Starting file count retrieval from file store");
             
             // Get file counts - materialize collections to avoid multiple enumerations
             var allFilesList = (await _fileStore.GetAllFilesAsync()).ToList();
+            _logger.LogDebug("ScanUnmarked: Retrieved {TotalCount} total files", allFilesList.Count);
+            
             var unmarkedFilesList = (await _fileStore.GetFilteredFilesAsync("unprocessed")).ToList();
+            _logger.LogDebug("ScanUnmarked: Retrieved {UnmarkedCount} unprocessed files after filtering", unmarkedFilesList.Count);
+            
             var markedFilesList = (await _fileStore.GetFilteredFilesAsync("processed")).ToList();
+            _logger.LogDebug("ScanUnmarked: Retrieved {MarkedCount} processed files after filtering", markedFilesList.Count);
             
             var totalCount = allFilesList.Count;
             var unmarkedCount = unmarkedFilesList.Count;
             var markedCount = markedFilesList.Count;
+            
+            _logger.LogInformation("ScanUnmarked: File counts - Total: {TotalCount}, Unmarked: {UnmarkedCount}, Marked: {MarkedCount}", 
+                totalCount, unmarkedCount, markedCount);
             
             return Ok(new { 
                 total_count = totalCount,
@@ -287,7 +302,7 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error scanning unmarked files");
+            _logger.LogError(ex, "ScanUnmarked: Error scanning unmarked files");
             return StatusCode(500, "Error scanning files");
         }
     }

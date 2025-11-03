@@ -381,17 +381,16 @@ public class FilesController : ControllerBase
             if (string.IsNullOrEmpty(filePath))
                 return BadRequest("Invalid file path");
 
+            if (!IsPathSafe(filePath))
+                return BadRequest("Invalid file path");
+
             var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
             _logger.LogInformation("Rename requested for file: {FilePath}", sanitizedPath);
             
-            // Get metadata and rename based on it
-            var metadata = await _processor.GetMetadataAsync(filePath);
-            if (metadata == null)
-                return NotFound("File not found or metadata unavailable");
-
-            // For now, just return OK since actual rename implementation needs to be done
-            // In production, this would call a rename method on the processor
-            return Ok(new { message = "Rename operation completed", file = filePath });
+            // Use the batch rename method with a single file
+            var jobId = await _processor.RenameFilesAsync(new[] { filePath });
+            
+            return Ok(new { message = "Rename job started", jobId });
         }
         catch (Exception ex)
         {
@@ -404,14 +403,20 @@ public class FilesController : ControllerBase
     // Legacy endpoint for backward compatibility
     [HttpPost("~/api/rename-file")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public ActionResult RenameSingleFile([FromQuery] string filePath)
+    public async Task<ActionResult> RenameSingleFile([FromQuery] string filePath)
     {
         try
         {
+            if (!IsPathSafe(filePath))
+                return BadRequest("Invalid file path");
+
             var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
             _logger.LogInformation("Rename requested for file: {FilePath}", sanitizedPath);
-            // Implementation would rename based on metadata
-            return Ok();
+            
+            // Use the batch rename method with a single file
+            var jobId = await _processor.RenameFilesAsync(new[] { filePath });
+            
+            return Ok(new { jobId });
         }
         catch (Exception ex)
         {

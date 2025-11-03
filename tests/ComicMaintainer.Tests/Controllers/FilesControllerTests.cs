@@ -786,19 +786,28 @@ public class FilesControllerTests
     }
 
     [Fact]
-    public async Task RenameFileByEncodedPath_WhenMetadataNotFound_ReturnsNotFound()
+    public async Task RenameFileByEncodedPath_StartsRenameJob()
     {
         // Arrange
         var filePath = Path.Combine(Path.GetTempPath(), "test.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
-        _mockProcessor.Setup(p => p.GetMetadataAsync(filePath, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ComicMetadata?)null);
+        var expectedJobId = Guid.NewGuid();
+        
+        _mockProcessor.Setup(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expectedJobId);
 
         // Act
         var result = await _controller.RenameFileByEncodedPath(encodedPath);
 
         // Assert
-        Assert.IsType<NotFoundObjectResult>(result);
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+        
+        // Verify the rename job was started
+        _mockProcessor.Verify(p => p.RenameFilesAsync(
+            It.Is<IEnumerable<string>>(files => files.Single() == filePath),
+            It.IsAny<CancellationToken>()), 
+            Times.Once);
     }
 
     [Fact]

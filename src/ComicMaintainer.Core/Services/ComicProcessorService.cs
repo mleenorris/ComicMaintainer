@@ -586,9 +586,9 @@ public class ComicProcessorService : IComicProcessorService
             await _eventBroadcaster.BroadcastJobUpdateAsync(
                 job.JobId,
                 job.Status.ToString().ToLower(),
-                job.ProcessedFiles,
+                job.ProcessedFiles + job.FailedFiles,
                 job.TotalFiles,
-                job.ProcessedFiles - job.FailedFiles,
+                job.ProcessedFiles,
                 job.FailedFiles);
         }
     }

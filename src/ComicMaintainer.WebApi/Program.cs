@@ -123,7 +123,7 @@ var configDirectory = builder.Configuration["AppSettings:ConfigDirectory"] ?? "/
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
     ?? $"Data Source={Path.Combine(configDirectory, "comicmaintainer.db")}";
 
-// Check if debug logging is enabled for EF Core by evaluating all conditions
+// Determine if sensitive data logging should be enabled by evaluating multiple conditions
 var enableSensitiveDataLogging = false;
 
 // Condition 1: Enable in Development environment
@@ -141,7 +141,7 @@ if (!string.IsNullOrEmpty(efLogLevel) &&
     enableSensitiveDataLogging = true;
 }
 
-// Condition 3: Allow explicit control via environment variable (takes precedence)
+// Condition 3: Allow explicit control via environment variable (overrides all previous conditions)
 var enableSensitiveDataEnv = Environment.GetEnvironmentVariable("ENABLE_EF_SENSITIVE_DATA_LOGGING");
 if (!string.IsNullOrEmpty(enableSensitiveDataEnv) && 
     bool.TryParse(enableSensitiveDataEnv, out var explicitEnable))

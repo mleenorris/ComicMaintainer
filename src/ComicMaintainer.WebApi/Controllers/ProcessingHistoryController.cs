@@ -38,22 +38,20 @@ public class ProcessingHistoryController : ControllerBase
                 operation_type = h.Action,
                 success = h.Success,
                 error_message = h.ErrorMessage,
-                // These fields are expected by the frontend but not yet implemented
-                // They will be shown as empty for now
-                before_filename = (string?)null,
-                after_filename = (string?)null,
-                before_title = (string?)null,
-                after_title = (string?)null,
-                before_series = (string?)null,
-                after_series = (string?)null,
-                before_issue = (string?)null,
-                after_issue = (string?)null,
-                before_publisher = (string?)null,
-                after_publisher = (string?)null,
-                before_year = (int?)null,
-                after_year = (int?)null,
-                before_volume = (string?)null,
-                after_volume = (string?)null
+                before_filename = h.BeforeFilename,
+                after_filename = h.AfterFilename,
+                before_title = h.BeforeTitle,
+                after_title = h.AfterTitle,
+                before_series = h.BeforeSeries,
+                after_series = h.AfterSeries,
+                before_issue = h.BeforeIssue,
+                after_issue = h.AfterIssue,
+                before_publisher = h.BeforePublisher,
+                after_publisher = h.AfterPublisher,
+                before_year = h.BeforeYear,
+                after_year = h.AfterYear,
+                before_volume = h.BeforeVolume,
+                after_volume = h.AfterVolume
             });
 
             return Ok(new

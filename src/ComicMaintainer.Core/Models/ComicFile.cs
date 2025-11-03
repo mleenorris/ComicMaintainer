@@ -44,6 +44,22 @@ public class ProcessingHistoryEntry
     public DateTime Timestamp { get; set; }
     public bool Success { get; set; }
     public string? ErrorMessage { get; set; }
+    
+    // Before/After tracking for changes
+    public string? BeforeFilename { get; set; }
+    public string? AfterFilename { get; set; }
+    public string? BeforeTitle { get; set; }
+    public string? AfterTitle { get; set; }
+    public string? BeforeSeries { get; set; }
+    public string? AfterSeries { get; set; }
+    public string? BeforeIssue { get; set; }
+    public string? AfterIssue { get; set; }
+    public string? BeforePublisher { get; set; }
+    public string? AfterPublisher { get; set; }
+    public int? BeforeYear { get; set; }
+    public int? AfterYear { get; set; }
+    public string? BeforeVolume { get; set; }
+    public string? AfterVolume { get; set; }
 }
 
 /// <summary>

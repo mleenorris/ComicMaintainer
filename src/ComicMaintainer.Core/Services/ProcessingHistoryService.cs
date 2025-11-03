@@ -57,7 +57,21 @@ public class ProcessingHistoryService : IProcessingHistoryService
             Action = e.Action,
             Timestamp = e.Timestamp,
             Success = e.Success,
-            ErrorMessage = e.ErrorMessage
+            ErrorMessage = e.ErrorMessage,
+            BeforeFilename = e.BeforeFilename,
+            AfterFilename = e.AfterFilename,
+            BeforeTitle = e.BeforeTitle,
+            AfterTitle = e.AfterTitle,
+            BeforeSeries = e.BeforeSeries,
+            AfterSeries = e.AfterSeries,
+            BeforeIssue = e.BeforeIssue,
+            AfterIssue = e.AfterIssue,
+            BeforePublisher = e.BeforePublisher,
+            AfterPublisher = e.AfterPublisher,
+            BeforeYear = e.BeforeYear,
+            AfterYear = e.AfterYear,
+            BeforeVolume = e.BeforeVolume,
+            AfterVolume = e.AfterVolume
         });
 
         return (history, total);
@@ -79,7 +93,21 @@ public class ProcessingHistoryService : IProcessingHistoryService
                 Action = entry.Action,
                 Timestamp = entry.Timestamp,
                 Success = entry.Success,
-                ErrorMessage = entry.ErrorMessage
+                ErrorMessage = entry.ErrorMessage,
+                BeforeFilename = entry.BeforeFilename,
+                AfterFilename = entry.AfterFilename,
+                BeforeTitle = entry.BeforeTitle,
+                AfterTitle = entry.AfterTitle,
+                BeforeSeries = entry.BeforeSeries,
+                AfterSeries = entry.AfterSeries,
+                BeforeIssue = entry.BeforeIssue,
+                AfterIssue = entry.AfterIssue,
+                BeforePublisher = entry.BeforePublisher,
+                AfterPublisher = entry.AfterPublisher,
+                BeforeYear = entry.BeforeYear,
+                AfterYear = entry.AfterYear,
+                BeforeVolume = entry.BeforeVolume,
+                AfterVolume = entry.AfterVolume
             };
 
             dbContext.ProcessingHistory.Add(entity);

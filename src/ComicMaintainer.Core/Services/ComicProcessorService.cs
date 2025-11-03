@@ -103,6 +103,9 @@ public class ComicProcessorService : IComicProcessorService
                     {
                         _logger.LogInformation("Renaming file from {OldPath} to {NewPath}", filePath, newFilePath);
                         var oldFilePath = filePath;
+                        var beforeFilename = Path.GetFileName(oldFilePath);
+                        var afterFilename = Path.GetFileName(newFilePath);
+                        
                         File.Move(filePath, newFilePath);
                         
                         // Update file store with new path
@@ -110,7 +113,8 @@ public class ComicProcessorService : IComicProcessorService
                         await _fileStore.AddFileAsync(newFilePath, cancellationToken);
                         await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
                         
-                        await LogHistoryAsync(newFilePath, "Rename", true, null, cancellationToken);
+                        await LogHistoryWithChangesAsync(newFilePath, "Rename", true, null, 
+                            beforeFilename, afterFilename, metadata, metadata, cancellationToken);
                         
                         filePath = newFilePath;
                         renameSuccess = true;
@@ -154,11 +158,14 @@ public class ComicProcessorService : IComicProcessorService
                 }
                 else
                 {
+                    var beforeMetadata = metadata;
                     normalizeSuccess = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
                     await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
                     if (normalizeSuccess)
                     {
-                        await LogHistoryAsync(filePath, "Normalize", true, null, cancellationToken);
+                        var filename = Path.GetFileName(filePath);
+                        await LogHistoryWithChangesAsync(filePath, "Normalize", true, null,
+                            filename, filename, beforeMetadata, metadata, cancellationToken);
                     }
                     else
                     {
@@ -481,6 +488,11 @@ public class ComicProcessorService : IComicProcessorService
                 try
                 {
                     _logger.LogInformation("Renaming file from {OldPath} to {NewPath}", filePath, newFilePath);
+                    
+                    // Capture before/after filenames for history
+                    var beforeFilename = Path.GetFileName(filePath);
+                    var afterFilename = Path.GetFileName(newFilePath);
+                    
                     // File.Move will throw IOException if target exists, which we catch and handle
                     // This avoids race condition from check-then-act pattern
                     File.Move(filePath, newFilePath);
@@ -491,7 +503,8 @@ public class ComicProcessorService : IComicProcessorService
                     await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
                     
                     _logger.LogInformation("File renamed successfully: {NewPath}", newFilePath);
-                    await LogHistoryAsync(newFilePath, "Rename", true, null, cancellationToken);
+                    await LogHistoryWithChangesAsync(newFilePath, "Rename", true, null, 
+                        beforeFilename, afterFilename, metadata, metadata, cancellationToken);
                     return true;
                 }
                 catch (IOException ex) when (File.Exists(newFilePath))
@@ -554,6 +567,9 @@ public class ComicProcessorService : IComicProcessorService
                 return true;
             }
 
+            // Capture before metadata state (current metadata)
+            var beforeMetadata = metadata;
+            
             // Update metadata (normalize it by re-writing ComicInfo.xml)
             var success = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
             await _fileStore.MarkFileNormalizedAsync(filePath, success, cancellationToken);
@@ -561,7 +577,10 @@ public class ComicProcessorService : IComicProcessorService
             if (success)
             {
                 _logger.LogInformation("File normalized successfully: {FilePath}", filePath);
-                await LogHistoryAsync(filePath, "Normalize", true, null, cancellationToken);
+                var filename = Path.GetFileName(filePath);
+                // After metadata is the same as before for normalize (we're just ensuring it's written properly)
+                await LogHistoryWithChangesAsync(filePath, "Normalize", true, null, 
+                    filename, filename, beforeMetadata, metadata, cancellationToken);
             }
             else
             {
@@ -1046,6 +1065,45 @@ public class ComicProcessorService : IComicProcessorService
             Timestamp = DateTime.UtcNow,
             Success = success,
             ErrorMessage = errorMessage
+        }, cancellationToken);
+    }
+
+    /// <summary>
+    /// Helper method to log processing history entries with before/after metadata
+    /// </summary>
+    private async Task LogHistoryWithChangesAsync(
+        string filePath, 
+        string action, 
+        bool success, 
+        string? errorMessage,
+        string? beforeFilename,
+        string? afterFilename,
+        ComicMetadata? beforeMetadata,
+        ComicMetadata? afterMetadata,
+        CancellationToken cancellationToken = default)
+    {
+        await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+        {
+            Id = Guid.NewGuid(),
+            FilePath = filePath,
+            Action = action,
+            Timestamp = DateTime.UtcNow,
+            Success = success,
+            ErrorMessage = errorMessage,
+            BeforeFilename = beforeFilename,
+            AfterFilename = afterFilename,
+            BeforeTitle = beforeMetadata?.Title,
+            AfterTitle = afterMetadata?.Title,
+            BeforeSeries = beforeMetadata?.Series,
+            AfterSeries = afterMetadata?.Series,
+            BeforeIssue = beforeMetadata?.Issue,
+            AfterIssue = afterMetadata?.Issue,
+            BeforePublisher = beforeMetadata?.Publisher,
+            AfterPublisher = afterMetadata?.Publisher,
+            BeforeYear = beforeMetadata?.Year,
+            AfterYear = afterMetadata?.Year,
+            BeforeVolume = beforeMetadata?.Volume,
+            AfterVolume = afterMetadata?.Volume
         }, cancellationToken);
     }
 }

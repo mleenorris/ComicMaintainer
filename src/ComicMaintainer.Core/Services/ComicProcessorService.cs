@@ -289,7 +289,7 @@ public class ComicProcessorService : IComicProcessorService
                 _jobCancellationTokens.TryRemove(jobId, out _);
                 jobCts.Dispose();
             }
-        }, jobCts.Token);
+        });
 
         return Task.FromResult(jobId);
     }

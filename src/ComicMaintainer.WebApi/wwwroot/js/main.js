@@ -392,7 +392,8 @@
                 const response = await fetch(apiUrl('/api/settings/watcher-enabled'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ enabled: enabled })
                 });
@@ -414,6 +415,66 @@
                 showMessage('Failed to update watcher: ' + error.message, 'error');
                 // Revert checkbox on error
                 document.getElementById('watcherToggleCheckbox').checked = !enabled;
+            }
+        }
+        
+        async function updateWatcherEnableRename() {
+            const enabled = document.getElementById('watcherEnableRenameCheckbox').checked;
+            
+            try {
+                const response = await fetch(apiUrl('/api/settings/watcher-enable-rename'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ enabled: enabled })
+                });
+                
+                if (handleAuthError(response)) {
+                    document.getElementById('watcherEnableRenameCheckbox').checked = !enabled;
+                    return;
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const statusText = enabled ? 'enabled' : 'disabled';
+                showMessage(`File rename ${statusText} successfully!`, 'success');
+            } catch (error) {
+                showMessage('Failed to update rename setting: ' + error.message, 'error');
+                document.getElementById('watcherEnableRenameCheckbox').checked = !enabled;
+            }
+        }
+        
+        async function updateWatcherEnableNormalize() {
+            const enabled = document.getElementById('watcherEnableNormalizeCheckbox').checked;
+            
+            try {
+                const response = await fetch(apiUrl('/api/settings/watcher-enable-normalize'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ enabled: enabled })
+                });
+                
+                if (handleAuthError(response)) {
+                    document.getElementById('watcherEnableNormalizeCheckbox').checked = !enabled;
+                    return;
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const statusText = enabled ? 'enabled' : 'disabled';
+                showMessage(`Metadata normalize ${statusText} successfully!`, 'success');
+            } catch (error) {
+                showMessage('Failed to update normalize setting: ' + error.message, 'error');
+                document.getElementById('watcherEnableNormalizeCheckbox').checked = !enabled;
             }
         }
         
@@ -2402,6 +2463,28 @@
                 }
                 const watcherData = await watcherResponse.json();
                 document.getElementById('watcherToggleCheckbox').checked = watcherData.enabled;
+                
+                // Load watcher enable rename status
+                const watcherRenameResponse = await fetch(apiUrl('/api/settings/watcher-enable-rename'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(watcherRenameResponse)) return;
+                if (!watcherRenameResponse.ok) {
+                    throw new Error(`HTTP error! status: ${watcherRenameResponse.status}`);
+                }
+                const watcherRenameData = await watcherRenameResponse.json();
+                document.getElementById('watcherEnableRenameCheckbox').checked = watcherRenameData.enabled;
+                
+                // Load watcher enable normalize status
+                const watcherNormalizeResponse = await fetch(apiUrl('/api/settings/watcher-enable-normalize'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(watcherNormalizeResponse)) return;
+                if (!watcherNormalizeResponse.ok) {
+                    throw new Error(`HTTP error! status: ${watcherNormalizeResponse.status}`);
+                }
+                const watcherNormalizeData = await watcherNormalizeResponse.json();
+                document.getElementById('watcherEnableNormalizeCheckbox').checked = watcherNormalizeData.enabled;
                 
                 // Load log max size
                 const logResponse = await fetch(apiUrl('/api/settings/log-max-bytes'), {

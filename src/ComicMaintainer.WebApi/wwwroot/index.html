@@ -529,6 +529,26 @@
                     </small>
                 </div>
                 
+                <div class="form-group" style="margin-top: 15px;">
+                    <label for="watcherEnableRenameCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="watcherEnableRenameCheckbox" onchange="updateWatcherEnableRename()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <span>Enable file rename (🔵 renamed indicator)</span>
+                    </label>
+                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                        When enabled, files will be renamed based on the filename template during processing.
+                    </small>
+                </div>
+                
+                <div class="form-group" style="margin-top: 15px;">
+                    <label for="watcherEnableNormalizeCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="watcherEnableNormalizeCheckbox" onchange="updateWatcherEnableNormalize()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <span>Enable metadata normalize (🔴 normalized indicator)</span>
+                    </label>
+                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                        When enabled, metadata will be normalized during processing.
+                    </small>
+                </div>
+                
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Log Rotation</h3>
                 <div class="form-group">
                     <label for="logMaxSize">Maximum Log File Size (MB)</label>

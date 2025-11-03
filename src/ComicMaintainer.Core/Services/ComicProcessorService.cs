@@ -106,9 +106,9 @@ public class ComicProcessorService : IComicProcessorService
                 {
                     // Target file already exists - treat as duplicate
                     _logger.LogInformation("ProcessFileAsync: Duplicate detected - target file already exists: {NewPath}", newFilePath);
-                    await MoveToDuplicatesAsync(filePath, cancellationToken);
+                    await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
-                    renameSuccess = true;
+                    renameSuccess = false;
                 }
                 else
                 {
@@ -136,9 +136,9 @@ public class ComicProcessorService : IComicProcessorService
                     {
                         // Target file already exists - treat as duplicate
                         _logger.LogInformation(ex, "ProcessFileAsync: Duplicate detected - target file already exists during move: {NewPath}", newFilePath);
-                        await MoveToDuplicatesAsync(filePath, cancellationToken);
+                        await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                         await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
-                        renameSuccess = true;
+                        renameSuccess = false;
                     }
                     catch (Exception ex)
                     {
@@ -608,9 +608,9 @@ public class ComicProcessorService : IComicProcessorService
                 {
                     // Target file already exists - treat as duplicate
                     _logger.LogInformation(ex, "RenameFileAsync: Duplicate detected - target file already exists: {NewPath}", newFilePath);
-                    await MoveToDuplicatesAsync(filePath, cancellationToken);
+                    await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Duplicate Detection", true, "Target file already exists", cancellationToken);
-                    return true;
+                    return false;
                 }
             }
             else
@@ -1056,39 +1056,6 @@ public class ComicProcessorService : IComicProcessorService
         {
             _logger.LogError(ex, "Error generating filename");
             return originalPath;
-        }
-    }
-
-    private async Task MoveToDuplicatesAsync(string filePath, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var fileName = Path.GetFileName(filePath);
-            var duplicatePath = Path.Combine(_settings.DuplicateDirectory, fileName);
-            
-            // Ensure duplicate directory exists
-            Directory.CreateDirectory(_settings.DuplicateDirectory);
-            
-            // Handle filename conflicts
-            var counter = 1;
-            while (File.Exists(duplicatePath))
-            {
-                var nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
-                var ext = Path.GetExtension(fileName);
-                duplicatePath = Path.Combine(_settings.DuplicateDirectory, $"{nameWithoutExt}_{counter}{ext}");
-                counter++;
-            }
-            
-            File.Move(filePath, duplicatePath);
-            // Mark as both renamed and normalized since duplicates are fully handled
-            await _fileStore.MarkFileRenamedAsync(duplicatePath, true, cancellationToken);
-            await _fileStore.MarkFileNormalizedAsync(duplicatePath, true, cancellationToken);
-            
-            _logger.LogInformation("Moved duplicate file to: {DuplicatePath}", duplicatePath);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error moving duplicate file");
         }
     }
 

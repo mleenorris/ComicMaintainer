@@ -202,7 +202,7 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ProcessFileAsync_WithDuplicate_MovesToDuplicateFolder()
+    public async Task ProcessFileAsync_WithDuplicate_MarksAsDuplicate()
     {
         // Arrange
         // Create first file with the expected target name
@@ -244,12 +244,12 @@ public class ComicProcessorServiceTests : IDisposable
 
         // Assert
         Assert.True(result);
-        // Verify that file2 was moved to duplicates directory (renamed=true since it was handled)
-        _mockFileStore.Verify(f => f.MarkFileRenamedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
+        // Verify that file2 was marked as duplicate (renamed=false since it couldn't be renamed)
+        _mockFileStore.Verify(f => f.MarkFileRenamedAsync(file2, false, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task RenameFileAsync_TargetExists_MovesToDuplicateFolder()
+    public async Task RenameFileAsync_TargetExists_MarksAsDuplicate()
     {
         // Arrange
         // Create first file with the expected target name
@@ -292,12 +292,10 @@ public class ComicProcessorServiceTests : IDisposable
 
         // Assert
         Assert.NotNull(job);
-        Assert.Equal(1, job.ProcessedFiles);
-        Assert.Equal(0, job.FailedFiles);
-        // Verify file was moved to duplicates directory
-        var duplicatesDir = Path.Combine(_testDirectory, "duplicates");
-        Assert.True(Directory.Exists(duplicatesDir));
-        Assert.True(Directory.GetFiles(duplicatesDir).Length > 0);
+        Assert.Equal(0, job.ProcessedFiles);
+        Assert.Equal(1, job.FailedFiles);
+        // Verify file was marked as duplicate (renamed=false)
+        _mockFileStore.Verify(f => f.MarkFileRenamedAsync(file2, false, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private string CreateTestComicArchiveNoMetadata(string fileName)

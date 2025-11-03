@@ -247,8 +247,8 @@ public class FileStoreService : IFileStoreService
         if (_files.TryGetValue(filePath, out var file))
         {
             file.IsProcessed = processed;
-            // When unmarking a file, also unmark renamed and normalized to maintain consistency
-            // A file should only be unmarked if it's not renamed AND not normalized
+            // When unmarking a file, reset renamed and normalized flags to maintain consistency
+            // This ensures: IsProcessed = true only when IsRenamed AND IsNormalized are both true
             if (!processed)
             {
                 file.IsRenamed = false;
@@ -268,7 +268,7 @@ public class FileStoreService : IFileStoreService
             if (entity != null)
             {
                 entity.IsProcessed = processed;
-                // When unmarking a file, also unmark renamed and normalized to maintain consistency
+                // Reset renamed and normalized flags when unmarking to maintain consistency
                 if (!processed)
                 {
                     entity.IsRenamed = false;
@@ -300,7 +300,7 @@ public class FileStoreService : IFileStoreService
                         if (entity != null)
                         {
                             entity.IsProcessed = processed;
-                            // When unmarking a file, also unmark renamed and normalized to maintain consistency
+                            // Reset renamed and normalized flags when unmarking to maintain consistency
                             if (!processed)
                             {
                                 entity.IsRenamed = false;

@@ -11,6 +11,8 @@ public class ComicFile
     public long FileSize { get; set; }
     public DateTime LastModified { get; set; }
     public bool IsProcessed { get; set; }
+    public bool IsRenamed { get; set; }
+    public bool IsNormalized { get; set; }
     public bool IsDuplicate { get; set; }
     public ComicMetadata? Metadata { get; set; }
 }

@@ -23,6 +23,12 @@ public class FileDto
     [JsonPropertyName("processed")]
     public bool Processed { get; set; }
 
+    [JsonPropertyName("renamed")]
+    public bool Renamed { get; set; }
+
+    [JsonPropertyName("normalized")]
+    public bool Normalized { get; set; }
+
     [JsonPropertyName("duplicate")]
     public bool Duplicate { get; set; }
 
@@ -40,6 +46,8 @@ public class FileDto
                 ? new DateTimeOffset(file.LastModified, TimeSpan.Zero).ToUnixTimeSeconds()
                 : new DateTimeOffset(file.LastModified).ToUnixTimeSeconds(),
             Processed = file.IsProcessed,
+            Renamed = file.IsRenamed,
+            Normalized = file.IsNormalized,
             Duplicate = file.IsDuplicate
         };
     }

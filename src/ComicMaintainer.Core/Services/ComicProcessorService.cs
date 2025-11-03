@@ -73,6 +73,10 @@ public class ComicProcessorService : IComicProcessorService
                 return true;
             }
 
+            // Track rename and normalize separately
+            bool renameSuccess = false;
+            bool normalizeSuccess = false;
+
             // Rename file based on template if metadata is available
             if (metadata != null && !string.IsNullOrEmpty(metadata.Series))
             {
@@ -81,12 +85,15 @@ public class ComicProcessorService : IComicProcessorService
                 {
                     // File already has correct name, no rename needed
                     _logger.LogDebug("File already has correct name: {FilePath}", filePath);
+                    await _fileStore.MarkFileRenamedAsync(filePath, true, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", true, "File already correctly named", cancellationToken);
+                    renameSuccess = true;
                 }
                 else if (File.Exists(newFilePath))
                 {
                     // Target file already exists
                     _logger.LogWarning("Cannot rename file, target already exists: {NewPath}", newFilePath);
+                    await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", false, "Target file already exists", cancellationToken);
                 }
                 else
@@ -100,14 +107,17 @@ public class ComicProcessorService : IComicProcessorService
                         // Update file store with new path
                         await _fileStore.RemoveFileAsync(oldFilePath, cancellationToken);
                         await _fileStore.AddFileAsync(newFilePath, cancellationToken);
+                        await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
                         
                         await LogHistoryAsync(newFilePath, "Rename", true, null, cancellationToken);
                         
                         filePath = newFilePath;
+                        renameSuccess = true;
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "Failed to rename file: {FilePath}", filePath);
+                        await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                         await LogHistoryAsync(filePath, "Rename", false, ex.Message, cancellationToken);
                     }
                 }
@@ -116,13 +126,15 @@ public class ComicProcessorService : IComicProcessorService
             {
                 // No metadata or series info available
                 _logger.LogDebug("No metadata or series information for rename: {FilePath}", filePath);
+                await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                 await LogHistoryAsync(filePath, "Rename", false, "No metadata or series information", cancellationToken);
             }
 
             // Normalize metadata (update ComicInfo.xml)
             if (metadata != null)
             {
-                var normalizeSuccess = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
+                normalizeSuccess = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
+                await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
                 if (normalizeSuccess)
                 {
                     await LogHistoryAsync(filePath, "Normalize", true, null, cancellationToken);
@@ -133,12 +145,19 @@ public class ComicProcessorService : IComicProcessorService
                     await LogHistoryAsync(filePath, "Normalize", false, "Failed to update metadata", cancellationToken);
                 }
             }
+            else
+            {
+                await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
+            }
 
-            // Mark as processed
-            await _fileStore.MarkFileProcessedAsync(filePath, true, cancellationToken);
-            _logger.LogInformation("File processed successfully: {FilePath}", filePath);
+            // IsProcessed is automatically computed in MarkFileRenamedAsync and MarkFileNormalizedAsync
+            // It will only be true when both rename and normalize are successful
+            _logger.LogInformation("File processing completed: {FilePath} (Renamed: {Renamed}, Normalized: {Normalized})", 
+                filePath, renameSuccess, normalizeSuccess);
 
-            await LogHistoryAsync(filePath, "Process", true, null, cancellationToken);
+            await LogHistoryAsync(filePath, "Process", renameSuccess && normalizeSuccess, 
+                renameSuccess && normalizeSuccess ? null : "File not fully processed (rename or normalize incomplete)", 
+                cancellationToken);
 
             return true;
         }
@@ -407,6 +426,7 @@ public class ComicProcessorService : IComicProcessorService
                 if (newFilePath == filePath)
                 {
                     _logger.LogInformation("File already has correct name: {FilePath}", filePath);
+                    await _fileStore.MarkFileRenamedAsync(filePath, true, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", true, null, cancellationToken);
                     return true;
                 }
@@ -421,6 +441,7 @@ public class ComicProcessorService : IComicProcessorService
                     // Update file store with new path
                     await _fileStore.RemoveFileAsync(filePath, cancellationToken);
                     await _fileStore.AddFileAsync(newFilePath, cancellationToken);
+                    await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
                     
                     _logger.LogInformation("File renamed successfully: {NewPath}", newFilePath);
                     await LogHistoryAsync(newFilePath, "Rename", true, null, cancellationToken);
@@ -429,6 +450,7 @@ public class ComicProcessorService : IComicProcessorService
                 catch (IOException ex) when (File.Exists(newFilePath))
                 {
                     _logger.LogWarning(ex, "Target file already exists: {NewPath}", newFilePath);
+                    await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", false, "Target file already exists", cancellationToken);
                     return false;
                 }
@@ -436,6 +458,7 @@ public class ComicProcessorService : IComicProcessorService
             else
             {
                 _logger.LogWarning("No metadata or series information found for: {FilePath}", filePath);
+                await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                 await LogHistoryAsync(filePath, "Rename", false, "No metadata or series information found", cancellationToken);
                 return false;
             }
@@ -443,6 +466,7 @@ public class ComicProcessorService : IComicProcessorService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error renaming file: {FilePath}", filePath);
+            await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
             await LogHistoryAsync(filePath, "Rename", false, ex.Message, cancellationToken);
             return false;
         }
@@ -457,6 +481,7 @@ public class ComicProcessorService : IComicProcessorService
             if (!File.Exists(filePath) || !IsComicArchive(filePath))
             {
                 _logger.LogWarning("File not found or not a comic archive: {FilePath}", filePath);
+                await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
                 await LogHistoryAsync(filePath, "Normalize", false, "File not found or not a comic archive", cancellationToken);
                 return false;
             }
@@ -467,12 +492,14 @@ public class ComicProcessorService : IComicProcessorService
             if (metadata == null)
             {
                 _logger.LogWarning("No metadata found for: {FilePath}", filePath);
+                await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
                 await LogHistoryAsync(filePath, "Normalize", false, "No metadata found", cancellationToken);
                 return false;
             }
 
             // Update metadata (normalize it by re-writing ComicInfo.xml)
             var success = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
+            await _fileStore.MarkFileNormalizedAsync(filePath, success, cancellationToken);
             
             if (success)
             {
@@ -489,6 +516,7 @@ public class ComicProcessorService : IComicProcessorService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error normalizing file: {FilePath}", filePath);
+            await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
             await LogHistoryAsync(filePath, "Normalize", false, ex.Message, cancellationToken);
             return false;
         }

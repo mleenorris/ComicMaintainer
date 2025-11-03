@@ -1021,16 +1021,21 @@
                     const duplicateTitle = file.duplicate ? 'Duplicate' : '';
                     
                     // Determine status class for background color
+                    // Priority: duplicate > fully processed (both) > partially processed > unmarked
                     let statusClass = '';
                     if (file.duplicate) {
                         statusClass = 'status-duplicate';
                     } else if (file.processed) {
+                        // Processed means both renamed AND normalized (green)
                         statusClass = 'status-marked';
                     } else if (file.renamed && !file.normalized) {
+                        // Renamed only, not normalized (blue)
                         statusClass = 'status-renamed';
                     } else if (file.normalized && !file.renamed) {
+                        // Normalized only, not renamed (red)
                         statusClass = 'status-normalized';
                     } else {
+                        // Neither renamed nor normalized (yellow)
                         statusClass = 'status-unmarked';
                     }
                     

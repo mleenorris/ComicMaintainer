@@ -195,6 +195,7 @@ public class JobsControllerTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
+        _mockProcessor.Setup(p => p.CancelJob(jobId)).Returns(true);
 
         // Act
         var result = _controller.CancelJob(jobId);

@@ -372,8 +372,16 @@ public class JobsController : ControllerBase
         try
         {
             _logger.LogInformation("Cancel requested for job {JobId}", jobId);
-            // In the future, implement job cancellation
-            return Ok(new { success = true });
+            var cancelled = _processor.CancelJob(jobId);
+            
+            if (cancelled)
+            {
+                return Ok(new { success = true });
+            }
+            else
+            {
+                return NotFound(new { success = false, error = "Job not found or already completed" });
+            }
         }
         catch (Exception ex)
         {

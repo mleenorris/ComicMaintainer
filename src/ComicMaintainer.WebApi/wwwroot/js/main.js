@@ -2561,6 +2561,53 @@
             document.getElementById('settingsModal').classList.remove('active');
         }
         
+        function showResetConfirmation() {
+            document.getElementById('resetConfirmationModal').classList.add('active');
+        }
+        
+        function closeResetConfirmation() {
+            document.getElementById('resetConfirmationModal').classList.remove('active');
+        }
+        
+        async function confirmReset() {
+            try {
+                closeResetConfirmation();
+                
+                // Show a loading message
+                showMessage('Resetting database... This may take a moment.', 'info');
+                
+                const response = await fetch(apiUrl('/api/settings/reset'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    }
+                });
+                
+                if (handleAuthError(response)) return;
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('Database reset completed successfully! Reloading page...', 'success');
+                    
+                    // Reload the page after a short delay to see the success message
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
+                } else {
+                    showMessage(result.error || 'Failed to reset database', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to reset database: ' + error.message, 'error');
+            }
+        }
+        
         async function openLogsModal() {
             document.getElementById('logsModal').classList.add('active');
             await loadLogs();

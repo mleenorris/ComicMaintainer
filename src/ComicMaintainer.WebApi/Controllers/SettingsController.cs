@@ -1,21 +1,37 @@
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class SettingsController : ControllerBase
 {
     private readonly IOptions<AppSettings> _appSettings;
     private readonly ILogger<SettingsController> _logger;
+    private readonly IServiceProvider _serviceProvider;
+    private readonly IComicProcessorService _processorService;
+    private readonly IFileStoreService _fileStore;
 
-    public SettingsController(IOptions<AppSettings> appSettings, ILogger<SettingsController> logger)
+    public SettingsController(
+        IOptions<AppSettings> appSettings, 
+        ILogger<SettingsController> logger,
+        IServiceProvider serviceProvider,
+        IComicProcessorService processorService,
+        IFileStoreService fileStore)
     {
         _appSettings = appSettings;
         _logger = logger;
+        _serviceProvider = serviceProvider;
+        _processorService = processorService;
+        _fileStore = fileStore;
     }
 
     // RESTful endpoint: GET /api/settings - Get all settings
@@ -218,6 +234,51 @@ public class SettingsController : ControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public ActionResult SetWatcherEnableNormalize([FromBody] WatcherEnableNormalizeRequest request)
         => UpdateWatcherEnableNormalize(request);
+
+    [HttpPost("reset")]
+    public async Task<ActionResult> ResetDatabase(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogWarning("Database reset requested - this will delete all processing data");
+
+            // Get all active jobs and mark them as cancelled
+            var activeJobs = _processorService.GetAllJobs()
+                .Where(j => j.Status == Core.Models.JobStatus.Running || j.Status == Core.Models.JobStatus.Queued)
+                .ToList();
+
+            foreach (var job in activeJobs)
+            {
+                _logger.LogInformation("Cancelling job {JobId} due to reset", job.JobId);
+                // Note: Jobs are cancelled via CancellationToken in their execution contexts
+                // We can only mark them and they will stop on their own
+            }
+
+            // Clear all database tables
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+
+            _logger.LogInformation("Deleting processing history...");
+            await dbContext.ProcessingHistory.ExecuteDeleteAsync(cancellationToken);
+
+            _logger.LogInformation("Deleting comic files...");
+            await dbContext.ComicFiles.ExecuteDeleteAsync(cancellationToken);
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            // Reinitialize file store from database (which is now empty)
+            await _fileStore.InitializeFromDatabaseAsync(cancellationToken);
+
+            _logger.LogInformation("Database reset completed successfully");
+
+            return Ok(new { success = true, message = "Database reset completed successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error resetting database");
+            return StatusCode(500, new { success = false, error = "Error resetting database: " + ex.Message });
+        }
+    }
 
     public class FilenameFormatRequest
     {

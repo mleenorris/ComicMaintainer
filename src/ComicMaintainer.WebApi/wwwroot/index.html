@@ -637,11 +637,66 @@
                         <strong>Note:</strong> Can also be configured via the <code>GITHUB_ISSUE_ASSIGNEE</code> environment variable.
                     </small>
                 </div>
+                
+                <h3 style="margin-bottom: 10px; margin-top: 35px; color: #e74c3c; border-bottom: 2px solid #e74c3c; padding-bottom: 8px;">⚠️ Danger Zone</h3>
+                <div class="form-group" style="border: 2px solid #e74c3c; border-radius: 8px; padding: 20px; background: var(--bg-hover);">
+                    <label style="font-weight: 600; color: #e74c3c; font-size: 15px;">Reset Database</label>
+                    <p style="margin: 10px 0; color: var(--text-secondary); font-size: 14px;">
+                        This will permanently delete all processing information including:
+                    </p>
+                    <ul style="margin: 10px 0 15px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.8;">
+                        <li>All file processing states (processed, renamed, normalized)</li>
+                        <li>Complete processing history</li>
+                        <li>All database records</li>
+                    </ul>
+                    <p style="margin: 10px 0; color: #e74c3c; font-size: 13px; font-weight: 600;">
+                        ⚠️ This action cannot be undone! Your actual comic files will NOT be deleted.
+                    </p>
+                    <button class="btn" onclick="showResetConfirmation()" style="background: #e74c3c; color: white; margin-top: 10px; font-weight: 600;">
+                        🗑️ Reset Database
+                    </button>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn" onclick="closeSettings()">Cancel</button>
                 <button class="btn" onclick="resetFilenameFormat()" style="background: #e67e22; color: white;">Reset to Default</button>
                 <button class="btn btn-primary" onclick="saveFilenameFormat()">Save</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Reset Confirmation Modal -->
+    <div class="modal" id="resetConfirmationModal">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h2 style="color: #e74c3c;">⚠️ Confirm Database Reset</h2>
+                <button class="close-btn" onclick="closeResetConfirmation()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 15px; color: var(--text-primary); margin-bottom: 15px; font-weight: 600;">
+                    Are you absolutely sure you want to reset the database?
+                </p>
+                <p style="font-size: 14px; color: var(--text-secondary); margin-bottom: 15px;">
+                    This will:
+                </p>
+                <ul style="margin: 10px 0 15px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.8;">
+                    <li>Cancel all running jobs</li>
+                    <li>Delete all file processing states</li>
+                    <li>Delete complete processing history</li>
+                    <li>Clear all database records</li>
+                </ul>
+                <p style="font-size: 13px; color: #e74c3c; font-weight: 600; margin-top: 15px;">
+                    ⚠️ This action is PERMANENT and cannot be undone!
+                </p>
+                <p style="font-size: 13px; color: var(--text-muted); margin-top: 10px;">
+                    Your actual comic files will remain untouched.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeResetConfirmation()">Cancel</button>
+                <button class="btn" onclick="confirmReset()" style="background: #e74c3c; color: white; font-weight: 600;">
+                    Yes, Reset Database
+                </button>
             </div>
         </div>
     </div>

@@ -730,6 +730,7 @@ public class ComicProcessorService : IComicProcessorService
 
             var allFiles = await _fileStore.GetFilteredFilesAsync(null, cancellationToken);
             var fileInfo = new FileInfo(filePath);
+            var generatedFileName = GenerateFileName(metadata, filePath);
             
             // Check for files with same series/issue but different path
             foreach (var file in allFiles)
@@ -737,12 +738,29 @@ public class ComicProcessorService : IComicProcessorService
                 if (file.FilePath == filePath)
                     continue;
 
+                // Check 1: Compare metadata if available
                 if (file.Metadata?.Series == metadata.Series && 
                     file.Metadata?.Issue == metadata.Issue &&
                     Math.Abs(file.FileSize - fileInfo.Length) < 1024 * 10) // Within 10KB
                 {
-                    _logger.LogInformation("Found duplicate: {File1} matches {File2}", filePath, file.FilePath);
+                    _logger.LogInformation("Found duplicate by metadata: {File1} matches {File2}", filePath, file.FilePath);
                     return true;
+                }
+                
+                // Check 2: Compare generated filenames (catches duplicates even if metadata not yet in store)
+                if (File.Exists(file.FilePath))
+                {
+                    var existingMetadata = await GetMetadataAsync(file.FilePath, cancellationToken);
+                    if (existingMetadata != null && !string.IsNullOrEmpty(existingMetadata.Series))
+                    {
+                        var existingGeneratedFileName = GenerateFileName(existingMetadata, file.FilePath);
+                        if (generatedFileName == existingGeneratedFileName &&
+                            Math.Abs(file.FileSize - fileInfo.Length) < 1024 * 10) // Within 10KB
+                        {
+                            _logger.LogInformation("Found duplicate by generated filename: {File1} matches {File2}", filePath, file.FilePath);
+                            return true;
+                        }
+                    }
                 }
             }
 

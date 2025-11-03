@@ -63,6 +63,20 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.Action).IsRequired().HasMaxLength(100);
             entity.HasIndex(e => e.Timestamp);
             entity.HasIndex(e => e.Success);
+            
+            // Configure before/after fields
+            entity.Property(e => e.BeforeFilename).HasMaxLength(512);
+            entity.Property(e => e.AfterFilename).HasMaxLength(512);
+            entity.Property(e => e.BeforeTitle).HasMaxLength(512);
+            entity.Property(e => e.AfterTitle).HasMaxLength(512);
+            entity.Property(e => e.BeforeSeries).HasMaxLength(512);
+            entity.Property(e => e.AfterSeries).HasMaxLength(512);
+            entity.Property(e => e.BeforeIssue).HasMaxLength(50);
+            entity.Property(e => e.AfterIssue).HasMaxLength(50);
+            entity.Property(e => e.BeforePublisher).HasMaxLength(256);
+            entity.Property(e => e.AfterPublisher).HasMaxLength(256);
+            entity.Property(e => e.BeforeVolume).HasMaxLength(50);
+            entity.Property(e => e.AfterVolume).HasMaxLength(50);
         });
     }
 }
@@ -99,4 +113,20 @@ public class ProcessingHistoryEntity
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
     public bool Success { get; set; }
     public string? ErrorMessage { get; set; }
+    
+    // Before/After tracking for changes
+    public string? BeforeFilename { get; set; }
+    public string? AfterFilename { get; set; }
+    public string? BeforeTitle { get; set; }
+    public string? AfterTitle { get; set; }
+    public string? BeforeSeries { get; set; }
+    public string? AfterSeries { get; set; }
+    public string? BeforeIssue { get; set; }
+    public string? AfterIssue { get; set; }
+    public string? BeforePublisher { get; set; }
+    public string? AfterPublisher { get; set; }
+    public int? BeforeYear { get; set; }
+    public int? AfterYear { get; set; }
+    public string? BeforeVolume { get; set; }
+    public string? AfterVolume { get; set; }
 }

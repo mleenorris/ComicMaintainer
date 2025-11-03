@@ -60,7 +60,7 @@ public class FilesController : ControllerBase
         try
         {
             _logger.LogDebug("GetFiles: Request received - Filter: {Filter}, Search: {Search}, Page: {Page}, PerPage: {PerPage}, Sort: {Sort}, Direction: {Direction}", 
-                filter, search, page, per_page, sort, direction);
+                LoggingHelper.SanitizeForLog(filter), LoggingHelper.SanitizeForLog(search), page, per_page, LoggingHelper.SanitizeForLog(sort), LoggingHelper.SanitizeForLog(direction));
             
             // Map filter values from frontend format
             var mappedFilter = filter switch
@@ -73,7 +73,7 @@ public class FilesController : ControllerBase
                 _ => null
             };
 
-            _logger.LogDebug("GetFiles: Mapped filter from '{OriginalFilter}' to '{MappedFilter}'", filter, mappedFilter);
+            _logger.LogDebug("GetFiles: Mapped filter from '{OriginalFilter}' to '{MappedFilter}'", LoggingHelper.SanitizeForLog(filter), LoggingHelper.SanitizeForLog(mappedFilter));
 
             var allFiles = await _fileStore.GetFilteredFilesAsync(mappedFilter);
             _logger.LogDebug("GetFiles: Retrieved {FileCount} files after applying filter '{MappedFilter}'", allFiles.Count(), mappedFilter);

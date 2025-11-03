@@ -610,12 +610,12 @@ public class ComicProcessorService : IComicProcessorService
         }
     }
 
-    public Task<bool> UpdateMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default)
+    public async Task<bool> UpdateMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default)
     {
         try
         {
             if (!File.Exists(filePath) || !IsComicArchive(filePath))
-                return Task.FromResult(false);
+                return false;
 
             _logger.LogInformation("Updating metadata for: {FilePath}", filePath);
 
@@ -663,14 +663,14 @@ public class ComicProcessorService : IComicProcessorService
                 }
                 
                 // Give a brief moment for any file handles to be fully released
-                System.Threading.Thread.Sleep(100);
+                await Task.Delay(100, cancellationToken);
                 
                 // Replace original file with updated one using retry logic
                 // to handle transient file locks from file system watchers or antivirus
-                ReplaceFileWithRetry(tempFile, filePath);
+                await ReplaceFileWithRetryAsync(tempFile, filePath, cancellationToken);
                 
                 _logger.LogInformation("Successfully updated metadata for: {FilePath}", filePath);
-                return Task.FromResult(true);
+                return true;
             }
             finally
             {
@@ -691,16 +691,21 @@ public class ComicProcessorService : IComicProcessorService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating metadata for {FilePath}", filePath);
-            return Task.FromResult(false);
+            return false;
         }
     }
 
-    private void ReplaceFileWithRetry(string tempFile, string targetFile, int maxRetries = 5)
+    /// <summary>
+    /// Maximum number of retry attempts for file replacement operations
+    /// </summary>
+    private const int MaxFileReplaceRetries = 5;
+
+    private async Task ReplaceFileWithRetryAsync(string tempFile, string targetFile, CancellationToken cancellationToken)
     {
         var backupPath = $"{targetFile}.backup";
         Exception? lastException = null;
         
-        for (int attempt = 0; attempt < maxRetries; attempt++)
+        for (int attempt = 0; attempt < MaxFileReplaceRetries; attempt++)
         {
             try
             {
@@ -715,14 +720,14 @@ public class ComicProcessorService : IComicProcessorService
                 
                 return; // Success
             }
-            catch (IOException ex) when (attempt < maxRetries - 1)
+            catch (IOException ex) when (attempt < MaxFileReplaceRetries - 1)
             {
                 lastException = ex;
                 _logger.LogWarning(ex, "File replace attempt {Attempt} failed for {File}, retrying...", attempt + 1, targetFile);
                 
                 // Exponential backoff: 100ms, 200ms, 400ms, 800ms
                 var delayMs = 100 * (int)Math.Pow(2, attempt);
-                System.Threading.Thread.Sleep(delayMs);
+                await Task.Delay(delayMs, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -734,7 +739,7 @@ public class ComicProcessorService : IComicProcessorService
                     try
                     {
                         // Wait a moment before attempting restore
-                        System.Threading.Thread.Sleep(200);
+                        await Task.Delay(200, cancellationToken);
                         
                         // Use Move instead of Copy for restore as it's more reliable
                         if (File.Exists(targetFile))
@@ -757,7 +762,7 @@ public class ComicProcessorService : IComicProcessorService
         // If we exhausted all retries, throw the last exception
         if (lastException != null)
         {
-            _logger.LogError(lastException, "Failed to replace file after {MaxRetries} attempts: {File}", maxRetries, targetFile);
+            _logger.LogError(lastException, "Failed to replace file after {MaxRetries} attempts: {File}", MaxFileReplaceRetries, targetFile);
             throw lastException;
         }
     }

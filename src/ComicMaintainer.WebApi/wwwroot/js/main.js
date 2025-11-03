@@ -2791,8 +2791,21 @@
             document.getElementById('progressDetails').innerHTML = '';
             document.getElementById('progressCloseBtn').style.display = 'none';
             document.getElementById('progressCancelBtn').style.display = 'inline-block';  // Show cancel button
-            modal.classList.add('active');
-            indicator.style.display = 'none';
+            
+            // Check if the modal was previously minimized
+            const wasMinimized = localStorage.getItem('progressModalMinimized') === 'true';
+            
+            if (wasMinimized) {
+                // Show the minimized indicator instead of the full modal
+                modal.classList.remove('active');
+                indicator.style.display = 'flex';
+                const indicatorText = document.getElementById('progressIndicatorText');
+                indicatorText.textContent = `⏳ ${title}`;
+            } else {
+                // Show the full modal
+                modal.classList.add('active');
+                indicator.style.display = 'none';
+            }
         }
         
         function updateProgress(current, total, successCount, errorCount) {
@@ -2850,6 +2863,8 @@
             document.getElementById('progressModal').classList.remove('active');
             document.getElementById('progressIndicator').style.display = 'none';
             document.getElementById('progressCancelBtn').style.display = 'none';  // Hide cancel button
+            // Clear minimized state when modal is closed
+            localStorage.removeItem('progressModalMinimized');
         }
         
         function minimizeProgressModal() {
@@ -2865,6 +2880,9 @@
             const progressText = document.getElementById('progressText').textContent;
             indicatorText.textContent = `⏳ ${progressText} (${percentText})`;
             indicator.style.display = 'flex';
+            
+            // Save minimized state to localStorage
+            localStorage.setItem('progressModalMinimized', 'true');
         }
         
         function restoreProgressModal() {
@@ -2876,6 +2894,9 @@
             
             // Hide the indicator
             indicator.style.display = 'none';
+            
+            // Clear minimized state when modal is restored
+            localStorage.removeItem('progressModalMinimized');
         }
         
         async function loadLogs() {

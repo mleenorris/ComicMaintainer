@@ -423,6 +423,65 @@ public class ComicProcessorServiceTests : IDisposable
             Times.AtLeastOnce);
     }
 
+    [Fact]
+    public async Task UpdateMetadataAsync_WithFileHandleReleased_SucceedsAfterDelay()
+    {
+        // Arrange
+        var filePath = CreateTestComicArchive("Test Series", "1");
+        var newMetadata = new ComicMetadata
+        {
+            Series = "Updated Series",
+            Issue = "1",
+            Title = "Updated Title",
+            Year = 2024
+        };
+
+        // Act
+        var result = await _service.UpdateMetadataAsync(filePath, newMetadata);
+
+        // Assert
+        Assert.True(result);
+        
+        // Give a moment for file handles to be fully released
+        await Task.Delay(200);
+        
+        // Verify the file is accessible and metadata was updated
+        var updatedMetadata = await _service.GetMetadataAsync(filePath);
+        Assert.NotNull(updatedMetadata);
+        Assert.Equal("Updated Series", updatedMetadata.Series);
+        Assert.Equal("1", updatedMetadata.Issue);
+    }
+
+    [Fact]
+    public async Task UpdateMetadataAsync_MultipleUpdatesInSequence_AllSucceed()
+    {
+        // Arrange
+        var filePath = CreateTestComicArchive("Original", "1");
+        
+        // Act & Assert - Multiple updates in sequence should all succeed
+        for (int i = 1; i <= 3; i++)
+        {
+            var metadata = new ComicMetadata
+            {
+                Series = $"Series {i}",
+                Issue = "1",
+                Title = $"Title {i}",
+                Year = 2024
+            };
+            
+            var result = await _service.UpdateMetadataAsync(filePath, metadata);
+            Assert.True(result, $"Update {i} should succeed");
+            
+            // Brief delay between updates
+            await Task.Delay(50);
+            
+            // Verify metadata was updated
+            var updatedMetadata = await _service.GetMetadataAsync(filePath);
+            Assert.NotNull(updatedMetadata);
+            Assert.Equal($"Series {i}", updatedMetadata.Series);
+        }
+    }
+
     public void Dispose()
     {
         // Clean up test directory

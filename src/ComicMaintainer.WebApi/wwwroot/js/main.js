@@ -976,10 +976,12 @@
                             <input type="checkbox" 
                                    ${isSelected ? 'checked' : ''} 
                                    onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
-                            <div class="grid-spacer"></div>
+                            <div class="status-badge" title="${processedTitle}">
+                                <span>${processedBadge}</span>${duplicateBadge ? ` <span title="${duplicateTitle}">${duplicateBadge}</span>` : ''}
+                            </div>
                             <div>
                                 <div class="file-name" title="${escapeHtml(file.name)}">
-                                    <span title="${processedTitle}">${processedBadge}</span>${duplicateBadge ? ` <span title="${duplicateTitle}">${duplicateBadge}</span>` : ''} ${filenameHtml}
+                                    ${filenameHtml}
                                 </div>
                                 ${!dir ? `<div class="file-path">${escapeHtml(file.relative_path)}</div>` : ''}
                             </div>

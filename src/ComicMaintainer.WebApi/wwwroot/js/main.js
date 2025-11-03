@@ -2318,24 +2318,42 @@
                 return;
             }
             
-            showMessage('Processing file...', 'info');
+            showProgressModal('Starting processing...');
             
             try {
-                const encodedPath = encodeFilePathForUrl(filepath);
-                const response = await fetch(apiUrl(`/api/files/${encodedPath}/process`), {
+                console.log('[SINGLE FILE] Starting process file request...');
+                // Start the job using the process-selected endpoint with a single file
+                const response = await fetch(apiUrl('/api/jobs/process-selected'), {
                     method: 'POST',
-                    headers: getAuthHeaders()
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ Files: [filepath] })
                 });
                 
-                if (handleAuthError(response)) return;
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    console.error(`[SINGLE FILE] Failed to start processing file (HTTP ${response.status})`);
+                    throw new Error('Failed to start processing job');
                 }
                 
-                showMessage('File processed successfully!', 'success');
-                await loadFiles(currentPage, true);
+                const data = await response.json();
+                const jobId = data.job_id;
+                
+                console.log(`[SINGLE FILE] Created job ${jobId} for file: ${filepath}`);
+                showMessage(`Started processing file in background`, 'info');
+                
+                // Track job status
+                await trackJobStatus(jobId, 'Processing File...');
+                
             } catch (error) {
-                showMessage('Failed to process file: ' + error.message, 'error');
+                console.error('[SINGLE FILE] Error starting process file:', error);
+                showMessage('Failed to start processing: ' + error.message, 'error');
+                closeProgressModal();
             }
         }
         
@@ -2344,24 +2362,43 @@
                 return;
             }
             
-            showMessage('Renaming file...', 'info');
+            showProgressModal('Starting rename...');
             
             try {
+                console.log('[SINGLE FILE] Starting rename file request...');
+                // Start the rename job
                 const encodedPath = encodeFilePathForUrl(filepath);
                 const response = await fetch(apiUrl(`/api/files/${encodedPath}/rename`), {
                     method: 'POST',
                     headers: getAuthHeaders()
                 });
                 
-                if (handleAuthError(response)) return;
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    console.error(`[SINGLE FILE] Failed to start renaming file (HTTP ${response.status})`);
+                    throw new Error('Failed to start renaming job');
                 }
                 
-                showMessage('File renamed successfully!', 'success');
-                await loadFiles(currentPage, true);
+                const data = await response.json();
+                const jobId = data.jobId;
+                
+                if (!jobId) {
+                    throw new Error('No job ID returned');
+                }
+                
+                console.log(`[SINGLE FILE] Created job ${jobId} for file: ${filepath}`);
+                showMessage(`Started renaming file in background`, 'info');
+                
+                // Track job status
+                await trackJobStatus(jobId, 'Renaming File...');
+                
             } catch (error) {
-                showMessage('Failed to rename file: ' + error.message, 'error');
+                console.error('[SINGLE FILE] Error starting rename file:', error);
+                showMessage('Failed to start renaming: ' + error.message, 'error');
+                closeProgressModal();
             }
         }
         
@@ -2370,9 +2407,11 @@
                 return;
             }
             
-            showMessage('Normalizing metadata...', 'info');
+            showProgressModal('Starting normalize...');
             
             try {
+                console.log('[SINGLE FILE] Starting normalize file request...');
+                // Start the normalize job
                 const response = await fetch(apiUrl('/api/jobs/normalize-selected'), {
                     method: 'POST',
                     headers: {
@@ -2382,20 +2421,32 @@
                     body: JSON.stringify({ Files: [filepath] })
                 });
                 
-                if (handleAuthError(response)) return;
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
                 if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                    console.error(`[SINGLE FILE] Failed to start normalizing file (HTTP ${response.status})`);
+                    throw new Error('Failed to start normalizing job');
                 }
                 
                 const result = await response.json();
-                if (result.job_id) {
-                    showMessage('Metadata normalization started!', 'success');
-                    await loadFiles(currentPage, true);
-                } else {
+                const jobId = result.job_id;
+                
+                if (!jobId) {
                     throw new Error('No job ID returned');
                 }
+                
+                console.log(`[SINGLE FILE] Created job ${jobId} for file: ${filepath}`);
+                showMessage(`Started normalizing file in background`, 'info');
+                
+                // Track job status
+                await trackJobStatus(jobId, 'Normalizing File...');
+                
             } catch (error) {
-                showMessage('Failed to normalize metadata: ' + error.message, 'error');
+                console.error('[SINGLE FILE] Error starting normalize file:', error);
+                showMessage('Failed to start normalizing: ' + error.message, 'error');
+                closeProgressModal();
             }
         }
         

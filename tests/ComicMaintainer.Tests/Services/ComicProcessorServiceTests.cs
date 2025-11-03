@@ -74,7 +74,9 @@ public class ComicProcessorServiceTests : IDisposable
     {
         // Arrange
         var filePath = CreateTestComicArchive("Test Series", "1");
-        _mockFileStore.Setup(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
+        _mockFileStore.Setup(f => f.MarkFileRenamedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _mockFileStore.Setup(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ComicFile>());
@@ -84,7 +86,9 @@ public class ComicProcessorServiceTests : IDisposable
 
         // Assert
         Assert.True(result);
-        _mockFileStore.Verify(f => f.MarkFileProcessedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
+        // Verify that MarkFileRenamedAsync and MarkFileNormalizedAsync were called (file is processed via these methods)
+        _mockFileStore.Verify(f => f.MarkFileRenamedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+        _mockFileStore.Verify(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

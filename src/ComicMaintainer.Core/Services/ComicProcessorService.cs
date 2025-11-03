@@ -222,8 +222,8 @@ public class ComicProcessorService : IComicProcessorService
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
 
-        // Process files asynchronously - use Task.Run for proper async execution
-        _ = Task.Run(async () =>
+        // Process files asynchronously using LongRunning for potentially long batch operations
+        _ = Task.Factory.StartNew(async () =>
         {
             try
             {
@@ -289,7 +289,7 @@ public class ComicProcessorService : IComicProcessorService
                 _jobCancellationTokens.TryRemove(jobId, out _);
                 jobCts.Dispose();
             }
-        });
+        }, jobCts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         return Task.FromResult(jobId);
     }

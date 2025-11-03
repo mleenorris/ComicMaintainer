@@ -143,16 +143,27 @@ public class ComicProcessorService : IComicProcessorService
             // Normalize metadata (update ComicInfo.xml) if enabled
             if (_settings.WatcherEnableNormalize && metadata != null)
             {
-                normalizeSuccess = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
-                await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
-                if (normalizeSuccess)
+                // Check if metadata is already normalized (has ComicInfo.xml with valid data)
+                if (IsMetadataNormalized(metadata))
                 {
-                    await LogHistoryAsync(filePath, "Normalize", true, null, cancellationToken);
+                    _logger.LogDebug("File already has normalized metadata: {FilePath}", filePath);
+                    await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
+                    await LogHistoryAsync(filePath, "Normalize", true, "File already normalized", cancellationToken);
+                    normalizeSuccess = true;
                 }
                 else
                 {
-                    _logger.LogWarning("Failed to normalize metadata for: {FilePath}", filePath);
-                    await LogHistoryAsync(filePath, "Normalize", false, "Failed to update metadata", cancellationToken);
+                    normalizeSuccess = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
+                    await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
+                    if (normalizeSuccess)
+                    {
+                        await LogHistoryAsync(filePath, "Normalize", true, null, cancellationToken);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Failed to normalize metadata for: {FilePath}", filePath);
+                        await LogHistoryAsync(filePath, "Normalize", false, "Failed to update metadata", cancellationToken);
+                    }
                 }
             }
             else if (!_settings.WatcherEnableNormalize)
@@ -513,6 +524,16 @@ public class ComicProcessorService : IComicProcessorService
                 await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
                 await LogHistoryAsync(filePath, "Normalize", false, "No metadata found", cancellationToken);
                 return false;
+            }
+
+            // Check if metadata is already normalized (has ComicInfo.xml with valid data)
+            // If we successfully read metadata, it means ComicInfo.xml exists and is parseable
+            if (IsMetadataNormalized(metadata))
+            {
+                _logger.LogInformation("File already has normalized metadata: {FilePath}", filePath);
+                await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
+                await LogHistoryAsync(filePath, "Normalize", true, "File already normalized", cancellationToken);
+                return true;
             }
 
             // Update metadata (normalize it by re-writing ComicInfo.xml)
@@ -958,6 +979,24 @@ public class ComicProcessorService : IComicProcessorService
         {
             _logger.LogError(ex, "Error moving duplicate file");
         }
+    }
+
+    /// <summary>
+    /// Helper method to check if metadata is already normalized.
+    /// Verifies that the file has ComicInfo.xml with minimum required fields to identify the comic.
+    /// A file is considered normalized if it has either a Series name OR both Title and Issue number.
+    /// This avoids unnecessary re-writing of metadata when the file already has valid comic information.
+    /// </summary>
+    /// <param name="metadata">The metadata to check</param>
+    /// <returns>True if the metadata meets minimum normalization requirements, false otherwise</returns>
+    private bool IsMetadataNormalized(ComicMetadata metadata)
+    {
+        // Metadata is considered normalized if it has at least Series OR (Title AND Issue)
+        // This ensures we have enough information to identify the comic
+        var hasSeries = !string.IsNullOrEmpty(metadata.Series);
+        var hasTitleAndIssue = !string.IsNullOrEmpty(metadata.Title) && !string.IsNullOrEmpty(metadata.Issue);
+        
+        return hasSeries || hasTitleAndIssue;
     }
 
     /// <summary>

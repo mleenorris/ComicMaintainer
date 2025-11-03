@@ -379,26 +379,16 @@ public class FileStoreService : IFileStoreService
 
     public async Task MarkFileRenamedAsync(string filePath, bool renamed, CancellationToken cancellationToken = default)
     {
-        bool isProcessed = false;
+        // Update in-memory file if it exists
         if (_files.TryGetValue(filePath, out var file))
         {
             file.IsRenamed = renamed;
             // Update IsProcessed - file is processed if either renamed OR normalized
             file.IsProcessed = file.IsRenamed || file.IsNormalized;
-            isProcessed = file.IsProcessed;
         }
 
-        // Update the processed files dictionary
-        if (isProcessed)
-        {
-            _processedFiles.TryAdd(filePath, true);
-        }
-        else
-        {
-            _processedFiles.TryRemove(filePath, out _);
-        }
-
-        // Persist to database
+        // Persist to database and get the final IsProcessed state
+        bool finalIsProcessed = false;
         try
         {
             using var scope = _serviceProvider.CreateScope();
@@ -412,6 +402,7 @@ public class FileStoreService : IFileStoreService
                 entity.IsRenamed = renamed;
                 // Update IsProcessed - file is processed if either renamed OR normalized
                 entity.IsProcessed = entity.IsRenamed || entity.IsNormalized;
+                finalIsProcessed = entity.IsProcessed;
                 entity.UpdatedAt = DateTime.UtcNow;
                 await dbContext.SaveChangesAsync(cancellationToken);
                 _logger.LogDebug("Updated renamed status for {FilePath} to {Status}", SanitizeForLogging(filePath), renamed);
@@ -426,6 +417,7 @@ public class FileStoreService : IFileStoreService
                         entity = CreateFileEntity(filePath);
                         entity.IsRenamed = renamed;
                         entity.IsProcessed = renamed || entity.IsNormalized; // Processed if either renamed OR normalized
+                        finalIsProcessed = entity.IsProcessed;
                         dbContext.ComicFiles.Add(entity);
                         await dbContext.SaveChangesAsync(cancellationToken);
                         _logger.LogDebug("Created file entity and set renamed status for {FilePath} to {Status}", SanitizeForLogging(filePath), renamed);
@@ -440,6 +432,7 @@ public class FileStoreService : IFileStoreService
                         {
                             entity.IsRenamed = renamed;
                             entity.IsProcessed = entity.IsRenamed || entity.IsNormalized;
+                            finalIsProcessed = entity.IsProcessed;
                             entity.UpdatedAt = DateTime.UtcNow;
                             await dbContext.SaveChangesAsync(cancellationToken);
                             _logger.LogDebug("Updated renamed status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), renamed);
@@ -456,21 +449,9 @@ public class FileStoreService : IFileStoreService
         {
             _logger.LogError(ex, "Error updating renamed status in database for {FilePath}", SanitizeForLogging(filePath));
         }
-    }
 
-    public async Task MarkFileNormalizedAsync(string filePath, bool normalized, CancellationToken cancellationToken = default)
-    {
-        bool isProcessed = false;
-        if (_files.TryGetValue(filePath, out var file))
-        {
-            file.IsNormalized = normalized;
-            // Update IsProcessed - file is processed if either renamed OR normalized
-            file.IsProcessed = file.IsRenamed || file.IsNormalized;
-            isProcessed = file.IsProcessed;
-        }
-
-        // Update the processed files dictionary
-        if (isProcessed)
+        // Update the processed files dictionary based on the final state
+        if (finalIsProcessed)
         {
             _processedFiles.TryAdd(filePath, true);
         }
@@ -478,8 +459,20 @@ public class FileStoreService : IFileStoreService
         {
             _processedFiles.TryRemove(filePath, out _);
         }
+    }
 
-        // Persist to database
+    public async Task MarkFileNormalizedAsync(string filePath, bool normalized, CancellationToken cancellationToken = default)
+    {
+        // Update in-memory file if it exists
+        if (_files.TryGetValue(filePath, out var file))
+        {
+            file.IsNormalized = normalized;
+            // Update IsProcessed - file is processed if either renamed OR normalized
+            file.IsProcessed = file.IsRenamed || file.IsNormalized;
+        }
+
+        // Persist to database and get the final IsProcessed state
+        bool finalIsProcessed = false;
         try
         {
             using var scope = _serviceProvider.CreateScope();
@@ -493,6 +486,7 @@ public class FileStoreService : IFileStoreService
                 entity.IsNormalized = normalized;
                 // Update IsProcessed - file is processed if either renamed OR normalized
                 entity.IsProcessed = entity.IsRenamed || entity.IsNormalized;
+                finalIsProcessed = entity.IsProcessed;
                 entity.UpdatedAt = DateTime.UtcNow;
                 await dbContext.SaveChangesAsync(cancellationToken);
                 _logger.LogDebug("Updated normalized status for {FilePath} to {Status}", SanitizeForLogging(filePath), normalized);
@@ -507,6 +501,7 @@ public class FileStoreService : IFileStoreService
                         entity = CreateFileEntity(filePath);
                         entity.IsNormalized = normalized;
                         entity.IsProcessed = entity.IsRenamed || normalized; // Processed if either renamed OR normalized
+                        finalIsProcessed = entity.IsProcessed;
                         dbContext.ComicFiles.Add(entity);
                         await dbContext.SaveChangesAsync(cancellationToken);
                         _logger.LogDebug("Created file entity and set normalized status for {FilePath} to {Status}", SanitizeForLogging(filePath), normalized);
@@ -521,6 +516,7 @@ public class FileStoreService : IFileStoreService
                         {
                             entity.IsNormalized = normalized;
                             entity.IsProcessed = entity.IsRenamed || entity.IsNormalized;
+                            finalIsProcessed = entity.IsProcessed;
                             entity.UpdatedAt = DateTime.UtcNow;
                             await dbContext.SaveChangesAsync(cancellationToken);
                             _logger.LogDebug("Updated normalized status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), normalized);
@@ -536,6 +532,16 @@ public class FileStoreService : IFileStoreService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating normalized status in database for {FilePath}", SanitizeForLogging(filePath));
+        }
+
+        // Update the processed files dictionary based on the final state
+        if (finalIsProcessed)
+        {
+            _processedFiles.TryAdd(filePath, true);
+        }
+        else
+        {
+            _processedFiles.TryRemove(filePath, out _);
         }
     }
 

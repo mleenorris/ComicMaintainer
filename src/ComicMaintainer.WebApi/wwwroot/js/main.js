@@ -166,13 +166,14 @@
         function handleFileProcessedEvent(data) {
             console.log('SSE: File processed:', data.filename, 'Success:', data.success);
             
-            // Add to progress details if modal is active
-            if (hasActiveJob) {
+            // Add to progress details if modal is active and not already added
+            if (hasActiveJob && !processedFilesInProgress.has(data.filename)) {
                 addProgressDetail(data.filename, data.success, data.error);
+                processedFilesInProgress.add(data.filename);
             }
             
-            // Refresh file list to show updated status
-            loadFiles(currentPage, false);
+            // Don't reload file list after each file - it will be refreshed once when job completes
+            // Removing this improves performance significantly for large batch operations
         }
         
         // Handle job update events (real-time via SSE)
@@ -643,6 +644,7 @@
         let hasActiveJob = false;
         let currentJobId = null;  // Track current job ID for cancellation
         let currentJobTitle = null;  // Track current job title for progress updates
+        let processedFilesInProgress = new Set();  // Track files already added to progress details to prevent duplicates
         window.addEventListener('beforeunload', function(event) {
             // Clean up SSE connection
             cleanupEventSource();
@@ -1705,10 +1707,13 @@
                 // Populate progress details with already-processed files when resuming
                 if (status.results && Array.isArray(status.results)) {
                     for (const result of status.results) {
-                        // Only show files that have been processed (either success or error)
+                        // Only show files that have been processed (either success or error) and not already shown
                         if (result.success || result.error) {
                             const filename = result.file.split(/[/\\]/).pop(); // Extract just the filename
-                            addProgressDetail(filename, result.success, result.error);
+                            if (!processedFilesInProgress.has(filename)) {
+                                addProgressDetail(filename, result.success, result.error);
+                                processedFilesInProgress.add(filename);
+                            }
                         }
                     }
                 }
@@ -2765,6 +2770,7 @@
             document.getElementById('progressPercent').textContent = '0%';
             document.getElementById('progressDetails').innerHTML = '';
             document.getElementById('progressCloseBtn').style.display = 'none';
+            processedFilesInProgress.clear();  // Clear tracking set for new job
             document.getElementById('progressCancelBtn').style.display = 'inline-block';  // Show cancel button
             modal.classList.add('active');
             indicator.style.display = 'none';
@@ -2825,6 +2831,7 @@
             document.getElementById('progressModal').classList.remove('active');
             document.getElementById('progressIndicator').style.display = 'none';
             document.getElementById('progressCancelBtn').style.display = 'none';  // Hide cancel button
+            processedFilesInProgress.clear();  // Clear tracking set when modal is closed
         }
         
         function minimizeProgressModal() {

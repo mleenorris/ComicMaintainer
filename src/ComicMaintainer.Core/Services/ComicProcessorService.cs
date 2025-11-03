@@ -25,6 +25,7 @@ public class ComicProcessorService : IComicProcessorService
     private readonly IEventBroadcaster? _eventBroadcaster;
     private readonly IProcessingHistoryService _historyService;
     private readonly ConcurrentDictionary<Guid, ProcessingJob> _jobs = new();
+    private readonly ConcurrentDictionary<Guid, Task> _runningTasks = new();
 
     public ComicProcessorService(
         IOptions<AppSettings> settings,
@@ -218,7 +219,8 @@ public class ComicProcessorService : IComicProcessorService
         _ = BroadcastJobStatusAsync(job);
 
         // Process files asynchronously using LongRunning for potentially long batch operations
-        _ = Task.Factory.StartNew(async () =>
+        // Store task reference to ensure it runs to completion and doesn't get garbage collected
+        var backgroundTask = Task.Run(async () =>
         {
             try
             {
@@ -271,7 +273,15 @@ public class ComicProcessorService : IComicProcessorService
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
-        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+            finally
+            {
+                // Clean up task reference when done
+                _runningTasks.TryRemove(jobId, out _);
+            }
+        }, cancellationToken);
+
+        // Store the task to ensure it doesn't get garbage collected
+        _runningTasks[jobId] = backgroundTask;
 
         return Task.FromResult(jobId);
     }
@@ -296,7 +306,8 @@ public class ComicProcessorService : IComicProcessorService
         _ = BroadcastJobStatusAsync(job);
 
         // Rename files asynchronously using LongRunning for potentially long batch operations
-        _ = Task.Factory.StartNew(async () =>
+        // Store task reference to ensure it runs to completion and doesn't get garbage collected
+        var backgroundTask = Task.Run(async () =>
         {
             try
             {
@@ -349,7 +360,15 @@ public class ComicProcessorService : IComicProcessorService
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
-        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+            finally
+            {
+                // Clean up task reference when done
+                _runningTasks.TryRemove(jobId, out _);
+            }
+        }, cancellationToken);
+
+        // Store the task to ensure it doesn't get garbage collected
+        _runningTasks[jobId] = backgroundTask;
 
         return Task.FromResult(jobId);
     }
@@ -374,7 +393,8 @@ public class ComicProcessorService : IComicProcessorService
         _ = BroadcastJobStatusAsync(job);
 
         // Normalize files asynchronously using LongRunning for potentially long batch operations
-        _ = Task.Factory.StartNew(async () =>
+        // Store task reference to ensure it runs to completion and doesn't get garbage collected
+        var backgroundTask = Task.Run(async () =>
         {
             try
             {
@@ -427,7 +447,15 @@ public class ComicProcessorService : IComicProcessorService
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
-        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+            finally
+            {
+                // Clean up task reference when done
+                _runningTasks.TryRemove(jobId, out _);
+            }
+        }, cancellationToken);
+
+        // Store the task to ensure it doesn't get garbage collected
+        _runningTasks[jobId] = backgroundTask;
 
         return Task.FromResult(jobId);
     }

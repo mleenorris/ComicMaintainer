@@ -23,7 +23,9 @@ public interface IFileWatcherService
     bool IsRunning { get; }
 
     /// <summary>
-    /// Enable or disable the watcher
+    /// DEPRECATED: Enable or disable the watcher
+    /// Direct watcher control is deprecated. Use WatcherEnableRename and WatcherEnableNormalize settings instead.
     /// </summary>
+    [Obsolete("Direct watcher enable/disable is deprecated. Use WatcherEnableRename and WatcherEnableNormalize settings instead.")]
     void SetEnabled(bool enabled);
 }

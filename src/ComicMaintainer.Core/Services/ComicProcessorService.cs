@@ -971,7 +971,9 @@ public class ComicProcessorService : IComicProcessorService
             }
             
             File.Move(filePath, duplicatePath);
-            await _fileStore.MarkFileProcessedAsync(duplicatePath, true, cancellationToken);
+            // Mark as both renamed and normalized since duplicates are fully handled
+            await _fileStore.MarkFileRenamedAsync(duplicatePath, true, cancellationToken);
+            await _fileStore.MarkFileNormalizedAsync(duplicatePath, true, cancellationToken);
             
             _logger.LogInformation("Moved duplicate file to: {DuplicatePath}", duplicatePath);
         }

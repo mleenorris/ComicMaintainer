@@ -323,7 +323,11 @@ app.MapFallbackToFile("index.html");
 var appSettingsValue = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<AppSettings>>().Value;
 logger.LogInformation("Server started successfully");
 logger.LogInformation("Watched Directory: {WatchedDir}", appSettingsValue.WatchedDirectory);
-logger.LogInformation("Watcher Status: {Status}", appSettingsValue.WatcherEnabled ? "Enabled" : "Disabled");
+var watcherEnabled = appSettingsValue.WatcherEnableRename || appSettingsValue.WatcherEnableNormalize;
+logger.LogInformation("Watcher Status: {Status} (Rename: {Rename}, Normalize: {Normalize})", 
+    watcherEnabled ? "Enabled" : "Disabled",
+    appSettingsValue.WatcherEnableRename,
+    appSettingsValue.WatcherEnableNormalize);
 
 app.Run();
 

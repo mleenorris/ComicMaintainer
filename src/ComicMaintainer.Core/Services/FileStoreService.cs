@@ -16,7 +16,6 @@ namespace ComicMaintainer.Core.Services;
 public class FileStoreService : IFileStoreService
 {
     private readonly ConcurrentDictionary<string, ComicFile> _files = new();
-    private readonly ConcurrentDictionary<string, bool> _processedFiles = new();
     private readonly ConcurrentDictionary<string, bool> _duplicateFiles = new();
     private readonly AppSettings _settings;
     private readonly ILogger<FileStoreService> _logger;
@@ -74,7 +73,7 @@ public class FileStoreService : IFileStoreService
         }
     }
 
-    private ComicFileEntity CreateFileEntity(string filePath, bool? isProcessed = null, bool? isDuplicate = null)
+    private ComicFileEntity CreateFileEntity(string filePath, bool? isDuplicate = null)
     {
         var fileInfo = new FileInfo(filePath);
         return new ComicFileEntity
@@ -84,7 +83,7 @@ public class FileStoreService : IFileStoreService
             Directory = fileInfo.DirectoryName ?? string.Empty,
             FileSize = fileInfo.Length,
             LastModified = fileInfo.LastWriteTime,
-            IsProcessed = isProcessed ?? _processedFiles.ContainsKey(filePath),
+            IsProcessed = false, // Will be computed from IsRenamed && IsNormalized
             IsRenamed = false, // Initialize to false by default
             IsNormalized = false, // Initialize to false by default
             IsDuplicate = isDuplicate ?? _duplicateFiles.ContainsKey(filePath),
@@ -139,7 +138,7 @@ public class FileStoreService : IFileStoreService
             Directory = fileInfo.DirectoryName ?? string.Empty,
             FileSize = fileInfo.Length,
             LastModified = fileInfo.LastWriteTime,
-            IsProcessed = _processedFiles.ContainsKey(filePath),
+            IsProcessed = false, // Will be set from database if exists, or computed from renamed && normalized
             IsDuplicate = _duplicateFiles.ContainsKey(filePath)
         };
 
@@ -208,7 +207,6 @@ public class FileStoreService : IFileStoreService
     public async Task RemoveFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
         _files.TryRemove(filePath, out _);
-        _processedFiles.TryRemove(filePath, out _);
         _duplicateFiles.TryRemove(filePath, out _);
 
         // Remove from database
@@ -233,76 +231,17 @@ public class FileStoreService : IFileStoreService
         }
     }
 
-    public async Task MarkFileProcessedAsync(string filePath, bool processed, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// DEPRECATED: Processed status is now computed from IsRenamed && IsNormalized.
+    /// This method is kept for backward compatibility but does nothing.
+    /// Use MarkFileRenamedAsync and MarkFileNormalizedAsync instead.
+    /// </summary>
+    [Obsolete("Processed status is now computed from renamed and normalized states. Use MarkFileRenamedAsync and MarkFileNormalizedAsync instead.")]
+    public Task MarkFileProcessedAsync(string filePath, bool processed, CancellationToken cancellationToken = default)
     {
-        if (processed)
-        {
-            _processedFiles.TryAdd(filePath, true);
-        }
-        else
-        {
-            _processedFiles.TryRemove(filePath, out _);
-        }
-
-        if (_files.TryGetValue(filePath, out var file))
-        {
-            file.IsProcessed = processed;
-        }
-
-        // Persist to database
-        try
-        {
-            using var scope = _serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
-            
-            var entity = await dbContext.ComicFiles
-                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
-
-            if (entity != null)
-            {
-                entity.IsProcessed = processed;
-                entity.UpdatedAt = DateTime.UtcNow;
-                await dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogDebug("Updated processing status for {FilePath} to {Status}", SanitizeForLogging(filePath), processed);
-            }
-            else
-            {
-                // Create entity if it doesn't exist
-                if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
-                {
-                    try
-                    {
-                        entity = CreateFileEntity(filePath, isProcessed: processed);
-                        dbContext.ComicFiles.Add(entity);
-                        await dbContext.SaveChangesAsync(cancellationToken);
-                        _logger.LogDebug("Created file entity and set processing status for {FilePath} to {Status}", SanitizeForLogging(filePath), processed);
-                    }
-                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx && 
-                                                        sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
-                    {
-                        // Race condition: entity was created by another thread between our check and insert
-                        // Retry by fetching and updating the existing entity
-                        _logger.LogDebug("File entity already exists (race condition), retrying update for {FilePath}", SanitizeForLogging(filePath));
-                        entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
-                        if (entity != null)
-                        {
-                            entity.IsProcessed = processed;
-                            entity.UpdatedAt = DateTime.UtcNow;
-                            await dbContext.SaveChangesAsync(cancellationToken);
-                            _logger.LogDebug("Updated processing status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), processed);
-                        }
-                    }
-                }
-                else
-                {
-                    _logger.LogDebug("File {FilePath} not found on filesystem or outside allowed directories, skipping database creation", SanitizeForLogging(filePath));
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating processing status in database for {FilePath}", SanitizeForLogging(filePath));
-        }
+        _logger.LogWarning("MarkFileProcessedAsync is deprecated. Processed status is computed from renamed and normalized states.");
+        // No-op: processed state is now computed, not stored
+        return Task.CompletedTask;
     }
 
     public async Task MarkFileDuplicateAsync(string filePath, bool duplicate, CancellationToken cancellationToken = default)
@@ -547,6 +486,9 @@ public class FileStoreService : IFileStoreService
                 // Only add file if it still exists on filesystem
                 if (File.Exists(entity.FilePath))
                 {
+                    // Compute IsProcessed from IsRenamed && IsNormalized
+                    var isProcessed = entity.IsRenamed && entity.IsNormalized;
+                    
                     var comicFile = new ComicFile
                     {
                         FilePath = entity.FilePath,
@@ -554,7 +496,7 @@ public class FileStoreService : IFileStoreService
                         Directory = entity.Directory,
                         FileSize = entity.FileSize,
                         LastModified = entity.LastModified,
-                        IsProcessed = entity.IsProcessed,
+                        IsProcessed = isProcessed,
                         IsRenamed = entity.IsRenamed,
                         IsNormalized = entity.IsNormalized,
                         IsDuplicate = entity.IsDuplicate,
@@ -562,11 +504,6 @@ public class FileStoreService : IFileStoreService
                     };
                     
                     _files.AddOrUpdate(entity.FilePath, comicFile, (_, _) => comicFile);
-                    
-                    if (entity.IsProcessed)
-                    {
-                        _processedFiles.TryAdd(entity.FilePath, true);
-                    }
                     
                     if (entity.IsDuplicate)
                     {
@@ -584,7 +521,7 @@ public class FileStoreService : IFileStoreService
             await dbContext.SaveChangesAsync(cancellationToken);
             
             var loadedCount = _files.Count;
-            var processedCount = _processedFiles.Count;
+            var processedCount = _files.Values.Count(f => f.IsProcessed);
             var duplicateCount = _duplicateFiles.Count;
             
             _logger.LogInformation("Loaded {FileCount} files from database ({ProcessedCount} processed, {DuplicateCount} duplicates)", 
@@ -598,10 +535,12 @@ public class FileStoreService : IFileStoreService
 
     public Task<bool> IsFileProcessedAsync(string filePath, CancellationToken cancellationToken = default)
     {
-        // Check the authoritative source - the _processedFiles dictionary
-        // This dictionary is maintained by MarkFileProcessedAsync and InitializeFromDatabaseAsync
-        var isProcessed = _processedFiles.ContainsKey(filePath);
-        return Task.FromResult(isProcessed);
+        // Processed status is now computed from renamed AND normalized states
+        if (_files.TryGetValue(filePath, out var file))
+        {
+            return Task.FromResult(file.IsRenamed && file.IsNormalized);
+        }
+        return Task.FromResult(false);
     }
 
     public Task<bool> IsFileRenamedAsync(string filePath, CancellationToken cancellationToken = default)

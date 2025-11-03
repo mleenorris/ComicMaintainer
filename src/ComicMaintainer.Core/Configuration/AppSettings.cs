@@ -11,7 +11,6 @@ public class AppSettings
     public string FilenameFormat { get; set; } = "{series} - Chapter {issue}";
     public int IssueNumberPadding { get; set; } = 4;
     public int MaxWorkers { get; set; } = 4;
-    public bool WatcherEnabled { get; set; } = true;
     public int LogMaxBytes { get; set; } = 10485760; // 10MB
     public int DbCacheSizeMB { get; set; } = 64;
     public string? BasePath { get; set; }

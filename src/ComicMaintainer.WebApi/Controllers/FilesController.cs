@@ -238,45 +238,8 @@ public class FilesController : ControllerBase
         }
     }
 
-    // RESTful endpoint: PATCH /api/files/{encodedFilePath}/processed
-    [HttpPatch("{encodedFilePath}/processed")]
-    public async Task<ActionResult> UpdateProcessedStatus(string encodedFilePath, [FromBody] ProcessedStatusRequest request)
-    {
-        try
-        {
-            var filePath = DecodeBase64UrlSafe(encodedFilePath);
-            if (string.IsNullOrEmpty(filePath))
-                return BadRequest("Invalid file path");
-
-            await _fileStore.MarkFileProcessedAsync(filePath, request.Processed);
-            return Ok();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error marking file as processed");
-            return StatusCode(500, "Error marking file");
-        }
-    }
-
-    // Legacy endpoint for backward compatibility
-    [HttpPost("mark-processed")]
-    [ApiExplorerSettings(IgnoreApi = true)]
-    public async Task<ActionResult> MarkProcessed([FromQuery] string filePath, [FromBody] bool processed)
-    {
-        try
-        {
-            if (string.IsNullOrEmpty(filePath))
-                return BadRequest("File path is required");
-
-            await _fileStore.MarkFileProcessedAsync(filePath, processed);
-            return Ok();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error marking file as processed");
-            return StatusCode(500, "Error marking file");
-        }
-    }
+    // Note: Processed status is now computed from renamed && normalized states
+    // No longer accepting manual updates to processed status
 
     [HttpPost("tags")]
     public async Task<ActionResult> UpdateTags([FromBody] UpdateTagsRequest request)

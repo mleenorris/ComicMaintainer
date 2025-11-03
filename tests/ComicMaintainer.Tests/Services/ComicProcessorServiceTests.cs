@@ -575,7 +575,7 @@ public class ComicProcessorServiceTests : IDisposable
             {
                 return job;
             }
-            await Task.Delay(pollIntervalMs);
+            await Task.Delay(pollIntervalMs).ConfigureAwait(false);
         }
         
         // Return the job even if not completed (test will fail on assertion)

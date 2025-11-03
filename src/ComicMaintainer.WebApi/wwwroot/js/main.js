@@ -1548,51 +1548,38 @@
                 return;
             }
             
-            showProgressModal('Processing All Files...');
-            
-            let successCount = 0;
-            let errorCount = 0;
-            let totalFiles = 0;
+            showProgressModal('Starting processing...');
             
             try {
-                const response = await fetch(apiUrl('/api/process-all?stream=true'), {
-                    method: 'POST'
+                console.log('[BATCH] Starting process all files request...');
+                // Start the job
+                const response = await fetch(apiUrl('/api/jobs/process-all'), {
+                    method: 'POST',
+                    headers: getAuthHeaders()
                 });
                 
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
-                    
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = JSON.parse(line.substring(6));
-                            
-                            if (data.done) {
-                                totalFiles = data.results.length;
-                                completeProgress();
-                                showMessage(`Processed ${successCount} of ${totalFiles} files successfully!`, 'success');
-                                // Refresh file list
-                                await loadFiles(1, true);
-                            } else {
-                                if (data.success) {
-                                    successCount++;
-                                } else {
-                                    errorCount++;
-                                }
-                                updateProgress(data.current, data.total, successCount, errorCount);
-                                addProgressDetail(data.file, data.success, data.error);
-                            }
-                        }
-                    }
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
                 }
+                if (!response.ok) {
+                    console.error(`[BATCH] Failed to start processing all files (HTTP ${response.status})`);
+                    throw new Error('Failed to start processing job');
+                }
+                
+                const data = await response.json();
+                const jobId = data.job_id;
+                const totalItems = data.total_items;
+                
+                console.log(`[BATCH] Created job ${jobId} for ${totalItems} files`);
+                showMessage(`Started processing ${totalItems} files in background`, 'info');
+                
+                // Track job status
+                await trackJobStatus(jobId, 'Processing All Files...');
+                
             } catch (error) {
-                showMessage('Failed to process files: ' + error.message, 'error');
+                console.error('[BATCH] Error starting process all files:', error);
+                showMessage('Failed to start processing: ' + error.message, 'error');
                 closeProgressModal();
             }
         }
@@ -1908,51 +1895,38 @@
                 return;
             }
             
-            showProgressModal('Renaming All Files...');
-            
-            let successCount = 0;
-            let errorCount = 0;
-            let totalFiles = 0;
+            showProgressModal('Starting rename...');
             
             try {
-                const response = await fetch(apiUrl('/api/rename-all?stream=true'), {
-                    method: 'POST'
+                console.log('[BATCH] Starting rename all files request...');
+                // Start the job
+                const response = await fetch(apiUrl('/api/jobs/rename-all'), {
+                    method: 'POST',
+                    headers: getAuthHeaders()
                 });
                 
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
-                    
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = JSON.parse(line.substring(6));
-                            
-                            if (data.done) {
-                                totalFiles = data.results.length;
-                                completeProgress();
-                                showMessage(`Renamed ${successCount} of ${totalFiles} files successfully!`, 'success');
-                                // Refresh file list
-                                await loadFiles(1, true);
-                            } else {
-                                if (data.success) {
-                                    successCount++;
-                                } else {
-                                    errorCount++;
-                                }
-                                updateProgress(data.current, data.total, successCount, errorCount);
-                                addProgressDetail(data.file, data.success, data.error);
-                            }
-                        }
-                    }
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
                 }
+                if (!response.ok) {
+                    console.error(`[BATCH] Failed to start renaming all files (HTTP ${response.status})`);
+                    throw new Error('Failed to start renaming job');
+                }
+                
+                const data = await response.json();
+                const jobId = data.job_id;
+                const totalItems = data.total_items;
+                
+                console.log(`[BATCH] Created job ${jobId} for ${totalItems} files`);
+                showMessage(`Started renaming ${totalItems} files in background`, 'info');
+                
+                // Track job status
+                await trackJobStatus(jobId, 'Renaming All Files...');
+                
             } catch (error) {
-                showMessage('Failed to rename files: ' + error.message, 'error');
+                console.error('[BATCH] Error starting rename all files:', error);
+                showMessage('Failed to start renaming: ' + error.message, 'error');
                 closeProgressModal();
             }
         }
@@ -1962,51 +1936,38 @@
                 return;
             }
             
-            showProgressModal('Normalizing Metadata...');
-            
-            let successCount = 0;
-            let errorCount = 0;
-            let totalFiles = 0;
+            showProgressModal('Starting normalize...');
             
             try {
-                const response = await fetch(apiUrl('/api/normalize-all?stream=true'), {
-                    method: 'POST'
+                console.log('[BATCH] Starting normalize all files request...');
+                // Start the job
+                const response = await fetch(apiUrl('/api/jobs/normalize-all'), {
+                    method: 'POST',
+                    headers: getAuthHeaders()
                 });
                 
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
-                    
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = JSON.parse(line.substring(6));
-                            
-                            if (data.done) {
-                                totalFiles = data.results.length;
-                                completeProgress();
-                                showMessage(`Normalized metadata for ${successCount} of ${totalFiles} files successfully!`, 'success');
-                                // Refresh file list
-                                await loadFiles(1, true);
-                            } else {
-                                if (data.success) {
-                                    successCount++;
-                                } else {
-                                    errorCount++;
-                                }
-                                updateProgress(data.current, data.total, successCount, errorCount);
-                                addProgressDetail(data.file, data.success, data.error);
-                            }
-                        }
-                    }
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
                 }
+                if (!response.ok) {
+                    console.error(`[BATCH] Failed to start normalizing all files (HTTP ${response.status})`);
+                    throw new Error('Failed to start normalizing job');
+                }
+                
+                const data = await response.json();
+                const jobId = data.job_id;
+                const totalItems = data.total_items;
+                
+                console.log(`[BATCH] Created job ${jobId} for ${totalItems} files`);
+                showMessage(`Started normalizing ${totalItems} files in background`, 'info');
+                
+                // Track job status
+                await trackJobStatus(jobId, 'Normalizing All Files...');
+                
             } catch (error) {
-                showMessage('Failed to normalize metadata: ' + error.message, 'error');
+                console.error('[BATCH] Error starting normalize all files:', error);
+                showMessage('Failed to start normalizing: ' + error.message, 'error');
                 closeProgressModal();
             }
         }
@@ -2129,57 +2090,44 @@
                 return;
             }
             
-            showProgressModal('Processing Selected Files...');
+            showProgressModal('Starting processing...');
             
             const files = Array.from(selectedFiles);
-            let successCount = 0;
-            let errorCount = 0;
             
             try {
-                const response = await fetch(apiUrl('/api/process-selected?stream=true'), {
+                console.log('[BATCH] Starting process selected files request...');
+                // Start the job using the jobs endpoint
+                const response = await fetch(apiUrl('/api/jobs/process-selected'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
-                    body: JSON.stringify({
-                        files: files
-                    })
+                    body: JSON.stringify({ files: files })
                 });
                 
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
-                    
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = JSON.parse(line.substring(6));
-                            
-                            if (data.done) {
-                                completeProgress();
-                                showMessage(`Processed ${successCount} of ${files.length} files successfully!`, 'success');
-                                // Clear selected files and refresh file list
-                                selectedFiles.clear();
-                                await loadFiles(1, true);
-                            } else {
-                                if (data.success) {
-                                    successCount++;
-                                } else {
-                                    errorCount++;
-                                }
-                                updateProgress(data.current, data.total, successCount, errorCount);
-                                addProgressDetail(data.file, data.success, data.error);
-                            }
-                        }
-                    }
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
                 }
+                if (!response.ok) {
+                    console.error(`[BATCH] Failed to start processing selected files (HTTP ${response.status})`);
+                    throw new Error('Failed to start processing job');
+                }
+                
+                const data = await response.json();
+                const jobId = data.job_id;
+                const totalItems = data.total_items;
+                
+                console.log(`[BATCH] Created job ${jobId} for ${totalItems} selected files`);
+                showMessage(`Started processing ${totalItems} selected files in background`, 'info');
+                
+                // Track job status
+                await trackJobStatus(jobId, 'Processing Selected Files...');
+                
             } catch (error) {
-                showMessage('Failed to process files: ' + error.message, 'error');
+                console.error('[BATCH] Error starting process selected files:', error);
+                showMessage('Failed to start processing: ' + error.message, 'error');
                 closeProgressModal();
             }
         }
@@ -2194,57 +2142,44 @@
                 return;
             }
             
-            showProgressModal('Renaming Selected Files...');
+            showProgressModal('Starting rename...');
             
             const files = Array.from(selectedFiles);
-            let successCount = 0;
-            let errorCount = 0;
             
             try {
-                const response = await fetch(apiUrl('/api/rename-selected?stream=true'), {
+                console.log('[BATCH] Starting rename selected files request...');
+                // Start the job using the jobs endpoint
+                const response = await fetch(apiUrl('/api/jobs/rename-selected'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
-                    body: JSON.stringify({
-                        files: files
-                    })
+                    body: JSON.stringify({ files: files })
                 });
                 
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
-                    
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = JSON.parse(line.substring(6));
-                            
-                            if (data.done) {
-                                completeProgress();
-                                showMessage(`Renamed ${successCount} of ${files.length} files successfully!`, 'success');
-                                // Clear selected files and refresh file list
-                                selectedFiles.clear();
-                                await loadFiles(1, true);
-                            } else {
-                                if (data.success) {
-                                    successCount++;
-                                } else {
-                                    errorCount++;
-                                }
-                                updateProgress(data.current, data.total, successCount, errorCount);
-                                addProgressDetail(data.file, data.success, data.error);
-                            }
-                        }
-                    }
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
                 }
+                if (!response.ok) {
+                    console.error(`[BATCH] Failed to start renaming selected files (HTTP ${response.status})`);
+                    throw new Error('Failed to start renaming job');
+                }
+                
+                const data = await response.json();
+                const jobId = data.job_id;
+                const totalItems = data.total_items;
+                
+                console.log(`[BATCH] Created job ${jobId} for ${totalItems} selected files`);
+                showMessage(`Started renaming ${totalItems} selected files in background`, 'info');
+                
+                // Track job status
+                await trackJobStatus(jobId, 'Renaming Selected Files...');
+                
             } catch (error) {
-                showMessage('Failed to rename files: ' + error.message, 'error');
+                console.error('[BATCH] Error starting rename selected files:', error);
+                showMessage('Failed to start renaming: ' + error.message, 'error');
                 closeProgressModal();
             }
         }
@@ -2259,57 +2194,44 @@
                 return;
             }
             
-            showProgressModal('Normalizing Metadata for Selected Files...');
+            showProgressModal('Starting normalize...');
             
             const files = Array.from(selectedFiles);
-            let successCount = 0;
-            let errorCount = 0;
             
             try {
-                const response = await fetch(apiUrl('/api/normalize-selected?stream=true'), {
+                console.log('[BATCH] Starting normalize selected files request...');
+                // Start the job using the jobs endpoint
+                const response = await fetch(apiUrl('/api/jobs/normalize-selected'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
-                    body: JSON.stringify({
-                        files: files
-                    })
+                    body: JSON.stringify({ files: files })
                 });
                 
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\n');
-                    
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = JSON.parse(line.substring(6));
-                            
-                            if (data.done) {
-                                completeProgress();
-                                showMessage(`Normalized metadata for ${successCount} of ${files.length} files successfully!`, 'success');
-                                // Clear selected files and refresh file list
-                                selectedFiles.clear();
-                                await loadFiles(1, true);
-                            } else {
-                                if (data.success) {
-                                    successCount++;
-                                } else {
-                                    errorCount++;
-                                }
-                                updateProgress(data.current, data.total, successCount, errorCount);
-                                addProgressDetail(data.file, data.success, data.error);
-                            }
-                        }
-                    }
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
                 }
+                if (!response.ok) {
+                    console.error(`[BATCH] Failed to start normalizing selected files (HTTP ${response.status})`);
+                    throw new Error('Failed to start normalizing job');
+                }
+                
+                const data = await response.json();
+                const jobId = data.job_id;
+                const totalItems = data.total_items;
+                
+                console.log(`[BATCH] Created job ${jobId} for ${totalItems} selected files`);
+                showMessage(`Started normalizing ${totalItems} selected files in background`, 'info');
+                
+                // Track job status
+                await trackJobStatus(jobId, 'Normalizing Selected Files...');
+                
             } catch (error) {
-                showMessage('Failed to normalize metadata: ' + error.message, 'error');
+                console.error('[BATCH] Error starting normalize selected files:', error);
+                showMessage('Failed to start normalizing: ' + error.message, 'error');
                 closeProgressModal();
             }
         }

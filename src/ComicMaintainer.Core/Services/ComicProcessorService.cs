@@ -946,7 +946,7 @@ public class ComicProcessorService : IComicProcessorService
                 if (file.FilePath == filePath)
                     continue;
 
-                // Check 1: Compare metadata if available
+                // Check 1: Compare metadata if available in cache
                 if (file.Metadata?.Series == metadata.Series && 
                     file.Metadata?.Issue == metadata.Issue &&
                     Math.Abs(file.FileSize - fileInfo.Length) < 1024 * 10) // Within 10KB
@@ -955,8 +955,9 @@ public class ComicProcessorService : IComicProcessorService
                     return true;
                 }
                 
-                // Check 2: Compare generated filenames (catches duplicates even if metadata not yet in store)
-                if (File.Exists(file.FilePath))
+                // Check 2: Compare generated filenames (only if metadata not in cache to avoid O(n²) performance issue)
+                // This check reads metadata from disk which is slow - only do it if we don't have cached metadata
+                if (file.Metadata == null && File.Exists(file.FilePath))
                 {
                     var existingMetadata = await GetMetadataAsync(file.FilePath, cancellationToken);
                     if (existingMetadata != null && !string.IsNullOrEmpty(existingMetadata.Series))

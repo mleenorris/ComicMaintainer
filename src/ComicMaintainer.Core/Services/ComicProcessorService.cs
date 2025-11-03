@@ -93,6 +93,21 @@ public class ComicProcessorService : IComicProcessorService
                 }
             }
 
+            // Normalize metadata (update ComicInfo.xml)
+            if (metadata != null)
+            {
+                var normalizeSuccess = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
+                if (normalizeSuccess)
+                {
+                    await LogHistoryAsync(filePath, "Normalize", true, null, cancellationToken);
+                }
+                else
+                {
+                    _logger.LogWarning("Failed to normalize metadata for: {FilePath}", filePath);
+                    await LogHistoryAsync(filePath, "Normalize", false, "Failed to update metadata", cancellationToken);
+                }
+            }
+
             // Mark as processed
             await _fileStore.MarkFileProcessedAsync(filePath, true, cancellationToken);
             _logger.LogInformation("File processed successfully: {FilePath}", filePath);

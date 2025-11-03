@@ -373,12 +373,12 @@ public class JobsController : ControllerBase
         {
             _logger.LogInformation("Cancel requested for job {JobId}", jobId);
             // In the future, implement job cancellation
-            return Ok();
+            return Ok(new { success = true });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error cancelling job {JobId}", jobId);
-            return StatusCode(500, "Error cancelling job");
+            return StatusCode(500, new { success = false, error = "Error cancelling job" });
         }
     }
 

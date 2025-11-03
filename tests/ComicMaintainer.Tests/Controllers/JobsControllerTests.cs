@@ -191,7 +191,7 @@ public class JobsControllerTests
     }
 
     [Fact]
-    public void CancelJob_ReturnsOk()
+    public void CancelJob_ReturnsOkWithSuccessJson()
     {
         // Arrange
         var jobId = Guid.NewGuid();
@@ -200,7 +200,10 @@ public class JobsControllerTests
         var result = _controller.CancelJob(jobId);
 
         // Assert
-        Assert.IsType<OkResult>(result);
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+        var json = JObject.FromObject(okResult.Value);
+        Assert.True(json["success"]!.Value<bool>());
     }
 
     [Fact]

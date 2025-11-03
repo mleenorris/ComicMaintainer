@@ -1068,13 +1068,14 @@ public class ComicProcessorService : IComicProcessorService
                 return false;
 
             var allFiles = await _fileStore.GetFilteredFilesAsync(null, cancellationToken);
+            var allFilesList = allFiles.ToList();
             var fileInfo = new FileInfo(filePath);
             
-            _logger.LogDebug("IsDuplicateAsync: Checking {FileCount} files for duplicates of {FilePath}", allFiles.Count(), LoggingHelper.SanitizePathForLog(filePath));
+            _logger.LogDebug("IsDuplicateAsync: Checking {FileCount} files for duplicates of {FilePath}", allFilesList.Count, LoggingHelper.SanitizePathForLog(filePath));
             
             // Check for files with same series/issue but different path
             // Only use cached metadata to avoid O(n) disk I/O operations
-            foreach (var file in allFiles)
+            foreach (var file in allFilesList)
             {
                 if (file.FilePath == filePath)
                     continue;

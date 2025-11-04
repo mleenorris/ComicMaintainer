@@ -327,7 +327,7 @@
                     console.error('Failed to get active job:', response.status);
                     return null;
                 }
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 return data.job_id ? data : null;
             } catch (error) {
                 console.error('Error getting active job:', error);
@@ -876,7 +876,7 @@
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 
                 showMessage(`Found ${data.unmarked_count} unmarked file(s) and ${data.marked_count} marked file(s) out of ${data.total_count} total files.`, 'success');
             } catch (error) {
@@ -1379,7 +1379,7 @@
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const tags = await response.json();
+                const tags = await safeJsonParse(response);
                 
                 if (tags.error) {
                     showMessage(tags.error, 'error');
@@ -1547,7 +1547,7 @@
                     throw new Error('Failed to start processing job');
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -1588,7 +1588,7 @@
                     throw new Error('Failed to start processing job');
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -1642,7 +1642,7 @@
                     throw new Error('Failed to start processing job');
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -1673,7 +1673,7 @@
                     return;
                 }
                 
-                const status = await response.json();
+                const status = await safeJsonParse(response);
                 const processed = status.processed_items || 0;
                 const total = status.total_items || 0;
                 
@@ -1766,7 +1766,7 @@
                     throw new Error(errorData.error || `Failed to cancel job (HTTP ${response.status})`);
                 }
                 
-                const result = await response.json();
+                const result = await safeJsonParse(response);
                 
                 if (result.success) {
                     console.log(`[CANCEL] Job ${currentJobId} cancelled successfully`);
@@ -1831,7 +1831,7 @@
                     }
                 }
                 
-                const status = await response.json();
+                const status = await safeJsonParse(response);
                 console.log(`[JOB RESUME] Job ${activeJobId} status: ${status.status}, ${status.processed_items}/${status.total_items} items processed`);
                 
                 // Resume if job is still running or queued
@@ -1904,7 +1904,7 @@
                     throw new Error('Failed to start renaming job');
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -1945,7 +1945,7 @@
                     throw new Error('Failed to start normalizing job');
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -1986,7 +1986,7 @@
                     throw new Error('Failed to start processing job');
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -2027,7 +2027,7 @@
                     throw new Error('Failed to start renaming job');
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -2068,7 +2068,7 @@
                     throw new Error('Failed to start normalizing job');
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -2120,7 +2120,7 @@
                     throw new Error('Failed to start processing job');
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -2172,7 +2172,7 @@
                     throw new Error('Failed to start renaming job');
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -2224,7 +2224,7 @@
                     throw new Error('Failed to start normalizing job');
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
@@ -2269,7 +2269,7 @@
                     throw new Error('Failed to start processing job');
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const jobId = data.job_id;
                 
                 console.log(`[SINGLE FILE] Created job ${jobId} for file: ${filepath}`);
@@ -2310,7 +2310,7 @@
                     throw new Error('Failed to start renaming job');
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const jobId = data.jobId;
                 
                 if (!jobId) {
@@ -2358,7 +2358,7 @@
                     throw new Error('Failed to start normalizing job');
                 }
                 
-                const result = await response.json();
+                const result = await safeJsonParse(response);
                 const jobId = result.job_id;
                 
                 if (!jobId) {
@@ -2525,11 +2525,11 @@
                 if (handleAuthError(response)) return;
                 
                 if (!response.ok) {
-                    const errorData = await response.json();
+                    const errorData = await safeJsonParse(response);
                     throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
                 }
                 
-                const result = await response.json();
+                const result = await safeJsonParse(response);
                 
                 if (result.success) {
                     showMessage('Database reset completed successfully! Reloading page...', 'success');
@@ -2587,7 +2587,7 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 historyTotal = data.total;
                 const totalPages = Math.ceil(historyTotal / historyPerPage);
                 
@@ -2735,7 +2735,7 @@
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const aboutVersionElement = document.getElementById('aboutVersion');
                 if (aboutVersionElement && data.version) {
                     aboutVersionElement.textContent = `v${data.version}`;
@@ -2911,7 +2911,7 @@
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 
                 if (data.error) {
                     logsContent.textContent = 'Error: ' + data.error;
@@ -2959,7 +2959,7 @@
                 if (!formatResponse.ok) {
                     throw new Error(`HTTP error! status: ${formatResponse.status}`);
                 }
-                const formatResult = await formatResponse.json();
+                const formatResult = await safeJsonParse(formatResponse);
                 
                 if (!formatResult.success) {
                     showMessage(formatResult.error || 'Failed to save filename format', 'error');
@@ -2978,7 +2978,7 @@
                 if (!logResponse.ok) {
                     throw new Error(`HTTP error! status: ${logResponse.status}`);
                 }
-                const logResult = await logResponse.json();
+                const logResult = await safeJsonParse(logResponse);
                 
                 if (!logResult.success) {
                     showMessage(logResult.error || 'Failed to save log max size', 'error');
@@ -2997,7 +2997,7 @@
                 if (!paddingResponse.ok) {
                     throw new Error(`HTTP error! status: ${paddingResponse.status}`);
                 }
-                const paddingResult = await paddingResponse.json();
+                const paddingResult = await safeJsonParse(paddingResponse);
                 
                 if (!paddingResult.success) {
                     showMessage(paddingResult.error || 'Failed to save issue number padding', 'error');
@@ -3020,7 +3020,7 @@
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 
                 document.getElementById('filenameFormat').value = data.default;
                 showMessage('Reset to default format', 'info');
@@ -3264,7 +3264,7 @@
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 updateWatcherStatusDisplay(data.running, data.enabled);
             } catch (error) {
                 console.error('Error fetching initial watcher status:', error);

@@ -1,0 +1,54 @@
+using ComicMaintainer.Core.Configuration;
+
+namespace ComicMaintainer.Core.Interfaces;
+
+/// <summary>
+/// Service for persisting and managing application settings
+/// </summary>
+public interface ISettingsService
+{
+    /// <summary>
+    /// Get the current settings
+    /// </summary>
+    Task<AppSettings> GetSettingsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the log max bytes setting
+    /// </summary>
+    Task UpdateLogMaxBytesAsync(int maxBytes, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the filename format setting
+    /// </summary>
+    Task UpdateFilenameFormatAsync(string format, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the issue number padding setting
+    /// </summary>
+    Task UpdateIssueNumberPaddingAsync(int padding, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the watcher enable rename setting
+    /// </summary>
+    Task UpdateWatcherEnableRenameAsync(bool enabled, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the watcher enable normalize setting
+    /// </summary>
+    Task UpdateWatcherEnableNormalizeAsync(bool enabled, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the GitHub token setting
+    /// </summary>
+    Task UpdateGitHubTokenAsync(string? token, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the GitHub repository setting
+    /// </summary>
+    Task UpdateGitHubRepositoryAsync(string? repository, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the GitHub issue assignee setting
+    /// </summary>
+    Task UpdateGitHubIssueAssigneeAsync(string? assignee, CancellationToken cancellationToken = default);
+}

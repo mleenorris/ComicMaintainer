@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -15,6 +16,8 @@ public class SettingsControllerTests
     private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly Mock<IComicProcessorService> _processorServiceMock;
     private readonly Mock<IFileStoreService> _fileStoreMock;
+    private readonly Mock<ISettingsService> _settingsServiceMock;
+    private readonly Mock<IHostApplicationLifetime> _applicationLifetimeMock;
     private readonly SettingsController _controller;
     private readonly AppSettings _appSettings;
 
@@ -36,13 +39,17 @@ public class SettingsControllerTests
         _serviceProviderMock = new Mock<IServiceProvider>();
         _processorServiceMock = new Mock<IComicProcessorService>();
         _fileStoreMock = new Mock<IFileStoreService>();
+        _settingsServiceMock = new Mock<ISettingsService>();
+        _applicationLifetimeMock = new Mock<IHostApplicationLifetime>();
         
         _controller = new SettingsController(
             _appSettingsMock.Object, 
             _loggerMock.Object,
             _serviceProviderMock.Object,
             _processorServiceMock.Object,
-            _fileStoreMock.Object);
+            _fileStoreMock.Object,
+            _settingsServiceMock.Object,
+            _applicationLifetimeMock.Object);
     }
 
     [Fact]
@@ -58,7 +65,7 @@ public class SettingsControllerTests
     }
 
     [Fact]
-    public void SetFilenameFormat_ReturnsOkResult()
+    public async Task SetFilenameFormat_ReturnsOkResult()
     {
         // Arrange
         var request = new SettingsController.FilenameFormatRequest 
@@ -67,10 +74,11 @@ public class SettingsControllerTests
         };
 
         // Act
-        var result = _controller.SetFilenameFormat(request);
+        var result = await _controller.SetFilenameFormat(request);
 
-        // Assert - Returns OkObjectResult with message about read-only settings
+        // Assert
         Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateFilenameFormatAsync(request.Format, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -129,7 +137,7 @@ public class SettingsControllerTests
     }
 
     [Fact]
-    public void UpdateFilenameFormat_ReturnsOk()
+    public async Task UpdateFilenameFormat_ReturnsOk()
     {
         // Arrange
         var request = new SettingsController.FilenameFormatRequest 
@@ -138,37 +146,77 @@ public class SettingsControllerTests
         };
 
         // Act
-        var result = _controller.UpdateFilenameFormat(request);
+        var result = await _controller.UpdateFilenameFormat(request);
 
         // Assert
         Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateFilenameFormatAsync(request.Format, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public void UpdateIssueNumberPadding_ReturnsOk()
+    public async Task UpdateIssueNumberPadding_ReturnsOk()
     {
         // Arrange
         var request = new SettingsController.IssueNumberPaddingRequest { Padding = 3 };
 
         // Act
-        var result = _controller.UpdateIssueNumberPadding(request);
+        var result = await _controller.UpdateIssueNumberPadding(request);
 
         // Assert
-        Assert.IsType<OkResult>(result);
+        Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateIssueNumberPaddingAsync(request.Padding, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // UpdateWatcherEnabled removed - use UpdateWatcherEnableRename and UpdateWatcherEnableNormalize instead
 
     [Fact]
-    public void UpdateLogMaxBytes_ReturnsOk()
+    public async Task UpdateLogMaxBytes_ReturnsOk()
     {
         // Arrange
         var request = new SettingsController.LogMaxBytesRequest { MaxBytes = 20971520 };
 
         // Act
-        var result = _controller.UpdateLogMaxBytes(request);
+        var result = await _controller.UpdateLogMaxBytes(request);
 
         // Assert
-        Assert.IsType<OkResult>(result);
+        Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateLogMaxBytesAsync(request.MaxBytes, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public void RestartApplication_ReturnsOk()
+    {
+        // Arrange - Set up a mock user context
+        var claims = new List<System.Security.Claims.Claim>
+        {
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, "test-user-id"),
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "testuser"),
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "Admin")
+        };
+        var identity = new System.Security.Claims.ClaimsIdentity(claims, "TestAuth");
+        var claimsPrincipal = new System.Security.Claims.ClaimsPrincipal(identity);
+        
+        _controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
+        {
+            HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+            {
+                User = claimsPrincipal
+            }
+        };
+
+        // Act
+        var result = _controller.RestartApplication();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+        
+        var value = okResult.Value;
+        var successProperty = value.GetType().GetProperty("success");
+        Assert.NotNull(successProperty);
+        Assert.Equal(true, successProperty.GetValue(value));
+        
+        // Verify that StopApplication would eventually be called (we can't verify the delayed task directly)
+        // The test validates that the endpoint returns successfully without throwing
     }
 }

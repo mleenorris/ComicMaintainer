@@ -99,7 +99,9 @@ public class ComicProcessorService : IComicProcessorService
                     // File already has correct name, no rename needed
                     _logger.LogDebug("File already has correct name: {FilePath}", filePath);
                     await _fileStore.MarkFileRenamedAsync(filePath, true, cancellationToken);
-                    await LogHistoryAsync(filePath, "Rename", true, "File already correctly named", cancellationToken);
+                    var filename = Path.GetFileName(filePath);
+                    await LogHistoryWithChangesAsync(filePath, "Rename", true, "File already correctly named", 
+                        filename, filename, metadata, metadata, cancellationToken);
                     renameSuccess = true;
                 }
                 else if (File.Exists(newFilePath))
@@ -180,7 +182,9 @@ public class ComicProcessorService : IComicProcessorService
                 {
                     _logger.LogDebug("File already has normalized metadata: {FilePath}", filePath);
                     await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
-                    await LogHistoryAsync(filePath, "Normalize", true, "File already normalized", cancellationToken);
+                    var filename = Path.GetFileName(filePath);
+                    await LogHistoryWithChangesAsync(filePath, "Normalize", true, "File already normalized",
+                        filename, filename, metadata, metadata, cancellationToken);
                     normalizeSuccess = true;
                 }
                 else
@@ -614,7 +618,9 @@ public class ComicProcessorService : IComicProcessorService
                 {
                     _logger.LogInformation("RenameFileAsync: File already has correct name: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                     await _fileStore.MarkFileRenamedAsync(filePath, true, cancellationToken);
-                    await LogHistoryAsync(filePath, "Rename", true, null, cancellationToken);
+                    var filename = Path.GetFileName(filePath);
+                    await LogHistoryWithChangesAsync(filePath, "Rename", true, "File already correctly named",
+                        filename, filename, metadata, metadata, cancellationToken);
                     return true;
                 }
                 
@@ -707,7 +713,9 @@ public class ComicProcessorService : IComicProcessorService
             {
                 _logger.LogInformation("NormalizeFileAsync: File already has normalized metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
-                await LogHistoryAsync(filePath, "Normalize", true, "File already normalized", cancellationToken);
+                var filename = Path.GetFileName(filePath);
+                await LogHistoryWithChangesAsync(filePath, "Normalize", true, "File already normalized",
+                    filename, filename, metadata, metadata, cancellationToken);
                 return true;
             }
             

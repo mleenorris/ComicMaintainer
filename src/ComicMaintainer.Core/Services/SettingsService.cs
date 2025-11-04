@@ -18,8 +18,7 @@ public class SettingsService : ISettingsService
     private readonly SemaphoreSlim _lock = new(1, 1);
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        WriteIndented = true
     };
 
     public SettingsService(

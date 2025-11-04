@@ -1854,8 +1854,8 @@
                 const status = await response.json();
                 console.log(`[JOB RESUME] Job ${activeJobId} status: ${status.status}, ${status.processed_items}/${status.total_items} items processed`);
                 
-                // Resume if job is still processing or queued
-                if (status.status === 'processing' || status.status === 'queued') {
+                // Resume if job is still running or queued
+                if (status.status === 'running' || status.status === 'queued') {
                     console.log(`[JOB RESUME] Resuming job ${activeJobId}`);
                     hasActiveJob = true;
                     showProgressModal(activeJobTitle || 'Resuming Job...');

@@ -224,6 +224,8 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.True(result);
         // Verify that file2 was marked as duplicate (renamed=false since it couldn't be renamed)
         _mockFileStore.Verify(f => f.MarkFileRenamedAsync(file2, false, It.IsAny<CancellationToken>()), Times.Once);
+        // Verify that file2 was marked with IsDuplicate flag
+        _mockFileStore.Verify(f => f.MarkFileDuplicateAsync(file2, true, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -252,6 +254,8 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.Equal(1, job.FailedFiles);
         // Verify file was marked as duplicate (renamed=false)
         _mockFileStore.Verify(f => f.MarkFileRenamedAsync(file2, false, It.IsAny<CancellationToken>()), Times.Once);
+        // Verify that file2 was marked with IsDuplicate flag
+        _mockFileStore.Verify(f => f.MarkFileDuplicateAsync(file2, true, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private string CreateTestComicArchiveWithTargetName(string series, string issue)

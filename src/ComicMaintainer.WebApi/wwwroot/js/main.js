@@ -35,6 +35,21 @@
             return false;
         }
         
+        // Helper function to safely parse JSON with better error messages
+        async function safeJsonParse(response) {
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text();
+                throw new Error(`Expected JSON response but got ${contentType || 'unknown content type'}. Response: ${text.substring(0, 100)}`);
+            }
+            try {
+                return await response.json();
+            } catch (error) {
+                const text = await response.text();
+                throw new Error(`Failed to parse JSON response: ${error.message}. Response: ${text.substring(0, 100)}`);
+            }
+        }
+        
         // Helper function to encode filepath for RESTful URL
         function encodeFilePathForUrl(filePath) {
             // Convert to base64 URL-safe encoding
@@ -389,8 +404,8 @@
             const enabled = document.getElementById('watcherToggleCheckbox').checked;
             
             try {
-                const response = await fetch(apiUrl('/api/settings/watcher-enabled'), {
-                    method: 'POST',
+                const response = await fetch(apiUrl('/api/watcher'), {
+                    method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
@@ -398,19 +413,18 @@
                     body: JSON.stringify({ enabled: enabled })
                 });
                 
+                if (handleAuthError(response)) {
+                    document.getElementById('watcherToggleCheckbox').checked = !enabled;
+                    return;
+                }
+                
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const result = await response.json();
                 
-                if (result.success) {
-                    const statusText = result.enabled ? 'enabled' : 'disabled';
-                    showMessage(`Watcher ${statusText} successfully!`, 'success');
-                } else {
-                    showMessage(result.error || 'Failed to update watcher', 'error');
-                    // Revert checkbox on error
-                    document.getElementById('watcherToggleCheckbox').checked = !enabled;
-                }
+                const statusText = result.enabled ? 'enabled' : 'disabled';
+                showMessage(`Watcher ${statusText} successfully!`, 'success');
             } catch (error) {
                 showMessage('Failed to update watcher: ' + error.message, 'error');
                 // Revert checkbox on error
@@ -2463,7 +2477,7 @@
                 document.getElementById('themeSelect').value = currentTheme;
                 
                 // Load watcher status
-                const watcherResponse = await fetch(apiUrl('/api/settings/watcher-enabled'), {
+                const watcherResponse = await fetch(apiUrl('/api/watcher/status'), {
                     headers: getAuthHeaders()
                 });
                 if (handleAuthError(watcherResponse)) return;

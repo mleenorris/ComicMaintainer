@@ -136,7 +136,7 @@ public class SettingsController : ControllerBase
             return BadRequest(new { error = "MaxMB must be between 1 and 2047" });
         }
         
-        var maxBytes = (int)(request.MaxMB * BYTES_PER_MB);
+        var maxBytes = Convert.ToInt32(Math.Round(request.MaxMB * BYTES_PER_MB));
         _logger.LogInformation("Log max bytes update requested: {MaxMB} MB ({MaxBytes} bytes)", request.MaxMB, maxBytes);
         
         try

@@ -163,6 +163,8 @@ public class AuthService : IAuthService
     public async Task<(bool Success, string? Error)> SetupAdminAsync(string username, string password, string? email = null)
     {
         // Check if setup is still required
+        // Note: This check provides basic protection against concurrent setup attempts.
+        // The database's unique constraints on username and email provide additional protection.
         if (!await IsSetupRequiredAsync())
         {
             return (false, "Admin user already exists");

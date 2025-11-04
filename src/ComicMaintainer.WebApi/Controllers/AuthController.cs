@@ -97,6 +97,17 @@ public class AuthController : ControllerBase
     [HttpPost("setup")]
     public async Task<ActionResult> SetupAdmin([FromBody] SetupRequest request)
     {
+        // Validate input
+        if (string.IsNullOrWhiteSpace(request.Username) || request.Username.Length < 3)
+        {
+            return BadRequest(new { error = "Username must be at least 3 characters" });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 8)
+        {
+            return BadRequest(new { error = "Password must be at least 8 characters" });
+        }
+
         var (success, error) = await _authService.SetupAdminAsync(
             request.Username, 
             request.Password, 

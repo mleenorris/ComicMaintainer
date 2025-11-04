@@ -358,7 +358,7 @@ static long LoadLogMaxBytes(string configDir)
         {
             if (value.ValueKind == JsonValueKind.Number)
             {
-                return value.GetInt64();
+                return value.GetInt32();
             }
         }
     }

@@ -389,8 +389,8 @@
             const enabled = document.getElementById('watcherToggleCheckbox').checked;
             
             try {
-                const response = await fetch(apiUrl('/api/settings/watcher-enabled'), {
-                    method: 'POST',
+                const response = await fetch(apiUrl('/api/watcher'), {
+                    method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
@@ -398,19 +398,18 @@
                     body: JSON.stringify({ enabled: enabled })
                 });
                 
+                if (handleAuthError(response)) {
+                    document.getElementById('watcherToggleCheckbox').checked = !enabled;
+                    return;
+                }
+                
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const result = await response.json();
                 
-                if (result.success) {
-                    const statusText = result.enabled ? 'enabled' : 'disabled';
-                    showMessage(`Watcher ${statusText} successfully!`, 'success');
-                } else {
-                    showMessage(result.error || 'Failed to update watcher', 'error');
-                    // Revert checkbox on error
-                    document.getElementById('watcherToggleCheckbox').checked = !enabled;
-                }
+                const statusText = result.enabled ? 'enabled' : 'disabled';
+                showMessage(`Watcher ${statusText} successfully!`, 'success');
             } catch (error) {
                 showMessage('Failed to update watcher: ' + error.message, 'error');
                 // Revert checkbox on error
@@ -2463,7 +2462,7 @@
                 document.getElementById('themeSelect').value = currentTheme;
                 
                 // Load watcher status
-                const watcherResponse = await fetch(apiUrl('/api/settings/watcher-enabled'), {
+                const watcherResponse = await fetch(apiUrl('/api/watcher/status'), {
                     headers: getAuthHeaders()
                 });
                 if (handleAuthError(watcherResponse)) return;

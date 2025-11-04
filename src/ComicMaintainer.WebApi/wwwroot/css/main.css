@@ -1632,6 +1632,12 @@
                 display: none;
             }
             
+            /* Ensure Actions column (6th child) is right-aligned in mobile */
+            .file-list-header > *:nth-child(6) {
+                text-align: right;
+                justify-self: end;
+            }
+            
             .file-item {
                 grid-template-columns: 30px 40px 1fr 60px;
                 padding: 10px;
@@ -1649,6 +1655,11 @@
                 display: none;
             }
             
+            /* Ensure Actions column (6th child) is right-aligned in mobile */
+            .file-item > *:nth-child(6) {
+                justify-self: end;
+            }
+            
             .status-badge {
                 display: flex;
                 align-items: center;
@@ -1660,6 +1671,8 @@
                 flex-direction: column;
                 gap: 5px;
                 width: 100%;
+                justify-content: center;
+                align-items: flex-end;
             }
             
             .btn-small {
@@ -1693,6 +1706,8 @@
             
             .file-actions-dropdown {
                 width: 100%;
+                display: flex;
+                justify-content: flex-end;
             }
             
             .dropdown-toggle {

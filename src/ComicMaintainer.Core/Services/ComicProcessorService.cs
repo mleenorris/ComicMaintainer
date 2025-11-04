@@ -362,6 +362,10 @@ public class ComicProcessorService : IComicProcessorService
         };
 
         _jobs[jobId] = job;
+        
+        // Create a CancellationTokenSource for this job that can be cancelled independently
+        var jobCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _jobCancellationTokens[jobId] = jobCts;
 
         _logger.LogDebug("RenameFilesAsync: Job {JobId} created and queued with {FileCount} files", jobId, fileList.Count);
 
@@ -384,17 +388,18 @@ public class ComicProcessorService : IComicProcessorService
                     _logger.LogDebug("RenameFilesAsync: Job {JobId} renaming file {FileIndex}/{TotalFiles}: {FilePath}", 
                         jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
                     
-                    if (cancellationToken.IsCancellationRequested)
+                    if (jobCts.Token.IsCancellationRequested)
                     {
                         _logger.LogInformation("RenameFilesAsync: Job {JobId} cancellation requested at file {FileIndex}/{TotalFiles}", 
                             jobId, fileIndex, fileList.Count);
                         job.Status = JobStatus.Cancelled;
                         await BroadcastJobStatusAsync(job);
+                        _jobCancellationTokens.TryRemove(jobId, out _);
                         return;
                     }
 
                     job.CurrentFile = file;
-                    var success = await RenameFileAsync(file, cancellationToken);
+                    var success = await RenameFileAsync(file, jobCts.Token);
 
                     if (success)
                     {
@@ -429,6 +434,13 @@ public class ComicProcessorService : IComicProcessorService
                     jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
                 await BroadcastJobStatusAsync(job);
             }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("RenameFilesAsync: Rename job cancelled: {JobId}", jobId);
+                job.Status = JobStatus.Cancelled;
+                job.EndTime = DateTime.UtcNow;
+                await BroadcastJobStatusAsync(job);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "RenameFilesAsync: Error processing rename job: {JobId}", jobId);
@@ -436,7 +448,12 @@ public class ComicProcessorService : IComicProcessorService
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
-        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+            finally
+            {
+                _jobCancellationTokens.TryRemove(jobId, out _);
+                jobCts.Dispose();
+            }
+        }, jobCts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         return Task.FromResult(jobId);
     }
@@ -458,6 +475,10 @@ public class ComicProcessorService : IComicProcessorService
         };
 
         _jobs[jobId] = job;
+        
+        // Create a CancellationTokenSource for this job that can be cancelled independently
+        var jobCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _jobCancellationTokens[jobId] = jobCts;
 
         _logger.LogDebug("NormalizeFilesAsync: Job {JobId} created and queued with {FileCount} files", jobId, fileList.Count);
 
@@ -480,17 +501,18 @@ public class ComicProcessorService : IComicProcessorService
                     _logger.LogDebug("NormalizeFilesAsync: Job {JobId} normalizing file {FileIndex}/{TotalFiles}: {FilePath}", 
                         jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
                     
-                    if (cancellationToken.IsCancellationRequested)
+                    if (jobCts.Token.IsCancellationRequested)
                     {
                         _logger.LogInformation("NormalizeFilesAsync: Job {JobId} cancellation requested at file {FileIndex}/{TotalFiles}", 
                             jobId, fileIndex, fileList.Count);
                         job.Status = JobStatus.Cancelled;
                         await BroadcastJobStatusAsync(job);
+                        _jobCancellationTokens.TryRemove(jobId, out _);
                         return;
                     }
 
                     job.CurrentFile = file;
-                    var success = await NormalizeFileAsync(file, cancellationToken);
+                    var success = await NormalizeFileAsync(file, jobCts.Token);
 
                     if (success)
                     {
@@ -525,6 +547,13 @@ public class ComicProcessorService : IComicProcessorService
                     jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
                 await BroadcastJobStatusAsync(job);
             }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("NormalizeFilesAsync: Normalize job cancelled: {JobId}", jobId);
+                job.Status = JobStatus.Cancelled;
+                job.EndTime = DateTime.UtcNow;
+                await BroadcastJobStatusAsync(job);
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "NormalizeFilesAsync: Error processing normalize job: {JobId}", jobId);
@@ -532,7 +561,12 @@ public class ComicProcessorService : IComicProcessorService
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
-        }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+            finally
+            {
+                _jobCancellationTokens.TryRemove(jobId, out _);
+                jobCts.Dispose();
+            }
+        }, jobCts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         return Task.FromResult(jobId);
     }

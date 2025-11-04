@@ -39,9 +39,8 @@
         async function safeJsonParse(response) {
             const contentType = response.headers.get('content-type');
             if (!contentType || !contentType.includes('application/json')) {
-                // Response is not JSON, try to get text for better error message
-                const text = await response.text();
-                throw new Error(`Expected JSON response but got ${contentType || 'unknown content type'}. Response: ${text.substring(0, 100)}`);
+                // Response is not JSON - provide a helpful error without exposing response content
+                throw new Error(`Expected JSON response but got ${contentType || 'unknown content type'}. Status: ${response.status}`);
             }
             return await response.json();
         }

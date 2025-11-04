@@ -7,6 +7,7 @@ This guide explains how to deploy ComicMaintainer behind a reverse proxy for sec
 ## Table of Contents
 - [Why Use a Reverse Proxy?](#why-use-a-reverse-proxy)
 - [Configuration Options](#configuration-options)
+- [SWAG Configuration](#swag-configuration)
 - [Nginx Configuration](#nginx-configuration)
 - [Traefik Configuration](#traefik-configuration)
 - [Apache Configuration](#apache-configuration)
@@ -63,6 +64,104 @@ The application automatically handles:
 - All API and static asset URLs relative to your configured path
 
 No additional configuration is needed - PWA features work out of the box with both root path and subdirectory deployments.
+
+## SWAG Configuration
+
+[SWAG (Secure Web Application Gateway)](https://github.com/linuxserver/docker-swag) is an all-in-one Docker container from linuxserver.io that includes Nginx, Let's Encrypt, and fail2ban. It's one of the easiest ways to add HTTPS to your services with automatic certificate management.
+
+### Quick Start with SWAG
+
+**Ready-to-use configuration files are available in the [swag-configs](swag-configs/) directory:**
+
+- **`comicmaintainer.subdomain.conf`** - For subdomain deployment (e.g., `comics.yourdomain.com`)
+- **`comicmaintainer.subfolder.conf`** - For subfolder deployment (e.g., `yourdomain.com/comics`)
+
+See the [SWAG Configuration README](swag-configs/README.md) for complete setup instructions.
+
+### SWAG Subdomain Setup (Quick Reference)
+
+**1. Ensure containers are on the same network:**
+```bash
+docker network create swag-network
+docker network connect swag-network comicmaintainer
+```
+
+**2. Copy the config file:**
+```bash
+cp docs/swag-configs/comicmaintainer.subdomain.conf /path/to/swag/config/nginx/proxy-confs/
+```
+
+**3. Update ComicMaintainer docker-compose.yml:**
+```yaml
+services:
+  comicmaintainer:
+    image: iceburn1/comictagger-watcher:latest
+    container_name: comicmaintainer
+    environment:
+      - WATCHED_DIR=/watched_dir
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - /path/to/comics:/watched_dir
+      - /path/to/config:/Config
+    networks:
+      - swag-network
+    expose:
+      - 5000
+    restart: unless-stopped
+
+networks:
+  swag-network:
+    external: true
+```
+
+**4. Restart SWAG and access at `https://comics.yourdomain.com`**
+
+### SWAG Subfolder Setup (Quick Reference)
+
+**1. Copy the config file:**
+```bash
+cp docs/swag-configs/comicmaintainer.subfolder.conf /path/to/swag/config/nginx/proxy-confs/
+```
+
+**2. Update ComicMaintainer with BASE_PATH:**
+```yaml
+services:
+  comicmaintainer:
+    image: iceburn1/comictagger-watcher:latest
+    container_name: comicmaintainer
+    environment:
+      - WATCHED_DIR=/watched_dir
+      - BASE_PATH=/comics  # Required for subfolder
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - /path/to/comics:/watched_dir
+      - /path/to/config:/Config
+    networks:
+      - swag-network
+    expose:
+      - 5000
+
+networks:
+  swag-network:
+    external: true
+```
+
+**3. Restart both containers and access at `https://yourdomain.com/comics`**
+
+### SWAG Features Included
+
+The provided SWAG configurations include:
+- ✅ Automatic HTTPS with Let's Encrypt
+- ✅ HTTP/2 support
+- ✅ WebSocket/SSE support for real-time updates
+- ✅ Long timeouts for batch operations (10 minutes)
+- ✅ Optional authentication (HTTP Basic, Authelia, Authentik, LDAP)
+- ✅ Fail2ban protection
+- ✅ Proper buffering settings for Server-Sent Events
+
+For detailed setup instructions, troubleshooting, and authentication options, see the [SWAG Configuration Guide](swag-configs/README.md).
 
 ## Nginx Configuration
 

@@ -200,6 +200,151 @@ public class LogsControllerTests : IDisposable
         Assert.DoesNotContain("Line 500", content);
     }
 
+    [Fact]
+    public void GetLogFiles_WithDebugType_ReturnsAllDebugLogFiles()
+    {
+        // Arrange
+        var log1 = Path.Combine(_testLogDir, "debug20241101.log");
+        var log2 = Path.Combine(_testLogDir, "debug20241102.log");
+        var log3 = Path.Combine(_testLogDir, "debug.log");
+        File.WriteAllText(log1, "Old log 1");
+        Thread.Sleep(10);
+        File.WriteAllText(log2, "Old log 2");
+        Thread.Sleep(10);
+        File.WriteAllText(log3, "Current log");
+
+        // Act
+        var result = _controller.GetLogFiles(type: "debug");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var count = okResult.Value.GetType().GetProperty("count")?.GetValue(okResult.Value);
+        Assert.Equal(3, count);
+    }
+
+    [Fact]
+    public void GetLogFiles_WithAppType_ReturnsOnlyAppLogFiles()
+    {
+        // Arrange
+        var appLog = Path.Combine(_testLogDir, "app.log");
+        var debugLog = Path.Combine(_testLogDir, "debug.log");
+        File.WriteAllText(appLog, "App log");
+        File.WriteAllText(debugLog, "Debug log");
+
+        // Act
+        var result = _controller.GetLogFiles(type: "app");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var count = okResult.Value.GetType().GetProperty("count")?.GetValue(okResult.Value);
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public void GetLogFiles_WithNoFiles_ReturnsEmptyList()
+    {
+        // Act
+        var result = _controller.GetLogFiles(type: "debug");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var count = okResult.Value.GetType().GetProperty("count")?.GetValue(okResult.Value);
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
+    public void GetLogs_WithSpecificFilename_ReturnsContentFromThatFile()
+    {
+        // Arrange
+        var oldLog = Path.Combine(_testLogDir, "debug20241101.log");
+        var newLog = Path.Combine(_testLogDir, "debug20241102.log");
+        File.WriteAllLines(oldLog, new[] { "Old log line 1", "Old log line 2" });
+        Thread.Sleep(10);
+        File.WriteAllLines(newLog, new[] { "New log line 1", "New log line 2" });
+
+        // Act - Request the old log specifically
+        var result = _controller.GetLogs(type: "debug", filename: "debug20241101.log");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var content = okResult.Value.GetType().GetProperty("content")?.GetValue(okResult.Value) as string;
+        Assert.Contains("Old log line 1", content);
+        Assert.DoesNotContain("New log line", content);
+    }
+
+    [Fact]
+    public void GetLogs_WithInvalidFilename_ReturnsNotFoundMessage()
+    {
+        // Arrange
+        var logFile = Path.Combine(_testLogDir, "debug.log");
+        File.WriteAllText(logFile, "Some content");
+
+        // Act
+        var result = _controller.GetLogs(type: "debug", filename: "nonexistent.log");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var content = okResult.Value.GetType().GetProperty("content")?.GetValue(okResult.Value) as string;
+        Assert.Contains("not found", content);
+    }
+
+    [Fact]
+    public void GetLogs_WithFilenameNotMatchingType_ReturnsErrorMessage()
+    {
+        // Arrange
+        var appLog = Path.Combine(_testLogDir, "app.log");
+        File.WriteAllText(appLog, "App content");
+
+        // Act - Try to access app log with debug type
+        var result = _controller.GetLogs(type: "debug", filename: "app.log");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var content = okResult.Value.GetType().GetProperty("content")?.GetValue(okResult.Value) as string;
+        Assert.Contains("does not match", content);
+    }
+
+    [Fact]
+    public void GetLogs_WithFilenameContainingPathTraversal_IsSanitized()
+    {
+        // Arrange
+        var logFile = Path.Combine(_testLogDir, "debug.log");
+        File.WriteAllText(logFile, "Safe content");
+
+        // Act - Try directory traversal attack
+        var result = _controller.GetLogs(type: "debug", filename: "../../../etc/passwd");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var content = okResult.Value.GetType().GetProperty("content")?.GetValue(okResult.Value) as string;
+        // Should be sanitized to just "passwd" which won't exist or won't match pattern
+        Assert.True(content.Contains("not found") || content.Contains("does not match"));
+    }
+
+    [Fact]
+    public void GetLogs_ReturnsFilename()
+    {
+        // Arrange
+        var logFile = Path.Combine(_testLogDir, "debug.log");
+        File.WriteAllLines(logFile, new[] { "Line 1", "Line 2" });
+
+        // Act
+        var result = _controller.GetLogs(type: "debug");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var filename = okResult.Value.GetType().GetProperty("filename")?.GetValue(okResult.Value) as string;
+        Assert.Equal("debug.log", filename);
+    }
+
     public void Dispose()
     {
         Dispose(true);

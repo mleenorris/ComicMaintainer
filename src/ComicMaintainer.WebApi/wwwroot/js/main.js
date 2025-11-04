@@ -2596,7 +2596,7 @@
         
         async function openLogsModal() {
             document.getElementById('logsModal').classList.add('active');
-            await loadLogs();
+            await loadLogFiles();
         }
         
         function closeLogsModal() {
@@ -2938,19 +2938,79 @@
             }
         }
         
+        async function loadLogFiles() {
+            const logFileSelect = document.getElementById('logFile');
+            const logType = document.getElementById('logType').value;
+            
+            try {
+                logFileSelect.innerHTML = '<option value="">Loading...</option>';
+                
+                const response = await fetch(apiUrl(`/api/logs/files?type=${logType}`), {
+                    headers: getAuthHeaders()
+                });
+                
+                if (handleAuthError(response)) return;
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                // Clear and populate the dropdown
+                logFileSelect.innerHTML = '';
+                
+                if (data.files && data.files.length > 0) {
+                    // Add "Most Recent" option
+                    const mostRecentOption = document.createElement('option');
+                    mostRecentOption.value = '';
+                    mostRecentOption.textContent = 'Most Recent';
+                    logFileSelect.appendChild(mostRecentOption);
+                    
+                    // Add each log file as an option
+                    data.files.forEach(file => {
+                        const option = document.createElement('option');
+                        option.value = file.filename;
+                        option.textContent = `${file.filename} (${file.size_mb} MB, ${file.last_modified})`;
+                        logFileSelect.appendChild(option);
+                    });
+                } else {
+                    const noFilesOption = document.createElement('option');
+                    noFilesOption.value = '';
+                    noFilesOption.textContent = 'No log files available';
+                    logFileSelect.appendChild(noFilesOption);
+                }
+                
+                // Load logs for the selected file (most recent by default)
+                await loadLogs();
+            } catch (error) {
+                logFileSelect.innerHTML = '<option value="">Error loading files</option>';
+                console.error('Failed to load log files:', error);
+            }
+        }
+        
+        async function onLogTypeChange() {
+            await loadLogFiles();
+        }
+        
         async function loadLogs() {
             const logsContent = document.getElementById('logsContent');
             const logsLoadingIndicator = document.getElementById('logsLoadingIndicator');
             const logStats = document.getElementById('logStats');
             const lines = document.getElementById('logLines').value;
             const logType = document.getElementById('logType').value;
+            const logFile = document.getElementById('logFile').value;
             
             try {
                 logsLoadingIndicator.style.display = 'block';
                 logsContent.textContent = '';
                 logStats.textContent = '';
                 
-                const response = await fetch(apiUrl(`/api/logs?lines=${lines}&type=${logType}`), {
+                let url = `/api/logs?lines=${lines}&type=${logType}`;
+                if (logFile) {
+                    url += `&filename=${encodeURIComponent(logFile)}`;
+                }
+                
+                const response = await fetch(apiUrl(url), {
                     headers: getAuthHeaders()
                 });
                 
@@ -2965,7 +3025,8 @@
                     logsContent.textContent = 'Error: ' + data.error;
                 } else {
                     logsContent.textContent = data.content || 'No logs available';
-                    logStats.textContent = `Showing ${data.shown_lines} of ${data.total_lines} total lines`;
+                    const fileInfo = data.filename ? ` from ${data.filename}` : '';
+                    logStats.textContent = `Showing ${data.shown_lines} of ${data.total_lines} total lines${fileInfo}`;
                 }
             } catch (error) {
                 logsContent.textContent = 'Failed to load logs: ' + error.message;

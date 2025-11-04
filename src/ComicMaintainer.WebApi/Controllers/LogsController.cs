@@ -21,8 +21,8 @@ public class LogsController : ControllerBase
         _logger = logger;
     }
 
-    [HttpGet]
-    public ActionResult<object> GetLogs([FromQuery] int lines = 500, [FromQuery] string type = "debug")
+    [HttpGet("files")]
+    public ActionResult<object> GetLogFiles([FromQuery] string type = "debug")
     {
         try
         {
@@ -37,22 +37,117 @@ public class LogsController : ControllerBase
                 _ => "debug*.log"
             };
             
-            // Find the most recent log file (Serilog uses rolling date suffix)
+            // Find all log files matching the pattern
             var logFiles = Directory.GetFiles(configDir, logFilePattern)
-                .OrderByDescending(f => System.IO.File.GetLastWriteTime(f))
+                .Select(f => new
+                {
+                    filename = Path.GetFileName(f),
+                    fullPath = f,
+                    lastModified = System.IO.File.GetLastWriteTime(f),
+                    size = new FileInfo(f).Length
+                })
+                .OrderByDescending(f => f.lastModified)
+                .Select(f => new
+                {
+                    f.filename,
+                    last_modified = f.lastModified.ToString("yyyy-MM-dd HH:mm:ss"),
+                    size_mb = Math.Round(f.size / 1024.0 / 1024.0, 2)
+                })
                 .ToArray();
 
-            if (logFiles.Length == 0)
+            return Ok(new
             {
-                return Ok(new
-                {
-                    content = $"No log files found matching pattern: {logFilePattern}",
-                    total_lines = 0,
-                    shown_lines = 0
-                });
-            }
+                files = logFiles,
+                count = logFiles.Length
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error listing log files");
+            return StatusCode(500, new
+            {
+                error = $"Error listing log files: {ex.Message}",
+                files = Array.Empty<object>(),
+                count = 0
+            });
+        }
+    }
 
-            var logFilePath = logFiles[0]; // Most recent log file
+    [HttpGet]
+    public ActionResult<object> GetLogs([FromQuery] int lines = 500, [FromQuery] string type = "debug", [FromQuery] string? filename = null)
+    {
+        try
+        {
+            var configDir = _settings.ConfigDirectory ?? "/Config";
+            
+            // Determine log file pattern based on type
+            string logFilePattern = type.ToLower() switch
+            {
+                "app" => "app*.log",
+                "watcher" => "watcher*.log",
+                "debug" => "debug*.log",
+                _ => "debug*.log"
+            };
+            
+            string logFilePath;
+            
+            if (!string.IsNullOrEmpty(filename))
+            {
+                // Use specific filename if provided
+                // Sanitize filename to prevent directory traversal
+                var sanitizedFilename = Path.GetFileName(filename);
+                logFilePath = Path.Combine(configDir, sanitizedFilename);
+                
+                // Verify the file exists and matches the pattern
+                if (!System.IO.File.Exists(logFilePath))
+                {
+                    return Ok(new
+                    {
+                        content = $"Log file not found: {sanitizedFilename}",
+                        total_lines = 0,
+                        shown_lines = 0
+                    });
+                }
+                
+                // Verify filename matches the expected pattern for the type
+                var filenameOnly = Path.GetFileName(logFilePath);
+                var matchesPattern = type.ToLower() switch
+                {
+                    "app" => filenameOnly.StartsWith("app") && filenameOnly.EndsWith(".log"),
+                    "watcher" => filenameOnly.StartsWith("watcher") && filenameOnly.EndsWith(".log"),
+                    "debug" => filenameOnly.StartsWith("debug") && filenameOnly.EndsWith(".log"),
+                    _ => filenameOnly.StartsWith("debug") && filenameOnly.EndsWith(".log")
+                };
+                
+                if (!matchesPattern)
+                {
+                    return Ok(new
+                    {
+                        content = $"File does not match expected log type: {sanitizedFilename}",
+                        total_lines = 0,
+                        shown_lines = 0
+                    });
+                }
+            }
+            else
+            {
+                // Find the most recent log file (Serilog uses rolling date suffix)
+                var logFiles = Directory.GetFiles(configDir, logFilePattern)
+                    .OrderByDescending(f => System.IO.File.GetLastWriteTime(f))
+                    .ToArray();
+
+                if (logFiles.Length == 0)
+                {
+                    return Ok(new
+                    {
+                        content = $"No log files found matching pattern: {logFilePattern}",
+                        total_lines = 0,
+                        shown_lines = 0
+                    });
+                }
+
+                logFilePath = logFiles[0]; // Most recent log file
+            }
 
             // Use streaming for memory efficiency with large log files
             string[] linesToShow;
@@ -84,7 +179,8 @@ public class LogsController : ControllerBase
             {
                 content,
                 total_lines = totalLines,
-                shown_lines = linesToShow.Length
+                shown_lines = linesToShow.Length,
+                filename = Path.GetFileName(logFilePath)
             });
         }
         catch (Exception ex)

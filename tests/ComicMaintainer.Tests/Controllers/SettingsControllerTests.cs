@@ -173,14 +173,14 @@ public class SettingsControllerTests
     public async Task UpdateLogMaxBytes_ReturnsOk()
     {
         // Arrange
-        var request = new SettingsController.LogMaxBytesRequest { MaxBytes = 20971520 };
+        var request = new SettingsController.LogMaxBytesRequest { MaxMB = 20 }; // 20 MB
 
         // Act
         var result = await _controller.UpdateLogMaxBytes(request);
 
         // Assert
         Assert.IsType<OkObjectResult>(result);
-        _settingsServiceMock.Verify(s => s.UpdateLogMaxBytesAsync(request.MaxBytes, It.IsAny<CancellationToken>()), Times.Once);
+        _settingsServiceMock.Verify(s => s.UpdateLogMaxBytesAsync(20971520, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

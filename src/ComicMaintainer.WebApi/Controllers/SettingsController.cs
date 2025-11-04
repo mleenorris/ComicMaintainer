@@ -121,19 +121,20 @@ public class SettingsController : ControllerBase
     [HttpGet("log-max-bytes")]
     public ActionResult<object> GetLogMaxBytes()
     {
-        return Ok(new { maxBytes = _appSettings.Value.LogMaxBytes });
+        return Ok(new { maxMB = _appSettings.Value.LogMaxBytes / 1048576.0 });
     }
 
     // RESTful endpoint: PUT /api/settings/log-max-bytes
     [HttpPut("log-max-bytes")]
     public async Task<ActionResult> UpdateLogMaxBytes([FromBody] LogMaxBytesRequest request, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Log max bytes update requested: {MaxBytes}", request.MaxBytes);
+        var maxBytes = (int)(request.MaxMB * 1048576);
+        _logger.LogInformation("Log max bytes update requested: {MaxMB} MB ({MaxBytes} bytes)", request.MaxMB, maxBytes);
         
         try
         {
-            await _settingsService.UpdateLogMaxBytesAsync(request.MaxBytes, cancellationToken);
-            _logger.LogWarning("Log max bytes updated to {MaxBytes}. Restart the application for the change to take effect.", request.MaxBytes);
+            await _settingsService.UpdateLogMaxBytesAsync(maxBytes, cancellationToken);
+            _logger.LogWarning("Log max bytes updated to {MaxMB} MB ({MaxBytes} bytes). Restart the application for the change to take effect.", request.MaxMB, maxBytes);
             return Ok(new { message = "Log max bytes updated successfully. Restart required for changes to take effect." });
         }
         catch (Exception ex)
@@ -295,7 +296,7 @@ public class SettingsController : ControllerBase
 
     public class LogMaxBytesRequest
     {
-        public int MaxBytes { get; set; }
+        public double MaxMB { get; set; }
     }
 
     public class WatcherEnableRenameRequest

@@ -11,6 +11,8 @@ namespace ComicMaintainer.Tests.Controllers;
 
 public class SettingsControllerTests
 {
+    private const int BYTES_PER_MB = 1048576;
+    
     private readonly Mock<IOptions<AppSettings>> _appSettingsMock;
     private readonly Mock<ILogger<SettingsController>> _loggerMock;
     private readonly Mock<IServiceProvider> _serviceProviderMock;
@@ -194,7 +196,7 @@ public class SettingsControllerTests
     {
         // Arrange
         const int requestedMB = 20;
-        const int expectedBytes = requestedMB * 1048576; // 20 MB in bytes
+        const int expectedBytes = requestedMB * BYTES_PER_MB;
         var request = new SettingsController.LogMaxBytesRequest { MaxMB = requestedMB };
 
         // Act
@@ -203,6 +205,34 @@ public class SettingsControllerTests
         // Assert
         Assert.IsType<OkObjectResult>(result);
         _settingsServiceMock.Verify(s => s.UpdateLogMaxBytesAsync(expectedBytes, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateLogMaxBytes_InvalidValue_ReturnsBadRequest()
+    {
+        // Arrange - Test with value that's too large
+        var request = new SettingsController.LogMaxBytesRequest { MaxMB = 3000 };
+
+        // Act
+        var result = await _controller.UpdateLogMaxBytes(request);
+
+        // Assert
+        Assert.IsType<BadRequestObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateLogMaxBytesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateLogMaxBytes_ZeroValue_ReturnsBadRequest()
+    {
+        // Arrange
+        var request = new SettingsController.LogMaxBytesRequest { MaxMB = 0 };
+
+        // Act
+        var result = await _controller.UpdateLogMaxBytes(request);
+
+        // Assert
+        Assert.IsType<BadRequestObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateLogMaxBytesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

@@ -130,6 +130,12 @@ public class SettingsController : ControllerBase
     [HttpPut("log-max-bytes")]
     public async Task<ActionResult> UpdateLogMaxBytes([FromBody] LogMaxBytesRequest request, CancellationToken cancellationToken = default)
     {
+        // Validate MaxMB to prevent integer overflow (max ~2047 MB for int.MaxValue)
+        if (request.MaxMB <= 0 || request.MaxMB > 2047)
+        {
+            return BadRequest(new { error = "MaxMB must be between 1 and 2047" });
+        }
+        
         var maxBytes = (int)(request.MaxMB * BYTES_PER_MB);
         _logger.LogInformation("Log max bytes update requested: {MaxMB} MB ({MaxBytes} bytes)", request.MaxMB, maxBytes);
         

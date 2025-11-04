@@ -35,22 +35,6 @@
             return false;
         }
         
-        // Helper function to safely parse JSON with better error messages
-        async function safeJsonParse(response) {
-            const contentType = response.headers.get('content-type');
-            const text = await response.text();
-            
-            if (!contentType || !contentType.includes('application/json')) {
-                throw new Error(`Expected JSON response but got ${contentType || 'unknown content type'}. Response: ${text.substring(0, 100)}`);
-            }
-            
-            try {
-                return JSON.parse(text);
-            } catch (error) {
-                throw new Error(`Failed to parse JSON response: ${error.message}. Response: ${text.substring(0, 100)}`);
-            }
-        }
-        
         // Helper function to encode filepath for RESTful URL
         function encodeFilePathForUrl(filePath) {
             // Convert to base64 URL-safe encoding

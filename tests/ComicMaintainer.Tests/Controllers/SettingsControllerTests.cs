@@ -170,6 +170,26 @@ public class SettingsControllerTests
     // UpdateWatcherEnabled removed - use UpdateWatcherEnableRename and UpdateWatcherEnableNormalize instead
 
     [Fact]
+    public void GetLogMaxBytes_ReturnsMaxMB()
+    {
+        // Arrange - AppSettings has LogMaxBytes = 10485760 (10 MB)
+        
+        // Act
+        var result = _controller.GetLogMaxBytes();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var value = okResult.Value;
+        
+        // Use reflection to get the anonymous type property
+        var maxMBProperty = value?.GetType().GetProperty("maxMB");
+        Assert.NotNull(maxMBProperty);
+        
+        var maxMB = maxMBProperty.GetValue(value);
+        Assert.Equal(10.0, maxMB); // 10485760 bytes = 10 MB
+    }
+
+    [Fact]
     public async Task UpdateLogMaxBytes_ReturnsOk()
     {
         // Arrange

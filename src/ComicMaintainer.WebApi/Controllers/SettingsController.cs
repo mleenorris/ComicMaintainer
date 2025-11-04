@@ -20,6 +20,7 @@ public class SettingsController : ControllerBase
     private readonly IComicProcessorService _processorService;
     private readonly IFileStoreService _fileStore;
     private readonly ISettingsService _settingsService;
+    private readonly IHostApplicationLifetime _applicationLifetime;
 
     public SettingsController(
         IOptions<AppSettings> appSettings, 
@@ -27,7 +28,8 @@ public class SettingsController : ControllerBase
         IServiceProvider serviceProvider,
         IComicProcessorService processorService,
         IFileStoreService fileStore,
-        ISettingsService settingsService)
+        ISettingsService settingsService,
+        IHostApplicationLifetime applicationLifetime)
     {
         _appSettings = appSettings;
         _logger = logger;
@@ -35,6 +37,7 @@ public class SettingsController : ControllerBase
         _processorService = processorService;
         _fileStore = fileStore;
         _settingsService = settingsService;
+        _applicationLifetime = applicationLifetime;
     }
 
     // RESTful endpoint: GET /api/settings - Get all settings
@@ -340,6 +343,39 @@ public class SettingsController : ControllerBase
         {
             _logger.LogError(ex, "Error resetting database");
             return StatusCode(500, new { success = false, error = "Error resetting database: " + ex.Message });
+        }
+    }
+
+    [HttpPost("restart")]
+    [Authorize(Roles = "Admin")]
+    public ActionResult RestartApplication()
+    {
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var userName = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+        
+        _logger.LogWarning("Application restart requested by user {UserId} ({UserName})", userId, userName);
+        
+        try
+        {
+            // Trigger graceful shutdown which will cause the application to restart (when running in a container or with a process manager)
+            _logger.LogInformation("Initiating application shutdown for restart...");
+            
+            // Use a background task to allow the response to be sent before shutting down
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(1000); // Give time for the response to be sent
+                _applicationLifetime.StopApplication();
+            });
+            
+            return Ok(new { 
+                success = true, 
+                message = "Application restart initiated. The application will shut down gracefully and restart if running in a container or with a process manager." 
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error initiating application restart");
+            return StatusCode(500, new { success = false, error = "Error initiating restart: " + ex.Message });
         }
     }
 

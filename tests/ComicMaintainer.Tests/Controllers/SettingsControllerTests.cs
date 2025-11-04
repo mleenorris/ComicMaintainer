@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -16,6 +17,7 @@ public class SettingsControllerTests
     private readonly Mock<IComicProcessorService> _processorServiceMock;
     private readonly Mock<IFileStoreService> _fileStoreMock;
     private readonly Mock<ISettingsService> _settingsServiceMock;
+    private readonly Mock<IHostApplicationLifetime> _applicationLifetimeMock;
     private readonly SettingsController _controller;
     private readonly AppSettings _appSettings;
 
@@ -41,6 +43,7 @@ public class SettingsControllerTests
         _processorServiceMock = new Mock<IComicProcessorService>();
         _fileStoreMock = new Mock<IFileStoreService>();
         _settingsServiceMock = new Mock<ISettingsService>();
+        _applicationLifetimeMock = new Mock<IHostApplicationLifetime>();
         
         _controller = new SettingsController(
             _appSettingsMock.Object, 
@@ -48,7 +51,8 @@ public class SettingsControllerTests
             _serviceProviderMock.Object,
             _processorServiceMock.Object,
             _fileStoreMock.Object,
-            _settingsServiceMock.Object);
+            _settingsServiceMock.Object,
+            _applicationLifetimeMock.Object);
     }
 
     [Fact]
@@ -256,5 +260,42 @@ public class SettingsControllerTests
         // Assert
         Assert.IsType<OkObjectResult>(result);
         _settingsServiceMock.Verify(s => s.UpdateGitHubIssueAssigneeAsync(request.Assignee, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public void RestartApplication_ReturnsOk()
+    {
+        // Arrange - Set up a mock user context
+        var claims = new List<System.Security.Claims.Claim>
+        {
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, "test-user-id"),
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "testuser"),
+            new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "Admin")
+        };
+        var identity = new System.Security.Claims.ClaimsIdentity(claims, "TestAuth");
+        var claimsPrincipal = new System.Security.Claims.ClaimsPrincipal(identity);
+        
+        _controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
+        {
+            HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+            {
+                User = claimsPrincipal
+            }
+        };
+
+        // Act
+        var result = _controller.RestartApplication();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+        
+        var value = okResult.Value;
+        var successProperty = value.GetType().GetProperty("success");
+        Assert.NotNull(successProperty);
+        Assert.Equal(true, successProperty.GetValue(value));
+        
+        // Verify that StopApplication would eventually be called (we can't verify the delayed task directly)
+        // The test validates that the endpoint returns successfully without throwing
     }
 }

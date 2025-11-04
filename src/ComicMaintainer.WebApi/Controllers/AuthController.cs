@@ -86,8 +86,43 @@ public class AuthController : ControllerBase
 
         return Ok(new { apiKey });
     }
+
+    [HttpGet("setup-required")]
+    public async Task<ActionResult> IsSetupRequired()
+    {
+        var setupRequired = await _authService.IsSetupRequiredAsync();
+        return Ok(new { setupRequired });
+    }
+
+    [HttpPost("setup")]
+    public async Task<ActionResult> SetupAdmin([FromBody] SetupRequest request)
+    {
+        // Validate input
+        if (string.IsNullOrWhiteSpace(request.Username) || request.Username.Length < 3)
+        {
+            return BadRequest(new { error = "Username must be at least 3 characters" });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 8)
+        {
+            return BadRequest(new { error = "Password must be at least 8 characters" });
+        }
+
+        var (success, error) = await _authService.SetupAdminAsync(
+            request.Username, 
+            request.Password, 
+            request.Email);
+        
+        if (!success)
+        {
+            return BadRequest(new { error });
+        }
+
+        return Ok(new { message = "Admin user created successfully" });
+    }
 }
 
 public record LoginRequest(string Username, string Password);
 public record RegisterRequest(string Username, string Password, string Email, string? FullName);
 public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+public record SetupRequest(string Username, string Password, string? Email);

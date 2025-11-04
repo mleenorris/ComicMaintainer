@@ -1632,7 +1632,9 @@
                 display: none;
             }
             
-            /* Ensure Actions column (6th child) is right-aligned in mobile */
+            /* Ensure Actions column (6th child in DOM) is right-aligned in mobile
+               Note: 6th child is still in DOM even though children 4-5 are hidden,
+               and grid will auto-place it in the 4th column position */
             .file-list-header > *:nth-child(6) {
                 text-align: right;
                 justify-self: end;
@@ -1655,7 +1657,9 @@
                 display: none;
             }
             
-            /* Ensure Actions column (6th child) is right-aligned in mobile */
+            /* Ensure Actions column (6th child in DOM) is right-aligned in mobile
+               Note: 6th child is still in DOM even though children 4-5 are hidden,
+               and grid will auto-place it in the 4th column position */
             .file-item > *:nth-child(6) {
                 justify-self: end;
             }

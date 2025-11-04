@@ -189,6 +189,9 @@ public class FilesController : ControllerBase
             if (string.IsNullOrEmpty(filePath))
                 return BadRequest("File path is required");
 
+            // Capture before state
+            var beforeMetadata = await _processor.GetMetadataAsync(filePath);
+            
             var success = await _processor.UpdateMetadataAsync(filePath, metadata);
             if (!success)
             {
@@ -196,7 +199,10 @@ public class FilesController : ControllerBase
                 return BadRequest("Failed to update metadata");
             }
             
-            await LogHistoryAsync(filePath, "Update Metadata", true);
+            // Log with before/after metadata
+            var filename = Path.GetFileName(filePath);
+            await LogHistoryWithChangesAsync(filePath, "Update Metadata", true, null,
+                filename, filename, beforeMetadata, metadata);
             
             return Ok();
         }
@@ -568,6 +574,44 @@ public class FilesController : ControllerBase
             Timestamp = DateTime.UtcNow,
             Success = success,
             ErrorMessage = errorMessage
+        });
+    }
+
+    /// <summary>
+    /// Helper method to log processing history entries with before/after metadata
+    /// </summary>
+    private async Task LogHistoryWithChangesAsync(
+        string filePath, 
+        string action, 
+        bool success, 
+        string? errorMessage,
+        string? beforeFilename,
+        string? afterFilename,
+        ComicMetadata? beforeMetadata,
+        ComicMetadata? afterMetadata)
+    {
+        await _historyService.AddHistoryEntryAsync(new ProcessingHistoryEntry
+        {
+            Id = Guid.NewGuid(),
+            FilePath = filePath,
+            Action = action,
+            Timestamp = DateTime.UtcNow,
+            Success = success,
+            ErrorMessage = errorMessage,
+            BeforeFilename = beforeFilename,
+            AfterFilename = afterFilename,
+            BeforeTitle = beforeMetadata?.Title,
+            AfterTitle = afterMetadata?.Title,
+            BeforeSeries = beforeMetadata?.Series,
+            AfterSeries = afterMetadata?.Series,
+            BeforeIssue = beforeMetadata?.Issue,
+            AfterIssue = afterMetadata?.Issue,
+            BeforePublisher = beforeMetadata?.Publisher,
+            AfterPublisher = afterMetadata?.Publisher,
+            BeforeYear = beforeMetadata?.Year,
+            AfterYear = afterMetadata?.Year,
+            BeforeVolume = beforeMetadata?.Volume,
+            AfterVolume = afterMetadata?.Volume
         });
     }
 

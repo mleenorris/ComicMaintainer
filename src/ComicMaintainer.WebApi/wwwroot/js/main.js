@@ -2688,16 +2688,37 @@
             const timestamp = new Date(item.timestamp * 1000).toLocaleString();
             const filepath = item.after_filename || item.before_filename || item.filepath;
             
+            // Determine status styling
+            const statusIcon = item.success ? '✅' : '❌';
+            const statusText = item.success ? 'Success' : 'Failed';
+            const statusColor = item.success ? '#10b981' : '#ef4444';
+            const borderColor = item.success ? 'var(--border-secondary)' : '#ef4444';
+            
             let html = `
-                <div style="border: 1px solid var(--border-secondary); border-radius: 8px; padding: 15px; background: var(--bg-secondary);">
+                <div style="border: 1px solid ${borderColor}; border-radius: 8px; padding: 15px; background: var(--bg-secondary);">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-primary); padding-bottom: 10px;">
-                        <div>
-                            <strong style="font-size: 15px; color: var(--text-primary);">${escapeHtml(filepath)}</strong>
-                            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">${timestamp}</div>
+                        <div style="flex: 1;">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                <span style="font-size: 18px;" title="${statusText}">${statusIcon}</span>
+                                <strong style="font-size: 15px; color: var(--text-primary);">${escapeHtml(filepath)}</strong>
+                            </div>
+                            <div style="font-size: 12px; color: var(--text-muted);">${timestamp}</div>
                         </div>
                         <span style="background: var(--bg-hover); padding: 4px 12px; border-radius: 4px; font-size: 12px; color: var(--text-secondary);">${item.operation_type}</span>
                     </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px;">
+            `;
+            
+            // Show error message if operation failed
+            if (!item.success && item.error_message) {
+                html += `
+                    <div style="background: #fef2f2; border-left: 3px solid #ef4444; padding: 10px; margin-bottom: 12px; border-radius: 4px;">
+                        <div style="font-weight: 500; color: #dc2626; margin-bottom: 4px;">Error</div>
+                        <div style="color: #991b1b; font-size: 13px;">${escapeHtml(item.error_message)}</div>
+                    </div>
+                `;
+            }
+            
+            html += `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 13px;">
             `;
             
             // Show changes
@@ -2711,26 +2732,38 @@
                 { label: 'Volume', before: item.before_volume, after: item.after_volume }
             ];
             
-            fields.forEach(field => {
-                if (field.before !== field.after && (field.before || field.after)) {
-                    html += `
-                        <div style="grid-column: 1 / -1; border-left: 3px solid var(--border-secondary); padding-left: 10px; margin: 5px 0;">
-                            <div style="font-weight: 500; color: var(--text-secondary); margin-bottom: 5px;">${field.label}</div>
-                            <div style="display: flex; gap: 10px; align-items: center;">
-                                <div style="flex: 1; padding: 6px 10px; background: var(--bg-hover); border-radius: 4px; color: var(--text-muted);">
-                                    <span style="font-size: 11px; text-transform: uppercase; opacity: 0.7;">Before:</span>
-                                    <div style="margin-top: 3px; color: var(--text-primary);">${field.before || '<em style="opacity: 0.5;">(empty)</em>'}</div>
-                                </div>
-                                <span style="color: var(--text-muted);">→</span>
-                                <div style="flex: 1; padding: 6px 10px; background: var(--bg-hover); border-radius: 4px; color: var(--text-muted);">
-                                    <span style="font-size: 11px; text-transform: uppercase; opacity: 0.7;">After:</span>
-                                    <div style="margin-top: 3px; color: var(--text-primary);">${field.after || '<em style="opacity: 0.5;">(empty)</em>'}</div>
+            // Check if there are any changes to display
+            const hasChanges = fields.some(field => field.before !== field.after && (field.before || field.after));
+            
+            if (hasChanges) {
+                fields.forEach(field => {
+                    if (field.before !== field.after && (field.before || field.after)) {
+                        html += `
+                            <div style="grid-column: 1 / -1; border-left: 3px solid var(--border-secondary); padding-left: 10px; margin: 5px 0;">
+                                <div style="font-weight: 500; color: var(--text-secondary); margin-bottom: 5px;">${field.label}</div>
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <div style="flex: 1; padding: 6px 10px; background: var(--bg-hover); border-radius: 4px; color: var(--text-muted);">
+                                        <span style="font-size: 11px; text-transform: uppercase; opacity: 0.7;">Before:</span>
+                                        <div style="margin-top: 3px; color: var(--text-primary);">${field.before || '<em style="opacity: 0.5;">(empty)</em>'}</div>
+                                    </div>
+                                    <span style="color: var(--text-muted);">→</span>
+                                    <div style="flex: 1; padding: 6px 10px; background: var(--bg-hover); border-radius: 4px; color: var(--text-muted);">
+                                        <span style="font-size: 11px; text-transform: uppercase; opacity: 0.7;">After:</span>
+                                        <div style="margin-top: 3px; color: var(--text-primary);">${field.after || '<em style="opacity: 0.5;">(empty)</em>'}</div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    `;
-                }
-            });
+                        `;
+                    }
+                });
+            } else if (item.success) {
+                // No changes but operation was successful (e.g., "already normalized", "rename disabled")
+                html += `
+                    <div style="grid-column: 1 / -1; padding: 10px; color: var(--text-muted); font-size: 13px; font-style: italic; text-align: center;">
+                        No changes made
+                    </div>
+                `;
+            }
             
             html += `
                     </div>

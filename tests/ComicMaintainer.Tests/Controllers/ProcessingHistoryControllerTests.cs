@@ -153,4 +153,115 @@ public class ProcessingHistoryControllerTests
         var badRequestResult = Assert.IsType<BadRequestObjectResult>(statusResult.Result);
         Assert.Equal(400, badRequestResult.StatusCode);
     }
+
+    [Fact]
+    public async Task GetProcessingHistory_IncludesSuccessStatusAndErrorMessage()
+    {
+        // Arrange
+        var historyEntries = new List<ProcessingHistoryEntry>
+        {
+            new ProcessingHistoryEntry
+            {
+                Id = Guid.NewGuid(),
+                FilePath = "/path/to/file.cbz",
+                Action = "Rename",
+                Timestamp = DateTime.UtcNow,
+                Success = false,
+                ErrorMessage = "File not found"
+            }
+        };
+        
+        _historyServiceMock
+            .Setup(s => s.GetHistoryAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((historyEntries, 1));
+
+        // Act
+        var result = await _controller.GetProcessingHistory(50, 0);
+
+        // Assert
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
+        Assert.NotNull(objectResult.Value);
+        
+        // Use reflection to access the anonymous type properties
+        var value = objectResult.Value;
+        var historyProperty = value.GetType().GetProperty("history");
+        Assert.NotNull(historyProperty);
+        
+        var historyValue = historyProperty.GetValue(value) as System.Collections.IEnumerable;
+        Assert.NotNull(historyValue);
+        
+        var historyList = historyValue.Cast<object>().ToList();
+        Assert.Single(historyList);
+        
+        var firstItem = historyList[0];
+        var successProperty = firstItem.GetType().GetProperty("success");
+        var errorMessageProperty = firstItem.GetType().GetProperty("error_message");
+        
+        Assert.NotNull(successProperty);
+        Assert.NotNull(errorMessageProperty);
+        Assert.False((bool)successProperty.GetValue(firstItem)!);
+        Assert.Equal("File not found", errorMessageProperty.GetValue(firstItem));
+    }
+
+    [Fact]
+    public async Task GetProcessingHistory_IncludesBeforeAndAfterMetadata()
+    {
+        // Arrange
+        var historyEntries = new List<ProcessingHistoryEntry>
+        {
+            new ProcessingHistoryEntry
+            {
+                Id = Guid.NewGuid(),
+                FilePath = "/path/to/file.cbz",
+                Action = "Rename",
+                Timestamp = DateTime.UtcNow,
+                Success = true,
+                BeforeFilename = "old_name.cbz",
+                AfterFilename = "new_name.cbz",
+                BeforeTitle = "Old Title",
+                AfterTitle = "New Title",
+                BeforeSeries = "Old Series",
+                AfterSeries = "New Series"
+            }
+        };
+        
+        _historyServiceMock
+            .Setup(s => s.GetHistoryAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((historyEntries, 1));
+
+        // Act
+        var result = await _controller.GetProcessingHistory(50, 0);
+
+        // Assert
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
+        Assert.NotNull(objectResult.Value);
+        
+        // Use reflection to access the anonymous type properties
+        var value = objectResult.Value;
+        var historyProperty = value.GetType().GetProperty("history");
+        Assert.NotNull(historyProperty);
+        
+        var historyValue = historyProperty.GetValue(value) as System.Collections.IEnumerable;
+        Assert.NotNull(historyValue);
+        
+        var historyList = historyValue.Cast<object>().ToList();
+        Assert.Single(historyList);
+        
+        var firstItem = historyList[0];
+        var beforeFilenameProperty = firstItem.GetType().GetProperty("before_filename");
+        var afterFilenameProperty = firstItem.GetType().GetProperty("after_filename");
+        var beforeTitleProperty = firstItem.GetType().GetProperty("before_title");
+        var afterTitleProperty = firstItem.GetType().GetProperty("after_title");
+        
+        Assert.NotNull(beforeFilenameProperty);
+        Assert.NotNull(afterFilenameProperty);
+        Assert.NotNull(beforeTitleProperty);
+        Assert.NotNull(afterTitleProperty);
+        Assert.Equal("old_name.cbz", beforeFilenameProperty.GetValue(firstItem));
+        Assert.Equal("new_name.cbz", afterFilenameProperty.GetValue(firstItem));
+        Assert.Equal("Old Title", beforeTitleProperty.GetValue(firstItem));
+        Assert.Equal("New Title", afterTitleProperty.GetValue(firstItem));
+    }
 }

@@ -526,16 +526,12 @@
                 
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Watcher</h3>
                 <div class="form-group">
-                    <label for="watcherToggleCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="watcherToggleCheckbox" onchange="updateWatcherFromSettings()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                        <span>Enable file watcher (automatically process new/modified files)</span>
-                    </label>
-                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
-                        When enabled, the watcher monitors the directory for changes and automatically processes files.
+                    <small style="display: block; margin-bottom: 15px; color: var(--text-muted);">
+                        The file watcher automatically starts when either rename or normalize is enabled below. It monitors the directory for changes and automatically processes new or modified files based on your selected options.
                     </small>
                 </div>
                 
-                <div class="form-group" style="margin-top: 15px;">
+                <div class="form-group">
                     <label for="watcherEnableRenameCheckbox" style="display: flex; align-items: center; cursor: pointer;">
                         <input type="checkbox" id="watcherEnableRenameCheckbox" onchange="updateWatcherEnableRename()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
                         <span>Enable file rename (🔵 renamed indicator)</span>
@@ -606,41 +602,6 @@
                     </small>
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
                         <strong>Note:</strong> This only affects the <code>{issue}</code> placeholder. Use <code>{issue_no_pad}</code> for unpadded issue numbers regardless of this setting.
-                    </small>
-                </div>
-                
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">GitHub Integration</h3>
-                <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
-                    Configure GitHub integration for automatic error reporting. When configured, errors will automatically create GitHub issues.
-                </p>
-                <div class="form-group">
-                    <label for="githubToken">GitHub Personal Access Token</label>
-                    <input type="password" id="githubToken" placeholder="ghp_..." style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Personal Access Token with <code>repo</code> scope for creating issues. Leave empty to disable GitHub integration.
-                    </small>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        <strong>Note:</strong> Can also be configured via the <code>GITHUB_TOKEN</code> environment variable.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="githubRepository">GitHub Repository</label>
-                    <input type="text" id="githubRepository" placeholder="owner/repo" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Repository in format <code>owner/repo</code> where issues should be created.
-                    </small>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        <strong>Note:</strong> Can also be configured via the <code>GITHUB_REPOSITORY</code> environment variable.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="githubIssueAssignee">GitHub Issue Assignee (Optional)</label>
-                    <input type="text" id="githubIssueAssignee" placeholder="username" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        GitHub username to assign auto-generated issues to. Leave empty for no assignment.
-                    </small>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        <strong>Note:</strong> Can also be configured via the <code>GITHUB_ISSUE_ASSIGNEE</code> environment variable.
                     </small>
                 </div>
                 

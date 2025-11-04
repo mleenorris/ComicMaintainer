@@ -50,10 +50,7 @@ public class SettingsController : ControllerBase
             issue_number_padding = _appSettings.Value.IssueNumberPadding,
             watcher_enable_rename = _appSettings.Value.WatcherEnableRename,
             watcher_enable_normalize = _appSettings.Value.WatcherEnableNormalize,
-            log_max_bytes = _appSettings.Value.LogMaxBytes,
-            github_token_configured = !string.IsNullOrEmpty(_appSettings.Value.GitHubToken),
-            github_repository = _appSettings.Value.GitHubRepository ?? "",
-            github_issue_assignee = _appSettings.Value.GitHubIssueAssignee ?? ""
+            log_max_bytes = _appSettings.Value.LogMaxBytes
         });
     }
 
@@ -151,99 +148,6 @@ public class SettingsController : ControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public Task<ActionResult> SetLogMaxBytes([FromBody] LogMaxBytesRequest request, CancellationToken cancellationToken = default)
         => UpdateLogMaxBytes(request, cancellationToken);
-
-    [HttpGet("github-token")]
-    public ActionResult<object> GetGitHubToken()
-    {
-        // Don't return the actual token for security
-        return Ok(new { hasToken = !string.IsNullOrEmpty(_appSettings.Value.GitHubToken) });
-    }
-
-    // RESTful endpoint: PUT /api/settings/github-token
-    [HttpPut("github-token")]
-    public async Task<ActionResult> UpdateGitHubToken([FromBody] GitHubTokenRequest request, CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("GitHub token update requested");
-        
-        try
-        {
-            await _settingsService.UpdateGitHubTokenAsync(request.Token, cancellationToken);
-            return Ok(new { message = "GitHub token updated successfully" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update GitHub token");
-            return StatusCode(500, new { error = "Failed to update GitHub token" });
-        }
-    }
-
-    // Legacy endpoint for backward compatibility
-    [HttpPost("github-token")]
-    [ApiExplorerSettings(IgnoreApi = true)]
-    public Task<ActionResult> SetGitHubToken([FromBody] GitHubTokenRequest request, CancellationToken cancellationToken = default)
-        => UpdateGitHubToken(request, cancellationToken);
-
-    [HttpGet("github-repository")]
-    public ActionResult<object> GetGitHubRepository()
-    {
-        return Ok(new { repository = _appSettings.Value.GitHubRepository ?? "" });
-    }
-
-    // RESTful endpoint: PUT /api/settings/github-repository
-    [HttpPut("github-repository")]
-    public async Task<ActionResult> UpdateGitHubRepository([FromBody] GitHubRepositoryRequest request, CancellationToken cancellationToken = default)
-    {
-        var sanitizedRepo = LoggingHelper.SanitizeForLog(request.Repository);
-        _logger.LogInformation("GitHub repository update requested: {Repository}", sanitizedRepo);
-        
-        try
-        {
-            await _settingsService.UpdateGitHubRepositoryAsync(request.Repository, cancellationToken);
-            return Ok(new { message = "GitHub repository updated successfully" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update GitHub repository");
-            return StatusCode(500, new { error = "Failed to update GitHub repository" });
-        }
-    }
-
-    // Legacy endpoint for backward compatibility
-    [HttpPost("github-repository")]
-    [ApiExplorerSettings(IgnoreApi = true)]
-    public Task<ActionResult> SetGitHubRepository([FromBody] GitHubRepositoryRequest request, CancellationToken cancellationToken = default)
-        => UpdateGitHubRepository(request, cancellationToken);
-
-    [HttpGet("github-issue-assignee")]
-    public ActionResult<object> GetGitHubIssueAssignee()
-    {
-        return Ok(new { assignee = _appSettings.Value.GitHubIssueAssignee ?? "" });
-    }
-
-    // RESTful endpoint: PUT /api/settings/github-issue-assignee
-    [HttpPut("github-issue-assignee")]
-    public async Task<ActionResult> UpdateGitHubIssueAssignee([FromBody] GitHubIssueAssigneeRequest request, CancellationToken cancellationToken = default)
-    {
-        var sanitizedAssignee = LoggingHelper.SanitizeForLog(request.Assignee);
-        _logger.LogInformation("GitHub issue assignee update requested: {Assignee}", sanitizedAssignee);
-        
-        try
-        {
-            await _settingsService.UpdateGitHubIssueAssigneeAsync(request.Assignee, cancellationToken);
-            return Ok(new { message = "GitHub issue assignee updated successfully" });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update GitHub issue assignee");
-            return StatusCode(500, new { error = "Failed to update GitHub issue assignee" });
-        }
-    }
-
-    // Legacy endpoint for backward compatibility
-    [HttpPost("github-issue-assignee")]
-    [ApiExplorerSettings(IgnoreApi = true)]
-    public Task<ActionResult> SetGitHubIssueAssignee([FromBody] GitHubIssueAssigneeRequest request, CancellationToken cancellationToken = default)
-        => UpdateGitHubIssueAssignee(request, cancellationToken);
 
     [HttpGet("watcher-enable-rename")]
     public ActionResult<object> GetWatcherEnableRename()
@@ -392,21 +296,6 @@ public class SettingsController : ControllerBase
     public class LogMaxBytesRequest
     {
         public int MaxBytes { get; set; }
-    }
-
-    public class GitHubTokenRequest
-    {
-        public string Token { get; set; } = string.Empty;
-    }
-
-    public class GitHubRepositoryRequest
-    {
-        public string Repository { get; set; } = string.Empty;
-    }
-
-    public class GitHubIssueAssigneeRequest
-    {
-        public string Assignee { get; set; } = string.Empty;
     }
 
     public class WatcherEnableRenameRequest

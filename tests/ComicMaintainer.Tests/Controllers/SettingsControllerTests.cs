@@ -29,10 +29,7 @@ public class SettingsControllerTests
             IssueNumberPadding = 4,
             WatcherEnableRename = true,
             WatcherEnableNormalize = true,
-            LogMaxBytes = 10485760,
-            GitHubToken = "test-token",
-            GitHubRepository = "test/repo",
-            GitHubIssueAssignee = "testuser"
+            LogMaxBytes = 10485760
         };
 
         _appSettingsMock = new Mock<IOptions<AppSettings>>();
@@ -120,40 +117,6 @@ public class SettingsControllerTests
         Assert.Equal(true, enabledProperty.GetValue(enabled));
     }
 
-    [Fact]
-    public void GetGitHubToken_DoesNotExposeActualToken()
-    {
-        // Act
-        var result = _controller.GetGitHubToken();
-
-        // Assert
-        var okResult = Assert.IsType<ActionResult<object>>(result);
-        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
-        
-        var tokenInfo = objectResult.Value;
-        Assert.NotNull(tokenInfo);
-        var hasTokenProperty = tokenInfo.GetType().GetProperty("hasToken");
-        Assert.NotNull(hasTokenProperty);
-        Assert.Equal(true, hasTokenProperty.GetValue(tokenInfo));
-    }
-
-    [Fact]
-    public void GetGitHubRepository_ReturnsRepository()
-    {
-        // Act
-        var result = _controller.GetGitHubRepository();
-
-        // Assert
-        var okResult = Assert.IsType<ActionResult<object>>(result);
-        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
-        
-        var repo = objectResult.Value;
-        Assert.NotNull(repo);
-        var repoProperty = repo.GetType().GetProperty("repository");
-        Assert.NotNull(repoProperty);
-        Assert.Equal("test/repo", repoProperty.GetValue(repo));
-    }
-
     // New RESTful endpoint tests
 
     [Fact]
@@ -218,48 +181,6 @@ public class SettingsControllerTests
         // Assert
         Assert.IsType<OkObjectResult>(result);
         _settingsServiceMock.Verify(s => s.UpdateLogMaxBytesAsync(request.MaxBytes, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task UpdateGitHubToken_ReturnsOk()
-    {
-        // Arrange
-        var request = new SettingsController.GitHubTokenRequest { Token = "new-token" };
-
-        // Act
-        var result = await _controller.UpdateGitHubToken(request);
-
-        // Assert
-        Assert.IsType<OkObjectResult>(result);
-        _settingsServiceMock.Verify(s => s.UpdateGitHubTokenAsync(request.Token, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task UpdateGitHubRepository_ReturnsOk()
-    {
-        // Arrange
-        var request = new SettingsController.GitHubRepositoryRequest { Repository = "newowner/newrepo" };
-
-        // Act
-        var result = await _controller.UpdateGitHubRepository(request);
-
-        // Assert
-        Assert.IsType<OkObjectResult>(result);
-        _settingsServiceMock.Verify(s => s.UpdateGitHubRepositoryAsync(request.Repository, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task UpdateGitHubIssueAssignee_ReturnsOk()
-    {
-        // Arrange
-        var request = new SettingsController.GitHubIssueAssigneeRequest { Assignee = "newuser" };
-
-        // Act
-        var result = await _controller.UpdateGitHubIssueAssignee(request);
-
-        // Assert
-        Assert.IsType<OkObjectResult>(result);
-        _settingsServiceMock.Verify(s => s.UpdateGitHubIssueAssigneeAsync(request.Assignee, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

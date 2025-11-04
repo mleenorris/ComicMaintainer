@@ -56,31 +56,33 @@ public class WatcherControllerTests
     }
 
     [Fact]
-    public void EnableWatcher_WithTrue_CallsSetEnabledAndReturnsOk()
+    public void EnableWatcher_WithTrue_IsDeprecatedAndReturnsOk()
     {
-        // Arrange
-        _mockWatcher.Setup(w => w.SetEnabled(true));
+        // Arrange - no SetEnabled should be called since it's deprecated
 
         // Act
+        #pragma warning disable CS0618 // Type or member is obsolete
         var result = _controller.EnableWatcher(true);
+        #pragma warning restore CS0618 // Type or member is obsolete
 
-        // Assert
+        // Assert - Should return Ok but not call SetEnabled
         Assert.IsType<OkResult>(result);
-        _mockWatcher.Verify(w => w.SetEnabled(true), Times.Once);
+        _mockWatcher.Verify(w => w.SetEnabled(It.IsAny<bool>()), Times.Never);
     }
 
     [Fact]
-    public void EnableWatcher_WithFalse_CallsSetEnabledAndReturnsOk()
+    public void EnableWatcher_WithFalse_IsDeprecatedAndReturnsOk()
     {
-        // Arrange
-        _mockWatcher.Setup(w => w.SetEnabled(false));
+        // Arrange - no SetEnabled should be called since it's deprecated
 
         // Act
+        #pragma warning disable CS0618 // Type or member is obsolete
         var result = _controller.EnableWatcher(false);
+        #pragma warning restore CS0618 // Type or member is obsolete
 
-        // Assert
+        // Assert - Should return Ok but not call SetEnabled
         Assert.IsType<OkResult>(result);
-        _mockWatcher.Verify(w => w.SetEnabled(false), Times.Once);
+        _mockWatcher.Verify(w => w.SetEnabled(It.IsAny<bool>()), Times.Never);
     }
 
     [Fact]
@@ -98,17 +100,18 @@ public class WatcherControllerTests
     }
 
     [Fact]
-    public void EnableWatcher_WhenExceptionThrown_ReturnsInternalServerError()
+    public void EnableWatcher_IsDeprecatedAndDoesNotThrow()
     {
-        // Arrange
-        _mockWatcher.Setup(w => w.SetEnabled(It.IsAny<bool>())).Throws(new InvalidOperationException("Test error"));
+        // Arrange - deprecated endpoint should not throw even with exception
+        // No need to setup exception since SetEnabled is never called
 
         // Act
+        #pragma warning disable CS0618 // Type or member is obsolete
         var result = _controller.EnableWatcher(true);
+        #pragma warning restore CS0618 // Type or member is obsolete
 
-        // Assert
-        var statusCodeResult = Assert.IsType<ObjectResult>(result);
-        Assert.Equal(500, statusCodeResult.StatusCode);
+        // Assert - Should return Ok and not throw
+        Assert.IsType<OkResult>(result);
     }
 
     // New RESTful endpoint tests
@@ -150,46 +153,58 @@ public class WatcherControllerTests
     }
 
     [Fact]
-    public void UpdateWatcher_WithEnabled_ReturnsOkWithEnabledStatus()
+    public void UpdateWatcher_IsDeprecatedAndReturnsCurrentState()
     {
         // Arrange
         var request = new WatcherController.WatcherUpdateRequest { Enabled = true };
-        _mockWatcher.Setup(w => w.SetEnabled(true));
+        _mockWatcher.Setup(w => w.IsRunning).Returns(false); // Watcher is not running
 
         // Act
+        #pragma warning disable CS0618 // Type or member is obsolete
         var result = _controller.UpdateWatcher(request);
+        #pragma warning restore CS0618 // Type or member is obsolete
 
-        // Assert
+        // Assert - Should return current state, not requested state
         var okResult = Assert.IsType<OkObjectResult>(result);
         Assert.NotNull(okResult.Value);
-        _mockWatcher.Verify(w => w.SetEnabled(true), Times.Once);
+        var enabledProperty = okResult.Value.GetType().GetProperty("enabled");
+        Assert.NotNull(enabledProperty);
+        Assert.False((bool)enabledProperty.GetValue(okResult.Value)!); // Returns false (current state) not true (requested state)
+        _mockWatcher.Verify(w => w.SetEnabled(It.IsAny<bool>()), Times.Never); // Should never call SetEnabled
     }
 
     [Fact]
-    public void UpdateWatcher_WithDisabled_ReturnsOkWithDisabledStatus()
+    public void UpdateWatcher_WithRunningWatcher_ReturnsRunningState()
     {
         // Arrange
         var request = new WatcherController.WatcherUpdateRequest { Enabled = false };
-        _mockWatcher.Setup(w => w.SetEnabled(false));
+        _mockWatcher.Setup(w => w.IsRunning).Returns(true); // Watcher is running
 
         // Act
+        #pragma warning disable CS0618 // Type or member is obsolete
         var result = _controller.UpdateWatcher(request);
+        #pragma warning restore CS0618 // Type or member is obsolete
 
-        // Assert
+        // Assert - Should return current state (running), not requested state (disabled)
         var okResult = Assert.IsType<OkObjectResult>(result);
         Assert.NotNull(okResult.Value);
-        _mockWatcher.Verify(w => w.SetEnabled(false), Times.Once);
+        var enabledProperty = okResult.Value.GetType().GetProperty("enabled");
+        Assert.NotNull(enabledProperty);
+        Assert.True((bool)enabledProperty.GetValue(okResult.Value)!); // Returns true (current state) not false (requested state)
+        _mockWatcher.Verify(w => w.SetEnabled(It.IsAny<bool>()), Times.Never); // Should never call SetEnabled
     }
 
     [Fact]
-    public void UpdateWatcher_WhenExceptionThrown_ReturnsInternalServerError()
+    public void UpdateWatcher_WhenIsRunningThrows_ReturnsInternalServerError()
     {
         // Arrange
         var request = new WatcherController.WatcherUpdateRequest { Enabled = true };
-        _mockWatcher.Setup(w => w.SetEnabled(It.IsAny<bool>())).Throws(new InvalidOperationException("Test error"));
+        _mockWatcher.Setup(w => w.IsRunning).Throws(new InvalidOperationException("Test error"));
 
         // Act
+        #pragma warning disable CS0618 // Type or member is obsolete
         var result = _controller.UpdateWatcher(request);
+        #pragma warning restore CS0618 // Type or member is obsolete
 
         // Assert
         var statusCodeResult = Assert.IsType<ObjectResult>(result);

@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Comic Maintainer</title>
+    <title>Administrator Setup - Comic Maintainer</title>
     
     <!-- PWA Meta Tags -->
-    <meta name="description" content="Login to Comic Maintainer">
+    <meta name="description" content="Setup administrator for Comic Maintainer">
     <meta name="theme-color" content="#2c3e50">
     
     <!-- Favicons and Icons -->
@@ -27,6 +27,7 @@
             --primary-hover: #2980b9;
             --danger-color: #e74c3c;
             --success-color: #27ae60;
+            --warning-color: #f39c12;
         }
         
         [data-theme="dark"] {
@@ -59,17 +60,17 @@
             transition: background-color 0.3s, color 0.3s;
         }
         
-        .login-container {
+        .setup-container {
             background: var(--bg-secondary);
             border-radius: 12px;
             box-shadow: var(--shadow-md);
             padding: 40px;
             width: 100%;
-            max-width: 400px;
+            max-width: 450px;
             transition: background-color 0.3s;
         }
         
-        .login-header {
+        .setup-header {
             text-align: center;
             margin-bottom: 30px;
         }
@@ -78,15 +79,26 @@
             margin-bottom: 20px;
         }
         
-        .login-header h1 {
+        .setup-header h1 {
             color: var(--text-secondary);
             font-size: 24px;
             margin-bottom: 10px;
         }
         
-        .login-header p {
+        .setup-header p {
             color: var(--text-muted);
             font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .info-box {
+            background: rgba(243, 156, 18, 0.1);
+            border-left: 4px solid var(--warning-color);
+            padding: 12px 15px;
+            margin-bottom: 25px;
+            border-radius: 6px;
+            font-size: 13px;
+            color: var(--text-primary);
         }
         
         .form-group {
@@ -115,6 +127,13 @@
         .form-group input:focus {
             outline: none;
             border-color: var(--primary-color);
+        }
+        
+        .form-group small {
+            display: block;
+            margin-top: 5px;
+            color: var(--text-muted);
+            font-size: 12px;
         }
         
         .btn {
@@ -170,22 +189,38 @@
             display: block;
         }
         
-        .form-footer {
-            margin-top: 20px;
-            text-align: center;
+        .password-strength {
+            margin-top: 8px;
+            font-size: 12px;
         }
         
-        .form-footer button {
-            background: none;
-            border: none;
-            color: var(--primary-color);
-            font-size: 14px;
-            cursor: pointer;
-            text-decoration: underline;
+        .password-strength .strength-bar {
+            height: 4px;
+            background: #ddd;
+            border-radius: 2px;
+            margin-top: 5px;
+            overflow: hidden;
         }
         
-        .form-footer button:hover {
-            color: var(--primary-hover);
+        .password-strength .strength-fill {
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s, background-color 0.3s;
+        }
+        
+        .password-strength.weak .strength-fill {
+            width: 33%;
+            background: var(--danger-color);
+        }
+        
+        .password-strength.medium .strength-fill {
+            width: 66%;
+            background: var(--warning-color);
+        }
+        
+        .password-strength.strong .strength-fill {
+            width: 100%;
+            background: var(--success-color);
         }
         
         .theme-toggle {
@@ -233,8 +268,8 @@
         🌓
     </button>
     
-    <div class="login-container">
-        <div class="login-header">
+    <div class="setup-container">
+        <div class="setup-header">
             <div class="logo">
                 <svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
                     <!-- Brown border/frame -->
@@ -277,30 +312,44 @@
                     <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
                 </svg>
             </div>
-            <h1>Comic Maintainer</h1>
-            <p>Sign in to manage your comic library</p>
+            <h1>Administrator Setup</h1>
+            <p>Create your administrator account to secure your Comic Maintainer installation</p>
+        </div>
+        
+        <div class="info-box">
+            ⚠️ This is a one-time setup. Choose a strong password and remember your credentials.
         </div>
         
         <div id="errorMessage" class="error-message"></div>
         <div id="successMessage" class="success-message"></div>
         
-        <!-- Login Form -->
-        <form id="loginForm">
+        <!-- Setup Form -->
+        <form id="setupForm">
             <div class="form-group">
                 <label for="username">Username</label>
-                <input type="text" id="username" name="username" required autocomplete="username">
+                <input type="text" id="username" name="username" required autocomplete="username" minlength="3">
+                <small>Minimum 3 characters</small>
             </div>
             <div class="form-group">
                 <label for="password">Password</label>
-                <input type="password" id="password" name="password" required autocomplete="current-password">
+                <input type="password" id="password" name="password" required autocomplete="new-password" minlength="8">
+                <div class="password-strength" id="passwordStrength">
+                    <div class="strength-bar">
+                        <div class="strength-fill"></div>
+                    </div>
+                </div>
+                <small>Minimum 8 characters, must include uppercase, lowercase, and digit</small>
             </div>
-            <button type="submit" class="btn btn-primary" id="loginBtn">
-                <span id="loginBtnText">Sign In</span>
-                <span id="loginBtnSpinner" class="spinner hidden"></span>
+            <div class="form-group">
+                <label for="confirmPassword">Confirm Password</label>
+                <input type="password" id="confirmPassword" name="confirmPassword" required autocomplete="new-password">
+                <small>Re-enter your password to confirm</small>
+            </div>
+            <button type="submit" class="btn btn-primary" id="setupBtn">
+                <span id="setupBtnText">Create Administrator Account</span>
+                <span id="setupBtnSpinner" class="spinner hidden"></span>
             </button>
         </form>
-        
-
     </div>
     
     <script>
@@ -350,142 +399,131 @@
             }, 3000);
         }
         
-        // Helper function to decode JWT token and extract expiration
-        function decodeJwtToken(token) {
-            try {
-                // JWT format: header.payload.signature
-                const parts = token.split('.');
-                if (parts.length !== 3) {
-                    return null;
-                }
-                
-                // Decode the payload (second part)
-                const payload = parts[1];
-                // Add padding if needed for base64 decode
-                const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
-                const paddedBase64 = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
-                const jsonPayload = decodeURIComponent(atob(paddedBase64).split('').map(function(c) {
-                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-                }).join(''));
-                
-                return JSON.parse(jsonPayload);
-            } catch (error) {
-                console.error('Error decoding JWT token:', error);
-                return null;
+        // Check password strength
+        function checkPasswordStrength(password) {
+            const strengthElement = document.getElementById('passwordStrength');
+            let strength = 0;
+            
+            if (password.length >= 8) strength++;
+            if (password.length >= 12) strength++;
+            if (/[a-z]/.test(password) && /[A-Z]/.test(password)) strength++;
+            if (/\d/.test(password)) strength++;
+            if (/[^a-zA-Z0-9]/.test(password)) strength++;
+            
+            strengthElement.classList.remove('weak', 'medium', 'strong');
+            
+            if (strength <= 2) {
+                strengthElement.classList.add('weak');
+            } else if (strength <= 4) {
+                strengthElement.classList.add('medium');
+            } else {
+                strengthElement.classList.add('strong');
             }
         }
         
-        // Helper function to check if JWT token is expired
-        function isTokenExpired(token) {
-            const decoded = decodeJwtToken(token);
-            if (!decoded || !decoded.exp) {
-                return true; // Treat invalid token as expired
-            }
-            
-            // JWT exp claim is in seconds, Date.now() is in milliseconds
-            const expirationTime = decoded.exp * 1000;
-            const currentTime = Date.now();
-            
-            return currentTime >= expirationTime;
-        }
+        // Password strength indicator
+        document.getElementById('password').addEventListener('input', (e) => {
+            checkPasswordStrength(e.target.value);
+        });
         
-        // Check if setup is required
+        // Check if setup is still required
         async function checkSetupRequired() {
             try {
                 const response = await fetch(apiUrl('/api/auth/setup-required'));
                 const data = await response.json();
                 
-                if (data.setupRequired) {
-                    // Setup is required, redirect to setup page
-                    window.location.href = '/setup.html';
+                if (!data.setupRequired) {
+                    // Setup already completed, redirect to login
+                    window.location.href = '/login.html';
                 }
             } catch (error) {
                 console.error('Error checking setup status:', error);
             }
         }
         
-        // Check if already logged in
-        function checkAuth() {
-            const token = localStorage.getItem('jwt_token');
-            if (token) {
-                // Check if token is expired
-                if (isTokenExpired(token)) {
-                    // Token expired, clear it and stay on login page
-                    console.log('JWT token has expired, clearing storage');
-                    localStorage.removeItem('jwt_token');
-                    localStorage.removeItem('username');
-                    return;
-                }
-                // Token is valid, redirect to main page
-                window.location.href = '/';
-            }
-        }
-        
-        // Handle login form submission
-        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+        // Handle setup form submission
+        document.getElementById('setupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
             const username = document.getElementById('username').value.trim();
             const password = document.getElementById('password').value;
+            const confirmPassword = document.getElementById('confirmPassword').value;
             
-            if (!username || !password) {
-                showError('Please enter both username and password');
+            if (!username || !password || !confirmPassword) {
+                showError('Please fill in all fields');
+                return;
+            }
+            
+            if (username.length < 3) {
+                showError('Username must be at least 3 characters');
+                return;
+            }
+            
+            if (password.length < 8) {
+                showError('Password must be at least 8 characters');
+                return;
+            }
+            
+            if (password !== confirmPassword) {
+                showError('Passwords do not match');
                 return;
             }
             
             // Show loading state
-            const loginBtn = document.getElementById('loginBtn');
-            const loginBtnText = document.getElementById('loginBtnText');
-            const loginBtnSpinner = document.getElementById('loginBtnSpinner');
+            const setupBtn = document.getElementById('setupBtn');
+            const setupBtnText = document.getElementById('setupBtnText');
+            const setupBtnSpinner = document.getElementById('setupBtnSpinner');
             
-            loginBtn.disabled = true;
-            loginBtnText.classList.add('hidden');
-            loginBtnSpinner.classList.remove('hidden');
+            setupBtn.disabled = true;
+            setupBtnText.classList.add('hidden');
+            setupBtnSpinner.classList.remove('hidden');
             
             try {
-                const response = await fetch(apiUrl('/api/auth/login'), {
+                const response = await fetch(apiUrl('/api/auth/setup'), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ username, password })
+                    body: JSON.stringify({ 
+                        username, 
+                        password,
+                        email: null
+                    })
                 });
                 
                 const data = await response.json();
                 
-                if (response.ok && data.token) {
-                    // Store the token
-                    localStorage.setItem('jwt_token', data.token);
-                    localStorage.setItem('username', username);
-                    
-                    // Show success and redirect
-                    showSuccess('Login successful! Redirecting...');
+                if (response.ok) {
+                    // Show success and redirect to login
+                    showSuccess('Administrator account created successfully! Redirecting to login...');
                     
                     setTimeout(() => {
-                        window.location.href = '/';
-                    }, 500);
+                        window.location.href = '/login.html';
+                    }, 1500);
                 } else {
-                    showError(data.error || 'Login failed. Please check your credentials.');
+                    showError(data.error || 'Setup failed. Please try again.');
+                    
+                    // Reset button state
+                    setupBtn.disabled = false;
+                    setupBtnText.classList.remove('hidden');
+                    setupBtnSpinner.classList.add('hidden');
                 }
             } catch (error) {
-                console.error('Login error:', error);
+                console.error('Setup error:', error);
                 showError('An error occurred. Please try again.');
-            } finally {
+                
                 // Reset button state
-                loginBtn.disabled = false;
-                loginBtnText.classList.remove('hidden');
-                loginBtnSpinner.classList.add('hidden');
+                setupBtn.disabled = false;
+                setupBtnText.classList.remove('hidden');
+                setupBtnSpinner.classList.add('hidden');
             }
         });
         
         // Initialize theme on page load
         initTheme();
         
-        // Check if setup is required first
+        // Check if setup is still required
         checkSetupRequired();
-        
-        // Check if already authenticated
-        checkAuth();
     </script>
 </body>
 </html>

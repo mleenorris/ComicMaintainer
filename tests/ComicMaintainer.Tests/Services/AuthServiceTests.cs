@@ -350,4 +350,125 @@ public class AuthServiceTests
         Assert.Equal("TestIssuer", jwtToken.Issuer);
         Assert.Contains("TestAudience", jwtToken.Audiences);
     }
+
+    [Fact]
+    public async Task IsSetupRequiredAsync_WithNoAdminUsers_ReturnsTrue()
+    {
+        // Arrange
+        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("Admin"))
+            .ReturnsAsync(new List<ApplicationUser>());
+
+        // Act
+        var setupRequired = await _authService.IsSetupRequiredAsync();
+
+        // Assert
+        Assert.True(setupRequired);
+    }
+
+    [Fact]
+    public async Task IsSetupRequiredAsync_WithExistingAdmin_ReturnsFalse()
+    {
+        // Arrange
+        var adminUser = new ApplicationUser
+        {
+            Id = "admin-id",
+            UserName = "admin",
+            Email = "admin@example.com",
+            IsActive = true
+        };
+
+        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("Admin"))
+            .ReturnsAsync(new List<ApplicationUser> { adminUser });
+
+        // Act
+        var setupRequired = await _authService.IsSetupRequiredAsync();
+
+        // Assert
+        Assert.False(setupRequired);
+    }
+
+    [Fact]
+    public async Task SetupAdminAsync_WithNoExistingAdmin_ReturnsSuccess()
+    {
+        // Arrange
+        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("Admin"))
+            .ReturnsAsync(new List<ApplicationUser>());
+        _mockUserManager.Setup(x => x.CreateAsync(It.IsAny<ApplicationUser>(), "AdminPass123!"))
+            .ReturnsAsync(IdentityResult.Success);
+        _mockUserManager.Setup(x => x.AddToRoleAsync(It.IsAny<ApplicationUser>(), "Admin"))
+            .ReturnsAsync(IdentityResult.Success);
+
+        // Act
+        var (success, error) = await _authService.SetupAdminAsync("newadmin", "AdminPass123!", "admin@example.com");
+
+        // Assert
+        Assert.True(success);
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public async Task SetupAdminAsync_WithExistingAdmin_ReturnsFailure()
+    {
+        // Arrange
+        var existingAdmin = new ApplicationUser
+        {
+            Id = "admin-id",
+            UserName = "admin",
+            Email = "admin@example.com",
+            IsActive = true
+        };
+
+        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("Admin"))
+            .ReturnsAsync(new List<ApplicationUser> { existingAdmin });
+
+        // Act
+        var (success, error) = await _authService.SetupAdminAsync("newadmin", "AdminPass123!", "admin@example.com");
+
+        // Assert
+        Assert.False(success);
+        Assert.Equal("Admin user already exists", error);
+    }
+
+    [Fact]
+    public async Task SetupAdminAsync_WithWeakPassword_ReturnsFailure()
+    {
+        // Arrange
+        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("Admin"))
+            .ReturnsAsync(new List<ApplicationUser>());
+        
+        var identityError = new IdentityError { Description = "Password must have at least one uppercase letter" };
+        _mockUserManager.Setup(x => x.CreateAsync(It.IsAny<ApplicationUser>(), "weakpass"))
+            .ReturnsAsync(IdentityResult.Failed(identityError));
+
+        // Act
+        var (success, error) = await _authService.SetupAdminAsync("newadmin", "weakpass", "admin@example.com");
+
+        // Assert
+        Assert.False(success);
+        Assert.NotNull(error);
+        Assert.Contains("uppercase", error);
+    }
+
+    [Fact]
+    public async Task SetupAdminAsync_WithoutEmail_UsesDefaultEmail()
+    {
+        // Arrange
+        ApplicationUser? capturedUser = null;
+        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("Admin"))
+            .ReturnsAsync(new List<ApplicationUser>());
+        _mockUserManager.Setup(x => x.CreateAsync(It.IsAny<ApplicationUser>(), "AdminPass123!"))
+            .Callback<ApplicationUser, string>((user, _) => capturedUser = user)
+            .ReturnsAsync(IdentityResult.Success);
+        _mockUserManager.Setup(x => x.AddToRoleAsync(It.IsAny<ApplicationUser>(), "Admin"))
+            .ReturnsAsync(IdentityResult.Success);
+
+        // Act
+        var (success, error) = await _authService.SetupAdminAsync("newadmin", "AdminPass123!", null);
+
+        // Assert
+        Assert.True(success);
+        Assert.Null(error);
+        Assert.NotNull(capturedUser);
+        Assert.Equal("newadmin@comicmaintainer.local", capturedUser.Email);
+    }
 }

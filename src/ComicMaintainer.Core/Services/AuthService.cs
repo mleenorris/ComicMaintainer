@@ -153,6 +153,43 @@ public class AuthService : IAuthService
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
+    public async Task<bool> IsSetupRequiredAsync()
+    {
+        // Check if any admin users exist
+        var adminUsers = await _userManager.GetUsersInRoleAsync("Admin");
+        return adminUsers.Count == 0;
+    }
+
+    public async Task<(bool Success, string? Error)> SetupAdminAsync(string username, string password, string? email = null)
+    {
+        // Check if setup is still required
+        if (!await IsSetupRequiredAsync())
+        {
+            return (false, "Admin user already exists");
+        }
+
+        // Create the admin user
+        var adminUser = new ApplicationUser
+        {
+            UserName = username,
+            Email = email ?? $"{username}@comicmaintainer.local",
+            FullName = "Administrator",
+            IsActive = true,
+            EmailConfirmed = true
+        };
+
+        var result = await _userManager.CreateAsync(adminUser, password);
+        if (!result.Succeeded)
+        {
+            return (false, string.Join(", ", result.Errors.Select(e => e.Description)));
+        }
+
+        // Assign admin role
+        await _userManager.AddToRoleAsync(adminUser, "Admin");
+
+        return (true, null);
+    }
+
     private static string GenerateSecureApiKey()
     {
         var randomBytes = new byte[32];

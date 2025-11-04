@@ -13,4 +13,6 @@ public interface IAuthService
     Task<ApplicationUser?> GetUserByApiKeyAsync(string apiKey);
     Task<(bool Success, string? ApiKey, string? Error)> GenerateApiKeyAsync(string userId);
     Task<bool> ValidateApiKeyAsync(string apiKey);
+    Task<bool> IsSetupRequiredAsync();
+    Task<(bool Success, string? Error)> SetupAdminAsync(string username, string password, string? email = null);
 }

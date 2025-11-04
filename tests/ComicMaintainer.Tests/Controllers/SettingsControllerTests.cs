@@ -15,6 +15,7 @@ public class SettingsControllerTests
     private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly Mock<IComicProcessorService> _processorServiceMock;
     private readonly Mock<IFileStoreService> _fileStoreMock;
+    private readonly Mock<ISettingsService> _settingsServiceMock;
     private readonly SettingsController _controller;
     private readonly AppSettings _appSettings;
 
@@ -39,13 +40,15 @@ public class SettingsControllerTests
         _serviceProviderMock = new Mock<IServiceProvider>();
         _processorServiceMock = new Mock<IComicProcessorService>();
         _fileStoreMock = new Mock<IFileStoreService>();
+        _settingsServiceMock = new Mock<ISettingsService>();
         
         _controller = new SettingsController(
             _appSettingsMock.Object, 
             _loggerMock.Object,
             _serviceProviderMock.Object,
             _processorServiceMock.Object,
-            _fileStoreMock.Object);
+            _fileStoreMock.Object,
+            _settingsServiceMock.Object);
     }
 
     [Fact]
@@ -61,7 +64,7 @@ public class SettingsControllerTests
     }
 
     [Fact]
-    public void SetFilenameFormat_ReturnsOkResult()
+    public async Task SetFilenameFormat_ReturnsOkResult()
     {
         // Arrange
         var request = new SettingsController.FilenameFormatRequest 
@@ -70,10 +73,11 @@ public class SettingsControllerTests
         };
 
         // Act
-        var result = _controller.SetFilenameFormat(request);
+        var result = await _controller.SetFilenameFormat(request);
 
-        // Assert - Returns OkObjectResult with message about read-only settings
+        // Assert
         Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateFilenameFormatAsync(request.Format, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -166,7 +170,7 @@ public class SettingsControllerTests
     }
 
     [Fact]
-    public void UpdateFilenameFormat_ReturnsOk()
+    public async Task UpdateFilenameFormat_ReturnsOk()
     {
         // Arrange
         var request = new SettingsController.FilenameFormatRequest 
@@ -175,76 +179,82 @@ public class SettingsControllerTests
         };
 
         // Act
-        var result = _controller.UpdateFilenameFormat(request);
+        var result = await _controller.UpdateFilenameFormat(request);
 
         // Assert
         Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateFilenameFormatAsync(request.Format, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public void UpdateIssueNumberPadding_ReturnsOk()
+    public async Task UpdateIssueNumberPadding_ReturnsOk()
     {
         // Arrange
         var request = new SettingsController.IssueNumberPaddingRequest { Padding = 3 };
 
         // Act
-        var result = _controller.UpdateIssueNumberPadding(request);
+        var result = await _controller.UpdateIssueNumberPadding(request);
 
         // Assert
-        Assert.IsType<OkResult>(result);
+        Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateIssueNumberPaddingAsync(request.Padding, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // UpdateWatcherEnabled removed - use UpdateWatcherEnableRename and UpdateWatcherEnableNormalize instead
 
     [Fact]
-    public void UpdateLogMaxBytes_ReturnsOk()
+    public async Task UpdateLogMaxBytes_ReturnsOk()
     {
         // Arrange
         var request = new SettingsController.LogMaxBytesRequest { MaxBytes = 20971520 };
 
         // Act
-        var result = _controller.UpdateLogMaxBytes(request);
+        var result = await _controller.UpdateLogMaxBytes(request);
 
         // Assert
-        Assert.IsType<OkResult>(result);
+        Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateLogMaxBytesAsync(request.MaxBytes, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public void UpdateGitHubToken_ReturnsOk()
+    public async Task UpdateGitHubToken_ReturnsOk()
     {
         // Arrange
         var request = new SettingsController.GitHubTokenRequest { Token = "new-token" };
 
         // Act
-        var result = _controller.UpdateGitHubToken(request);
+        var result = await _controller.UpdateGitHubToken(request);
 
         // Assert
-        Assert.IsType<OkResult>(result);
+        Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateGitHubTokenAsync(request.Token, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public void UpdateGitHubRepository_ReturnsOk()
+    public async Task UpdateGitHubRepository_ReturnsOk()
     {
         // Arrange
         var request = new SettingsController.GitHubRepositoryRequest { Repository = "newowner/newrepo" };
 
         // Act
-        var result = _controller.UpdateGitHubRepository(request);
+        var result = await _controller.UpdateGitHubRepository(request);
 
         // Assert
-        Assert.IsType<OkResult>(result);
+        Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateGitHubRepositoryAsync(request.Repository, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public void UpdateGitHubIssueAssignee_ReturnsOk()
+    public async Task UpdateGitHubIssueAssignee_ReturnsOk()
     {
         // Arrange
         var request = new SettingsController.GitHubIssueAssigneeRequest { Assignee = "newuser" };
 
         // Act
-        var result = _controller.UpdateGitHubIssueAssignee(request);
+        var result = await _controller.UpdateGitHubIssueAssignee(request);
 
         // Assert
-        Assert.IsType<OkResult>(result);
+        Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateGitHubIssueAssigneeAsync(request.Assignee, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

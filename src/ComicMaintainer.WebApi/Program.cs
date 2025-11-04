@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
@@ -31,6 +32,9 @@ catch (UnauthorizedAccessException)
     Directory.CreateDirectory(configDir);
 }
 
+// Load user settings to get LogMaxBytes
+var logMaxBytes = LoadLogMaxBytes(configDir);
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Use Serilog for logging - configure with the builder context to ensure proper integration
@@ -54,7 +58,7 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
             restrictedToMinimumLevel: LogEventLevel.Information,
             rollingInterval: RollingInterval.Day,
             retainedFileCountLimit: 7,
-            fileSizeLimitBytes: 10_485_760, // 10 MB
+            fileSizeLimitBytes: logMaxBytes,
             outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] {Message:lj}{NewLine}{Exception}"))
     // Debug log file - capture everything at Debug level and above (including watcher)
     .WriteTo.File(
@@ -62,7 +66,7 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
         restrictedToMinimumLevel: LogEventLevel.Debug,
         rollingInterval: RollingInterval.Day,
         retainedFileCountLimit: 3,
-        fileSizeLimitBytes: 10_485_760, // 10 MB
+        fileSizeLimitBytes: logMaxBytes,
         outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
     // Watcher-specific log file - capture all watcher-related logs
     .WriteTo.Logger(lc => lc
@@ -75,7 +79,7 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
             restrictedToMinimumLevel: LogEventLevel.Debug,
             rollingInterval: RollingInterval.Day,
             retainedFileCountLimit: 7,
-            fileSizeLimitBytes: 10_485_760, // 10 MB
+            fileSizeLimitBytes: logMaxBytes,
             outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] {Message:lj}{NewLine}{Exception}"))
     // Override specific namespaces to reduce console noise
     .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
@@ -88,7 +92,10 @@ builder.Services.Configure<AppSettings>(options =>
 {
     builder.Configuration.GetSection("AppSettings").Bind(options);
     
-    // Override with environment variables if present
+    // Load user settings from file
+    LoadUserSettings(configDir, options);
+    
+    // Override with environment variables if present (highest priority)
     var watchedDir = Environment.GetEnvironmentVariable("WATCHED_DIR");
     if (!string.IsNullOrEmpty(watchedDir))
         options.WatchedDirectory = watchedDir;
@@ -97,9 +104,9 @@ builder.Services.Configure<AppSettings>(options =>
     if (!string.IsNullOrEmpty(duplicateDir))
         options.DuplicateDirectory = duplicateDir;
     
-    var configDir = Environment.GetEnvironmentVariable("CONFIG_DIR");
-    if (!string.IsNullOrEmpty(configDir))
-        options.ConfigDirectory = configDir;
+    var configDirEnv = Environment.GetEnvironmentVariable("CONFIG_DIR");
+    if (!string.IsNullOrEmpty(configDirEnv))
+        options.ConfigDirectory = configDirEnv;
     
     var basePath = Environment.GetEnvironmentVariable("BASE_PATH");
     if (!string.IsNullOrEmpty(basePath))
@@ -231,6 +238,7 @@ builder.Services.AddSingleton<IFileStoreService, FileStoreService>();
 builder.Services.AddSingleton<IComicProcessorService, ComicProcessorService>();
 builder.Services.AddSingleton<IFileWatcherService, FileWatcherService>();
 builder.Services.AddSingleton<IProcessingHistoryService, ProcessingHistoryService>();
+builder.Services.AddSingleton<ISettingsService, SettingsService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 
 // Add hosted service for file watcher
@@ -329,6 +337,109 @@ logger.LogInformation("Watcher Status: {Status} (Rename: {Rename}, Normalize: {N
     appSettingsValue.WatcherEnableNormalize);
 
 app.Run();
+
+// Helper functions
+static long LoadLogMaxBytes(string configDir)
+{
+    const long defaultLogMaxBytes = 10_485_760; // 10 MB
+    
+    try
+    {
+        var settingsFilePath = Path.Combine(configDir, "user-settings.json");
+        if (!File.Exists(settingsFilePath))
+        {
+            return defaultLogMaxBytes;
+        }
+
+        var json = File.ReadAllText(settingsFilePath);
+        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+        
+        if (settings != null && settings.TryGetValue("LogMaxBytes", out var value))
+        {
+            if (value.ValueKind == JsonValueKind.Number)
+            {
+                return value.GetInt64();
+            }
+        }
+    }
+    catch
+    {
+        // If any error occurs, use default value
+    }
+
+    return defaultLogMaxBytes;
+}
+
+static void LoadUserSettings(string configDir, AppSettings options)
+{
+    try
+    {
+        var settingsFilePath = Path.Combine(configDir, "user-settings.json");
+        if (!File.Exists(settingsFilePath))
+        {
+            return;
+        }
+
+        var json = File.ReadAllText(settingsFilePath);
+        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+        
+        if (settings == null)
+        {
+            return;
+        }
+
+        // Load each setting from the user settings file
+        if (settings.TryGetValue("LogMaxBytes", out var logMaxBytes) && logMaxBytes.ValueKind == JsonValueKind.Number)
+        {
+            options.LogMaxBytes = logMaxBytes.GetInt32();
+        }
+
+        if (settings.TryGetValue("FilenameFormat", out var filenameFormat) && filenameFormat.ValueKind == JsonValueKind.String)
+        {
+            var format = filenameFormat.GetString();
+            if (!string.IsNullOrWhiteSpace(format))
+            {
+                options.FilenameFormat = format;
+            }
+        }
+
+        if (settings.TryGetValue("IssueNumberPadding", out var issueNumberPadding) && issueNumberPadding.ValueKind == JsonValueKind.Number)
+        {
+            options.IssueNumberPadding = issueNumberPadding.GetInt32();
+        }
+
+        if (settings.TryGetValue("WatcherEnableRename", out var watcherEnableRename) && 
+            (watcherEnableRename.ValueKind == JsonValueKind.True || watcherEnableRename.ValueKind == JsonValueKind.False))
+        {
+            options.WatcherEnableRename = watcherEnableRename.GetBoolean();
+        }
+
+        if (settings.TryGetValue("WatcherEnableNormalize", out var watcherEnableNormalize) && 
+            (watcherEnableNormalize.ValueKind == JsonValueKind.True || watcherEnableNormalize.ValueKind == JsonValueKind.False))
+        {
+            options.WatcherEnableNormalize = watcherEnableNormalize.GetBoolean();
+        }
+
+        if (settings.TryGetValue("GitHubToken", out var githubToken) && githubToken.ValueKind == JsonValueKind.String)
+        {
+            options.GitHubToken = githubToken.GetString();
+        }
+
+        if (settings.TryGetValue("GitHubRepository", out var githubRepository) && githubRepository.ValueKind == JsonValueKind.String)
+        {
+            options.GitHubRepository = githubRepository.GetString();
+        }
+
+        if (settings.TryGetValue("GitHubIssueAssignee", out var githubIssueAssignee) && githubIssueAssignee.ValueKind == JsonValueKind.String)
+        {
+            options.GitHubIssueAssignee = githubIssueAssignee.GetString();
+        }
+    }
+    catch
+    {
+        // If any error occurs, just continue with default values
+    }
+}
 
 // Make the implicit Program class public so test projects can access it
 public partial class Program { }

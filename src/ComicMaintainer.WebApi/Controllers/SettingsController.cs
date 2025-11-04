@@ -14,6 +14,8 @@ namespace ComicMaintainer.WebApi.Controllers;
 [Authorize]
 public class SettingsController : ControllerBase
 {
+    private const int BYTES_PER_MB = 1048576;
+    
     private readonly IOptions<AppSettings> _appSettings;
     private readonly ILogger<SettingsController> _logger;
     private readonly IServiceProvider _serviceProvider;
@@ -121,19 +123,26 @@ public class SettingsController : ControllerBase
     [HttpGet("log-max-bytes")]
     public ActionResult<object> GetLogMaxBytes()
     {
-        return Ok(new { maxBytes = _appSettings.Value.LogMaxBytes });
+        return Ok(new { maxMB = _appSettings.Value.LogMaxBytes / (double)BYTES_PER_MB });
     }
 
     // RESTful endpoint: PUT /api/settings/log-max-bytes
     [HttpPut("log-max-bytes")]
     public async Task<ActionResult> UpdateLogMaxBytes([FromBody] LogMaxBytesRequest request, CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Log max bytes update requested: {MaxBytes}", request.MaxBytes);
+        // Validate MaxMB to prevent integer overflow (max ~2047 MB for int.MaxValue)
+        if (request.MaxMB <= 0 || request.MaxMB > 2047)
+        {
+            return BadRequest(new { error = "MaxMB must be between 1 and 2047" });
+        }
+        
+        var maxBytes = Convert.ToInt32(Math.Round(request.MaxMB * BYTES_PER_MB));
+        _logger.LogInformation("Log max bytes update requested: {MaxMB} MB ({MaxBytes} bytes)", request.MaxMB, maxBytes);
         
         try
         {
-            await _settingsService.UpdateLogMaxBytesAsync(request.MaxBytes, cancellationToken);
-            _logger.LogWarning("Log max bytes updated to {MaxBytes}. Restart the application for the change to take effect.", request.MaxBytes);
+            await _settingsService.UpdateLogMaxBytesAsync(maxBytes, cancellationToken);
+            _logger.LogWarning("Log max bytes updated to {MaxMB} MB ({MaxBytes} bytes). Restart the application for the change to take effect.", request.MaxMB, maxBytes);
             return Ok(new { message = "Log max bytes updated successfully. Restart required for changes to take effect." });
         }
         catch (Exception ex)
@@ -295,7 +304,7 @@ public class SettingsController : ControllerBase
 
     public class LogMaxBytesRequest
     {
-        public int MaxBytes { get; set; }
+        public double MaxMB { get; set; }
     }
 
     public class WatcherEnableRenameRequest

@@ -419,21 +419,6 @@ static void LoadUserSettings(string configDir, AppSettings options)
         {
             options.WatcherEnableNormalize = watcherEnableNormalize.GetBoolean();
         }
-
-        if (settings.TryGetValue("GitHubToken", out var githubToken) && githubToken.ValueKind == JsonValueKind.String)
-        {
-            options.GitHubToken = githubToken.GetString();
-        }
-
-        if (settings.TryGetValue("GitHubRepository", out var githubRepository) && githubRepository.ValueKind == JsonValueKind.String)
-        {
-            options.GitHubRepository = githubRepository.GetString();
-        }
-
-        if (settings.TryGetValue("GitHubIssueAssignee", out var githubIssueAssignee) && githubIssueAssignee.ValueKind == JsonValueKind.String)
-        {
-            options.GitHubIssueAssignee = githubIssueAssignee.GetString();
-        }
     }
     catch
     {

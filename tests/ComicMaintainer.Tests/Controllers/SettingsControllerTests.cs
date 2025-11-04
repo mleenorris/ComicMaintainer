@@ -193,14 +193,16 @@ public class SettingsControllerTests
     public async Task UpdateLogMaxBytes_ReturnsOk()
     {
         // Arrange
-        var request = new SettingsController.LogMaxBytesRequest { MaxMB = 20 }; // 20 MB
+        const int requestedMB = 20;
+        const int expectedBytes = requestedMB * 1048576; // 20 MB in bytes
+        var request = new SettingsController.LogMaxBytesRequest { MaxMB = requestedMB };
 
         // Act
         var result = await _controller.UpdateLogMaxBytes(request);
 
         // Assert
         Assert.IsType<OkObjectResult>(result);
-        _settingsServiceMock.Verify(s => s.UpdateLogMaxBytesAsync(20971520, It.IsAny<CancellationToken>()), Times.Once);
+        _settingsServiceMock.Verify(s => s.UpdateLogMaxBytesAsync(expectedBytes, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

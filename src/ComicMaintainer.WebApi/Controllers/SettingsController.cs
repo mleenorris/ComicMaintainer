@@ -14,6 +14,8 @@ namespace ComicMaintainer.WebApi.Controllers;
 [Authorize]
 public class SettingsController : ControllerBase
 {
+    private const int BYTES_PER_MB = 1048576;
+    
     private readonly IOptions<AppSettings> _appSettings;
     private readonly ILogger<SettingsController> _logger;
     private readonly IServiceProvider _serviceProvider;
@@ -121,14 +123,14 @@ public class SettingsController : ControllerBase
     [HttpGet("log-max-bytes")]
     public ActionResult<object> GetLogMaxBytes()
     {
-        return Ok(new { maxMB = _appSettings.Value.LogMaxBytes / 1048576.0 });
+        return Ok(new { maxMB = _appSettings.Value.LogMaxBytes / (double)BYTES_PER_MB });
     }
 
     // RESTful endpoint: PUT /api/settings/log-max-bytes
     [HttpPut("log-max-bytes")]
     public async Task<ActionResult> UpdateLogMaxBytes([FromBody] LogMaxBytesRequest request, CancellationToken cancellationToken = default)
     {
-        var maxBytes = (int)(request.MaxMB * 1048576);
+        var maxBytes = (int)(request.MaxMB * BYTES_PER_MB);
         _logger.LogInformation("Log max bytes update requested: {MaxMB} MB ({MaxBytes} bytes)", request.MaxMB, maxBytes);
         
         try

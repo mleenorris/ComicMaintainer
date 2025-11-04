@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Models.Auth;
@@ -265,5 +266,88 @@ public class AuthServiceTests
 
         // Assert
         Assert.False(isValid);
+    }
+
+    [Fact]
+    public async Task LoginAsync_GeneratedToken_ContainsExpirationClaim()
+    {
+        // Arrange
+        var user = new ApplicationUser
+        {
+            Id = "test-user-id",
+            UserName = "testuser",
+            Email = "test@example.com",
+            IsActive = true
+        };
+
+        _mockUserManager.Setup(x => x.FindByNameAsync("testuser"))
+            .ReturnsAsync(user);
+        _mockUserManager.Setup(x => x.CheckPasswordAsync(user, "password123"))
+            .ReturnsAsync(true);
+        _mockUserManager.Setup(x => x.UpdateAsync(user))
+            .ReturnsAsync(IdentityResult.Success);
+        _mockUserManager.Setup(x => x.GetRolesAsync(user))
+            .ReturnsAsync(new List<string> { "User" });
+
+        // Act
+        var (success, token, error) = await _authService.LoginAsync("testuser", "password123");
+
+        // Assert
+        Assert.True(success);
+        Assert.NotEmpty(token);
+        
+        // Decode and verify token has expiration claim
+        var handler = new JwtSecurityTokenHandler();
+        var jwtToken = handler.ReadJwtToken(token);
+        
+        // Verify expiration claim exists
+        var expClaim = jwtToken.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Exp);
+        Assert.NotNull(expClaim);
+        
+        // Verify expiration is in the future (token should be valid for 60 minutes per test settings)
+        var expirationTime = DateTimeOffset.FromUnixTimeSeconds(long.Parse(expClaim.Value));
+        Assert.True(expirationTime > DateTimeOffset.UtcNow, "Token expiration should be in the future");
+        
+        // Verify expiration is approximately 60 minutes from now (allow 1 minute tolerance)
+        var expectedExpiration = DateTimeOffset.UtcNow.AddMinutes(60);
+        var timeDifference = Math.Abs((expirationTime - expectedExpiration).TotalMinutes);
+        Assert.True(timeDifference < 1, $"Token expiration should be ~60 minutes from now, but differs by {timeDifference} minutes");
+    }
+
+    [Fact]
+    public async Task LoginAsync_GeneratedToken_HasCorrectIssuerAndAudience()
+    {
+        // Arrange
+        var user = new ApplicationUser
+        {
+            Id = "test-user-id",
+            UserName = "testuser",
+            Email = "test@example.com",
+            IsActive = true
+        };
+
+        _mockUserManager.Setup(x => x.FindByNameAsync("testuser"))
+            .ReturnsAsync(user);
+        _mockUserManager.Setup(x => x.CheckPasswordAsync(user, "password123"))
+            .ReturnsAsync(true);
+        _mockUserManager.Setup(x => x.UpdateAsync(user))
+            .ReturnsAsync(IdentityResult.Success);
+        _mockUserManager.Setup(x => x.GetRolesAsync(user))
+            .ReturnsAsync(new List<string> { "User" });
+
+        // Act
+        var (success, token, error) = await _authService.LoginAsync("testuser", "password123");
+
+        // Assert
+        Assert.True(success);
+        Assert.NotEmpty(token);
+        
+        // Decode and verify token claims
+        var handler = new JwtSecurityTokenHandler();
+        var jwtToken = handler.ReadJwtToken(token);
+        
+        // Verify issuer and audience from test settings
+        Assert.Equal("TestIssuer", jwtToken.Issuer);
+        Assert.Contains("TestAudience", jwtToken.Audiences);
     }
 }

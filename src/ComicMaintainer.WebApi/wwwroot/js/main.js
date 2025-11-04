@@ -384,38 +384,8 @@
             await setPreferences({ theme: selectedTheme });
         }
         
-        // Update watcher from settings modal
-        async function updateWatcherFromSettings() {
-            const enabled = document.getElementById('watcherToggleCheckbox').checked;
-            
-            try {
-                const response = await fetch(apiUrl('/api/watcher'), {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...getAuthHeaders()
-                    },
-                    body: JSON.stringify({ enabled: enabled })
-                });
-                
-                if (handleAuthError(response)) {
-                    document.getElementById('watcherToggleCheckbox').checked = !enabled;
-                    return;
-                }
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                const result = await response.json();
-                
-                const statusText = result.enabled ? 'enabled' : 'disabled';
-                showMessage(`Watcher ${statusText} successfully!`, 'success');
-            } catch (error) {
-                showMessage('Failed to update watcher: ' + error.message, 'error');
-                // Revert checkbox on error
-                document.getElementById('watcherToggleCheckbox').checked = !enabled;
-            }
-        }
+        // Note: Watcher is now automatically enabled/disabled based on rename and normalize settings
+        // No need for explicit watcher toggle
         
         async function updateWatcherEnableRename() {
             const enabled = document.getElementById('watcherEnableRenameCheckbox').checked;
@@ -2462,15 +2432,7 @@
                 document.getElementById('themeSelect').value = currentTheme;
                 
                 // Load watcher status
-                const watcherResponse = await fetch(apiUrl('/api/watcher/status'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(watcherResponse)) return;
-                if (!watcherResponse.ok) {
-                    throw new Error(`HTTP error! status: ${watcherResponse.status}`);
-                }
-                const watcherData = await watcherResponse.json();
-                document.getElementById('watcherToggleCheckbox').checked = watcherData.enabled;
+                // Note: Watcher toggle removed - watcher is now automatically controlled by rename/normalize settings
                 
                 // Load watcher enable rename status
                 const watcherRenameResponse = await fetch(apiUrl('/api/settings/watcher-enable-rename'), {

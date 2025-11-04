@@ -2,11 +2,64 @@
         // (before this external JS is loaded) to support Flask template variable injection.
         // They are available globally when this script executes.
         
-        // Authentication check - redirect to login if no token
+        // Helper function to decode JWT token and extract expiration
+        function decodeJwtToken(token) {
+            try {
+                // JWT format: header.payload.signature
+                const parts = token.split('.');
+                if (parts.length !== 3) {
+                    return null;
+                }
+                
+                // Decode the payload (second part)
+                const payload = parts[1];
+                // Add padding if needed for base64 decode
+                const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+                const paddedBase64 = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
+                const jsonPayload = decodeURIComponent(atob(paddedBase64).split('').map(function(c) {
+                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+                }).join(''));
+                
+                return JSON.parse(jsonPayload);
+            } catch (error) {
+                console.error('Error decoding JWT token:', error);
+                return null;
+            }
+        }
+        
+        // Helper function to check if JWT token is expired
+        function isTokenExpired(token) {
+            const decoded = decodeJwtToken(token);
+            if (!decoded || !decoded.exp) {
+                return true; // Treat invalid token as expired
+            }
+            
+            // JWT exp claim is in seconds, Date.now() is in milliseconds
+            const expirationTime = decoded.exp * 1000;
+            const currentTime = Date.now();
+            
+            return currentTime >= expirationTime;
+        }
+        
+        // Helper function to redirect to login and clear auth data
+        function redirectToLogin() {
+            localStorage.removeItem('jwt_token');
+            localStorage.removeItem('username');
+            window.location.href = '/login.html';
+        }
+        
+        // Authentication check - redirect to login if no token or token is expired
         (function checkAuth() {
             const token = localStorage.getItem('jwt_token');
             if (!token) {
-                window.location.href = '/login.html';
+                redirectToLogin();
+                return;
+            }
+            
+            // Check if token is expired
+            if (isTokenExpired(token)) {
+                console.log('JWT token has expired, redirecting to login');
+                redirectToLogin();
                 return;
             }
         })();
@@ -14,6 +67,14 @@
         // Helper function to get auth headers
         function getAuthHeaders() {
             const token = localStorage.getItem('jwt_token');
+            
+            // Proactively check token expiry before making API calls
+            if (token && isTokenExpired(token)) {
+                console.log('JWT token expired, redirecting to login');
+                redirectToLogin();
+                return {};
+            }
+            
             const headers = {
                 'Content-Type': 'application/json'
             };
@@ -27,9 +88,8 @@
         function handleAuthError(response) {
             if (response.status === 401) {
                 // Token expired or invalid, redirect to login
-                localStorage.removeItem('jwt_token');
-                localStorage.removeItem('username');
-                window.location.href = '/login.html';
+                console.log('Received 401 Unauthorized, redirecting to login');
+                redirectToLogin();
                 return true;
             }
             return false;
@@ -49,9 +109,7 @@
         // Add logout function
         function logout() {
             if (confirm('Are you sure you want to logout?')) {
-                localStorage.removeItem('jwt_token');
-                localStorage.removeItem('username');
-                window.location.href = '/login.html';
+                redirectToLogin();
             }
         }
         

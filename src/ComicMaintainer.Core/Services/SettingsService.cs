@@ -1,6 +1,7 @@
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -133,7 +134,13 @@ public class SettingsService : ISettingsService
             var updatedJson = JsonSerializer.Serialize(settings, _jsonOptions);
             await File.WriteAllTextAsync(_settingsFilePath, updatedJson, cancellationToken);
 
-            _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, value);
+            // Sanitize value for logging to prevent log forging
+            var sanitizedValue = value?.ToString() ?? "null";
+            if (value is string strValue)
+            {
+                sanitizedValue = LoggingHelper.SanitizeForLog(strValue);
+            }
+            _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, sanitizedValue);
         }
         catch (Exception ex)
         {

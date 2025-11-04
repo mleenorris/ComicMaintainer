@@ -1854,8 +1854,8 @@
                 const status = await response.json();
                 console.log(`[JOB RESUME] Job ${activeJobId} status: ${status.status}, ${status.processed_items}/${status.total_items} items processed`);
                 
-                // Resume if job is still processing or queued
-                if (status.status === 'processing' || status.status === 'queued') {
+                // Resume if job is still running or queued
+                if (status.status === 'running' || status.status === 'queued') {
                     console.log(`[JOB RESUME] Resuming job ${activeJobId}`);
                     hasActiveJob = true;
                     showProgressModal(activeJobTitle || 'Resuming Job...');
@@ -2791,8 +2791,27 @@
             document.getElementById('progressDetails').innerHTML = '';
             document.getElementById('progressCloseBtn').style.display = 'none';
             document.getElementById('progressCancelBtn').style.display = 'inline-block';  // Show cancel button
-            modal.classList.add('active');
-            indicator.style.display = 'none';
+            
+            // Check if the modal was previously minimized
+            let wasMinimized = false;
+            try {
+                wasMinimized = localStorage.getItem('progressModalMinimized') === 'true';
+            } catch (e) {
+                // localStorage may be unavailable (e.g., private browsing mode)
+                console.warn('Could not access localStorage:', e);
+            }
+            
+            if (wasMinimized) {
+                // Show the minimized indicator instead of the full modal
+                modal.classList.remove('active');
+                indicator.style.display = 'flex';
+                const indicatorText = document.getElementById('progressIndicatorText');
+                indicatorText.textContent = `⏳ ${title}`;
+            } else {
+                // Show the full modal
+                modal.classList.add('active');
+                indicator.style.display = 'none';
+            }
         }
         
         function updateProgress(current, total, successCount, errorCount) {
@@ -2850,6 +2869,13 @@
             document.getElementById('progressModal').classList.remove('active');
             document.getElementById('progressIndicator').style.display = 'none';
             document.getElementById('progressCancelBtn').style.display = 'none';  // Hide cancel button
+            // Clear minimized state when modal is closed
+            try {
+                localStorage.removeItem('progressModalMinimized');
+            } catch (e) {
+                // localStorage may be unavailable (e.g., private browsing mode)
+                console.warn('Could not clear localStorage:', e);
+            }
         }
         
         function minimizeProgressModal() {
@@ -2865,6 +2891,14 @@
             const progressText = document.getElementById('progressText').textContent;
             indicatorText.textContent = `⏳ ${progressText} (${percentText})`;
             indicator.style.display = 'flex';
+            
+            // Save minimized state to localStorage
+            try {
+                localStorage.setItem('progressModalMinimized', 'true');
+            } catch (e) {
+                // localStorage may be unavailable (e.g., private browsing mode, quota exceeded)
+                console.warn('Could not save to localStorage:', e);
+            }
         }
         
         function restoreProgressModal() {
@@ -2876,6 +2910,14 @@
             
             // Hide the indicator
             indicator.style.display = 'none';
+            
+            // Clear minimized state when modal is restored
+            try {
+                localStorage.removeItem('progressModalMinimized');
+            } catch (e) {
+                // localStorage may be unavailable (e.g., private browsing mode)
+                console.warn('Could not clear localStorage:', e);
+            }
         }
         
         async function loadLogs() {

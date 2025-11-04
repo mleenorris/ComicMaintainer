@@ -44,10 +44,7 @@ public class SettingsController : ControllerBase
             issue_number_padding = _appSettings.Value.IssueNumberPadding,
             watcher_enable_rename = _appSettings.Value.WatcherEnableRename,
             watcher_enable_normalize = _appSettings.Value.WatcherEnableNormalize,
-            log_max_bytes = _appSettings.Value.LogMaxBytes,
-            github_token_configured = !string.IsNullOrEmpty(_appSettings.Value.GitHubToken),
-            github_repository = _appSettings.Value.GitHubRepository ?? "",
-            github_issue_assignee = _appSettings.Value.GitHubIssueAssignee ?? ""
+            log_max_bytes = _appSettings.Value.LogMaxBytes
         });
     }
 
@@ -117,69 +114,6 @@ public class SettingsController : ControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public ActionResult SetLogMaxBytes([FromBody] LogMaxBytesRequest request)
         => UpdateLogMaxBytes(request);
-
-    [HttpGet("github-token")]
-    public ActionResult<object> GetGitHubToken()
-    {
-        // Don't return the actual token for security
-        return Ok(new { hasToken = !string.IsNullOrEmpty(_appSettings.Value.GitHubToken) });
-    }
-
-    // RESTful endpoint: PUT /api/settings/github-token
-    [HttpPut("github-token")]
-    public ActionResult UpdateGitHubToken([FromBody] GitHubTokenRequest request)
-    {
-        _logger.LogInformation("GitHub token update requested");
-        return Ok();
-    }
-
-    // Legacy endpoint for backward compatibility
-    [HttpPost("github-token")]
-    [ApiExplorerSettings(IgnoreApi = true)]
-    public ActionResult SetGitHubToken([FromBody] GitHubTokenRequest request)
-        => UpdateGitHubToken(request);
-
-    [HttpGet("github-repository")]
-    public ActionResult<object> GetGitHubRepository()
-    {
-        return Ok(new { repository = _appSettings.Value.GitHubRepository ?? "" });
-    }
-
-    // RESTful endpoint: PUT /api/settings/github-repository
-    [HttpPut("github-repository")]
-    public ActionResult UpdateGitHubRepository([FromBody] GitHubRepositoryRequest request)
-    {
-        var sanitizedRepo = LoggingHelper.SanitizeForLog(request.Repository);
-        _logger.LogInformation("GitHub repository update requested: {Repository}", sanitizedRepo);
-        return Ok();
-    }
-
-    // Legacy endpoint for backward compatibility
-    [HttpPost("github-repository")]
-    [ApiExplorerSettings(IgnoreApi = true)]
-    public ActionResult SetGitHubRepository([FromBody] GitHubRepositoryRequest request)
-        => UpdateGitHubRepository(request);
-
-    [HttpGet("github-issue-assignee")]
-    public ActionResult<object> GetGitHubIssueAssignee()
-    {
-        return Ok(new { assignee = _appSettings.Value.GitHubIssueAssignee ?? "" });
-    }
-
-    // RESTful endpoint: PUT /api/settings/github-issue-assignee
-    [HttpPut("github-issue-assignee")]
-    public ActionResult UpdateGitHubIssueAssignee([FromBody] GitHubIssueAssigneeRequest request)
-    {
-        var sanitizedAssignee = LoggingHelper.SanitizeForLog(request.Assignee);
-        _logger.LogInformation("GitHub issue assignee update requested: {Assignee}", sanitizedAssignee);
-        return Ok();
-    }
-
-    // Legacy endpoint for backward compatibility
-    [HttpPost("github-issue-assignee")]
-    [ApiExplorerSettings(IgnoreApi = true)]
-    public ActionResult SetGitHubIssueAssignee([FromBody] GitHubIssueAssigneeRequest request)
-        => UpdateGitHubIssueAssignee(request);
 
     [HttpGet("watcher-enable-rename")]
     public ActionResult<object> GetWatcherEnableRename()
@@ -275,21 +209,6 @@ public class SettingsController : ControllerBase
     public class LogMaxBytesRequest
     {
         public int MaxBytes { get; set; }
-    }
-
-    public class GitHubTokenRequest
-    {
-        public string Token { get; set; } = string.Empty;
-    }
-
-    public class GitHubRepositoryRequest
-    {
-        public string Repository { get; set; } = string.Empty;
-    }
-
-    public class GitHubIssueAssigneeRequest
-    {
-        public string Assignee { get; set; } = string.Empty;
     }
 
     public class WatcherEnableRenameRequest

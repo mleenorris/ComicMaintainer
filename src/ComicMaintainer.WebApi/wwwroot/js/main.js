@@ -2516,41 +2516,6 @@
                 const paddingData = await paddingResponse.json();
                 document.getElementById('issueNumberPadding').value = paddingData.padding;
                 
-                // Load GitHub token (masked)
-                const tokenResponse = await fetch(apiUrl('/api/settings/github-token'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(tokenResponse)) return;
-                if (!tokenResponse.ok) {
-                    throw new Error(`HTTP error! status: ${tokenResponse.status}`);
-                }
-                const tokenData = await tokenResponse.json();
-                // Show placeholder if token exists, otherwise empty
-                document.getElementById('githubToken').placeholder = tokenData.has_token ? tokenData.token : 'ghp_...';
-                document.getElementById('githubToken').value = ''; // Don't populate actual value for security
-                
-                // Load GitHub repository
-                const repoResponse = await fetch(apiUrl('/api/settings/github-repository'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(repoResponse)) return;
-                if (!repoResponse.ok) {
-                    throw new Error(`HTTP error! status: ${repoResponse.status}`);
-                }
-                const repoData = await repoResponse.json();
-                document.getElementById('githubRepository').value = repoData.repository;
-                
-                // Load GitHub issue assignee
-                const assigneeResponse = await fetch(apiUrl('/api/settings/github-issue-assignee'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(assigneeResponse)) return;
-                if (!assigneeResponse.ok) {
-                    throw new Error(`HTTP error! status: ${assigneeResponse.status}`);
-                }
-                const assigneeData = await assigneeResponse.json();
-                document.getElementById('githubIssueAssignee').value = assigneeData.assignee;
-                
                 document.getElementById('settingsModal').classList.add('active');
             } catch (error) {
                 showMessage('Failed to load settings: ' + error.message, 'error');
@@ -3063,72 +3028,6 @@
                 
                 if (!paddingResult.success) {
                     showMessage(paddingResult.error || 'Failed to save issue number padding', 'error');
-                    return;
-                }
-                
-                // Save GitHub settings
-                const githubToken = document.getElementById('githubToken').value.trim();
-                const githubRepository = document.getElementById('githubRepository').value.trim();
-                const githubIssueAssignee = document.getElementById('githubIssueAssignee').value.trim();
-                
-                // Only save token if it was entered (not empty)
-                if (githubToken) {
-                    const tokenResponse = await fetch(apiUrl('/api/settings/github-token'), {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ token: githubToken })
-                    });
-                    
-                    if (!tokenResponse.ok) {
-                        throw new Error(`HTTP error! status: ${tokenResponse.status}`);
-                    }
-                    const tokenResult = await tokenResponse.json();
-                    
-                    if (!tokenResult.success) {
-                        showMessage(tokenResult.error || 'Failed to save GitHub token', 'error');
-                        return;
-                    }
-                }
-                
-                // Save GitHub repository (validate if not empty)
-                if (githubRepository) {
-                    const repoResponse = await fetch(apiUrl('/api/settings/github-repository'), {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ repository: githubRepository })
-                    });
-                    
-                    if (!repoResponse.ok) {
-                        throw new Error(`HTTP error! status: ${repoResponse.status}`);
-                    }
-                    const repoResult = await repoResponse.json();
-                    
-                    if (!repoResult.success) {
-                        showMessage(repoResult.error || 'Failed to save GitHub repository', 'error');
-                        return;
-                    }
-                }
-                
-                // Save GitHub issue assignee (can be empty)
-                const assigneeResponse = await fetch(apiUrl('/api/settings/github-issue-assignee'), {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ assignee: githubIssueAssignee })
-                });
-                
-                if (!assigneeResponse.ok) {
-                    throw new Error(`HTTP error! status: ${assigneeResponse.status}`);
-                }
-                const assigneeResult = await assigneeResponse.json();
-                
-                if (!assigneeResult.success) {
-                    showMessage(assigneeResult.error || 'Failed to save GitHub issue assignee', 'error');
                     return;
                 }
                 

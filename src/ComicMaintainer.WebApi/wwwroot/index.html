@@ -609,41 +609,6 @@
                     </small>
                 </div>
                 
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">GitHub Integration</h3>
-                <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
-                    Configure GitHub integration for automatic error reporting. When configured, errors will automatically create GitHub issues.
-                </p>
-                <div class="form-group">
-                    <label for="githubToken">GitHub Personal Access Token</label>
-                    <input type="password" id="githubToken" placeholder="ghp_..." style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Personal Access Token with <code>repo</code> scope for creating issues. Leave empty to disable GitHub integration.
-                    </small>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        <strong>Note:</strong> Can also be configured via the <code>GITHUB_TOKEN</code> environment variable.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="githubRepository">GitHub Repository</label>
-                    <input type="text" id="githubRepository" placeholder="owner/repo" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Repository in format <code>owner/repo</code> where issues should be created.
-                    </small>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        <strong>Note:</strong> Can also be configured via the <code>GITHUB_REPOSITORY</code> environment variable.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="githubIssueAssignee">GitHub Issue Assignee (Optional)</label>
-                    <input type="text" id="githubIssueAssignee" placeholder="username" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        GitHub username to assign auto-generated issues to. Leave empty for no assignment.
-                    </small>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        <strong>Note:</strong> Can also be configured via the <code>GITHUB_ISSUE_ASSIGNEE</code> environment variable.
-                    </small>
-                </div>
-                
                 <h3 style="margin-bottom: 10px; margin-top: 35px; color: #e74c3c; border-bottom: 2px solid #e74c3c; padding-bottom: 8px;">⚠️ Danger Zone</h3>
                 <div class="form-group" style="border: 2px solid #e74c3c; border-radius: 8px; padding: 20px; background: var(--bg-hover);">
                     <label style="font-weight: 600; color: #e74c3c; font-size: 15px;">Reset Database</label>

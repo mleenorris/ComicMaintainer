@@ -1163,7 +1163,6 @@
             margin: 0;
             color: var(--text-primary);
             flex: 1;
-            word-wrap: break-word;
             overflow-wrap: break-word;
             padding-right: 15px;
         }

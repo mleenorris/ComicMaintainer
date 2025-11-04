@@ -677,17 +677,21 @@
             <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
                 <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center; flex-wrap: wrap;">
                     <label for="logType" style="color: var(--text-secondary); font-weight: 500;">Log Type:</label>
-                    <select id="logType" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="logType" onchange="onLogTypeChange()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
                         <option value="app" selected>Application Logs</option>
                         <option value="watcher">Watcher Logs</option>
                         <option value="debug">Debug Logs</option>
                     </select>
-                    <label for="logLines" style="color: var(--text-secondary); font-weight: 500; margin-left: 10px;">Lines to display:</label>
+                    <label for="logFile" style="color: var(--text-secondary); font-weight: 500; margin-left: 10px;">Log File:</label>
+                    <select id="logFile" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary); min-width: 200px;">
+                        <option value="">Loading...</option>
+                    </select>
+                    <label for="logLines" style="color: var(--text-secondary); font-weight: 500; margin-left: 10px;">Lines:</label>
                     <select id="logLines" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                        <option value="100">Last 100 lines</option>
-                        <option value="500" selected>Last 500 lines</option>
-                        <option value="1000">Last 1000 lines</option>
-                        <option value="0">All lines</option>
+                        <option value="100">Last 100</option>
+                        <option value="500" selected>Last 500</option>
+                        <option value="1000">Last 1000</option>
+                        <option value="0">All</option>
                     </select>
                     <button class="btn" onclick="loadLogs()" style="margin-left: auto;">🔄 Refresh</button>
                 </div>

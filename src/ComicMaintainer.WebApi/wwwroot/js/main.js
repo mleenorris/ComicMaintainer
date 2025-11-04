@@ -547,10 +547,11 @@
         // Listen for the beforeinstallprompt event
         window.addEventListener('beforeinstallprompt', (e) => {
             console.log('PWA: beforeinstallprompt event fired');
-            // Don't prevent the default behavior - allow native Android install prompt
-            // Just stash the event so we can also provide a custom install button
+            // Prevent the default mini-infobar from appearing on mobile
+            e.preventDefault();
+            // Stash the event so we can trigger it later via our custom install button
             deferredPrompt = e;
-            // Show the install button
+            // Show the custom install button
             const installButton = document.getElementById('installAppButton');
             if (installButton) {
                 installButton.style.display = 'block';

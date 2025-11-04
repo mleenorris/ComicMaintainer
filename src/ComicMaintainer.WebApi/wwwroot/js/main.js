@@ -2793,7 +2793,13 @@
             document.getElementById('progressCancelBtn').style.display = 'inline-block';  // Show cancel button
             
             // Check if the modal was previously minimized
-            const wasMinimized = localStorage.getItem('progressModalMinimized') === 'true';
+            let wasMinimized = false;
+            try {
+                wasMinimized = localStorage.getItem('progressModalMinimized') === 'true';
+            } catch (e) {
+                // localStorage may be unavailable (e.g., private browsing mode)
+                console.warn('Could not access localStorage:', e);
+            }
             
             if (wasMinimized) {
                 // Show the minimized indicator instead of the full modal
@@ -2864,7 +2870,12 @@
             document.getElementById('progressIndicator').style.display = 'none';
             document.getElementById('progressCancelBtn').style.display = 'none';  // Hide cancel button
             // Clear minimized state when modal is closed
-            localStorage.removeItem('progressModalMinimized');
+            try {
+                localStorage.removeItem('progressModalMinimized');
+            } catch (e) {
+                // localStorage may be unavailable (e.g., private browsing mode)
+                console.warn('Could not clear localStorage:', e);
+            }
         }
         
         function minimizeProgressModal() {
@@ -2882,7 +2893,12 @@
             indicator.style.display = 'flex';
             
             // Save minimized state to localStorage
-            localStorage.setItem('progressModalMinimized', 'true');
+            try {
+                localStorage.setItem('progressModalMinimized', 'true');
+            } catch (e) {
+                // localStorage may be unavailable (e.g., private browsing mode, quota exceeded)
+                console.warn('Could not save to localStorage:', e);
+            }
         }
         
         function restoreProgressModal() {
@@ -2896,7 +2912,12 @@
             indicator.style.display = 'none';
             
             // Clear minimized state when modal is restored
-            localStorage.removeItem('progressModalMinimized');
+            try {
+                localStorage.removeItem('progressModalMinimized');
+            } catch (e) {
+                // localStorage may be unavailable (e.g., private browsing mode)
+                console.warn('Could not clear localStorage:', e);
+            }
         }
         
         async function loadLogs() {

@@ -1156,12 +1156,16 @@
             border-bottom: 1px solid var(--border-primary);
             display: flex;
             justify-content: space-between;
-            align-items: center;
+            align-items: flex-start;
         }
         
         .modal-header h2 {
             margin: 0;
             color: var(--text-primary);
+            flex: 1;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            padding-right: 15px;
         }
         
         .close-btn {

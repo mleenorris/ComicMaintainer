@@ -35,6 +35,17 @@
             return false;
         }
         
+        // Helper function to safely parse JSON response
+        async function safeJsonParse(response) {
+            const contentType = response.headers.get('content-type');
+            if (!contentType || !contentType.includes('application/json')) {
+                // Response is not JSON, try to get text for better error message
+                const text = await response.text();
+                throw new Error(`Expected JSON response but got ${contentType || 'unknown content type'}. Response: ${text.substring(0, 100)}`);
+            }
+            return await response.json();
+        }
+        
         // Helper function to encode filepath for RESTful URL
         function encodeFilePathForUrl(filePath) {
             // Convert to base64 URL-safe encoding
@@ -282,7 +293,7 @@
                     console.error('Failed to get preferences:', response.status);
                     return {};
                 }
-                return await response.json();
+                return await safeJsonParse(response);
             } catch (error) {
                 console.error('Error getting preferences:', error);
                 return {};
@@ -457,7 +468,7 @@
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 const versionElement = document.getElementById('appVersion');
                 if (versionElement && data.version) {
                     versionElement.textContent = `v${data.version}`;
@@ -651,7 +662,7 @@
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                const data = await response.json();
+                const data = await safeJsonParse(response);
                 
                 files = data.files;
                 currentPage = data.page;
@@ -2422,7 +2433,7 @@
                 if (!formatResponse.ok) {
                     throw new Error(`HTTP error! status: ${formatResponse.status}`);
                 }
-                const formatData = await formatResponse.json();
+                const formatData = await safeJsonParse(formatResponse);
                 
                 document.getElementById('filenameFormat').value = formatData.format || '';
                 document.getElementById('currentFormat').textContent = formatData.format || formatData.default;
@@ -2442,7 +2453,7 @@
                 if (!watcherRenameResponse.ok) {
                     throw new Error(`HTTP error! status: ${watcherRenameResponse.status}`);
                 }
-                const watcherRenameData = await watcherRenameResponse.json();
+                const watcherRenameData = await safeJsonParse(watcherRenameResponse);
                 document.getElementById('watcherEnableRenameCheckbox').checked = watcherRenameData.enabled;
                 
                 // Load watcher enable normalize status
@@ -2453,7 +2464,7 @@
                 if (!watcherNormalizeResponse.ok) {
                     throw new Error(`HTTP error! status: ${watcherNormalizeResponse.status}`);
                 }
-                const watcherNormalizeData = await watcherNormalizeResponse.json();
+                const watcherNormalizeData = await safeJsonParse(watcherNormalizeResponse);
                 document.getElementById('watcherEnableNormalizeCheckbox').checked = watcherNormalizeData.enabled;
                 
                 // Load log max size
@@ -2464,7 +2475,7 @@
                 if (!logResponse.ok) {
                     throw new Error(`HTTP error! status: ${logResponse.status}`);
                 }
-                const logData = await logResponse.json();
+                const logData = await safeJsonParse(logResponse);
                 document.getElementById('logMaxSize').value = Math.round(logData.maxMB);
                 
                 // Load issue number padding
@@ -2475,7 +2486,7 @@
                 if (!paddingResponse.ok) {
                     throw new Error(`HTTP error! status: ${paddingResponse.status}`);
                 }
-                const paddingData = await paddingResponse.json();
+                const paddingData = await safeJsonParse(paddingResponse);
                 document.getElementById('issueNumberPadding').value = paddingData.padding;
                 
                 document.getElementById('settingsModal').classList.add('active');

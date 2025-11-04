@@ -38,14 +38,15 @@
         // Helper function to safely parse JSON with better error messages
         async function safeJsonParse(response) {
             const contentType = response.headers.get('content-type');
+            const text = await response.text();
+            
             if (!contentType || !contentType.includes('application/json')) {
-                const text = await response.text();
                 throw new Error(`Expected JSON response but got ${contentType || 'unknown content type'}. Response: ${text.substring(0, 100)}`);
             }
+            
             try {
-                return await response.json();
+                return JSON.parse(text);
             } catch (error) {
-                const text = await response.text();
                 throw new Error(`Failed to parse JSON response: ${error.message}. Response: ${text.substring(0, 100)}`);
             }
         }

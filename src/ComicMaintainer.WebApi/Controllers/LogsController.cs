@@ -39,19 +39,13 @@ public class LogsController : ControllerBase
             
             // Find all log files matching the pattern
             var logFiles = Directory.GetFiles(configDir, logFilePattern)
+                .Select(f => new FileInfo(f))
+                .OrderByDescending(f => f.LastWriteTime)
                 .Select(f => new
                 {
-                    filename = Path.GetFileName(f),
-                    fullPath = f,
-                    lastModified = System.IO.File.GetLastWriteTime(f),
-                    size = new FileInfo(f).Length
-                })
-                .OrderByDescending(f => f.lastModified)
-                .Select(f => new
-                {
-                    f.filename,
-                    last_modified = f.lastModified.ToString("yyyy-MM-dd HH:mm:ss"),
-                    size_mb = Math.Round(f.size / 1024.0 / 1024.0, 2)
+                    filename = f.Name,
+                    last_modified = f.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss"),
+                    size_mb = Math.Round(f.Length / 1024.0 / 1024.0, 2)
                 })
                 .ToArray();
 
@@ -105,7 +99,8 @@ public class LogsController : ControllerBase
                     {
                         content = $"Log file not found: {sanitizedFilename}",
                         total_lines = 0,
-                        shown_lines = 0
+                        shown_lines = 0,
+                        filename = (string?)null
                     });
                 }
                 
@@ -125,7 +120,8 @@ public class LogsController : ControllerBase
                     {
                         content = $"File does not match expected log type: {sanitizedFilename}",
                         total_lines = 0,
-                        shown_lines = 0
+                        shown_lines = 0,
+                        filename = (string?)null
                     });
                 }
             }
@@ -142,7 +138,8 @@ public class LogsController : ControllerBase
                     {
                         content = $"No log files found matching pattern: {logFilePattern}",
                         total_lines = 0,
-                        shown_lines = 0
+                        shown_lines = 0,
+                        filename = (string?)null
                     });
                 }
 

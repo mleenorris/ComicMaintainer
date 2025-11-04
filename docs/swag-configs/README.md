@@ -34,6 +34,8 @@ Access ComicMaintainer at: `https://yourdomain.com/comics`
 
 **Configuration file:** `comicmaintainer.subfolder.conf`
 
+**Need help choosing?** See [COMPARISON.md](COMPARISON.md) for a detailed comparison of both methods.
+
 ## Installation Instructions
 
 ### Step 1: Set Up Docker Network
@@ -361,6 +363,12 @@ networks:
   swag-network:
     driver: bridge
 ```
+
+## Additional Documentation
+
+- **[COMPARISON.md](COMPARISON.md)** - Detailed comparison of subdomain vs subfolder deployment
+- **[EXAMPLE_SETUP.md](EXAMPLE_SETUP.md)** - Complete step-by-step setup with docker-compose examples
+- **[../REVERSE_PROXY.md](../REVERSE_PROXY.md)** - General reverse proxy documentation
 
 ## Notes
 

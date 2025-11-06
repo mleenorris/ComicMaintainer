@@ -65,4 +65,21 @@ public class AuthResponseTests : IClassFixture<WebApplicationFactory<Program>>
             Assert.DoesNotContain("<html", content);
         }
     }
+    
+    [Fact]
+    public async Task NonExistentApiEndpoint_ReturnsJsonNotHtml()
+    {
+        // Act - Call a non-existent API endpoint
+        var response = await _client.GetAsync("/api/nonexistent/endpoint");
+
+        // Assert - Should return 404 with JSON content, not HTML
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Contains("application/json", response.Content.Headers.ContentType?.ToString() ?? "");
+        
+        // Verify the content is JSON and not HTML
+        var content = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("<!DOCTYPE", content);
+        Assert.DoesNotContain("<html", content);
+        Assert.Contains("error", content.ToLower());
+    }
 }

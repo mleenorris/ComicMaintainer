@@ -14,7 +14,12 @@ jobs:
   # Determine which languages to analyze based on branch
   analyze-dotnet:
     name: CodeQL Analysis (C#/.NET)
-    if: github.ref_name == 'dotnet' || github.base_ref == 'dotnet'
+    # Run on dotnet branch for any event type (push, PR, schedule, manual)
+    if: |
+      github.ref_name == 'dotnet' || 
+      github.base_ref == 'dotnet' ||
+      (github.event_name == 'schedule' && github.ref == 'refs/heads/dotnet') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dotnet')
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -97,7 +102,12 @@ jobs:
 
   analyze-python:
     name: CodeQL Analysis (Python)
-    if: github.ref_name == 'master' || github.ref_name == 'python' || github.base_ref == 'master' || github.base_ref == 'python'
+    # Run on master, main, or python branches for any event type
+    if: |
+      github.ref_name == 'master' || github.ref_name == 'main' || github.ref_name == 'python' || 
+      github.base_ref == 'master' || github.base_ref == 'main' || github.base_ref == 'python' ||
+      (github.event_name == 'schedule' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/python')) ||
+      (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/python'))
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

@@ -746,6 +746,65 @@ public class ComicProcessorServiceTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task GetMetadataAsync_FileWithoutComicInfo_ExtractsSeriesFromFolderName()
+    {
+        // Arrange - Create a folder with "The Infinite Mage" as the name
+        var seriesFolder = Path.Combine(_testDirectory, "The Infinite Mage");
+        Directory.CreateDirectory(seriesFolder);
+        
+        // Create a file in that folder without ComicInfo.xml
+        var fileName = "Chapter 12.cbz";
+        var filePath = Path.Combine(seriesFolder, fileName);
+        
+        using (var archive = System.IO.Compression.ZipFile.Open(filePath, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+
+        // Act
+        var metadata = await _service.GetMetadataAsync(filePath);
+
+        // Assert
+        Assert.NotNull(metadata);
+        Assert.Equal("The Infinite Mage", metadata.Series);
+        Assert.Equal("12", metadata.Issue);
+    }
+
+    [Fact]
+    public async Task GetMetadataAsync_FileWithoutComicInfo_InFolderWithUnderscores_NormalizesSeriesName()
+    {
+        // Arrange - Create a folder with underscores
+        var seriesFolder = Path.Combine(_testDirectory, "Batman_The Dark Knight");
+        Directory.CreateDirectory(seriesFolder);
+        
+        // Create a file in that folder without ComicInfo.xml
+        var fileName = "Chapter 5.cbz";
+        var filePath = Path.Combine(seriesFolder, fileName);
+        
+        using (var archive = System.IO.Compression.ZipFile.Open(filePath, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+
+        // Act
+        var metadata = await _service.GetMetadataAsync(filePath);
+
+        // Assert
+        Assert.NotNull(metadata);
+        // Underscores should be converted to colons by NormalizeSeriesName
+        Assert.Equal("Batman:The Dark Knight", metadata.Series);
+        Assert.Equal("5", metadata.Issue);
+    }
+
     public void Dispose()
     {
         // Clean up test directory

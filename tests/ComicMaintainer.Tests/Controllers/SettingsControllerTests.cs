@@ -31,7 +31,8 @@ public class SettingsControllerTests
             IssueNumberPadding = 4,
             WatcherEnableRename = true,
             WatcherEnableNormalize = true,
-            LogMaxBytes = 10485760
+            LogMaxBytes = 10485760,
+            DatabaseCleanupIntervalHours = 12
         };
 
         _appSettingsMock = new Mock<IOptions<AppSettings>>();
@@ -270,5 +271,53 @@ public class SettingsControllerTests
         
         // Verify that StopApplication would eventually be called (we can't verify the delayed task directly)
         // The test validates that the endpoint returns successfully without throwing
+    }
+
+    [Fact]
+    public void GetDatabaseCleanupIntervalHours_ReturnsCorrectValue()
+    {
+        // Arrange
+        _appSettings.DatabaseCleanupIntervalHours = 24;
+        
+        // Act
+        var result = _controller.GetDatabaseCleanupIntervalHours();
+
+        // Assert
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
+        
+        var hours = objectResult.Value;
+        Assert.NotNull(hours);
+        var hoursProperty = hours.GetType().GetProperty("hours");
+        Assert.NotNull(hoursProperty);
+        Assert.Equal(24, hoursProperty.GetValue(hours));
+    }
+
+    [Fact]
+    public async Task UpdateDatabaseCleanupIntervalHours_ReturnsOk()
+    {
+        // Arrange
+        var request = new SettingsController.DatabaseCleanupIntervalRequest { Hours = 24 };
+
+        // Act
+        var result = await _controller.UpdateDatabaseCleanupIntervalHours(request);
+
+        // Assert
+        Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateDatabaseCleanupIntervalHoursAsync(request.Hours, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateDatabaseCleanupIntervalHours_WithZero_ReturnsOk()
+    {
+        // Arrange - 0 means only run on startup
+        var request = new SettingsController.DatabaseCleanupIntervalRequest { Hours = 0 };
+
+        // Act
+        var result = await _controller.UpdateDatabaseCleanupIntervalHours(request);
+
+        // Assert
+        Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateDatabaseCleanupIntervalHoursAsync(request.Hours, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

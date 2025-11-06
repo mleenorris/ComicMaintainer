@@ -145,7 +145,8 @@
         
         .header-search {
             position: relative;
-            flex: 1;
+            flex: 2;
+            min-width: 200px;
         }
         
         .header-search input {
@@ -171,6 +172,7 @@
         
         .header-filter-dropdown {
             position: relative;
+            flex-shrink: 0;
         }
         
         .header-filter-toggle {
@@ -199,6 +201,7 @@
         
         .header-sort-dropdown {
             position: relative;
+            flex-shrink: 0;
         }
         
         .header-sort-toggle {
@@ -1373,10 +1376,6 @@
             
             .header p {
                 font-size: 12px;
-            }
-            
-            .header-search input {
-                width: 180px;
             }
             
             .btn {

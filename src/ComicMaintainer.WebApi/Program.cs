@@ -210,6 +210,29 @@ builder.Services.AddAuthentication(options =>
         ValidAudience = jwtSettings.Audience,
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
     };
+    
+    // Configure events to return JSON for authentication failures
+    options.Events = new JwtBearerEvents
+    {
+        OnChallenge = context =>
+        {
+            // Override the default behavior to return JSON instead of redirecting
+            context.HandleResponse();
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            context.Response.ContentType = "application/json";
+            
+            var result = JsonSerializer.Serialize(new { error = "Unauthorized", message = "Authentication required" });
+            return context.Response.WriteAsync(result);
+        },
+        OnForbidden = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "application/json";
+            
+            var result = JsonSerializer.Serialize(new { error = "Forbidden", message = "Insufficient permissions" });
+            return context.Response.WriteAsync(result);
+        }
+    };
 });
 
 // Add services to the container
@@ -329,6 +352,8 @@ app.MapControllers();
 app.MapHub<ProgressHub>("/hubs/progress");
 
 // Map default route to serve index.html
+// The fallback only applies to requests that don't match any controller route
+// With the JWT events configured above, API auth failures will return JSON, not HTML
 app.MapFallbackToFile("index.html");
 
 // Log startup complete

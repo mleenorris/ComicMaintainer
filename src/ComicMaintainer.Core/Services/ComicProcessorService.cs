@@ -1000,21 +1000,7 @@ public class ComicProcessorService : IComicProcessorService
             catch (Exception fallbackEx)
             {
                 _logger.LogError(fallbackEx, "Fallback strategy failed for {File}, attempting restore from backup", targetFile);
-                
-                // Try to restore from backup
-                if (File.Exists(backupPath))
-                {
-                    try
-                    {
-                        File.Copy(backupPath, targetFile, overwrite: true);
-                        File.Delete(backupPath);
-                        _logger.LogWarning("Restored backup file after failed fallback: {File}", targetFile);
-                    }
-                    catch (Exception restoreEx)
-                    {
-                        _logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", backupPath);
-                    }
-                }
+                await TryRestoreBackupAsync(backupPath, targetFile, cancellationToken);
                 throw;
             }
         }
@@ -1026,28 +1012,7 @@ public class ComicProcessorService : IComicProcessorService
         {
             // For non-IOException, try to restore from backup if it exists
             _logger.LogError(ex, "File replace failed for {File}, attempting restore from backup", targetFile);
-            
-            if (File.Exists(backupPath))
-            {
-                try
-                {
-                    // Wait a moment before attempting restore
-                    await Task.Delay(BackupRestoreDelayMs, cancellationToken);
-                    
-                    // Use Move instead of Copy for restore as it's more reliable
-                    if (File.Exists(targetFile))
-                    {
-                        File.Delete(targetFile);
-                    }
-                    File.Move(backupPath, targetFile);
-                    
-                    _logger.LogWarning("Restored backup file after failed replacement: {File}", targetFile);
-                }
-                catch (Exception restoreEx)
-                {
-                    _logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", backupPath);
-                }
-            }
+            await TryRestoreBackupAsync(backupPath, targetFile, cancellationToken);
             throw;
         }
         
@@ -1056,11 +1021,7 @@ public class ComicProcessorService : IComicProcessorService
         {
             try
             {
-                _logger.LogWarning(lastException, "File replace attempt {Attempt} failed for {File}, retrying...", attempt + 1, targetFile);
-                
-                // Exponential backoff: 100ms, 200ms, 400ms, 800ms
-                var delayMs = RetryInitialDelayMs * (int)Math.Pow(2, attempt);
-                await Task.Delay(delayMs, cancellationToken);
+                await DelayWithExponentialBackoffAsync(attempt, lastException, targetFile, cancellationToken);
                 
                 // Attempt to replace the file
                 File.Replace(tempFile, targetFile, backupPath);
@@ -1076,38 +1037,12 @@ public class ComicProcessorService : IComicProcessorService
             catch (IOException ex) when (attempt < MaxFileReplaceRetries - 1)
             {
                 lastException = ex;
-                _logger.LogWarning(ex, "File replace attempt {Attempt} failed for {File}, retrying...", attempt + 1, targetFile);
-                
-                // Exponential backoff: 100ms, 200ms, 400ms, 800ms
-                var delayMs = RetryInitialDelayMs * (int)Math.Pow(2, attempt);
-                await Task.Delay(delayMs, cancellationToken);
             }
             catch (Exception ex)
             {
                 // For non-IOException or final attempt, try to restore from backup if it exists
                 _logger.LogError(ex, "File replace failed for {File}, attempting restore from backup", targetFile);
-                
-                if (File.Exists(backupPath))
-                {
-                    try
-                    {
-                        // Wait a moment before attempting restore
-                        await Task.Delay(BackupRestoreDelayMs, cancellationToken);
-                        
-                        // Use Move instead of Copy for restore as it's more reliable
-                        if (File.Exists(targetFile))
-                        {
-                            File.Delete(targetFile);
-                        }
-                        File.Move(backupPath, targetFile);
-                        
-                        _logger.LogWarning("Restored backup file after failed replacement: {File}", targetFile);
-                    }
-                    catch (Exception restoreEx)
-                    {
-                        _logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", backupPath);
-                    }
-                }
+                await TryRestoreBackupAsync(backupPath, targetFile, cancellationToken);
                 throw;
             }
         }
@@ -1121,6 +1056,46 @@ public class ComicProcessorService : IComicProcessorService
     }
 
     /// <summary>
+    /// Attempts to restore a backup file with proper error handling
+    /// </summary>
+    private async Task TryRestoreBackupAsync(string backupPath, string targetFile, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(backupPath))
+            return;
+            
+        try
+        {
+            // Wait a moment before attempting restore
+            await Task.Delay(BackupRestoreDelayMs, cancellationToken);
+            
+            // Use Move instead of Copy for restore as it's more reliable
+            if (File.Exists(targetFile))
+            {
+                File.Delete(targetFile);
+            }
+            File.Move(backupPath, targetFile);
+            
+            _logger.LogWarning("Restored backup file after failed replacement: {File}", targetFile);
+        }
+        catch (Exception restoreEx)
+        {
+            _logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", backupPath);
+        }
+    }
+
+    /// <summary>
+    /// Delays execution with exponential backoff for retry logic
+    /// </summary>
+    private async Task DelayWithExponentialBackoffAsync(int attempt, Exception? exception, string targetFile, CancellationToken cancellationToken)
+    {
+        _logger.LogWarning(exception, "File replace attempt {Attempt} failed for {File}, retrying...", attempt + 1, targetFile);
+        
+        // Exponential backoff: 100ms, 200ms, 400ms, 800ms
+        var delayMs = RetryInitialDelayMs * (int)Math.Pow(2, attempt);
+        await Task.Delay(delayMs, cancellationToken);
+    }
+
+    /// <summary>
     /// Checks if an IOException is a cross-device link error
     /// </summary>
     private static bool IsCrossDeviceLinkError(IOException ex)
@@ -1129,10 +1104,11 @@ public class ComicProcessorService : IComicProcessorService
         // On Windows, HResult 0x80070011 = ERROR_NOT_SAME_DEVICE
         const int EXDEV = 18;
         const int ERROR_NOT_SAME_DEVICE = 0x11;
+        const int HRESULT_ERROR_CODE_MASK = 0xFFFF;
         
         // Check HResult for Windows (upper 16 bits are facility code, lower 16 bits are error code)
         var hresult = ex.HResult;
-        var errorCode = hresult & 0xFFFF;
+        var errorCode = hresult & HRESULT_ERROR_CODE_MASK;
         
         // Check if this is a cross-device error on Windows or Unix
         return errorCode == ERROR_NOT_SAME_DEVICE || 

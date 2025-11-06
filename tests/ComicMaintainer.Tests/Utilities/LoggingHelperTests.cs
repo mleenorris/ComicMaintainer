@@ -146,4 +146,50 @@ public class LoggingHelperTests
         Assert.Single(dict);
         Assert.Equal("testValue", dict["testKey"]);
     }
+
+    [Theory]
+    [InlineData("File created", "[WATCHER] File created")]
+    [InlineData("Processing file", "[WATCHER] Processing file")]
+    [InlineData("", "[WATCHER] ")]
+    public void WithWatcherPrefix_AddsWatcherPrefix(string message, string expected)
+    {
+        // Act
+        var result = LoggingHelper.WithWatcherPrefix(message);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("Process all requested", "[WEBSITE] Process all requested")]
+    [InlineData("Rename requested", "[WEBSITE] Rename requested")]
+    [InlineData("", "[WEBSITE] ")]
+    public void WithWebsitePrefix_AddsWebsitePrefix(string message, string expected)
+    {
+        // Act
+        var result = LoggingHelper.WithWebsitePrefix(message);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void WithWatcherPrefix_WithNullMessage_HandlesGracefully()
+    {
+        // This tests that the method doesn't throw with null input
+        // In C#, string interpolation with null produces "null" text
+        // Act & Assert - should not throw
+        var result = LoggingHelper.WithWatcherPrefix(null!);
+        Assert.Contains("[WATCHER]", result);
+    }
+
+    [Fact]
+    public void WithWebsitePrefix_WithNullMessage_HandlesGracefully()
+    {
+        // This tests that the method doesn't throw with null input
+        // In C#, string interpolation with null produces "null" text
+        // Act & Assert - should not throw
+        var result = LoggingHelper.WithWebsitePrefix(null!);
+        Assert.Contains("[WEBSITE]", result);
+    }
 }

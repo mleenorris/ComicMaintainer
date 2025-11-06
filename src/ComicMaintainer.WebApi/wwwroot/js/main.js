@@ -3295,6 +3295,32 @@
             }
         }
         
+        async function cleanupDatabaseNow() {
+            try {
+                showMessage('Starting database cleanup...', 'info');
+                
+                const response = await fetch(apiUrl('/api/settings/cleanup-database'), {
+                    method: 'POST',
+                    headers: getAuthHeaders()
+                });
+                
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage(`Database cleanup completed. Removed ${result.removedCount} stale entries.`, 'success');
+                } else {
+                    showMessage(result.error || 'Failed to cleanup database', 'error');
+                }
+            } catch (error) {
+                showMessage('Failed to cleanup database: ' + error.message, 'error');
+            }
+        }
+        
         function toggleDropdown(event, filepath) {
             event.stopPropagation();
             

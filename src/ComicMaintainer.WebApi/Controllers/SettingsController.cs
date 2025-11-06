@@ -244,6 +244,24 @@ public class SettingsController : ControllerBase
     public Task<ActionResult> SetDatabaseCleanupIntervalHours([FromBody] DatabaseCleanupIntervalRequest request, CancellationToken cancellationToken = default)
         => UpdateDatabaseCleanupIntervalHours(request, cancellationToken);
 
+    [HttpPost("cleanup-database")]
+    public async Task<ActionResult> CleanupDatabase(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogInformation("Manual database cleanup requested");
+            var removedCount = await _fileStore.CleanupStaleEntriesAsync(cancellationToken);
+            _logger.LogInformation("Database cleanup completed, removed {Count} stale entries", removedCount);
+            
+            return Ok(new { success = true, message = $"Database cleanup completed. Removed {removedCount} stale entries.", removedCount = removedCount });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during manual database cleanup");
+            return StatusCode(500, new { success = false, error = "Error during database cleanup: " + ex.Message });
+        }
+    }
+
     [HttpPost("reset")]
     public async Task<ActionResult> ResetDatabase(CancellationToken cancellationToken = default)
     {

@@ -578,6 +578,15 @@
                     </small>
                 </div>
                 
+                <div class="form-group" style="margin-top: 15px;">
+                    <button class="btn" onclick="cleanupDatabaseNow()" style="background: var(--accent-primary); color: white; width: 100%;">
+                        🧹 Clean Database Now
+                    </button>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Manually trigger database cleanup to remove stale entries for files that no longer exist on disk.
+                    </small>
+                </div>
+                
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Filename Format</h3>
                 <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
                     Configure how files are renamed when processed. Use placeholders like <code>{series}</code>, <code>{issue}</code>, etc.

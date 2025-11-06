@@ -320,4 +320,30 @@ public class SettingsControllerTests
         Assert.IsType<OkObjectResult>(result);
         _settingsServiceMock.Verify(s => s.UpdateDatabaseCleanupIntervalHoursAsync(request.Hours, It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public async Task CleanupDatabase_RemovesStaleEntries_ReturnsOk()
+    {
+        // Arrange
+        _fileStoreMock.Setup(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(5); // Simulate 5 stale entries removed
+
+        // Act
+        var result = await _controller.CleanupDatabase();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+        
+        var value = okResult.Value;
+        var successProperty = value.GetType().GetProperty("success");
+        Assert.NotNull(successProperty);
+        Assert.Equal(true, successProperty.GetValue(value));
+        
+        var removedCountProperty = value.GetType().GetProperty("removedCount");
+        Assert.NotNull(removedCountProperty);
+        Assert.Equal(5, removedCountProperty.GetValue(value));
+        
+        _fileStoreMock.Verify(f => f.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
 }

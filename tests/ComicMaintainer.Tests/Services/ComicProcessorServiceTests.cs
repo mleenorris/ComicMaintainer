@@ -184,6 +184,65 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetMetadataAsync_FileWithoutComicInfo_ExtractsSeriesFromParentFolder()
+    {
+        // Arrange - Create a subfolder to simulate series folder structure
+        var seriesFolderName = "The Infinite Mage";
+        var seriesFolderPath = Path.Combine(_testDirectory, seriesFolderName);
+        Directory.CreateDirectory(seriesFolderPath);
+        
+        // Create a file with a name that doesn't include "The"
+        var fileName = "Infinite Mage Chapter 5.cbz";
+        var filePath = Path.Combine(seriesFolderPath, fileName);
+        
+        using (var archive = System.IO.Compression.ZipFile.Open(filePath, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+
+        // Act
+        var metadata = await _service.GetMetadataAsync(filePath);
+
+        // Assert
+        Assert.NotNull(metadata);
+        Assert.Equal("The Infinite Mage", metadata.Series);
+        Assert.Equal("5", metadata.Issue);
+    }
+
+    [Fact]
+    public async Task GetMetadataAsync_FileWithoutComicInfo_NormalizesUnderscoresInFolderName()
+    {
+        // Arrange - Create a subfolder with underscores that should be converted to colons
+        var seriesFolderName = "Batman_The Dark Knight";
+        var seriesFolderPath = Path.Combine(_testDirectory, seriesFolderName);
+        Directory.CreateDirectory(seriesFolderPath);
+        
+        var fileName = "Issue 1.cbz";
+        var filePath = Path.Combine(seriesFolderPath, fileName);
+        
+        using (var archive = System.IO.Compression.ZipFile.Open(filePath, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+
+        // Act
+        var metadata = await _service.GetMetadataAsync(filePath);
+
+        // Assert
+        Assert.NotNull(metadata);
+        Assert.Equal("Batman:The Dark Knight", metadata.Series);
+        Assert.Equal("1", metadata.Issue);
+    }
+
+    [Fact]
     public async Task UpdateMetadataAsync_WithLargeFile_HandlesCorrectly()
     {
         // Arrange

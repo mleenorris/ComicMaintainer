@@ -243,14 +243,38 @@ builder.Services.AddSwaggerGen();
 // Add SignalR
 builder.Services.AddSignalR();
 
-// Add CORS
+// Add CORS with security-conscious configuration
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.AllowAnyOrigin()
+        // Get allowed origins from configuration or environment variable
+        var allowedOriginsConfig = builder.Configuration.GetSection("CorsSettings:AllowedOrigins").Get<string[]>();
+        var allowedOriginsEnv = Environment.GetEnvironmentVariable("CORS_ALLOWED_ORIGINS");
+        
+        string[] allowedOrigins;
+        if (!string.IsNullOrEmpty(allowedOriginsEnv))
+        {
+            // Environment variable takes precedence (comma-separated)
+            allowedOrigins = allowedOriginsEnv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        }
+        else if (allowedOriginsConfig != null && allowedOriginsConfig.Length > 0)
+        {
+            // Use configuration from appsettings.json
+            allowedOrigins = allowedOriginsConfig;
+        }
+        else
+        {
+            // Default to localhost only (safe default)
+            allowedOrigins = new[] { "http://localhost:5000", "https://localhost:5000" };
+            Log.Warning("⚠️ No CORS origins configured. Using default localhost-only policy.");
+            Log.Warning("⚠️ Set CORS_ALLOWED_ORIGINS environment variable for production.");
+        }
+        
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyMethod()
-              .AllowAnyHeader();
+              .AllowAnyHeader()
+              .AllowCredentials();
     });
 });
 
@@ -337,6 +361,49 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
+
+// Add security headers middleware
+app.Use(async (context, next) =>
+{
+    // Prevent MIME type sniffing
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    
+    // Prevent clickjacking
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    
+    // Enable XSS protection
+    context.Response.Headers["X-XSS-Protection"] = "1; mode=block";
+    
+    // Control referrer information
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    
+    // Restrict dangerous browser features
+    context.Response.Headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()";
+    
+    // Add HSTS and CSP headers when behind HTTPS proxy
+    // Use case-insensitive comparison as HTTP headers are case-insensitive per RFC 7230
+    if (context.Request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto) && 
+        forwardedProto.ToString().Equals("https", StringComparison.OrdinalIgnoreCase))
+    {
+        // HSTS: Force HTTPS for 1 year
+        context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+        
+        // CSP: Upgrade insecure requests
+        if (!context.Response.Headers.ContainsKey("Content-Security-Policy"))
+        {
+            context.Response.Headers["Content-Security-Policy"] = "upgrade-insecure-requests";
+        }
+    }
+    
+    // Prevent caching for API endpoints
+    if (context.Request.Path.StartsWithSegments("/api"))
+    {
+        context.Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private";
+        context.Response.Headers["Pragma"] = "no-cache";
+    }
+    
+    await next();
+});
 
 // Add path validation middleware for security
 app.UseMiddleware<PathValidationMiddleware>();

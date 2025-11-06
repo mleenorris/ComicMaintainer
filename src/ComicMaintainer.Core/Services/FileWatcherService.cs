@@ -286,8 +286,9 @@ public class FileWatcherService : IFileWatcherService
 
     private void OnFileRenamed(object sender, RenamedEventArgs e)
     {
-        // Ignore if the new file is a temporary file
-        // Note: We don't check old path because we want to handle renames FROM temp files TO comic files
+        // Ignore if the target (new) file is a temporary file
+        // Note: We only check the target path to allow renames FROM temporary files TO comic files,
+        // which is a common pattern when files are moved into the watched directory
         if (IsTemporaryFile(e.FullPath))
         {
             return;

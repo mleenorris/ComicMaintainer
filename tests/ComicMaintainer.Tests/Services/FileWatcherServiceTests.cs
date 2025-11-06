@@ -330,8 +330,8 @@ public class FileWatcherServiceTests : IDisposable
     [Fact]
     public async Task OnFileCreated_IgnoresTemporaryFilesStartingWithTmpPrefix()
     {
-        // Arrange
-        var tempFile = Path.Combine(_testDirectory, ".tmp_a9f723d9-9231-4a6e-8737-cc8aceb2a4d6.cbz");
+        // Arrange - Use realistic temporary file pattern matching the issue screenshot
+        var tempFile = Path.Combine(_testDirectory, $".tmp_{Guid.NewGuid()}.cbz");
         
         // Start the watcher
         await _service.StartAsync();
@@ -419,8 +419,8 @@ public class FileWatcherServiceTests : IDisposable
     [Fact]
     public async Task OnFileDeleted_IgnoresTemporaryFiles()
     {
-        // Arrange
-        var tempFile = Path.Combine(_testDirectory, ".tmp_b0a63162-fbc2-44c1-9c92-5dda06a97515.cbz");
+        // Arrange - Use realistic temporary file pattern matching the issue screenshot
+        var tempFile = Path.Combine(_testDirectory, $".tmp_{Guid.NewGuid()}.cbz");
         
         // Create the temporary file
         File.WriteAllText(tempFile, "fake cbz content");

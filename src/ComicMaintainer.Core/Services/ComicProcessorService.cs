@@ -966,7 +966,7 @@ public class ComicProcessorService : IComicProcessorService
         {
             // Cross-device link error - use fallback strategy
             // This is deterministic and won't be resolved by retrying
-            _logger.LogWarning("Cross-device link detected, using fallback copy strategy for {File}", targetFile);
+            _logger.LogWarning("Cross-device link detected, using fallback copy strategy for {File}", LoggingHelper.SanitizePathForLog(targetFile));
             
             try
             {
@@ -994,12 +994,12 @@ public class ComicProcessorService : IComicProcessorService
                     File.Delete(backupPath);
                 }
                 
-                _logger.LogInformation("Successfully replaced file using fallback strategy: {File}", targetFile);
+                _logger.LogInformation("Successfully replaced file using fallback strategy: {File}", LoggingHelper.SanitizePathForLog(targetFile));
                 return; // Success
             }
             catch (Exception fallbackEx)
             {
-                _logger.LogError(fallbackEx, "Fallback strategy failed for {File}, attempting restore from backup", targetFile);
+                _logger.LogError(fallbackEx, "Fallback strategy failed for {File}, attempting restore from backup", LoggingHelper.SanitizePathForLog(targetFile));
                 await TryRestoreBackupAsync(backupPath, targetFile, cancellationToken);
                 throw;
             }
@@ -1011,7 +1011,7 @@ public class ComicProcessorService : IComicProcessorService
         catch (Exception ex)
         {
             // For non-IOException, try to restore from backup if it exists
-            _logger.LogError(ex, "File replace failed for {File}, attempting restore from backup", targetFile);
+            _logger.LogError(ex, "File replace failed for {File}, attempting restore from backup", LoggingHelper.SanitizePathForLog(targetFile));
             await TryRestoreBackupAsync(backupPath, targetFile, cancellationToken);
             throw;
         }
@@ -1075,11 +1075,11 @@ public class ComicProcessorService : IComicProcessorService
             }
             File.Move(backupPath, targetFile);
             
-            _logger.LogWarning("Restored backup file after failed replacement: {File}", targetFile);
+            _logger.LogWarning("Restored backup file after failed replacement: {File}", LoggingHelper.SanitizePathForLog(targetFile));
         }
         catch (Exception restoreEx)
         {
-            _logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", backupPath);
+            _logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", LoggingHelper.SanitizePathForLog(backupPath));
         }
     }
 
@@ -1088,7 +1088,7 @@ public class ComicProcessorService : IComicProcessorService
     /// </summary>
     private async Task DelayWithExponentialBackoffAsync(int attempt, Exception? exception, string targetFile, CancellationToken cancellationToken)
     {
-        _logger.LogWarning(exception, "File replace attempt {Attempt} failed for {File}, retrying...", attempt + 1, targetFile);
+        _logger.LogWarning(exception, "File replace attempt {Attempt} failed for {File}, retrying...", attempt + 1, LoggingHelper.SanitizePathForLog(targetFile));
         
         // Exponential backoff: 100ms, 200ms, 400ms, 800ms
         var delayMs = RetryInitialDelayMs * (int)Math.Pow(2, attempt);

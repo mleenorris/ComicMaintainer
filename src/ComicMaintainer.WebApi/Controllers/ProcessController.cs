@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -30,7 +31,7 @@ public class ProcessController : ControllerBase
             var allFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
             var filePaths = allFiles.Select(f => f.FilePath).ToList();
             
-            _logger.LogInformation("Process all files requested, processing {Count} files", filePaths.Count);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Process all files requested, processing {Count} files"), filePaths.Count);
             
             // Start processing job
             var jobId = await _processor.ProcessFilesAsync(filePaths, cancellationToken);
@@ -39,7 +40,7 @@ public class ProcessController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing all files");
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error processing all files"));
             return StatusCode(500, "Error processing files");
         }
     }
@@ -54,7 +55,7 @@ public class ProcessController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing selected files");
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error processing selected files"));
             return StatusCode(500, "Error processing files");
         }
     }
@@ -68,7 +69,7 @@ public class ProcessController : ControllerBase
             var allFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
             var filePaths = allFiles.Select(f => f.FilePath).ToList();
             
-            _logger.LogInformation("Rename all files requested, processing {Count} files", filePaths.Count);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename all files requested, processing {Count} files"), filePaths.Count);
             
             // Start rename job
             var jobId = await _processor.RenameFilesAsync(filePaths, cancellationToken);
@@ -77,7 +78,7 @@ public class ProcessController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error renaming all files");
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error renaming all files"));
             return StatusCode(500, "Error renaming files");
         }
     }
@@ -92,7 +93,7 @@ public class ProcessController : ControllerBase
                 return BadRequest("No files specified");
             }
             
-            _logger.LogInformation("Rename selected files requested, processing {Count} files", request.Files.Count);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename selected files requested, processing {Count} files"), request.Files.Count);
             
             // Start rename job
             var jobId = await _processor.RenameFilesAsync(request.Files, cancellationToken);
@@ -101,7 +102,7 @@ public class ProcessController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error renaming selected files");
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error renaming selected files"));
             return StatusCode(500, "Error renaming files");
         }
     }
@@ -115,7 +116,7 @@ public class ProcessController : ControllerBase
             var allFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
             var filePaths = allFiles.Select(f => f.FilePath).ToList();
             
-            _logger.LogInformation("Normalize all files requested, processing {Count} files", filePaths.Count);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Normalize all files requested, processing {Count} files"), filePaths.Count);
             
             // Start normalize job
             var jobId = await _processor.NormalizeFilesAsync(filePaths, cancellationToken);
@@ -124,7 +125,7 @@ public class ProcessController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error normalizing all files");
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error normalizing all files"));
             return StatusCode(500, "Error normalizing files");
         }
     }
@@ -139,7 +140,7 @@ public class ProcessController : ControllerBase
                 return BadRequest("No files specified");
             }
             
-            _logger.LogInformation("Normalize selected files requested, processing {Count} files", request.Files.Count);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Normalize selected files requested, processing {Count} files"), request.Files.Count);
             
             // Start normalize job
             var jobId = await _processor.NormalizeFilesAsync(request.Files, cancellationToken);
@@ -148,7 +149,7 @@ public class ProcessController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error normalizing selected files");
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error normalizing selected files"));
             return StatusCode(500, "Error normalizing files");
         }
     }

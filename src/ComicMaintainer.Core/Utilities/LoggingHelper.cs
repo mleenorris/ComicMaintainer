@@ -55,4 +55,20 @@ public static class LoggingHelper
         }
         return data;
     }
+
+    /// <summary>
+    /// Add [WATCHER] prefix to log message to indicate action came from file watcher
+    /// </summary>
+    public static string WithWatcherPrefix(string message)
+    {
+        return $"[WATCHER] {message}";
+    }
+
+    /// <summary>
+    /// Add [WEBSITE] prefix to log message to indicate action came from web interface
+    /// </summary>
+    public static string WithWebsitePrefix(string message)
+    {
+        return $"[WEBSITE] {message}";
+    }
 }

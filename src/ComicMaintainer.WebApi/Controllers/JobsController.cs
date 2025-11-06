@@ -364,6 +364,33 @@ public class JobsController : ControllerBase
         }
     }
 
+    [HttpPost("update-metadata-selected")]
+    public async Task<ActionResult<object>> UpdateMetadataSelected([FromBody] UpdateMetadataSelectedRequest request)
+    {
+        try
+        {
+            if (request.Files == null || request.Files.Count == 0)
+            {
+                return BadRequest(new { error = "No files specified" });
+            }
+
+            if (request.Metadata == null)
+            {
+                return BadRequest(new { error = "No metadata specified" });
+            }
+            
+            var jobId = await _processor.UpdateMetadataAsync(request.Files, request.Metadata);
+            _logger.LogInformation("Update metadata for selected files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, request.Files.Count);
+            
+            return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error starting update metadata selected job");
+            return StatusCode(500, new { error = "Error starting job" });
+        }
+    }
+
     // RESTful endpoint: GET /api/jobs - List all jobs
     [HttpGet]
     public ActionResult<object> ListJobs()
@@ -462,5 +489,11 @@ public class JobsController : ControllerBase
     public class ProcessSelectedRequest
     {
         public List<string> Files { get; set; } = new();
+    }
+
+    public class UpdateMetadataSelectedRequest
+    {
+        public List<string> Files { get; set; } = new();
+        public ComicMetadata Metadata { get; set; } = new();
     }
 }

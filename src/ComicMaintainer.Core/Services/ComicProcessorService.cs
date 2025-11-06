@@ -199,7 +199,7 @@ public class ComicProcessorService : IComicProcessorService
                         if (string.IsNullOrEmpty(metadata.Series) || metadata.Series != normalizedSeriesFromFolder)
                         {
                             _logger.LogDebug("ProcessFileAsync: Setting series name from folder: {FolderName} -> {SeriesName}", 
-                                folderName, normalizedSeriesFromFolder);
+                                LoggingHelper.SanitizePathForLog(folderName), LoggingHelper.SanitizePathForLog(normalizedSeriesFromFolder));
                             metadata.Series = normalizedSeriesFromFolder;
                         }
                     }
@@ -859,7 +859,7 @@ public class ComicProcessorService : IComicProcessorService
                 if (string.IsNullOrEmpty(metadata.Series) || metadata.Series != normalizedSeriesFromFolder)
                 {
                     _logger.LogDebug("NormalizeFileAsync: Setting series name from folder: {FolderName} -> {SeriesName}", 
-                        folderName, normalizedSeriesFromFolder);
+                        LoggingHelper.SanitizePathForLog(folderName), LoggingHelper.SanitizePathForLog(normalizedSeriesFromFolder));
                     metadata.Series = normalizedSeriesFromFolder;
                 }
             }

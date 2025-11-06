@@ -615,6 +615,35 @@ public class FilesController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Remove stale database entries for files that no longer exist on disk
+    /// </summary>
+    [HttpPost("cleanup-stale")]
+    public async Task<ActionResult<object>> CleanupStaleEntries(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogInformation("Cleanup stale entries endpoint called");
+            var removedCount = await _fileStore.CleanupStaleEntriesAsync(cancellationToken);
+            
+            return Ok(new 
+            { 
+                success = true, 
+                removedCount = removedCount,
+                message = $"Removed {removedCount} stale database entries"
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(499, new { error = "Cleanup operation was cancelled" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during stale entry cleanup");
+            return StatusCode(500, new { error = "Failed to cleanup stale entries" });
+        }
+    }
+
     public class UpdateTagsRequest
     {
         public List<string> Files { get; set; } = new();

@@ -628,4 +628,65 @@ public class FileStoreService : IFileStoreService
         var exists = _files.ContainsKey(filePath);
         return Task.FromResult(exists);
     }
+
+    public async Task<int> CleanupStaleEntriesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogInformation("Starting cleanup of stale database entries");
+            
+            using var scope = _serviceProvider.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            
+            // Load all file entries from database
+            var fileEntities = await dbContext.ComicFiles
+                .ToListAsync(cancellationToken);
+            
+            var removedCount = 0;
+            var filesToRemove = new List<ComicFileEntity>();
+            
+            // Check each entry to see if the file still exists
+            foreach (var entity in fileEntities)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+                    
+                if (!File.Exists(entity.FilePath))
+                {
+                    _logger.LogDebug("Marking stale entry for removal: {FilePath}", SanitizeForLogging(entity.FilePath));
+                    filesToRemove.Add(entity);
+                    
+                    // Also remove from in-memory store
+                    _files.TryRemove(entity.FilePath, out _);
+                    _duplicateFiles.TryRemove(entity.FilePath, out _);
+                }
+            }
+            
+            // Remove all stale entries in a single operation
+            if (filesToRemove.Any())
+            {
+                dbContext.ComicFiles.RemoveRange(filesToRemove);
+                await dbContext.SaveChangesAsync(cancellationToken);
+                removedCount = filesToRemove.Count;
+                
+                _logger.LogInformation("Removed {Count} stale database entries", removedCount);
+            }
+            else
+            {
+                _logger.LogInformation("No stale entries found during cleanup");
+            }
+            
+            return removedCount;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "Cleanup of stale entries was cancelled");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error during cleanup of stale database entries");
+            return 0;
+        }
+    }
 }

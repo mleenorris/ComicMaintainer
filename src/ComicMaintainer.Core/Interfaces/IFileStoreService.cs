@@ -79,4 +79,9 @@ public interface IFileStoreService
     /// Check if a file exists in the store
     /// </summary>
     Task<bool> FileExistsAsync(string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Remove stale entries from database where files no longer exist on disk
+    /// </summary>
+    Task<int> CleanupStaleEntriesAsync(CancellationToken cancellationToken = default);
 }

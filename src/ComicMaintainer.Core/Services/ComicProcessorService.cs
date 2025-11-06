@@ -949,10 +949,119 @@ public class ComicProcessorService : IComicProcessorService
         var backupPath = $"{targetFile}.backup";
         Exception? lastException = null;
         
+        // First, try the atomic File.Replace operation
+        try
+        {
+            File.Replace(tempFile, targetFile, backupPath);
+            
+            // Clean up backup if replace succeeded
+            if (File.Exists(backupPath))
+            {
+                File.Delete(backupPath);
+            }
+            
+            return; // Success
+        }
+        catch (IOException ex) when (IsCrossDeviceLinkError(ex))
+        {
+            // Cross-device link error - use fallback strategy
+            // This is deterministic and won't be resolved by retrying
+            _logger.LogWarning("Cross-device link detected, using fallback copy strategy for {File}", targetFile);
+            
+            try
+            {
+                // Clean up any existing backup file first to ensure we have a clean state
+                if (File.Exists(backupPath))
+                {
+                    File.Delete(backupPath);
+                }
+                
+                // Create backup by copying the target file
+                if (File.Exists(targetFile))
+                {
+                    File.Copy(targetFile, backupPath, overwrite: true);
+                }
+                
+                // Copy temp file to target
+                File.Copy(tempFile, targetFile, overwrite: true);
+                
+                // Delete temp file
+                File.Delete(tempFile);
+                
+                // Clean up backup
+                if (File.Exists(backupPath))
+                {
+                    File.Delete(backupPath);
+                }
+                
+                _logger.LogInformation("Successfully replaced file using fallback strategy: {File}", targetFile);
+                return; // Success
+            }
+            catch (Exception fallbackEx)
+            {
+                _logger.LogError(fallbackEx, "Fallback strategy failed for {File}, attempting restore from backup", targetFile);
+                
+                // Try to restore from backup
+                if (File.Exists(backupPath))
+                {
+                    try
+                    {
+                        File.Copy(backupPath, targetFile, overwrite: true);
+                        File.Delete(backupPath);
+                        _logger.LogWarning("Restored backup file after failed fallback: {File}", targetFile);
+                    }
+                    catch (Exception restoreEx)
+                    {
+                        _logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", backupPath);
+                    }
+                }
+                throw;
+            }
+        }
+        catch (IOException ex)
+        {
+            lastException = ex;
+        }
+        catch (Exception ex)
+        {
+            // For non-IOException, try to restore from backup if it exists
+            _logger.LogError(ex, "File replace failed for {File}, attempting restore from backup", targetFile);
+            
+            if (File.Exists(backupPath))
+            {
+                try
+                {
+                    // Wait a moment before attempting restore
+                    await Task.Delay(BackupRestoreDelayMs, cancellationToken);
+                    
+                    // Use Move instead of Copy for restore as it's more reliable
+                    if (File.Exists(targetFile))
+                    {
+                        File.Delete(targetFile);
+                    }
+                    File.Move(backupPath, targetFile);
+                    
+                    _logger.LogWarning("Restored backup file after failed replacement: {File}", targetFile);
+                }
+                catch (Exception restoreEx)
+                {
+                    _logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", backupPath);
+                }
+            }
+            throw;
+        }
+        
+        // If we got here, we have an IOException (but not cross-device) - retry with backoff
         for (int attempt = 0; attempt < MaxFileReplaceRetries; attempt++)
         {
             try
             {
+                _logger.LogWarning(lastException, "File replace attempt {Attempt} failed for {File}, retrying...", attempt + 1, targetFile);
+                
+                // Exponential backoff: 100ms, 200ms, 400ms, 800ms
+                var delayMs = RetryInitialDelayMs * (int)Math.Pow(2, attempt);
+                await Task.Delay(delayMs, cancellationToken);
+                
                 // Attempt to replace the file
                 File.Replace(tempFile, targetFile, backupPath);
                 
@@ -963,55 +1072,6 @@ public class ComicProcessorService : IComicProcessorService
                 }
                 
                 return; // Success
-            }
-            catch (IOException ex) when (IsCrossDeviceLinkError(ex))
-            {
-                // Cross-device link error - use fallback strategy
-                _logger.LogWarning("Cross-device link detected, using fallback copy strategy for {File}", targetFile);
-                
-                try
-                {
-                    // Create backup by copying the target file
-                    if (File.Exists(targetFile))
-                    {
-                        File.Copy(targetFile, backupPath, overwrite: true);
-                    }
-                    
-                    // Copy temp file to target
-                    File.Copy(tempFile, targetFile, overwrite: true);
-                    
-                    // Delete temp file
-                    File.Delete(tempFile);
-                    
-                    // Clean up backup
-                    if (File.Exists(backupPath))
-                    {
-                        File.Delete(backupPath);
-                    }
-                    
-                    _logger.LogInformation("Successfully replaced file using fallback strategy: {File}", targetFile);
-                    return; // Success
-                }
-                catch (Exception fallbackEx)
-                {
-                    _logger.LogError(fallbackEx, "Fallback strategy failed for {File}, attempting restore from backup", targetFile);
-                    
-                    // Try to restore from backup
-                    if (File.Exists(backupPath))
-                    {
-                        try
-                        {
-                            File.Copy(backupPath, targetFile, overwrite: true);
-                            File.Delete(backupPath);
-                            _logger.LogWarning("Restored backup file after failed fallback: {File}", targetFile);
-                        }
-                        catch (Exception restoreEx)
-                        {
-                            _logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", backupPath);
-                        }
-                    }
-                    throw;
-                }
             }
             catch (IOException ex) when (attempt < MaxFileReplaceRetries - 1)
             {
@@ -1065,9 +1125,19 @@ public class ComicProcessorService : IComicProcessorService
     /// </summary>
     private static bool IsCrossDeviceLinkError(IOException ex)
     {
-        // Check for cross-device link error message
-        return ex.Message.Contains("cross-device", StringComparison.OrdinalIgnoreCase) ||
-               ex.Message.Contains("Invalid cross-device link", StringComparison.OrdinalIgnoreCase);
+        // EXDEV (errno 18 on Linux/Unix) = Cross-device link
+        // On Windows, HResult 0x80070011 = ERROR_NOT_SAME_DEVICE
+        const int EXDEV = 18;
+        const int ERROR_NOT_SAME_DEVICE = 0x11;
+        
+        // Check HResult for Windows (upper 16 bits are facility code, lower 16 bits are error code)
+        var hresult = ex.HResult;
+        var errorCode = hresult & 0xFFFF;
+        
+        // Check if this is a cross-device error on Windows or Unix
+        return errorCode == ERROR_NOT_SAME_DEVICE || 
+               errorCode == EXDEV ||
+               ex.Message.Contains("cross-device", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? ParseIssueNumber(string filename)

@@ -398,4 +398,93 @@ public class JobsControllerTests
         var statusCodeResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, statusCodeResult.StatusCode);
     }
+
+    [Fact]
+    public async Task UpdateMetadataSelected_WithValidFilesAndMetadata_ReturnsJobIdAndTotalItems()
+    {
+        // Arrange
+        var files = new List<string> { "/path/file1.cbz", "/path/file2.cbz" };
+        var metadata = new ComicMetadata { Series = "Test Series", Issue = "1" };
+        var expectedJobId = Guid.NewGuid();
+        
+        _mockProcessor
+            .Setup(p => p.UpdateMetadataAsync(files, metadata, default))
+            .ReturnsAsync(expectedJobId);
+
+        var request = new JobsController.UpdateMetadataSelectedRequest
+        {
+            Files = files,
+            Metadata = metadata
+        };
+
+        // Act
+        var result = await _controller.UpdateMetadataSelected(request);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(expectedJobId.ToString(), jobId);
+        Assert.Equal(2, totalItems);
+    }
+
+    [Fact]
+    public async Task UpdateMetadataSelected_WithNoFiles_ReturnsBadRequest()
+    {
+        // Arrange
+        var request = new JobsController.UpdateMetadataSelectedRequest
+        {
+            Files = new List<string>(),
+            Metadata = new ComicMetadata { Series = "Test Series" }
+        };
+
+        // Act
+        var result = await _controller.UpdateMetadataSelected(request);
+
+        // Assert
+        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.NotNull(badRequestResult.Value);
+    }
+
+    [Fact]
+    public async Task UpdateMetadataSelected_WithNullMetadata_ReturnsBadRequest()
+    {
+        // Arrange
+        var request = new JobsController.UpdateMetadataSelectedRequest
+        {
+            Files = new List<string> { "/path/file1.cbz" },
+            Metadata = null!
+        };
+
+        // Act
+        var result = await _controller.UpdateMetadataSelected(request);
+
+        // Assert
+        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
+        Assert.NotNull(badRequestResult.Value);
+    }
+
+    [Fact]
+    public async Task UpdateMetadataSelected_WhenExceptionThrown_ReturnsInternalServerError()
+    {
+        // Arrange
+        var files = new List<string> { "/path/file1.cbz" };
+        var metadata = new ComicMetadata { Series = "Test Series" };
+        
+        _mockProcessor
+            .Setup(p => p.UpdateMetadataAsync(files, metadata, default))
+            .ThrowsAsync(new InvalidOperationException("Test error"));
+
+        var request = new JobsController.UpdateMetadataSelectedRequest
+        {
+            Files = files,
+            Metadata = metadata
+        };
+
+        // Act
+        var result = await _controller.UpdateMetadataSelected(request);
+
+        // Assert
+        var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(500, statusCodeResult.StatusCode);
+    }
 }

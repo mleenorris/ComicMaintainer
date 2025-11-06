@@ -577,6 +577,119 @@ public class ComicProcessorService : IComicProcessorService
         return Task.FromResult(jobId);
     }
 
+    public Task<Guid> UpdateMetadataAsync(IEnumerable<string> filePaths, ComicMetadata metadata, CancellationToken cancellationToken = default)
+    {
+        var jobId = Guid.NewGuid();
+        var fileList = filePaths.ToList();
+
+        _logger.LogDebug("UpdateMetadataAsync: Creating new update metadata job {JobId} for {FileCount} files", jobId, fileList.Count);
+
+        var job = new ProcessingJob
+        {
+            JobId = jobId,
+            Status = JobStatus.Queued,
+            Files = fileList,
+            TotalFiles = fileList.Count,
+            StartTime = DateTime.UtcNow
+        };
+
+        _jobs[jobId] = job;
+        
+        // Create a CancellationTokenSource for this job that can be cancelled independently
+        var jobCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _jobCancellationTokens[jobId] = jobCts;
+
+        _logger.LogDebug("UpdateMetadataAsync: Job {JobId} created and queued with {FileCount} files", jobId, fileList.Count);
+
+        // Broadcast initial job status
+        _ = BroadcastJobStatusAsync(job);
+
+        // Update metadata asynchronously using LongRunning for potentially long batch operations
+        _ = Task.Factory.StartNew(async () =>
+        {
+            try
+            {
+                _logger.LogDebug("UpdateMetadataAsync: Job {JobId} starting execution", jobId);
+                job.Status = JobStatus.Running;
+                await BroadcastJobStatusAsync(job);
+
+                var fileIndex = 0;
+                foreach (var file in fileList)
+                {
+                    fileIndex++;
+                    _logger.LogDebug("UpdateMetadataAsync: Job {JobId} updating metadata for file {FileIndex}/{TotalFiles}: {FilePath}", 
+                        jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
+                    
+                    if (jobCts.Token.IsCancellationRequested)
+                    {
+                        _logger.LogInformation("UpdateMetadataAsync: Job {JobId} cancellation requested at file {FileIndex}/{TotalFiles}", 
+                            jobId, fileIndex, fileList.Count);
+                        job.Status = JobStatus.Cancelled;
+                        await BroadcastJobStatusAsync(job);
+                        _jobCancellationTokens.TryRemove(jobId, out _);
+                        return;
+                    }
+
+                    job.CurrentFile = file;
+                    var success = await UpdateMetadataAsync(file, metadata, jobCts.Token);
+
+                    if (success)
+                    {
+                        job.ProcessedFiles++;
+                        _logger.LogDebug("UpdateMetadataAsync: Job {JobId} successfully updated metadata for file {FileIndex}/{TotalFiles}: {FilePath}", 
+                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
+                    }
+                    else
+                    {
+                        job.FailedFiles++;
+                        job.Errors[file] = "Update metadata failed";
+                        _logger.LogDebug("UpdateMetadataAsync: Job {JobId} failed to update metadata for file {FileIndex}/{TotalFiles}: {FilePath}", 
+                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
+                    }
+
+                    // Broadcast progress after each file
+                    await BroadcastJobStatusAsync(job);
+                    
+                    // Broadcast individual file processed event
+                    if (_eventBroadcaster != null)
+                    {
+                        await _eventBroadcaster.BroadcastFileProcessedAsync(
+                            Path.GetFileName(file), 
+                            success, 
+                            success ? null : "Update metadata failed");
+                    }
+                }
+
+                job.Status = JobStatus.Completed;
+                job.EndTime = DateTime.UtcNow;
+                _logger.LogInformation("UpdateMetadataAsync: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
+                    jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
+                await BroadcastJobStatusAsync(job);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("UpdateMetadataAsync: Update metadata job cancelled: {JobId}", jobId);
+                job.Status = JobStatus.Cancelled;
+                job.EndTime = DateTime.UtcNow;
+                await BroadcastJobStatusAsync(job);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "UpdateMetadataAsync: Error processing update metadata job: {JobId}", jobId);
+                job.Status = JobStatus.Failed;
+                job.EndTime = DateTime.UtcNow;
+                await BroadcastJobStatusAsync(job);
+            }
+            finally
+            {
+                _jobCancellationTokens.TryRemove(jobId, out _);
+                jobCts.Dispose();
+            }
+        }, jobCts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+
+        return Task.FromResult(jobId);
+    }
+
     private async Task<bool> RenameFileAsync(string filePath, CancellationToken cancellationToken)
     {
         try

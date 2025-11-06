@@ -48,6 +48,11 @@ public interface IComicProcessorService
     Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Update metadata for multiple comic files as a batch job
+    /// </summary>
+    Task<Guid> UpdateMetadataAsync(IEnumerable<string> filePaths, ComicMetadata metadata, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Get all jobs
     /// </summary>
     IEnumerable<ProcessingJob> GetAllJobs();

@@ -17,6 +17,11 @@ public class FileWatcherServiceTests : IDisposable
     private readonly string _testDirectory;
     private readonly FileWatcherService _service;
 
+    // Test delay constants
+    private const int WatcherInitDelayMs = 100;  // Time to wait for watcher to initialize
+    private const int SimpleEventDelayMs = 500;   // Time to wait for simple file events
+    private const int ProcessingDelayMs = 2000;   // Time to wait for stability delay + processing
+
     public FileWatcherServiceTests()
     {
         _mockLogger = new Mock<ILogger<FileWatcherService>>();
@@ -433,13 +438,13 @@ public class FileWatcherServiceTests : IDisposable
         await _service.StartAsync();
         
         // Wait a bit for watcher to initialize
-        await Task.Delay(100);
+        await Task.Delay(WatcherInitDelayMs);
 
         // Act - Modify the file (simulating website processing it)
         File.AppendAllText(comicFile, "updated content");
         
         // Wait for file system events (stability delay + processing time)
-        await Task.Delay(2000);
+        await Task.Delay(ProcessingDelayMs);
 
         // Assert - Should check if file is already processed
         _mockFileStore.Verify(

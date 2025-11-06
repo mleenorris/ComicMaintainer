@@ -14,6 +14,7 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
     private readonly ILogger<DatabaseCleanupHostedService> _logger;
     private Timer? _timer;
     private readonly SemaphoreSlim _cleanupLock = new(1, 1);
+    private CancellationTokenSource? _cancellationTokenSource;
 
     public DatabaseCleanupHostedService(
         IFileStoreService fileStore,
@@ -29,6 +30,8 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
     {
         _logger.LogInformation("Starting Database Cleanup Hosted Service");
         
+        _cancellationTokenSource = new CancellationTokenSource();
+        
         // Run cleanup on startup
         await RunCleanupAsync(cancellationToken);
         
@@ -41,7 +44,7 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
             _logger.LogInformation("Database cleanup will run every {Hours} hours", intervalHours);
             
             _timer = new Timer(
-                async _ => await RunCleanupAsync(CancellationToken.None),
+                async _ => await RunCleanupAsync(_cancellationTokenSource.Token),
                 null,
                 interval,
                 interval);
@@ -56,6 +59,7 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
     {
         _logger.LogInformation("Stopping Database Cleanup Hosted Service");
         _timer?.Change(Timeout.Infinite, 0);
+        _cancellationTokenSource?.Cancel();
         return Task.CompletedTask;
     }
 
@@ -74,6 +78,10 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
             var removedCount = await _fileStore.CleanupStaleEntriesAsync(cancellationToken);
             _logger.LogInformation("Database cleanup completed, removed {Count} stale entries", removedCount);
         }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Database cleanup was cancelled");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error during scheduled database cleanup");
@@ -88,5 +96,6 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
     {
         _timer?.Dispose();
         _cleanupLock.Dispose();
+        _cancellationTokenSource?.Dispose();
     }
 }

@@ -113,8 +113,14 @@ public class ProcessingHistoryService : IProcessingHistoryService
             dbContext.ProcessingHistory.Add(entity);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
+        catch (OperationCanceledException ex)
+        {
+            // Log cancellation but don't treat as error - operation was intentionally cancelled
+            _logger.LogWarning(ex, "History entry addition was cancelled for {FilePath}", entry.FilePath);
+        }
         catch (Exception ex)
         {
+            // Log other errors but don't throw - history logging should not break processing
             _logger.LogError(ex, "Error adding processing history entry for {FilePath}", entry.FilePath);
         }
     }

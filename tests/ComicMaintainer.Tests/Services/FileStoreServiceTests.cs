@@ -553,4 +553,80 @@ public class FileStoreServiceTests
         Assert.False(loadedFile3.IsProcessed);
         Assert.False(loadedFile3.IsDuplicate);
     }
+
+    [Fact]
+    public async Task CleanupStaleEntriesAsync_RemovesDeletedFiles_FromDatabase()
+    {
+        // Arrange - Add files to database through service
+        var file1 = Path.Combine(_testDirectory, "comic1.cbz");
+        var file2 = Path.Combine(_testDirectory, "comic2.cbz");
+        var file3 = Path.Combine(_testDirectory, "comic3.cbz");
+        
+        File.WriteAllText(file1, "test content 1");
+        File.WriteAllText(file2, "test content 2");
+        File.WriteAllText(file3, "test content 3");
+        
+        await _service.AddFileAsync(file1);
+        await _service.AddFileAsync(file2);
+        await _service.AddFileAsync(file3);
+        
+        // Verify all files are in store
+        var filesBeforeDelete = await _service.GetAllFilesAsync();
+        Assert.Equal(3, filesBeforeDelete.Count());
+        
+        // Act - Delete files from filesystem (simulating external deletion)
+        File.Delete(file1);
+        File.Delete(file3);
+        
+        var removedCount = await _service.CleanupStaleEntriesAsync();
+        
+        // Assert
+        Assert.Equal(2, removedCount);
+        
+        var filesAfterCleanup = await _service.GetAllFilesAsync();
+        Assert.Single(filesAfterCleanup);
+        Assert.Equal(file2, filesAfterCleanup.First().FilePath);
+        
+        // Verify database was actually updated
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+        var dbFiles = await dbContext.ComicFiles.ToListAsync();
+        Assert.Single(dbFiles);
+        Assert.Equal(file2, dbFiles.First().FilePath);
+    }
+
+    [Fact]
+    public async Task CleanupStaleEntriesAsync_NoDeletedFiles_ReturnsZero()
+    {
+        // Arrange
+        var file1 = Path.Combine(_testDirectory, "comic1.cbz");
+        var file2 = Path.Combine(_testDirectory, "comic2.cbz");
+        
+        File.WriteAllText(file1, "test content 1");
+        File.WriteAllText(file2, "test content 2");
+        
+        await _service.AddFileAsync(file1);
+        await _service.AddFileAsync(file2);
+        
+        // Act - No files deleted
+        var removedCount = await _service.CleanupStaleEntriesAsync();
+        
+        // Assert
+        Assert.Equal(0, removedCount);
+        
+        var filesAfterCleanup = await _service.GetAllFilesAsync();
+        Assert.Equal(2, filesAfterCleanup.Count());
+    }
+
+    [Fact]
+    public async Task CleanupStaleEntriesAsync_EmptyDatabase_ReturnsZero()
+    {
+        // Arrange - No files added
+        
+        // Act
+        var removedCount = await _service.CleanupStaleEntriesAsync();
+        
+        // Assert
+        Assert.Equal(0, removedCount);
+    }
 }

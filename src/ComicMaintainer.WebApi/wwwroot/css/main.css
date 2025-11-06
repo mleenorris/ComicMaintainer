@@ -1225,6 +1225,36 @@
             gap: 10px;
         }
         
+        .error-message {
+            background: #fee;
+            color: #e74c3c;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-size: 14px;
+            display: none;
+            border: 1px solid #fcc;
+        }
+        
+        .error-message.show {
+            display: block;
+        }
+        
+        .success-message {
+            background: #efe;
+            color: #27ae60;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            font-size: 14px;
+            display: none;
+            border: 1px solid #cfc;
+        }
+        
+        .success-message.show {
+            display: block;
+        }
+        
         .loading {
             text-align: center;
             padding: 40px;

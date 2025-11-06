@@ -2815,6 +2815,105 @@
             document.getElementById('aboutModal').classList.remove('active');
         }
         
+        function openChangePasswordModal() {
+            const modal = document.getElementById('changePasswordModal');
+            const form = document.getElementById('changePasswordForm');
+            const errorEl = document.getElementById('changePasswordError');
+            const successEl = document.getElementById('changePasswordSuccess');
+            
+            // Reset form and messages
+            form.reset();
+            errorEl.textContent = '';
+            errorEl.classList.remove('show');
+            successEl.textContent = '';
+            successEl.classList.remove('show');
+            
+            modal.classList.add('active');
+        }
+        
+        function closeChangePasswordModal() {
+            document.getElementById('changePasswordModal').classList.remove('active');
+        }
+        
+        async function changePassword() {
+            const currentPassword = document.getElementById('currentPassword').value;
+            const newPassword = document.getElementById('newPassword').value;
+            const confirmNewPassword = document.getElementById('confirmNewPassword').value;
+            const errorEl = document.getElementById('changePasswordError');
+            const successEl = document.getElementById('changePasswordSuccess');
+            const btn = document.getElementById('changePasswordBtn');
+            
+            // Clear previous messages
+            errorEl.textContent = '';
+            errorEl.classList.remove('show');
+            successEl.textContent = '';
+            successEl.classList.remove('show');
+            
+            // Validation
+            if (!currentPassword || !newPassword || !confirmNewPassword) {
+                errorEl.textContent = 'All fields are required';
+                errorEl.classList.add('show');
+                return;
+            }
+            
+            if (newPassword.length < 8) {
+                errorEl.textContent = 'New password must be at least 8 characters long';
+                errorEl.classList.add('show');
+                return;
+            }
+            
+            if (newPassword !== confirmNewPassword) {
+                errorEl.textContent = 'New passwords do not match';
+                errorEl.classList.add('show');
+                return;
+            }
+            
+            // Disable button during request
+            btn.disabled = true;
+            btn.textContent = 'Changing...';
+            
+            try {
+                const response = await fetch(apiUrl('/api/auth/change-password'), {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        currentPassword: currentPassword,
+                        newPassword: newPassword
+                    })
+                });
+                
+                if (handleAuthError(response)) {
+                    return;
+                }
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    successEl.textContent = 'Password changed successfully!';
+                    successEl.classList.add('show');
+                    
+                    // Clear form
+                    document.getElementById('changePasswordForm').reset();
+                    
+                    // Close modal after a short delay
+                    setTimeout(() => {
+                        closeChangePasswordModal();
+                    }, 2000);
+                } else {
+                    errorEl.textContent = data.error || 'Failed to change password';
+                    errorEl.classList.add('show');
+                }
+            } catch (error) {
+                console.error('Error changing password:', error);
+                errorEl.textContent = 'An error occurred. Please try again.';
+                errorEl.classList.add('show');
+            } finally {
+                // Re-enable button
+                btn.disabled = false;
+                btn.textContent = 'Change Password';
+            }
+        }
+        
         function showProgressModal(title) {
             const modal = document.getElementById('progressModal');
             const indicator = document.getElementById('progressIndicator');

@@ -189,18 +189,7 @@ public class ComicProcessorService : IComicProcessorService
                 }
                 else
                 {
-                    var beforeMetadata = new ComicMetadata
-                    {
-                        Series = metadata.Series,
-                        Title = metadata.Title,
-                        Issue = metadata.Issue,
-                        Volume = metadata.Volume,
-                        Publisher = metadata.Publisher,
-                        Year = metadata.Year,
-                        Summary = metadata.Summary,
-                        Authors = metadata.Authors,
-                        Tags = metadata.Tags
-                    };
+                    var beforeMetadata = metadata.Clone();
                     
                     // Set series name from folder name if not already set or different from folder name
                     var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
@@ -860,18 +849,7 @@ public class ComicProcessorService : IComicProcessorService
             _logger.LogDebug("NormalizeFileAsync: File needs normalization, updating metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             // Capture before metadata state (current metadata)
-            var beforeMetadata = new ComicMetadata
-            {
-                Series = metadata.Series,
-                Title = metadata.Title,
-                Issue = metadata.Issue,
-                Volume = metadata.Volume,
-                Publisher = metadata.Publisher,
-                Year = metadata.Year,
-                Summary = metadata.Summary,
-                Authors = metadata.Authors,
-                Tags = metadata.Tags
-            };
+            var beforeMetadata = metadata.Clone();
             
             // Set series name from folder name if not already set or different from folder name
             var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));

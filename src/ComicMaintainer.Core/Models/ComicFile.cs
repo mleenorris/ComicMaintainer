@@ -31,6 +31,25 @@ public class ComicMetadata
     public string? Summary { get; set; }
     public List<string> Authors { get; set; } = new();
     public List<string> Tags { get; set; } = new();
+
+    /// <summary>
+    /// Creates a deep copy of this ComicMetadata instance
+    /// </summary>
+    public ComicMetadata Clone()
+    {
+        return new ComicMetadata
+        {
+            Series = this.Series,
+            Title = this.Title,
+            Issue = this.Issue,
+            Volume = this.Volume,
+            Publisher = this.Publisher,
+            Year = this.Year,
+            Summary = this.Summary,
+            Authors = new List<string>(this.Authors),
+            Tags = new List<string>(this.Tags)
+        };
+    }
 }
 
 /// <summary>

@@ -51,4 +51,9 @@ public interface ISettingsService
     /// Update the GitHub issue assignee setting
     /// </summary>
     Task UpdateGitHubIssueAssigneeAsync(string? assignee, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the database cleanup interval setting (in hours, 0 = only on startup)
+    /// </summary>
+    Task UpdateDatabaseCleanupIntervalHoursAsync(int hours, CancellationToken cancellationToken = default);
 }

@@ -286,6 +286,15 @@ public class FileStoreService : IFileStoreService
                 await dbContext.SaveChangesAsync(cancellationToken);
                 _logger.LogDebug("Removed file from database: {FilePath}", SanitizeForLogging(filePath));
             }
+            else
+            {
+                _logger.LogDebug("File already removed from database: {FilePath}", SanitizeForLogging(filePath));
+            }
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            // File was already deleted by another process/thread - this is not an error
+            _logger.LogDebug(ex, "File already removed from database (concurrency): {FilePath}", SanitizeForLogging(filePath));
         }
         catch (Exception ex)
         {

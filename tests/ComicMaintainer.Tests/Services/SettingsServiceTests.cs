@@ -196,6 +196,59 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateDatabaseCleanupIntervalHours_PersistsSettingToFile()
+    {
+        // Arrange
+        const int newInterval = 24;
+
+        // Act
+        await _service.UpdateDatabaseCleanupIntervalHoursAsync(newInterval);
+
+        // Assert
+        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        Assert.True(File.Exists(settingsFilePath));
+
+        var json = await File.ReadAllTextAsync(settingsFilePath);
+        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+        
+        Assert.NotNull(settings);
+        Assert.True(settings.ContainsKey("DatabaseCleanupIntervalHours"));
+        Assert.Equal(newInterval, settings["DatabaseCleanupIntervalHours"].GetInt32());
+    }
+
+    [Fact]
+    public async Task UpdateDatabaseCleanupIntervalHours_WithZero_PersistsSettingToFile()
+    {
+        // Arrange - 0 means only run on startup
+        const int newInterval = 0;
+
+        // Act
+        await _service.UpdateDatabaseCleanupIntervalHoursAsync(newInterval);
+
+        // Assert
+        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        Assert.True(File.Exists(settingsFilePath));
+
+        var json = await File.ReadAllTextAsync(settingsFilePath);
+        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+        
+        Assert.NotNull(settings);
+        Assert.True(settings.ContainsKey("DatabaseCleanupIntervalHours"));
+        Assert.Equal(newInterval, settings["DatabaseCleanupIntervalHours"].GetInt32());
+    }
+
+    [Fact]
+    public async Task UpdateDatabaseCleanupIntervalHours_WithNegativeValue_ThrowsException()
+    {
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(() => 
+            _service.UpdateDatabaseCleanupIntervalHoursAsync(-1));
+        
+        await Assert.ThrowsAsync<ArgumentException>(() => 
+            _service.UpdateDatabaseCleanupIntervalHoursAsync(-100));
+    }
+
+    [Fact]
     public async Task MultipleUpdates_PreservesAllSettings()
     {
         // Arrange & Act

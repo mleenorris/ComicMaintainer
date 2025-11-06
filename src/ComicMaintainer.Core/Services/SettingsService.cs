@@ -107,6 +107,16 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("GitHubIssueAssignee", assignee, cancellationToken);
     }
 
+    public async Task UpdateDatabaseCleanupIntervalHoursAsync(int hours, CancellationToken cancellationToken = default)
+    {
+        if (hours < 0)
+        {
+            throw new ArgumentException("Cleanup interval hours must be non-negative (0 = only on startup)", nameof(hours));
+        }
+
+        await UpdateSettingAsync("DatabaseCleanupIntervalHours", hours, cancellationToken);
+    }
+
     private async Task UpdateSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);

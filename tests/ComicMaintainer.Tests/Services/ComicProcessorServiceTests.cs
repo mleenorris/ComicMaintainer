@@ -805,6 +805,105 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.Equal("5", metadata.Issue);
     }
 
+    [Fact]
+    public async Task NormalizeFileAsync_SetsSeriesNameFromFolderName()
+    {
+        // Arrange - Create a folder with a specific name
+        var seriesFolder = Path.Combine(_testDirectory, "Spider-Man");
+        Directory.CreateDirectory(seriesFolder);
+        
+        // Create a file with ComicInfo.xml that has wrong series name
+        var fileName = "Chapter 5.cbz";
+        var filePath = Path.Combine(seriesFolder, fileName);
+        
+        var comicInfoXml = @"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>Wrong Series Name</Series>
+    <Number>5</Number>
+    <Title>Chapter 5</Title>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Enable only normalize (not rename) to keep the file path unchanged
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+
+        // Act
+        var result = await _service.ProcessFileAsync(filePath);
+
+        // Assert
+        Assert.True(result);
+        
+        // Verify the file was normalized
+        _mockFileStore.Verify(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
+        
+        // Read the metadata back to verify series was updated
+        var updatedMetadata = await _service.GetMetadataAsync(filePath);
+        Assert.NotNull(updatedMetadata);
+        Assert.Equal("Spider-Man", updatedMetadata.Series);
+        Assert.Equal("5", updatedMetadata.Issue);
+    }
+
+    [Fact]
+    public async Task NormalizeFileAsync_WithFolderUnderscores_SetsSeriesNameWithColons()
+    {
+        // Arrange - Create a folder with underscores
+        var seriesFolder = Path.Combine(_testDirectory, "Batman_The Dark Knight");
+        Directory.CreateDirectory(seriesFolder);
+        
+        // Create a file without ComicInfo.xml
+        var fileName = "Chapter 10.cbz";
+        var filePath = Path.Combine(seriesFolder, fileName);
+        
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Enable only normalize (not rename) to keep the file path unchanged
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+
+        // Act
+        var result = await _service.ProcessFileAsync(filePath);
+
+        // Assert
+        Assert.True(result);
+        
+        // Verify the file was normalized
+        _mockFileStore.Verify(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
+        
+        // Read the metadata back to verify series was set from folder name with underscores converted to colons
+        var updatedMetadata = await _service.GetMetadataAsync(filePath);
+        Assert.NotNull(updatedMetadata);
+        Assert.Equal("Batman:The Dark Knight", updatedMetadata.Series);
+        Assert.Equal("10", updatedMetadata.Issue);
+    }
+
     public void Dispose()
     {
         // Clean up test directory

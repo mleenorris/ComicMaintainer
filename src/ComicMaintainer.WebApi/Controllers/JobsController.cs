@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -118,30 +119,30 @@ public class JobsController : ControllerBase
     {
         try
         {
-            _logger.LogDebug("ProcessAll: Starting process all files request");
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessAll: Starting process all files request"));
             
             // Get all files from the file store
             var allFiles = await _fileStore.GetAllFilesAsync();
             var filePaths = allFiles.Select(f => f.FilePath).ToList();
             
-            _logger.LogDebug("ProcessAll: Retrieved {TotalFiles} files from file store", filePaths.Count);
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessAll: Retrieved {TotalFiles} files from file store"), filePaths.Count);
             
             if (filePaths.Count == 0)
             {
-                _logger.LogInformation("ProcessAll: No files found to process");
+                _logger.LogInformation(LoggingHelper.WithWebsitePrefix("ProcessAll: No files found to process"));
                 return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
             }
             
             // Start the process job
             var jobId = await _processor.ProcessFilesAsync(filePaths);
-            _logger.LogInformation("ProcessAll: Process all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
-            _logger.LogDebug("ProcessAll: Job created successfully with ID: {JobId}", jobId);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("ProcessAll: Process all files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, filePaths.Count);
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessAll: Job created successfully with ID: {JobId}"), jobId);
             
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "ProcessAll: Error starting process all job");
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("ProcessAll: Error starting process all job"));
             return StatusCode(500, new { error = "Error starting job" });
         }
     }
@@ -151,30 +152,30 @@ public class JobsController : ControllerBase
     {
         try
         {
-            _logger.LogDebug("RenameAll: Starting rename all files request");
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("RenameAll: Starting rename all files request"));
             
             // Get all files from the file store
             var allFiles = await _fileStore.GetAllFilesAsync();
             var filePaths = allFiles.Select(f => f.FilePath).ToList();
             
-            _logger.LogDebug("RenameAll: Retrieved {TotalFiles} files from file store", filePaths.Count);
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("RenameAll: Retrieved {TotalFiles} files from file store"), filePaths.Count);
             
             if (filePaths.Count == 0)
             {
-                _logger.LogInformation("RenameAll: No files found to rename");
+                _logger.LogInformation(LoggingHelper.WithWebsitePrefix("RenameAll: No files found to rename"));
                 return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
             }
             
             // Start the rename job
             var jobId = await _processor.RenameFilesAsync(filePaths);
-            _logger.LogInformation("RenameAll: Rename all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
-            _logger.LogDebug("RenameAll: Job created successfully with ID: {JobId}", jobId);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("RenameAll: Rename all files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, filePaths.Count);
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("RenameAll: Job created successfully with ID: {JobId}"), jobId);
             
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "RenameAll: Error starting rename all job");
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("RenameAll: Error starting rename all job"));
             return StatusCode(500, new { error = "Error starting job" });
         }
     }
@@ -184,30 +185,30 @@ public class JobsController : ControllerBase
     {
         try
         {
-            _logger.LogDebug("NormalizeAll: Starting normalize all files request");
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("NormalizeAll: Starting normalize all files request"));
             
             // Get all files from the file store
             var allFiles = await _fileStore.GetAllFilesAsync();
             var filePaths = allFiles.Select(f => f.FilePath).ToList();
             
-            _logger.LogDebug("NormalizeAll: Retrieved {TotalFiles} files from file store", filePaths.Count);
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("NormalizeAll: Retrieved {TotalFiles} files from file store"), filePaths.Count);
             
             if (filePaths.Count == 0)
             {
-                _logger.LogInformation("NormalizeAll: No files found to normalize");
+                _logger.LogInformation(LoggingHelper.WithWebsitePrefix("NormalizeAll: No files found to normalize"));
                 return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
             }
             
             // Start the normalize job
             var jobId = await _processor.NormalizeFilesAsync(filePaths);
-            _logger.LogInformation("NormalizeAll: Normalize all files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
-            _logger.LogDebug("NormalizeAll: Job created successfully with ID: {JobId}", jobId);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("NormalizeAll: Normalize all files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, filePaths.Count);
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("NormalizeAll: Job created successfully with ID: {JobId}"), jobId);
             
             return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "NormalizeAll: Error starting normalize all job");
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("NormalizeAll: Error starting normalize all job"));
             return StatusCode(500, new { error = "Error starting job" });
         }
     }
@@ -217,25 +218,25 @@ public class JobsController : ControllerBase
     {
         try
         {
-            _logger.LogDebug("ProcessSelected: Starting process selected files request");
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessSelected: Starting process selected files request"));
             
             if (request.Files == null || request.Files.Count == 0)
             {
-                _logger.LogDebug("ProcessSelected: No files specified in request");
+                _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessSelected: No files specified in request"));
                 return BadRequest(new { error = "No files specified" });
             }
             
-            _logger.LogDebug("ProcessSelected: Processing {SelectedCount} selected files", request.Files.Count);
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessSelected: Processing {SelectedCount} selected files"), request.Files.Count);
             
             var jobId = await _processor.ProcessFilesAsync(request.Files);
-            _logger.LogInformation("ProcessSelected: Process selected files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, request.Files.Count);
-            _logger.LogDebug("ProcessSelected: Job created successfully with ID: {JobId}", jobId);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("ProcessSelected: Process selected files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, request.Files.Count);
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessSelected: Job created successfully with ID: {JobId}"), jobId);
             
             return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "ProcessSelected: Error starting process selected job");
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("ProcessSelected: Error starting process selected job"));
             return StatusCode(500, new { error = "Error starting job" });
         }
     }

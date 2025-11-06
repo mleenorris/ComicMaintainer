@@ -47,19 +47,19 @@ public class FileWatcherService : IFileWatcherService
             
             if (!_enabled)
             {
-                _logger.LogInformation("Watcher is disabled (both rename and normalize are disabled), not starting");
+                _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Watcher is disabled (both rename and normalize are disabled), not starting"));
                 return;
             }
 
             if (_watcher != null && _watcher.EnableRaisingEvents)
             {
-                _logger.LogInformation("Watcher is already running");
+                _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Watcher is already running"));
                 return;
             }
 
             if (!Directory.Exists(_settings.WatchedDirectory))
             {
-                _logger.LogError("Watched directory does not exist: {Directory}", _settings.WatchedDirectory);
+                _logger.LogError(LoggingHelper.WithWatcherPrefix("Watched directory does not exist: {Directory}"), _settings.WatchedDirectory);
                 return;
             }
 
@@ -76,7 +76,7 @@ public class FileWatcherService : IFileWatcherService
             _watcher.Deleted += OnFileDeleted;
 
             _watcher.EnableRaisingEvents = true;
-            _logger.LogInformation("File watcher started for directory: {Directory}", _settings.WatchedDirectory);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File watcher started for directory: {Directory}"), _settings.WatchedDirectory);
             
             // Set flag to initialize outside the lock
             if (!_initialized)
@@ -104,13 +104,13 @@ public class FileWatcherService : IFileWatcherService
     {
         try
         {
-            _logger.LogInformation("Starting incremental scan of directory: {Directory}", _settings.WatchedDirectory);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Starting incremental scan of directory: {Directory}"), _settings.WatchedDirectory);
             
             var comicFiles = Directory.EnumerateFiles(_settings.WatchedDirectory, "*.*", SearchOption.AllDirectories)
                 .Where(IsComicFile)
                 .ToList();
             
-            _logger.LogInformation("Found {Count} comic files on filesystem", comicFiles.Count);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Found {Count} comic files on filesystem"), comicFiles.Count);
             
             // Check each file individually to avoid loading all files into memory
             var newFileCount = 0;
@@ -130,15 +130,15 @@ public class FileWatcherService : IFileWatcherService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error adding file during incremental scan: {File}", file);
+                    _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error adding file during incremental scan: {File}"), file);
                 }
             }
             
-            _logger.LogInformation("Incremental scan completed. Added {Count} new files", newFileCount);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Incremental scan completed. Added {Count} new files"), newFileCount);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during incremental directory scan");
+            _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error during incremental directory scan"));
         }
     }
 
@@ -149,11 +149,11 @@ public class FileWatcherService : IFileWatcherService
     {
         try
         {
-            _logger.LogInformation("Scanning directory for comic files: {Directory}", directoryPath);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Scanning directory for comic files: {Directory}"), directoryPath);
             
             if (!Directory.Exists(directoryPath))
             {
-                _logger.LogWarning("Directory no longer exists: {Directory}", directoryPath);
+                _logger.LogWarning(LoggingHelper.WithWatcherPrefix("Directory no longer exists: {Directory}"), directoryPath);
                 return;
             }
             
@@ -161,7 +161,7 @@ public class FileWatcherService : IFileWatcherService
                 .Where(IsComicFile)
                 .ToList();
             
-            _logger.LogInformation("Found {Count} comic files in new directory: {Directory}", comicFiles.Count, directoryPath);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Found {Count} comic files in new directory: {Directory}"), comicFiles.Count, directoryPath);
             
             foreach (var file in comicFiles)
             {
@@ -185,15 +185,15 @@ public class FileWatcherService : IFileWatcherService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error processing file from new directory: {File}", file);
+                    _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error processing file from new directory: {File}"), file);
                 }
             }
             
-            _logger.LogInformation("Directory scan completed: {Directory}", directoryPath);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Directory scan completed: {Directory}"), directoryPath);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error scanning directory: {Directory}", directoryPath);
+            _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error scanning directory: {Directory}"), directoryPath);
         }
     }
 
@@ -206,7 +206,7 @@ public class FileWatcherService : IFileWatcherService
                 _watcher.EnableRaisingEvents = false;
                 _watcher.Dispose();
                 _watcher = null;
-                _logger.LogInformation("File watcher stopped");
+                _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File watcher stopped"));
             }
         }
 
@@ -236,7 +236,7 @@ public class FileWatcherService : IFileWatcherService
         // Check if it's a directory
         if (Directory.Exists(e.FullPath))
         {
-            _logger.LogInformation("Directory created: {Path}, scanning for comic files", e.FullPath);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Directory created: {Path}, scanning for comic files"), e.FullPath);
             _ = Task.Run(async () =>
             {
                 // Give the system time to finish copying files into the directory
@@ -246,7 +246,7 @@ public class FileWatcherService : IFileWatcherService
         }
         else if (IsComicFile(e.FullPath))
         {
-            _logger.LogInformation("File created: {Path}", e.FullPath);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File created: {Path}"), e.FullPath);
             _ = Task.Run(async () =>
             {
                 await _fileStore.AddFileAsync(e.FullPath);
@@ -275,7 +275,7 @@ public class FileWatcherService : IFileWatcherService
         
         if (IsComicFile(e.FullPath))
         {
-            _logger.LogInformation("File changed: {Path}", e.FullPath);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File changed: {Path}"), e.FullPath);
             _ = Task.Run(async () =>
             {
                 await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
@@ -296,7 +296,7 @@ public class FileWatcherService : IFileWatcherService
         
         if (IsComicFile(e.FullPath))
         {
-            _logger.LogInformation("File renamed: {OldPath} -> {NewPath}", e.OldFullPath, e.FullPath);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File renamed: {OldPath} -> {NewPath}"), e.OldFullPath, e.FullPath);
             _ = Task.Run(async () =>
             {
                 try
@@ -317,7 +317,7 @@ public class FileWatcherService : IFileWatcherService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error processing renamed file: {Path}", e.FullPath);
+                    _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error processing renamed file: {Path}"), e.FullPath);
                 }
             });
         }
@@ -331,7 +331,7 @@ public class FileWatcherService : IFileWatcherService
             return;
         }
         
-        _logger.LogInformation("File deleted: {Path}", e.FullPath);
+        _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File deleted: {Path}"), e.FullPath);
         _ = Task.Run(async () =>
         {
             await _fileStore.RemoveFileAsync(e.FullPath);
@@ -381,7 +381,7 @@ public class FileWatcherService : IFileWatcherService
                 var isProcessed = await _fileStore.IsFileProcessedAsync(filePath, cancellationToken);
                 if (isProcessed)
                 {
-                    _logger.LogInformation("File already fully processed (renamed and normalized), skipping: {File}", filePath);
+                    _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File already fully processed (renamed and normalized), skipping: {File}"), filePath);
                     return false;
                 }
                 return true;
@@ -394,7 +394,7 @@ public class FileWatcherService : IFileWatcherService
                 var isNormalized = await _fileStore.IsFileNormalizedAsync(filePath, cancellationToken);
                 if (isProcessed || isNormalized)
                 {
-                    _logger.LogInformation("File already processed or normalized, skipping: {File}", filePath);
+                    _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File already processed or normalized, skipping: {File}"), filePath);
                     return false;
                 }
                 return true;
@@ -407,19 +407,19 @@ public class FileWatcherService : IFileWatcherService
                 var isRenamed = await _fileStore.IsFileRenamedAsync(filePath, cancellationToken);
                 if (isProcessed || isRenamed)
                 {
-                    _logger.LogInformation("File already processed or renamed, skipping: {File}", filePath);
+                    _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File already processed or renamed, skipping: {File}"), filePath);
                     return false;
                 }
                 return true;
             }
 
             // If both are disabled, no processing needed
-            _logger.LogInformation("Both rename and normalize are disabled, skipping: {File}", filePath);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Both rename and normalize are disabled, skipping: {File}"), filePath);
             return false;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error checking if file should be processed: {File}", filePath);
+            _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error checking if file should be processed: {File}"), filePath);
             return false;
         }
     }

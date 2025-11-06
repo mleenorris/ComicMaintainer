@@ -280,24 +280,24 @@ public class FilesController : ControllerBase
     {
         try
         {
-            _logger.LogInformation("ScanUnmarked: Scan unmarked files requested");
-            _logger.LogDebug("ScanUnmarked: Starting file count retrieval from file store");
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("ScanUnmarked: Scan unmarked files requested"));
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ScanUnmarked: Starting file count retrieval from file store"));
             
             // Get file counts - materialize collections to avoid multiple enumerations
             var allFilesList = (await _fileStore.GetAllFilesAsync()).ToList();
-            _logger.LogDebug("ScanUnmarked: Retrieved {TotalCount} total files", allFilesList.Count);
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ScanUnmarked: Retrieved {TotalCount} total files"), allFilesList.Count);
             
             var unmarkedFilesList = (await _fileStore.GetFilteredFilesAsync("unprocessed")).ToList();
-            _logger.LogDebug("ScanUnmarked: Retrieved {UnmarkedCount} unprocessed files after filtering", unmarkedFilesList.Count);
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ScanUnmarked: Retrieved {UnmarkedCount} unprocessed files after filtering"), unmarkedFilesList.Count);
             
             var markedFilesList = (await _fileStore.GetFilteredFilesAsync("processed")).ToList();
-            _logger.LogDebug("ScanUnmarked: Retrieved {MarkedCount} processed files after filtering", markedFilesList.Count);
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ScanUnmarked: Retrieved {MarkedCount} processed files after filtering"), markedFilesList.Count);
             
             var totalCount = allFilesList.Count;
             var unmarkedCount = unmarkedFilesList.Count;
             var markedCount = markedFilesList.Count;
             
-            _logger.LogInformation("ScanUnmarked: File counts - Total: {TotalCount}, Unmarked: {UnmarkedCount}, Marked: {MarkedCount}", 
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("ScanUnmarked: File counts - Total: {TotalCount}, Unmarked: {UnmarkedCount}, Marked: {MarkedCount}"), 
                 totalCount, unmarkedCount, markedCount);
             
             return Ok(new { 
@@ -308,7 +308,7 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "ScanUnmarked: Error scanning unmarked files");
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("ScanUnmarked: Error scanning unmarked files"));
             return StatusCode(500, "Error scanning files");
         }
     }
@@ -371,7 +371,7 @@ public class FilesController : ControllerBase
                 return BadRequest("Invalid file path");
 
             var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
-            _logger.LogInformation("Rename requested for file: {FilePath}", sanitizedPath);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename requested for file: {FilePath}"), sanitizedPath);
             
             // Use the batch rename method with a single file
             var jobId = await _processor.RenameFilesAsync(new[] { filePath }, cancellationToken);
@@ -381,7 +381,7 @@ public class FilesController : ControllerBase
         catch (Exception ex)
         {
             var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
-            _logger.LogError(ex, "Error renaming file with encoded path {EncodedPath}", sanitizedEncodedPath);
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error renaming file with encoded path {EncodedPath}"), sanitizedEncodedPath);
             return StatusCode(500, "Error renaming file");
         }
     }
@@ -397,7 +397,7 @@ public class FilesController : ControllerBase
                 return BadRequest("Invalid file path");
 
             var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
-            _logger.LogInformation("Rename requested for file: {FilePath}", sanitizedPath);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename requested for file: {FilePath}"), sanitizedPath);
             
             // Use the batch rename method with a single file
             var jobId = await _processor.RenameFilesAsync(new[] { filePath }, cancellationToken);
@@ -407,7 +407,7 @@ public class FilesController : ControllerBase
         catch (Exception ex)
         {
             var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
-            _logger.LogError(ex, "Error renaming file {FilePath}", sanitizedPath);
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error renaming file {FilePath}"), sanitizedPath);
             return StatusCode(500, "Error renaming file");
         }
     }

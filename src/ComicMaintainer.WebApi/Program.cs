@@ -291,6 +291,9 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 // Add hosted service for file watcher
 builder.Services.AddHostedService<FileWatcherHostedService>();
 
+// Add hosted service for database cleanup
+builder.Services.AddHostedService<DatabaseCleanupHostedService>();
+
 var app = builder.Build();
 
 // Print startup banner
@@ -534,6 +537,11 @@ static void LoadUserSettings(string configDir, AppSettings options)
             (watcherEnableNormalize.ValueKind == JsonValueKind.True || watcherEnableNormalize.ValueKind == JsonValueKind.False))
         {
             options.WatcherEnableNormalize = watcherEnableNormalize.GetBoolean();
+        }
+
+        if (settings.TryGetValue("DatabaseCleanupIntervalHours", out var databaseCleanupIntervalHours) && databaseCleanupIntervalHours.ValueKind == JsonValueKind.Number)
+        {
+            options.DatabaseCleanupIntervalHours = databaseCleanupIntervalHours.GetInt32();
         }
     }
     catch

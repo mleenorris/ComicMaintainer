@@ -52,7 +52,8 @@ public class SettingsController : ControllerBase
             issue_number_padding = _appSettings.Value.IssueNumberPadding,
             watcher_enable_rename = _appSettings.Value.WatcherEnableRename,
             watcher_enable_normalize = _appSettings.Value.WatcherEnableNormalize,
-            log_max_bytes = _appSettings.Value.LogMaxBytes
+            log_max_bytes = _appSettings.Value.LogMaxBytes,
+            database_cleanup_interval_hours = _appSettings.Value.DatabaseCleanupIntervalHours
         });
     }
 
@@ -214,6 +215,35 @@ public class SettingsController : ControllerBase
     public Task<ActionResult> SetWatcherEnableNormalize([FromBody] WatcherEnableNormalizeRequest request, CancellationToken cancellationToken = default)
         => UpdateWatcherEnableNormalize(request, cancellationToken);
 
+    [HttpGet("database-cleanup-interval-hours")]
+    public ActionResult<object> GetDatabaseCleanupIntervalHours()
+    {
+        return Ok(new { hours = _appSettings.Value.DatabaseCleanupIntervalHours });
+    }
+
+    [HttpPut("database-cleanup-interval-hours")]
+    public async Task<ActionResult> UpdateDatabaseCleanupIntervalHours([FromBody] DatabaseCleanupIntervalRequest request, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Database cleanup interval update requested: {Hours} hours", request.Hours);
+        
+        try
+        {
+            await _settingsService.UpdateDatabaseCleanupIntervalHoursAsync(request.Hours, cancellationToken);
+            _logger.LogWarning("Database cleanup interval updated to {Hours} hours. Restart the application for the change to take effect.", request.Hours);
+            return Ok(new { message = "Database cleanup interval updated successfully. Restart required for changes to take effect." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update database cleanup interval");
+            return StatusCode(500, new { error = "Failed to update database cleanup interval" });
+        }
+    }
+
+    [HttpPost("database-cleanup-interval-hours")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public Task<ActionResult> SetDatabaseCleanupIntervalHours([FromBody] DatabaseCleanupIntervalRequest request, CancellationToken cancellationToken = default)
+        => UpdateDatabaseCleanupIntervalHours(request, cancellationToken);
+
     [HttpPost("reset")]
     public async Task<ActionResult> ResetDatabase(CancellationToken cancellationToken = default)
     {
@@ -315,5 +345,10 @@ public class SettingsController : ControllerBase
     public class WatcherEnableNormalizeRequest
     {
         public bool Enabled { get; set; }
+    }
+
+    public class DatabaseCleanupIntervalRequest
+    {
+        public int Hours { get; set; }
     }
 }

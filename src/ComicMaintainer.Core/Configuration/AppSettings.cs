@@ -26,4 +26,7 @@ public class AppSettings
     public int WatcherDirectoryScanDelaySeconds { get; set; } = 2;
     public bool WatcherEnableRename { get; set; } = true;
     public bool WatcherEnableNormalize { get; set; } = true;
+    
+    // Database cleanup settings
+    public int DatabaseCleanupIntervalHours { get; set; } = 12;
 }

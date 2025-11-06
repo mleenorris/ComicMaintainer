@@ -849,8 +849,10 @@ public class ComicProcessorService : IComicProcessorService
             // Create ComicInfo.xml content
             var comicInfoXml = GenerateComicInfoXml(metadata);
             
-            // Create a temporary file
-            var tempFile = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}.cbz");
+            // Create a temporary file in the same directory as the target file
+            // to ensure they are on the same file system (prevents cross-device link errors)
+            var targetDirectory = Path.GetDirectoryName(filePath) ?? Path.GetTempPath();
+            var tempFile = Path.Combine(targetDirectory, $".tmp_{Guid.NewGuid()}.cbz");
             
             try
             {
@@ -962,6 +964,55 @@ public class ComicProcessorService : IComicProcessorService
                 
                 return; // Success
             }
+            catch (IOException ex) when (IsCrossDeviceLinkError(ex))
+            {
+                // Cross-device link error - use fallback strategy
+                _logger.LogWarning("Cross-device link detected, using fallback copy strategy for {File}", targetFile);
+                
+                try
+                {
+                    // Create backup by copying the target file
+                    if (File.Exists(targetFile))
+                    {
+                        File.Copy(targetFile, backupPath, overwrite: true);
+                    }
+                    
+                    // Copy temp file to target
+                    File.Copy(tempFile, targetFile, overwrite: true);
+                    
+                    // Delete temp file
+                    File.Delete(tempFile);
+                    
+                    // Clean up backup
+                    if (File.Exists(backupPath))
+                    {
+                        File.Delete(backupPath);
+                    }
+                    
+                    _logger.LogInformation("Successfully replaced file using fallback strategy: {File}", targetFile);
+                    return; // Success
+                }
+                catch (Exception fallbackEx)
+                {
+                    _logger.LogError(fallbackEx, "Fallback strategy failed for {File}, attempting restore from backup", targetFile);
+                    
+                    // Try to restore from backup
+                    if (File.Exists(backupPath))
+                    {
+                        try
+                        {
+                            File.Copy(backupPath, targetFile, overwrite: true);
+                            File.Delete(backupPath);
+                            _logger.LogWarning("Restored backup file after failed fallback: {File}", targetFile);
+                        }
+                        catch (Exception restoreEx)
+                        {
+                            _logger.LogError(restoreEx, "Failed to restore backup file: {BackupPath}", backupPath);
+                        }
+                    }
+                    throw;
+                }
+            }
             catch (IOException ex) when (attempt < MaxFileReplaceRetries - 1)
             {
                 lastException = ex;
@@ -1007,6 +1058,16 @@ public class ComicProcessorService : IComicProcessorService
             _logger.LogError(lastException, "Failed to replace file after {MaxRetries} attempts: {File}", MaxFileReplaceRetries, targetFile);
             throw lastException;
         }
+    }
+
+    /// <summary>
+    /// Checks if an IOException is a cross-device link error
+    /// </summary>
+    private static bool IsCrossDeviceLinkError(IOException ex)
+    {
+        // Check for cross-device link error message
+        return ex.Message.Contains("cross-device", StringComparison.OrdinalIgnoreCase) ||
+               ex.Message.Contains("Invalid cross-device link", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? ParseIssueNumber(string filename)

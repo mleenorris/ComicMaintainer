@@ -227,6 +227,12 @@ public class FileWatcherService : IFileWatcherService
 
     private void OnFileCreated(object sender, FileSystemEventArgs e)
     {
+        // Ignore temporary files immediately to avoid unnecessary processing
+        if (IsTemporaryFile(e.FullPath))
+        {
+            return;
+        }
+        
         // Check if it's a directory
         if (Directory.Exists(e.FullPath))
         {
@@ -261,6 +267,12 @@ public class FileWatcherService : IFileWatcherService
 
     private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
+        // Ignore temporary files immediately to avoid unnecessary processing
+        if (IsTemporaryFile(e.FullPath))
+        {
+            return;
+        }
+        
         if (IsComicFile(e.FullPath))
         {
             _logger.LogInformation("File changed: {Path}", e.FullPath);
@@ -274,6 +286,14 @@ public class FileWatcherService : IFileWatcherService
 
     private void OnFileRenamed(object sender, RenamedEventArgs e)
     {
+        // Ignore if the target (new) file is a temporary file
+        // Note: We only check the target path to allow renames FROM temporary files TO comic files,
+        // which is a common pattern when files are moved into the watched directory
+        if (IsTemporaryFile(e.FullPath))
+        {
+            return;
+        }
+        
         if (IsComicFile(e.FullPath))
         {
             _logger.LogInformation("File renamed: {OldPath} -> {NewPath}", e.OldFullPath, e.FullPath);
@@ -305,6 +325,12 @@ public class FileWatcherService : IFileWatcherService
 
     private void OnFileDeleted(object sender, FileSystemEventArgs e)
     {
+        // Ignore temporary files immediately to avoid unnecessary processing
+        if (IsTemporaryFile(e.FullPath))
+        {
+            return;
+        }
+        
         _logger.LogInformation("File deleted: {Path}", e.FullPath);
         _ = Task.Run(async () =>
         {
@@ -315,6 +341,28 @@ public class FileWatcherService : IFileWatcherService
     private static bool IsComicFile(string path)
     {
         return ComicFileExtensions.IsComicArchive(path);
+    }
+
+    /// <summary>
+    /// Check if a file is a temporary file that should be ignored
+    /// </summary>
+    private static bool IsTemporaryFile(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        
+        // Ignore files starting with .tmp_ (common temporary file pattern)
+        if (fileName.StartsWith(".tmp_", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        
+        // Ignore files with .tmp extension
+        if (path.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        
+        return false;
     }
 
     /// <summary>

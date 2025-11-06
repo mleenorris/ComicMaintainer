@@ -33,6 +33,7 @@ public class ComicProcessorServiceTests : IDisposable
         {
             WatchedDirectory = _testDirectory,
             DuplicateDirectory = Path.Combine(_testDirectory, "duplicates"),
+            TempFileDirectory = Path.Combine(_testDirectory, "temp"),
             FilenameFormat = "{series} - Chapter {issue}",
             IssueNumberPadding = 4
         };

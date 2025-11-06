@@ -327,6 +327,157 @@ public class FileWatcherServiceTests : IDisposable
             "Already processed file should not be processed again");
     }
 
+    [Fact]
+    public async Task OnFileCreated_IgnoresTemporaryFilesStartingWithTmpPrefix()
+    {
+        // Arrange - Use realistic temporary file pattern matching the issue screenshot
+        var tempFile = Path.Combine(_testDirectory, $".tmp_{Guid.NewGuid()}.cbz");
+        
+        // Start the watcher
+        await _service.StartAsync();
+        
+        // Wait a bit for watcher to initialize
+        await Task.Delay(100);
+
+        // Act - Create a temporary file
+        File.WriteAllText(tempFile, "fake cbz content");
+        
+        // Wait for file system events
+        await Task.Delay(500);
+
+        // Assert - Temporary file should NOT be added to store
+        _mockFileStore.Verify(
+            fs => fs.AddFileAsync(tempFile, It.IsAny<CancellationToken>()), 
+            Times.Never, 
+            "Temporary files should be ignored and not added to file store");
+        
+        // Verify that file was NOT processed
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(tempFile, It.IsAny<CancellationToken>()), 
+            Times.Never, 
+            "Temporary files should not be processed");
+    }
+
+    [Fact]
+    public async Task OnFileCreated_IgnoresFilesWithTmpExtension()
+    {
+        // Arrange
+        var tempFile = Path.Combine(_testDirectory, "myfile.tmp");
+        
+        // Start the watcher
+        await _service.StartAsync();
+        
+        // Wait a bit for watcher to initialize
+        await Task.Delay(100);
+
+        // Act - Create a temporary file with .tmp extension
+        File.WriteAllText(tempFile, "fake tmp content");
+        
+        // Wait for file system events
+        await Task.Delay(500);
+
+        // Assert - Temporary file should NOT be added to store or processed
+        _mockFileStore.Verify(
+            fs => fs.AddFileAsync(tempFile, It.IsAny<CancellationToken>()), 
+            Times.Never, 
+            ".tmp files should be ignored and not added to file store");
+        
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(tempFile, It.IsAny<CancellationToken>()), 
+            Times.Never, 
+            ".tmp files should not be processed");
+    }
+
+    [Fact]
+    public async Task OnFileChanged_IgnoresTemporaryFiles()
+    {
+        // Arrange
+        var tempFile = Path.Combine(_testDirectory, ".tmp_test.cbz");
+        
+        // Create the temporary file
+        File.WriteAllText(tempFile, "initial content");
+        
+        // Start the watcher
+        await _service.StartAsync();
+        
+        // Wait a bit for watcher to initialize
+        await Task.Delay(100);
+
+        // Act - Modify the temporary file
+        File.AppendAllText(tempFile, "updated content");
+        
+        // Wait for file system events
+        await Task.Delay(500);
+
+        // Assert - Temporary file changes should be ignored
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(tempFile, It.IsAny<CancellationToken>()), 
+            Times.Never, 
+            "Temporary files should not be processed when changed");
+    }
+
+    [Fact]
+    public async Task OnFileDeleted_IgnoresTemporaryFiles()
+    {
+        // Arrange - Use realistic temporary file pattern matching the issue screenshot
+        var tempFile = Path.Combine(_testDirectory, $".tmp_{Guid.NewGuid()}.cbz");
+        
+        // Create the temporary file
+        File.WriteAllText(tempFile, "fake cbz content");
+        
+        // Start the watcher
+        await _service.StartAsync();
+        
+        // Wait a bit for watcher to initialize
+        await Task.Delay(100);
+
+        // Act - Delete the temporary file
+        File.Delete(tempFile);
+        
+        // Wait for file system events
+        await Task.Delay(500);
+
+        // Assert - Temporary file deletion should be ignored
+        _mockFileStore.Verify(
+            fs => fs.RemoveFileAsync(tempFile, It.IsAny<CancellationToken>()), 
+            Times.Never, 
+            "Temporary file deletions should be ignored");
+    }
+
+    [Fact]
+    public async Task OnFileRenamed_IgnoresWhenTargetIsTemporaryFile()
+    {
+        // Arrange
+        var regularFile = Path.Combine(_testDirectory, "test.cbz");
+        var tempFile = Path.Combine(_testDirectory, ".tmp_renamed.cbz");
+        
+        // Create the regular file
+        File.WriteAllText(regularFile, "fake cbz content");
+        
+        // Start the watcher
+        await _service.StartAsync();
+        
+        // Wait a bit for watcher to initialize
+        await Task.Delay(100);
+
+        // Act - Rename to a temporary file
+        File.Move(regularFile, tempFile);
+        
+        // Wait for file system events
+        await Task.Delay(500);
+
+        // Assert - Rename to temporary file should be ignored
+        _mockFileStore.Verify(
+            fs => fs.AddFileAsync(tempFile, It.IsAny<CancellationToken>()), 
+            Times.Never, 
+            "Rename to temporary file should be ignored");
+        
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(tempFile, It.IsAny<CancellationToken>()), 
+            Times.Never, 
+            "Temporary files should not be processed even after rename");
+    }
+
     public void Dispose()
     {
         _service.StopAsync().Wait();

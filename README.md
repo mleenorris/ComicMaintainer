@@ -118,6 +118,7 @@ docker run -d \
 - `WATCHED_DIR`: **(Required)** Directory to watch for comics. The service will not start if this is not set.
 - `PROCESS_SCRIPT`: Script to run for processing (default: `/app/process_file.py`)
 - `DUPLICATE_DIR`: Directory where duplicates are moved (required for duplicate handling)
+- `TEMP_FILE_DIR`: Directory where temporary files are created during processing (default: `/Config/temp`). Temporary files are automatically cleaned up after processing.
 - `WEB_PORT`: Port for the web interface (default: `5000`)
 - `GUNICORN_WORKERS`: Number of Gunicorn worker processes (default: `2`). Job state is shared across workers via SQLite.
 - `PUID`: User ID to run the service as (default: `99` for user `nobody`)

@@ -2553,6 +2553,17 @@
                 const paddingData = await paddingResponse.json();
                 document.getElementById('issueNumberPadding').value = paddingData.padding;
                 
+                // Load database cleanup interval
+                const cleanupResponse = await fetch(apiUrl('/api/settings/database-cleanup-interval-hours'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(cleanupResponse)) return;
+                if (!cleanupResponse.ok) {
+                    throw new Error(`HTTP error! status: ${cleanupResponse.status}`);
+                }
+                const cleanupData = await cleanupResponse.json();
+                document.getElementById('dbCleanupInterval').value = cleanupData.hours;
+                
                 document.getElementById('settingsModal').classList.add('active');
             } catch (error) {
                 showMessage('Failed to load settings: ' + error.message, 'error');
@@ -3160,6 +3171,7 @@
             const format = document.getElementById('filenameFormat').value.trim();
             const logMaxSize = parseFloat(document.getElementById('logMaxSize').value);
             const issueNumberPadding = parseInt(document.getElementById('issueNumberPadding').value);
+            const dbCleanupInterval = parseInt(document.getElementById('dbCleanupInterval').value);
             
             if (!format) {
                 showMessage('Filename format cannot be empty', 'error');
@@ -3173,6 +3185,11 @@
             
             if (isNaN(issueNumberPadding) || issueNumberPadding < 0) {
                 showMessage('Issue number padding must be 0 or greater', 'error');
+                return;
+            }
+            
+            if (isNaN(dbCleanupInterval) || dbCleanupInterval < 0) {
+                showMessage('Database cleanup interval must be 0 or greater', 'error');
                 return;
             }
             
@@ -3234,7 +3251,26 @@
                     return;
                 }
                 
-                showMessage('Settings saved successfully! Log rotation will take effect on restart.', 'success');
+                // Save database cleanup interval
+                const cleanupResponse = await fetch(apiUrl('/api/settings/database-cleanup-interval-hours'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ hours: dbCleanupInterval })
+                });
+                
+                if (!cleanupResponse.ok) {
+                    throw new Error(`HTTP error! status: ${cleanupResponse.status}`);
+                }
+                const cleanupResult = await cleanupResponse.json();
+                
+                if (!cleanupResult.success) {
+                    showMessage(cleanupResult.error || 'Failed to save database cleanup interval', 'error');
+                    return;
+                }
+                
+                showMessage('Settings saved successfully! Changes to log rotation and database cleanup will take effect on restart.', 'success');
                 closeSettings();
             } catch (error) {
                 showMessage('Failed to save settings: ' + error.message, 'error');

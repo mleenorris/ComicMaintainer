@@ -566,6 +566,18 @@
                     </small>
                 </div>
                 
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Database Cleanup</h3>
+                <div class="form-group">
+                    <label for="dbCleanupInterval">Cleanup Interval (Hours)</label>
+                    <input type="number" id="dbCleanupInterval" min="0" max="168" step="1" placeholder="12" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        How often the database should be cleaned of stale entries for files that no longer exist. Set to 0 to only run on startup. Changes take effect on restart.
+                    </small>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <strong>Recommended:</strong> 12 hours (default) or 24 hours for less frequent cleanup.
+                    </small>
+                </div>
+                
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Filename Format</h3>
                 <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
                     Configure how files are renamed when processed. Use placeholders like <code>{series}</code>, <code>{issue}</code>, etc.

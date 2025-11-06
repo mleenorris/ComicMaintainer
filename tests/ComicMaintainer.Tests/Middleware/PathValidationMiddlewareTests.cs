@@ -161,7 +161,7 @@ public class PathValidationMiddlewareTests
             x => x.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Invalid file path detected")),
+                It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("Invalid file path detected")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

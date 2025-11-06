@@ -358,8 +358,9 @@ app.Use(async (context, next) =>
     context.Response.Headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()";
     
     // Add HSTS and CSP headers when behind HTTPS proxy
-    if (context.Request.Headers.ContainsKey("X-Forwarded-Proto") && 
-        context.Request.Headers["X-Forwarded-Proto"] == "https")
+    // Use case-insensitive comparison as HTTP headers are case-insensitive per RFC 7230
+    if (context.Request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto) && 
+        forwardedProto.ToString().Equals("https", StringComparison.OrdinalIgnoreCase))
     {
         // HSTS: Force HTTPS for 1 year
         context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";

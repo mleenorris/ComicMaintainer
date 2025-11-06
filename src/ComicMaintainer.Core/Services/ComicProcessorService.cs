@@ -177,8 +177,8 @@ public class ComicProcessorService : IComicProcessorService
             if (_settings.WatcherEnableNormalize && metadata != null)
             {
                 _logger.LogDebug("ProcessFileAsync: Attempting to normalize file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                // Check if metadata is already normalized (has ComicInfo.xml with valid data)
-                if (IsMetadataNormalized(metadata))
+                // Check if metadata is already normalized (has ComicInfo.xml with valid data and series name matches folder)
+                if (IsMetadataNormalized(metadata, filePath))
                 {
                     _logger.LogDebug("File already has normalized metadata: {FilePath}", filePath);
                     await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
@@ -189,7 +189,32 @@ public class ComicProcessorService : IComicProcessorService
                 }
                 else
                 {
-                    var beforeMetadata = metadata;
+                    var beforeMetadata = new ComicMetadata
+                    {
+                        Series = metadata.Series,
+                        Title = metadata.Title,
+                        Issue = metadata.Issue,
+                        Volume = metadata.Volume,
+                        Publisher = metadata.Publisher,
+                        Year = metadata.Year,
+                        Summary = metadata.Summary,
+                        Authors = metadata.Authors,
+                        Tags = metadata.Tags
+                    };
+                    
+                    // Set series name from folder name if not already set or different from folder name
+                    var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
+                    if (!string.IsNullOrEmpty(folderName))
+                    {
+                        var normalizedSeriesFromFolder = ExtractSeriesFromFilename(filePath);
+                        if (string.IsNullOrEmpty(metadata.Series) || metadata.Series != normalizedSeriesFromFolder)
+                        {
+                            _logger.LogDebug("ProcessFileAsync: Setting series name from folder: {FolderName} -> {SeriesName}", 
+                                folderName, normalizedSeriesFromFolder);
+                            metadata.Series = normalizedSeriesFromFolder;
+                        }
+                    }
+                    
                     normalizeSuccess = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
                     await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
                     if (normalizeSuccess)
@@ -817,9 +842,9 @@ public class ComicProcessorService : IComicProcessorService
             _logger.LogDebug("NormalizeFileAsync: Metadata extracted - Series: {Series}, Issue: {Issue}, Title: {Title}", 
                 metadata.Series, metadata.Issue, metadata.Title);
 
-            // Check if metadata is already normalized (has ComicInfo.xml with valid data)
+            // Check if metadata is already normalized (has ComicInfo.xml with valid data and series name matches folder)
             // If we successfully read metadata, it means ComicInfo.xml exists and is parseable
-            var isNormalized = IsMetadataNormalized(metadata);
+            var isNormalized = IsMetadataNormalized(metadata, filePath);
             _logger.LogDebug("NormalizeFileAsync: Metadata normalization check - IsNormalized: {IsNormalized}", isNormalized);
             
             if (isNormalized)
@@ -835,7 +860,31 @@ public class ComicProcessorService : IComicProcessorService
             _logger.LogDebug("NormalizeFileAsync: File needs normalization, updating metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             // Capture before metadata state (current metadata)
-            var beforeMetadata = metadata;
+            var beforeMetadata = new ComicMetadata
+            {
+                Series = metadata.Series,
+                Title = metadata.Title,
+                Issue = metadata.Issue,
+                Volume = metadata.Volume,
+                Publisher = metadata.Publisher,
+                Year = metadata.Year,
+                Summary = metadata.Summary,
+                Authors = metadata.Authors,
+                Tags = metadata.Tags
+            };
+            
+            // Set series name from folder name if not already set or different from folder name
+            var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
+            if (!string.IsNullOrEmpty(folderName))
+            {
+                var normalizedSeriesFromFolder = ExtractSeriesFromFilename(filePath);
+                if (string.IsNullOrEmpty(metadata.Series) || metadata.Series != normalizedSeriesFromFolder)
+                {
+                    _logger.LogDebug("NormalizeFileAsync: Setting series name from folder: {FolderName} -> {SeriesName}", 
+                        folderName, normalizedSeriesFromFolder);
+                    metadata.Series = normalizedSeriesFromFolder;
+                }
+            }
             
             // Update metadata (normalize it by re-writing ComicInfo.xml)
             var success = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
@@ -1333,19 +1382,33 @@ public class ComicProcessorService : IComicProcessorService
     /// <summary>
     /// Helper method to check if metadata is already normalized.
     /// Verifies that the file has ComicInfo.xml with minimum required fields to identify the comic.
-    /// A file is considered normalized if it has either a Series name OR both Title and Issue number.
+    /// A file is considered normalized if it has valid metadata AND the series name matches the folder name.
     /// This avoids unnecessary re-writing of metadata when the file already has valid comic information.
     /// </summary>
     /// <param name="metadata">The metadata to check</param>
+    /// <param name="filePath">The file path to check against folder name</param>
     /// <returns>True if the metadata meets minimum normalization requirements, false otherwise</returns>
-    private bool IsMetadataNormalized(ComicMetadata metadata)
+    private bool IsMetadataNormalized(ComicMetadata metadata, string filePath)
     {
         // Metadata is considered normalized if it has at least Series OR (Title AND Issue)
         // This ensures we have enough information to identify the comic
         var hasSeries = !string.IsNullOrEmpty(metadata.Series);
         var hasTitleAndIssue = !string.IsNullOrEmpty(metadata.Title) && !string.IsNullOrEmpty(metadata.Issue);
         
-        return hasSeries || hasTitleAndIssue;
+        if (!hasSeries && !hasTitleAndIssue)
+        {
+            return false;
+        }
+        
+        // Additionally check if the series name matches the folder name
+        var expectedSeries = ExtractSeriesFromFilename(filePath);
+        if (hasSeries && metadata.Series != expectedSeries)
+        {
+            // Series exists but doesn't match folder name - not normalized
+            return false;
+        }
+        
+        return true;
     }
 
     /// <summary>

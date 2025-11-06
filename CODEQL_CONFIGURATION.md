@@ -97,6 +97,28 @@ Both jobs use the `security-and-quality` query suite, which includes:
 3. Filter by branch, language, or severity as needed
 4. Click on individual alerts for detailed information and remediation guidance
 
+## Important Notes
+
+### Requirements Files
+
+- **dotnet branch**: Uses .csproj files for dependency management (no requirements.txt)
+- **master/python branches**: Uses requirements.txt for Python dependencies
+- The workflow includes a check (`if [ -f requirements.txt ]`) to handle branches that don't have this file
+
+### Branch Support
+
+The workflow explicitly supports:
+- `dotnet` - For C#/.NET projects
+- `master`, `main`, `python` - For Python projects
+
+### Event Types
+
+The workflow runs on all event types:
+- **Push events**: Triggers when code is pushed to monitored branches
+- **Pull requests**: Triggers when PRs target monitored branches  
+- **Scheduled scans**: Runs weekly on all monitored branches
+- **Manual triggers**: Can be triggered manually on any monitored branch
+
 ## Maintenance
 
 When adding new branches with different languages:

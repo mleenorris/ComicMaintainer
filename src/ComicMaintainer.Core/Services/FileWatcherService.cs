@@ -278,6 +278,13 @@ public class FileWatcherService : IFileWatcherService
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File changed: {Path}"), e.FullPath);
             _ = Task.Run(async () =>
             {
+                // Check if file should be processed based on settings and current state
+                var shouldProcess = await ShouldProcessFileAsync(e.FullPath);
+                if (!shouldProcess)
+                {
+                    return;
+                }
+                
                 await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
                 await _processor.ProcessFileAsync(e.FullPath);
             });

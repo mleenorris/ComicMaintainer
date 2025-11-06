@@ -17,6 +17,11 @@ public class FileWatcherServiceTests : IDisposable
     private readonly string _testDirectory;
     private readonly FileWatcherService _service;
 
+    // Test delay constants
+    private const int WatcherInitDelayMs = 100;  // Time to wait for watcher to initialize
+    private const int SimpleEventDelayMs = 500;   // Time to wait for simple file events
+    private const int ProcessingDelayMs = 2000;   // Time to wait for stability delay + processing
+
     public FileWatcherServiceTests()
     {
         _mockLogger = new Mock<ILogger<FileWatcherService>>();
@@ -414,6 +419,44 @@ public class FileWatcherServiceTests : IDisposable
             p => p.ProcessFileAsync(tempFile, It.IsAny<CancellationToken>()), 
             Times.Never, 
             "Temporary files should not be processed when changed");
+    }
+
+    [Fact]
+    public async Task OnFileChanged_SkipsProcessingIfAlreadyProcessed()
+    {
+        // Arrange
+        var comicFile = Path.Combine(_testDirectory, "processed_comic.cbz");
+        
+        // Setup mock to indicate file is already processed
+        _mockFileStore.Setup(fs => fs.IsFileProcessedAsync(comicFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        
+        // Create the file
+        File.WriteAllText(comicFile, "initial content");
+        
+        // Start the watcher
+        await _service.StartAsync();
+        
+        // Wait a bit for watcher to initialize
+        await Task.Delay(WatcherInitDelayMs);
+
+        // Act - Modify the file (simulating website processing it)
+        File.AppendAllText(comicFile, "updated content");
+        
+        // Wait for file system events (stability delay + processing time)
+        await Task.Delay(ProcessingDelayMs);
+
+        // Assert - Should check if file is already processed
+        _mockFileStore.Verify(
+            fs => fs.IsFileProcessedAsync(comicFile, It.IsAny<CancellationToken>()), 
+            Times.AtLeastOnce, 
+            "Should check if file is already processed");
+        
+        // Verify that file was NOT processed since it's already marked as processed
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(comicFile, It.IsAny<CancellationToken>()), 
+            Times.Never, 
+            "Already processed file should not be processed again when changed");
     }
 
     [Fact]

@@ -177,19 +177,23 @@ public class LoggingHelperTests
     public void WithWatcherPrefix_WithNullMessage_HandlesGracefully()
     {
         // This tests that the method doesn't throw with null input
-        // In C#, string interpolation with null produces "null" text
-        // Act & Assert - should not throw
-        var result = LoggingHelper.WithWatcherPrefix(null!);
-        Assert.Contains("[WATCHER]", result);
+        // and produces a clean output with empty string
+        // Act
+        var result = LoggingHelper.WithWatcherPrefix(null);
+        
+        // Assert
+        Assert.Equal("[WATCHER] ", result);
     }
 
     [Fact]
     public void WithWebsitePrefix_WithNullMessage_HandlesGracefully()
     {
         // This tests that the method doesn't throw with null input
-        // In C#, string interpolation with null produces "null" text
-        // Act & Assert - should not throw
-        var result = LoggingHelper.WithWebsitePrefix(null!);
-        Assert.Contains("[WEBSITE]", result);
+        // and produces a clean output with empty string
+        // Act
+        var result = LoggingHelper.WithWebsitePrefix(null);
+        
+        // Assert
+        Assert.Equal("[WEBSITE] ", result);
     }
 }

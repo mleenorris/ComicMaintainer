@@ -59,16 +59,16 @@ public static class LoggingHelper
     /// <summary>
     /// Add [WATCHER] prefix to log message to indicate action came from file watcher
     /// </summary>
-    public static string WithWatcherPrefix(string message)
+    public static string WithWatcherPrefix(string? message)
     {
-        return $"[WATCHER] {message}";
+        return $"[WATCHER] {message ?? string.Empty}";
     }
 
     /// <summary>
     /// Add [WEBSITE] prefix to log message to indicate action came from web interface
     /// </summary>
-    public static string WithWebsitePrefix(string message)
+    public static string WithWebsitePrefix(string? message)
     {
-        return $"[WEBSITE] {message}";
+        return $"[WEBSITE] {message ?? string.Empty}";
     }
 }

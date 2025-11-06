@@ -2843,6 +2843,12 @@
             const successEl = document.getElementById('changePasswordSuccess');
             const btn = document.getElementById('changePasswordBtn');
             
+            // Helper to reset button state
+            const resetButtonState = () => {
+                btn.disabled = false;
+                btn.textContent = 'Change Password';
+            };
+            
             // Clear previous messages
             errorEl.textContent = '';
             errorEl.classList.remove('show');
@@ -2883,6 +2889,7 @@
                 });
                 
                 if (handleAuthError(response)) {
+                    resetButtonState();
                     return;
                 }
                 
@@ -2909,8 +2916,7 @@
                 errorEl.classList.add('show');
             } finally {
                 // Re-enable button
-                btn.disabled = false;
-                btn.textContent = 'Change Password';
+                resetButtonState();
             }
         }
         

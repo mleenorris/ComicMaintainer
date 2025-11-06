@@ -750,7 +750,7 @@
             <div class="modal-body">
                 <div id="changePasswordError" class="error-message"></div>
                 <div id="changePasswordSuccess" class="success-message"></div>
-                <form id="changePasswordForm">
+                <form id="changePasswordForm" onsubmit="changePassword(); return false;">
                     <div class="form-group">
                         <label for="currentPassword">Current Password</label>
                         <input type="password" id="currentPassword" name="currentPassword" required autocomplete="current-password">

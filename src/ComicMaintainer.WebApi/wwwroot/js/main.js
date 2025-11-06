@@ -1461,32 +1461,57 @@
             
             const form = document.getElementById('tagForm');
             const formData = new FormData(form);
-            const tags = {};
+            const metadata = {};
             
             for (let [key, value] of formData.entries()) {
-                tags[key] = value;
+                // Capitalize first letter to match ComicMetadata property names
+                const propertyName = key.charAt(0).toUpperCase() + key.slice(1);
+                metadata[propertyName] = value;
             }
             
+            closeModal();
+            showProgressModal('Updating metadata...');
+            
             try {
-                const encodedPath = encodeFilePathForUrl(currentEditFile);
-                const response = await fetch(apiUrl(`/api/files/${encodedPath}/tags`), {
-                    method: 'PUT',
+                console.log('[SINGLE FILE] Starting update metadata file request...');
+                // Start the update metadata job using job-based pattern
+                const response = await fetch(apiUrl('/api/jobs/update-metadata-selected'), {
+                    method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify(tags)
+                    body: JSON.stringify({ Files: [currentEditFile], Metadata: metadata })
                 });
                 
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
                 if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(errorText || `HTTP error! status: ${response.status}`);
+                    console.error(`[SINGLE FILE] Failed to start updating metadata for file (HTTP ${response.status})`);
+                    throw new Error('Failed to start update metadata job');
                 }
                 
-                showMessage('Tags updated successfully!', 'success');
-                closeModal();
+                const result = await response.json();
+                const jobId = result.job_id;
+                
+                if (!jobId) {
+                    throw new Error('No job ID returned');
+                }
+                
+                console.log(`[SINGLE FILE] Created job ${jobId} for file: ${currentEditFile}`);
+                showMessage(`Started updating metadata for file in background`, 'info');
+                
+                // Track job status
+                await trackJobStatus(jobId, 'Updating Metadata...');
+                
             } catch (error) {
-                showMessage('Failed to save tags: ' + error.message, 'error');
+                console.error('[SINGLE FILE] Error starting update metadata for file:', error);
+                showMessage('Failed to update metadata: ' + error.message, 'error');
+                closeProgressModal();
+            } finally {
+                currentEditFile = null;
             }
         }
         

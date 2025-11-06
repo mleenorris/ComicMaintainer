@@ -139,6 +139,35 @@ Update metadata tags for a file.
 }
 ```
 
+### POST /api/files/cleanup-stale
+
+Remove stale database entries for files that no longer exist on disk. This is useful when files have been moved or deleted outside the application, leaving orphaned records in the database.
+
+**Response:**
+```json
+{
+  "success": true,
+  "removedCount": 15,
+  "message": "Removed 15 stale database entries"
+}
+```
+
+**Error Response (499 - Cancelled):**
+```json
+{
+  "error": "Cleanup operation was cancelled"
+}
+```
+
+**Error Response (500 - Internal Server Error):**
+```json
+{
+  "error": "Failed to cleanup stale entries"
+}
+```
+
+**Note:** This endpoint scans all files in the database and removes entries where the file no longer exists on the filesystem. The operation also removes entries from the in-memory cache to ensure consistency.
+
 ## Job Management
 
 ### POST /api/jobs/process-all

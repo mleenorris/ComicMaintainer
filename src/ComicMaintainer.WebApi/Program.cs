@@ -210,6 +210,29 @@ builder.Services.AddAuthentication(options =>
         ValidAudience = jwtSettings.Audience,
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
     };
+    
+    // Configure events to return JSON for authentication failures
+    options.Events = new JwtBearerEvents
+    {
+        OnChallenge = context =>
+        {
+            // Override the default behavior to return JSON instead of redirecting
+            context.HandleResponse();
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            context.Response.ContentType = "application/json";
+            
+            var result = JsonSerializer.Serialize(new { error = "Unauthorized", message = "Authentication required" });
+            return context.Response.WriteAsync(result);
+        },
+        OnForbidden = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "application/json";
+            
+            var result = JsonSerializer.Serialize(new { error = "Forbidden", message = "Insufficient permissions" });
+            return context.Response.WriteAsync(result);
+        }
+    };
 });
 
 // Add services to the container
@@ -328,8 +351,29 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<ProgressHub>("/hubs/progress");
 
-// Map default route to serve index.html
-app.MapFallbackToFile("index.html");
+// Map default route to serve index.html for non-API routes only
+// This prevents the fallback from catching API requests, ensuring they always return JSON
+app.MapFallbackToFile("index.html").Add(endpointBuilder =>
+{
+    var originalRequestDelegate = endpointBuilder.RequestDelegate;
+    endpointBuilder.RequestDelegate = async context =>
+    {
+        // Only serve index.html for non-API and non-hub routes
+        if (context.Request.Path.StartsWithSegments("/api") || 
+            context.Request.Path.StartsWithSegments("/hubs"))
+        {
+            context.Response.StatusCode = 404;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Not Found\",\"message\":\"The requested endpoint does not exist\"}");
+            return;
+        }
+        
+        if (originalRequestDelegate != null)
+        {
+            await originalRequestDelegate(context);
+        }
+    };
+});
 
 // Log startup complete
 var appSettingsValue = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<AppSettings>>().Value;

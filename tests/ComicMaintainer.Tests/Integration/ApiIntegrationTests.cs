@@ -58,16 +58,18 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
-    public async Task GetSettings_ReturnsSuccess()
+    public async Task GetSettings_RequiresAuthentication()
     {
         // Act
         var response = await _client.GetAsync("/api/settings");
 
-        // Assert
-        response.EnsureSuccessStatusCode();
+        // Assert - Settings endpoint requires authentication
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        
+        // Verify it returns JSON, not HTML
         var content = await response.Content.ReadAsStringAsync();
-        // Check for snake_case naming convention used in API
-        Assert.Contains("filename_format", content, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("<!DOCTYPE", content);
+        Assert.Contains("application/json", response.Content.Headers.ContentType?.ToString() ?? "");
     }
 
     [Fact]
@@ -85,23 +87,31 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     [Fact]
     public async Task ApiEndpoints_ReturnJsonContentType()
     {
-        // Arrange
-        var endpoints = new[]
+        // Arrange - Test endpoints that don't require authentication
+        var publicEndpoints = new[]
         {
             "/api/version",
             "/api/watcher",
             "/api/files",
-            "/api/settings",
             "/api/jobs"
         };
 
-        foreach (var endpoint in endpoints)
+        foreach (var endpoint in publicEndpoints)
         {
             // Act
             var response = await _client.GetAsync(endpoint);
 
             // Assert
             response.EnsureSuccessStatusCode();
+            Assert.Contains("application/json", response.Content.Headers.ContentType?.ToString() ?? "");
+        }
+        
+        // Test that protected endpoints return JSON for 401 errors
+        var protectedEndpoints = new[] { "/api/settings" };
+        foreach (var endpoint in protectedEndpoints)
+        {
+            var response = await _client.GetAsync(endpoint);
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
             Assert.Contains("application/json", response.Content.Headers.ContentType?.ToString() ?? "");
         }
     }

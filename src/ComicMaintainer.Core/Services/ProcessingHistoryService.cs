@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -116,12 +117,12 @@ public class ProcessingHistoryService : IProcessingHistoryService
         catch (OperationCanceledException ex)
         {
             // Log cancellation but don't treat as error - operation was intentionally cancelled
-            _logger.LogWarning(ex, "History entry addition was cancelled for {FilePath}", entry.FilePath);
+            _logger.LogWarning(ex, "History entry addition was cancelled for {FilePath}", LoggingHelper.SanitizePathForLog(entry.FilePath));
         }
         catch (Exception ex)
         {
             // Log other errors but don't throw - history logging should not break processing
-            _logger.LogError(ex, "Error adding processing history entry for {FilePath}", entry.FilePath);
+            _logger.LogError(ex, "Error adding processing history entry for {FilePath}", LoggingHelper.SanitizePathForLog(entry.FilePath));
         }
     }
 }

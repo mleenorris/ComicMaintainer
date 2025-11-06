@@ -1023,9 +1023,15 @@ public class ComicProcessorService : IComicProcessorService
 
     private static string ExtractSeriesFromFilename(string filePath)
     {
-        var filename = Path.GetFileNameWithoutExtension(filePath);
-        // Remove issue numbers and common patterns
-        var series = Regex.Replace(filename, @"(?i)(?:ch|chapter|issue|#)?\s*\d+(?:\.\d+)?.*$", "").Trim();
+        // Extract series name from the parent folder name instead of filename
+        var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
+        if (string.IsNullOrEmpty(folderName))
+        {
+            return "Unknown Series";
+        }
+        
+        // Apply the same normalization as ComicFileProcessor to convert underscores to colons
+        var series = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
         return string.IsNullOrEmpty(series) ? "Unknown Series" : series;
     }
 

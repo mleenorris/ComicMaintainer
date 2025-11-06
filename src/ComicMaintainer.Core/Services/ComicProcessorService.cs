@@ -989,10 +989,15 @@ public class ComicProcessorService : IComicProcessorService
             // Create ComicInfo.xml content
             var comicInfoXml = GenerateComicInfoXml(metadata);
             
-            // Create a temporary file in the same directory as the target file
-            // to ensure they are on the same file system (prevents cross-device link errors)
-            var targetDirectory = Path.GetDirectoryName(filePath) ?? Path.GetTempPath();
-            var tempFile = Path.Combine(targetDirectory, $".tmp_{Guid.NewGuid()}.cbz");
+            // Create temporary file in the configured temp directory
+            // Ensure the temp directory exists
+            if (!Directory.Exists(_settings.TempFileDirectory))
+            {
+                Directory.CreateDirectory(_settings.TempFileDirectory);
+                _logger.LogInformation("Created temp directory: {TempDir}", _settings.TempFileDirectory);
+            }
+            
+            var tempFile = Path.Combine(_settings.TempFileDirectory, $".tmp_{Guid.NewGuid()}.cbz");
             
             try
             {

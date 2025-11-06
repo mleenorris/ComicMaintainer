@@ -8,6 +8,7 @@ public class AppSettings
     public string WatchedDirectory { get; set; } = "/watched_dir";
     public string DuplicateDirectory { get; set; } = "/duplicates";
     public string ConfigDirectory { get; set; } = "/Config";
+    public string TempFileDirectory { get; set; } = "/Config/temp";
     public string FilenameFormat { get; set; } = "{series} - Chapter {issue}";
     public int IssueNumberPadding { get; set; } = 4;
     public int MaxWorkers { get; set; } = 4;

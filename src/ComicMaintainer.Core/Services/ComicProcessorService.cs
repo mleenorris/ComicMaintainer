@@ -1367,7 +1367,7 @@ public class ComicProcessorService : IComicProcessorService
             return false;
         }
 
-        if (hasTitleAndIssue && metadata.Title == $"Chapter {metadata.Issue}")
+        if (hasTitleAndIssue && metadata.Title == CreateNormalizedTitle(metadata.Issue))
         {
             return false;
         }

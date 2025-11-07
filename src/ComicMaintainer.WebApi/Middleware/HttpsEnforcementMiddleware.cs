@@ -60,10 +60,13 @@ public class HttpsEnforcementMiddleware
 
             if (!isHttps && !isProxiedHttps)
             {
+                // Sanitize path to prevent log forging
+                var sanitizedPath = context.Request.Path.Value?.Replace("\r", "").Replace("\n", "") ?? string.Empty;
+                
                 _logger.LogWarning(
                     "SECURITY: Blocked password transmission over insecure connection. " +
                     "Endpoint: {Endpoint}, Remote IP: {RemoteIp}",
-                    context.Request.Path,
+                    sanitizedPath,
                     context.Connection.RemoteIpAddress);
 
                 context.Response.StatusCode = StatusCodes.Status426UpgradeRequired;

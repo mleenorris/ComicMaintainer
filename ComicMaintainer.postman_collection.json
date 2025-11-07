@@ -1,0 +1,1121 @@
+{
+	"info": {
+		"_postman_id": "comic-maintainer-api",
+		"name": "ComicMaintainer API",
+		"description": "Complete API collection for ComicMaintainer .NET WebAPI. This collection covers all endpoints for managing comic files, processing jobs, authentication, and settings.\n\n## Setup\n1. Import this collection into Postman\n2. Set up the environment variables (base_url, jwt_token)\n3. Use the Auth endpoints to login and get a JWT token\n4. Most endpoints require authentication\n\n## Environment Variables\n- base_url: http://localhost:5000 (or your API base URL)\n- jwt_token: Your JWT token from login (will be set automatically after login)",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{jwt_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"item": [
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Check Setup Required",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/setup-required",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "setup-required"]
+						},
+						"description": "Check if initial admin setup is required (no users exist yet)"
+					},
+					"response": []
+				},
+				{
+					"name": "Setup Admin User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Note: This endpoint is typically only available when no users exist",
+									"if (pm.response.code === 200) {",
+									"    console.log('Admin user created successfully');",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"admin\",\n  \"password\": \"Admin123!\",\n  \"email\": \"admin@example.com\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/setup",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "setup"]
+						},
+						"description": "Create the first admin user. Only works if no users exist yet."
+					},
+					"response": []
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Extract token from response and save to environment",
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    if (jsonData.token) {",
+									"        pm.environment.set('jwt_token', jsonData.token);",
+									"        console.log('JWT token saved to environment');",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"admin\",\n  \"password\": \"Admin123!\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "login"]
+						},
+						"description": "Login to get a JWT token. Token is automatically saved to environment variable."
+					},
+					"response": []
+				},
+				{
+					"name": "Register User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"newuser\",\n  \"password\": \"Password123!\",\n  \"email\": \"user@example.com\",\n  \"fullName\": \"New User\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/register",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "register"]
+						},
+						"description": "Register a new user account"
+					},
+					"response": []
+				},
+				{
+					"name": "Change Password",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"currentPassword\": \"OldPassword123!\",\n  \"newPassword\": \"NewPassword123!\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/auth/change-password",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "change-password"]
+						},
+						"description": "Change the current user's password"
+					},
+					"response": []
+				},
+				{
+					"name": "Generate API Key",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/auth/api-key",
+							"host": ["{{base_url}}"],
+							"path": ["api", "auth", "api-key"]
+						},
+						"description": "Generate an API key for the current user"
+					},
+					"response": []
+				}
+			],
+			"description": "Authentication endpoints for login, registration, and user management"
+		},
+		{
+			"name": "Files",
+			"item": [
+				{
+					"name": "List Files",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files?filter=all&page=1&per_page=100&sort=name&direction=asc",
+							"host": ["{{base_url}}"],
+							"path": ["api", "files"],
+							"query": [
+								{
+									"key": "filter",
+									"value": "all",
+									"description": "Filter: all, marked, unmarked, duplicates, renamed, normalized"
+								},
+								{
+									"key": "search",
+									"value": "",
+									"description": "Search term",
+									"disabled": true
+								},
+								{
+									"key": "page",
+									"value": "1",
+									"description": "Page number"
+								},
+								{
+									"key": "per_page",
+									"value": "100",
+									"description": "Items per page (-1 for all)"
+								},
+								{
+									"key": "sort",
+									"value": "name",
+									"description": "Sort by: name, date, size"
+								},
+								{
+									"key": "direction",
+									"value": "asc",
+									"description": "Sort direction: asc, desc"
+								}
+							]
+						},
+						"description": "Get list of comic files with filtering, searching, and pagination"
+					},
+					"response": []
+				},
+				{
+					"name": "Get File Counts",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/counts",
+							"host": ["{{base_url}}"],
+							"path": ["api", "files", "counts"]
+						},
+						"description": "Get count of total, processed, unprocessed, and duplicate files"
+					},
+					"response": []
+				},
+				{
+					"name": "Scan Unmarked Files",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/scan-unmarked",
+							"host": ["{{base_url}}"],
+							"path": ["api", "files", "scan-unmarked"]
+						},
+						"description": "Scan and count unmarked (unprocessed) files"
+					},
+					"response": []
+				},
+				{
+					"name": "Get File Metadata",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/metadata?filePath=/watched_dir/example.cbz",
+							"host": ["{{base_url}}"],
+							"path": ["api", "files", "metadata"],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "/watched_dir/example.cbz",
+									"description": "Full path to the file"
+								}
+							]
+						},
+						"description": "Get metadata (title, series, issue, etc.) for a specific file"
+					},
+					"response": []
+				},
+				{
+					"name": "Update File Metadata",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"title\": \"Batman Issue 1\",\n  \"series\": \"Batman\",\n  \"issue\": \"1\",\n  \"publisher\": \"DC Comics\",\n  \"year\": \"2023\",\n  \"volume\": \"1\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/files/metadata?filePath=/watched_dir/example.cbz",
+							"host": ["{{base_url}}"],
+							"path": ["api", "files", "metadata"],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "/watched_dir/example.cbz"
+								}
+							]
+						},
+						"description": "Update metadata for a specific file"
+					},
+					"response": []
+				},
+				{
+					"name": "Process Single File",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/process?filePath=/watched_dir/example.cbz",
+							"host": ["{{base_url}}"],
+							"path": ["api", "files", "process"],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "/watched_dir/example.cbz"
+								}
+							]
+						},
+						"description": "Process a single file (read and normalize metadata)"
+					},
+					"response": []
+				},
+				{
+					"name": "Process Batch",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "[\n  \"/watched_dir/file1.cbz\",\n  \"/watched_dir/file2.cbz\",\n  \"/watched_dir/file3.cbr\"\n]"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/files/process-batch",
+							"host": ["{{base_url}}"],
+							"path": ["api", "files", "process-batch"]
+						},
+						"description": "Process multiple files in a batch job"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Tags (Batch)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    \"/watched_dir/file1.cbz\",\n    \"/watched_dir/file2.cbz\"\n  ],\n  \"metadata\": {\n    \"publisher\": \"DC Comics\",\n    \"year\": \"2023\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/files/tags",
+							"host": ["{{base_url}}"],
+							"path": ["api", "files", "tags"]
+						},
+						"description": "Update tags/metadata for multiple files at once"
+					},
+					"response": []
+				},
+				{
+					"name": "Cleanup Stale Entries",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/files/cleanup-stale",
+							"host": ["{{base_url}}"],
+							"path": ["api", "files", "cleanup-stale"]
+						},
+						"description": "Remove database entries for files that no longer exist on disk"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete File",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/delete-file?filePath=/watched_dir/example.cbz",
+							"host": ["{{base_url}}"],
+							"path": ["api", "delete-file"],
+							"query": [
+								{
+									"key": "filePath",
+									"value": "/watched_dir/example.cbz"
+								}
+							]
+						},
+						"description": "Delete a file from the watched directory"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for managing comic files, metadata, and processing"
+		},
+		{
+			"name": "Jobs",
+			"item": [
+				{
+					"name": "Get Active Job",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/active-job",
+							"host": ["{{base_url}}"],
+							"path": ["api", "active-job"]
+						},
+						"description": "Get currently running job (if any)"
+					},
+					"response": []
+				},
+				{
+					"name": "List All Jobs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs"]
+						},
+						"description": "List all processing jobs (active and completed)"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Job Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/:jobId",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", ":jobId"],
+							"variable": [
+								{
+									"key": "jobId",
+									"value": "00000000-0000-0000-0000-000000000000",
+									"description": "Job ID (GUID)"
+								}
+							]
+						},
+						"description": "Get detailed information about a specific job"
+					},
+					"response": []
+				},
+				{
+					"name": "Cancel Job",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/:jobId/cancel",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", ":jobId", "cancel"],
+							"variable": [
+								{
+									"key": "jobId",
+									"value": "00000000-0000-0000-0000-000000000000"
+								}
+							]
+						},
+						"description": "Cancel a running job"
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Job",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/:jobId",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", ":jobId"],
+							"variable": [
+								{
+									"key": "jobId",
+									"value": "00000000-0000-0000-0000-000000000000"
+								}
+							]
+						},
+						"description": "Delete a completed job"
+					},
+					"response": []
+				},
+				{
+					"name": "Process All Files",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/process-all",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", "process-all"]
+						},
+						"description": "Start a job to process all files"
+					},
+					"response": []
+				},
+				{
+					"name": "Process Unmarked Files",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/process-unmarked",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", "process-unmarked"]
+						},
+						"description": "Start a job to process only unmarked (unprocessed) files"
+					},
+					"response": []
+				},
+				{
+					"name": "Process Selected Files",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    \"/watched_dir/file1.cbz\",\n    \"/watched_dir/file2.cbz\"\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/jobs/process-selected",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", "process-selected"]
+						},
+						"description": "Start a job to process selected files"
+					},
+					"response": []
+				},
+				{
+					"name": "Rename All Files",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/rename-all",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", "rename-all"]
+						},
+						"description": "Start a job to rename all files"
+					},
+					"response": []
+				},
+				{
+					"name": "Rename Unmarked Files",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/rename-unmarked",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", "rename-unmarked"]
+						},
+						"description": "Start a job to rename only unmarked files"
+					},
+					"response": []
+				},
+				{
+					"name": "Rename Selected Files",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    \"/watched_dir/file1.cbz\",\n    \"/watched_dir/file2.cbz\"\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/jobs/rename-selected",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", "rename-selected"]
+						},
+						"description": "Start a job to rename selected files"
+					},
+					"response": []
+				},
+				{
+					"name": "Normalize All Files",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/normalize-all",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", "normalize-all"]
+						},
+						"description": "Start a job to normalize metadata for all files"
+					},
+					"response": []
+				},
+				{
+					"name": "Normalize Unmarked Files",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/jobs/normalize-unmarked",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", "normalize-unmarked"]
+						},
+						"description": "Start a job to normalize only unmarked files"
+					},
+					"response": []
+				},
+				{
+					"name": "Normalize Selected Files",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    \"/watched_dir/file1.cbz\",\n    \"/watched_dir/file2.cbz\"\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/jobs/normalize-selected",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", "normalize-selected"]
+						},
+						"description": "Start a job to normalize selected files"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Metadata for Selected Files",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"files\": [\n    \"/watched_dir/file1.cbz\",\n    \"/watched_dir/file2.cbz\"\n  ],\n  \"metadata\": {\n    \"publisher\": \"DC Comics\",\n    \"year\": \"2023\"\n  }\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/jobs/update-metadata-selected",
+							"host": ["{{base_url}}"],
+							"path": ["api", "jobs", "update-metadata-selected"]
+						},
+						"description": "Start a job to update metadata for selected files"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for managing batch processing jobs"
+		},
+		{
+			"name": "Settings",
+			"item": [
+				{
+					"name": "Get All Settings",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings"]
+						},
+						"description": "Get all application settings"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Filename Format",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/filename-format",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings", "filename-format"]
+						},
+						"description": "Get the current filename format template"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Filename Format",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"format\": \"{series} - Chapter {issue}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/settings/filename-format",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings", "filename-format"]
+						},
+						"description": "Update the filename format template. Supports placeholders: {series}, {issue}, {title}, {publisher}, {year}, {volume}"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Issue Number Padding",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/issue-number-padding",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings", "issue-number-padding"]
+						},
+						"description": "Get the issue number padding (number of digits)"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Issue Number Padding",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"padding\": 4\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/settings/issue-number-padding",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings", "issue-number-padding"]
+						},
+						"description": "Update the issue number padding. Default is 4 (e.g., 0001)"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Log Max Bytes",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/log-max-bytes",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings", "log-max-bytes"]
+						},
+						"description": "Get the maximum log file size in bytes"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Log Max Bytes",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"maxBytes\": 10485760\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/settings/log-max-bytes",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings", "log-max-bytes"]
+						},
+						"description": "Update the maximum log file size in bytes"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Watcher Enable Rename",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/watcher-enable-rename",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings", "watcher-enable-rename"]
+						},
+						"description": "Check if automatic file renaming is enabled in the watcher"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Watcher Enable Rename",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/settings/watcher-enable-rename",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings", "watcher-enable-rename"]
+						},
+						"description": "Enable or disable automatic file renaming in the watcher"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Watcher Enable Normalize",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/watcher-enable-normalize",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings", "watcher-enable-normalize"]
+						},
+						"description": "Check if automatic metadata normalization is enabled in the watcher"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Watcher Enable Normalize",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enabled\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/settings/watcher-enable-normalize",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings", "watcher-enable-normalize"]
+						},
+						"description": "Enable or disable automatic metadata normalization in the watcher"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Database Cleanup Interval",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/database-cleanup-interval-hours",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings", "database-cleanup-interval-hours"]
+						},
+						"description": "Get the database cleanup interval in hours"
+					},
+					"response": []
+				},
+				{
+					"name": "Update Database Cleanup Interval",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"intervalHours\": 24\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/settings/database-cleanup-interval-hours",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings", "database-cleanup-interval-hours"]
+						},
+						"description": "Update the database cleanup interval in hours"
+					},
+					"response": []
+				},
+				{
+					"name": "Cleanup Database Now",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/settings/cleanup-database",
+							"host": ["{{base_url}}"],
+							"path": ["api", "settings", "cleanup-database"]
+						},
+						"description": "Trigger an immediate database cleanup"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for managing application settings"
+		},
+		{
+			"name": "Watcher",
+			"item": [
+				{
+					"name": "Get Watcher Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/watcher",
+							"host": ["{{base_url}}"],
+							"path": ["api", "watcher"]
+						},
+						"description": "Get the current status of the file watcher"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for monitoring the file watcher service"
+		},
+		{
+			"name": "Logs",
+			"item": [
+				{
+					"name": "List Log Files",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/logs/files",
+							"host": ["{{base_url}}"],
+							"path": ["api", "logs", "files"]
+						},
+						"description": "List available log files"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Log Content",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/logs?filename=app.log&lines=100",
+							"host": ["{{base_url}}"],
+							"path": ["api", "logs"],
+							"query": [
+								{
+									"key": "filename",
+									"value": "app.log",
+									"description": "Log file name (app.log, debug.log, watcher.log)"
+								},
+								{
+									"key": "lines",
+									"value": "100",
+									"description": "Number of lines to retrieve"
+								}
+							]
+						},
+						"description": "Get content from a specific log file"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for accessing application logs"
+		},
+		{
+			"name": "Processing History",
+			"item": [
+				{
+					"name": "Get Processing History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/processing-history?page=1&perPage=50",
+							"host": ["{{base_url}}"],
+							"path": ["api", "processing-history"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1",
+									"description": "Page number"
+								},
+								{
+									"key": "perPage",
+									"value": "50",
+									"description": "Items per page"
+								}
+							]
+						},
+						"description": "Get processing history with pagination"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for viewing file processing history"
+		},
+		{
+			"name": "Version",
+			"item": [
+				{
+					"name": "Get Version",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/version",
+							"host": ["{{base_url}}"],
+							"path": ["api", "version"]
+						},
+						"description": "Get API version information"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for API version information"
+		},
+		{
+			"name": "Preferences",
+			"item": [
+				{
+					"name": "Get User Preferences",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/preferences",
+							"host": ["{{base_url}}"],
+							"path": ["api", "preferences"]
+						},
+						"description": "Get current user's preferences (theme, pagination, etc.)"
+					},
+					"response": []
+				},
+				{
+					"name": "Update User Preferences",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"theme\": \"dark\",\n  \"itemsPerPage\": 100\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/api/preferences",
+							"host": ["{{base_url}}"],
+							"path": ["api", "preferences"]
+						},
+						"description": "Update current user's preferences"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints for managing user preferences"
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:5000",
+			"type": "string"
+		},
+		{
+			"key": "jwt_token",
+			"value": "",
+			"type": "string"
+		}
+	]
+}

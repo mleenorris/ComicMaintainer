@@ -188,6 +188,9 @@ Configuration can be set via:
 
 ## API Endpoints
 
+For a complete, ready-to-use API collection with all endpoints, see:
+- **[Postman Collection](POSTMAN_API_COLLECTION.md)** - Import into Postman for easy API testing and validation
+
 ### Files API
 
 - `GET /api/files` - Get all files (optional ?filter=processed|unprocessed|duplicates)
@@ -206,6 +209,8 @@ Configuration can be set via:
 
 - `GET /api/watcher/status` - Get watcher status
 - `POST /api/watcher/enable` - Enable/disable watcher
+
+**Note**: The above is a brief overview. See the [Postman Collection](POSTMAN_API_COLLECTION.md) for the complete API documentation with 52 endpoints organized into 9 categories.
 
 ## Development
 

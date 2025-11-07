@@ -662,6 +662,7 @@ See [STABLE_BRANCH_CREATION.md](STABLE_BRANCH_CREATION.md) for details about the
 ## Documentation
 
 - **[API Documentation](docs/API.md)** - Complete REST API reference
+- **[Postman API Collection](POSTMAN_API_COLLECTION.md)** - Import into Postman for easy API testing (.NET version)
 - **[HTTPS Setup Guide](docs/HTTPS_SETUP.md)** - Configure HTTPS with native support or reverse proxy
 - **[Reverse Proxy Setup Guide](docs/REVERSE_PROXY.md)** - Deploy behind SWAG, Nginx, Traefik, Apache, or Caddy
 - **[SWAG Configuration Guide](docs/swag-configs/README.md)** - Ready-to-use SWAG proxy configs

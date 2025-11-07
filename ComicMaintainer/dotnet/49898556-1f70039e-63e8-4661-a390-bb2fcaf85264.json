@@ -74,7 +74,7 @@
 		"jwt": [
 			{
 				"key": "secret",
-				"value": "{{ComicMaintiner JWT Secret}}",
+				"value": "{{",
 				"type": "string"
 			},
 			{
@@ -118,7 +118,7 @@
 		{
 			"listen": "prerequest",
 			"script": {
-				"id": "299c5ba5-7303-428f-8c76-87dbade33efe",
+				"id": "59d05727-b073-4a37-b287-4bb5a5e3af4f",
 				"type": "text/javascript",
 				"packages": {},
 				"requests": {},
@@ -130,7 +130,7 @@
 		{
 			"listen": "test",
 			"script": {
-				"id": "b9469a6d-aa1b-4536-bb7d-4b38515a3788",
+				"id": "bf9cdb4e-5c5f-4a75-a226-87a388e70367",
 				"type": "text/javascript",
 				"packages": {},
 				"requests": {},

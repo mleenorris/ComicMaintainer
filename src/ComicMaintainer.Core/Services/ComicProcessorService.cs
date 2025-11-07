@@ -203,7 +203,13 @@ public class ComicProcessorService : IComicProcessorService
                             metadata.Series = normalizedSeriesFromFolder;
                         }
                     }
-                    
+
+                    if(metadata.Title != $"Chapter  {metadata.Issue}")
+                    {
+                        // Update title to "Series Issue" format if not already set that way
+                        metadata.Title = $"Chapter {metadata.Issue}";
+                    }
+
                     normalizeSuccess = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
                     await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
                     if (normalizeSuccess)
@@ -863,6 +869,12 @@ public class ComicProcessorService : IComicProcessorService
                     metadata.Series = normalizedSeriesFromFolder;
                 }
             }
+
+            if(metadata.Title != $"Chapter {metadata.Issue}")
+            {
+                _logger.LogDebug("NormalizeFileAsync: Setting title to standard format: Chapter {Issue}", metadata.Issue);
+                metadata.Title = $"Chapter {metadata.Issue}";
+            }
             
             // Update metadata (normalize it by re-writing ComicInfo.xml)
             var success = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
@@ -1390,7 +1402,12 @@ public class ComicProcessorService : IComicProcessorService
             // Series exists but doesn't match folder name - not normalized
             return false;
         }
-        
+
+        if (hasTitleAndIssue && metadata.Title == $"Chapter {metadata.Issue}")
+        {
+            return false;
+        }
+
         return true;
     }
 

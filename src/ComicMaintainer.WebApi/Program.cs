@@ -131,6 +131,10 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 builder.Services.AddDbContext<ComicMaintainerDbContext>(options =>
     options.UseSqlite(connectionString));
 
+// Register DbContextFactory for singleton services that need scoped DbContext access
+builder.Services.AddDbContextFactory<ComicMaintainerDbContext>(options =>
+    options.UseSqlite(connectionString));
+
 // Configure Data Protection to persist keys in Config directory
 try
 {

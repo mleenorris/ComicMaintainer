@@ -13,14 +13,14 @@ namespace ComicMaintainer.Core.Services;
 /// </summary>
 public class ProcessingHistoryService : IProcessingHistoryService
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly ILogger<ProcessingHistoryService> _logger;
 
     public ProcessingHistoryService(
-        IServiceProvider serviceProvider,
+        IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         ILogger<ProcessingHistoryService> logger)
     {
-        _serviceProvider = serviceProvider;
+        _dbContextFactory = dbContextFactory;
         _logger = logger;
     }
 
@@ -40,8 +40,7 @@ public class ProcessingHistoryService : IProcessingHistoryService
             throw new ArgumentOutOfRangeException(nameof(offset), "Offset cannot be negative");
         }
 
-        using var scope = _serviceProvider.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
         var total = await dbContext.ProcessingHistory.CountAsync(cancellationToken);
 
@@ -84,8 +83,7 @@ public class ProcessingHistoryService : IProcessingHistoryService
     {
         try
         {
-            using var scope = _serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
             var entity = new ProcessingHistoryEntity
             {

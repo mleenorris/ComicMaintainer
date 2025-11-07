@@ -190,27 +190,9 @@ public class ComicProcessorService : IComicProcessorService
                 else
                 {
                     var beforeMetadata = metadata.Clone();
-                    
-                    // Set series name from folder name if not already set or different from folder name
-                    var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
-                    if (!string.IsNullOrEmpty(folderName))
-                    {
-                        var normalizedSeriesFromFolder = ExtractSeriesFromFilename(filePath);
-                        if (string.IsNullOrEmpty(metadata.Series) || metadata.Series != normalizedSeriesFromFolder)
-                        {
-                            _logger.LogDebug("ProcessFileAsync: Setting series name from folder: {FolderName} -> {SeriesName}", 
-                                LoggingHelper.SanitizePathForLog(folderName), LoggingHelper.SanitizePathForLog(normalizedSeriesFromFolder));
-                            metadata.Series = normalizedSeriesFromFolder;
-                        }
-                    }
+                    var normalizedMetadata = NormalizeMetadata(metadata, filePath);
 
-                    if(metadata.Title != $"Chapter  {metadata.Issue}")
-                    {
-                        // Update title to "Series Issue" format if not already set that way
-                        metadata.Title = $"Chapter {metadata.Issue}";
-                    }
-
-                    normalizeSuccess = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
+                    normalizeSuccess = await UpdateMetadataAsync(filePath, normalizedMetadata, cancellationToken);
                     await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
                     if (normalizeSuccess)
                     {
@@ -856,28 +838,10 @@ public class ComicProcessorService : IComicProcessorService
 
             // Capture before metadata state (current metadata)
             var beforeMetadata = metadata.Clone();
-            
-            // Set series name from folder name if not already set or different from folder name
-            var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
-            if (!string.IsNullOrEmpty(folderName))
-            {
-                var normalizedSeriesFromFolder = ExtractSeriesFromFilename(filePath);
-                if (string.IsNullOrEmpty(metadata.Series) || metadata.Series != normalizedSeriesFromFolder)
-                {
-                    _logger.LogDebug("NormalizeFileAsync: Setting series name from folder: {FolderName} -> {SeriesName}", 
-                        LoggingHelper.SanitizePathForLog(folderName), LoggingHelper.SanitizePathForLog(normalizedSeriesFromFolder));
-                    metadata.Series = normalizedSeriesFromFolder;
-                }
-            }
+            var normalizedMetadata = NormalizeMetadata(metadata, filePath);
 
-            if(metadata.Title != $"Chapter {metadata.Issue}")
-            {
-                _logger.LogDebug("NormalizeFileAsync: Setting title to standard format: Chapter {Issue}", metadata.Issue);
-                metadata.Title = $"Chapter {metadata.Issue}";
-            }
-            
             // Update metadata (normalize it by re-writing ComicInfo.xml)
-            var success = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
+            var success = await UpdateMetadataAsync(filePath, normalizedMetadata, cancellationToken);
             await _fileStore.MarkFileNormalizedAsync(filePath, success, cancellationToken);
             
             if (success)
@@ -1409,6 +1373,47 @@ public class ComicProcessorService : IComicProcessorService
         }
 
         return true;
+    }
+
+    ///<summary>
+    /// Helper method to create nomalized title from issue number
+    /// </summary>
+    private string? CreateNormalizedTitle(string? issueNumber)
+    {
+        if (string.IsNullOrEmpty(issueNumber))
+            return "Chapter Unknown";
+        
+        return $"Chapter {issueNumber}";
+    }
+
+    ///<summary>
+    /// Helper method to consolidate normalization functions
+    /// </summary>
+    private ComicMetadata NormalizeMetadata(ComicMetadata metadata, string filePath)
+    {
+        var normalizedMetadata = metadata.Clone();
+        
+        // Set series name from folder name if not already set or different from folder name
+        var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
+        if (!string.IsNullOrEmpty(folderName))
+        {
+            var normalizedSeriesFromFolder = ExtractSeriesFromFilename(filePath);
+            if (string.IsNullOrEmpty(normalizedMetadata.Series) || normalizedMetadata.Series != normalizedSeriesFromFolder)
+            {
+                _logger.LogDebug("Setting series name from folder: {FolderName} -> {SeriesName}", 
+                    LoggingHelper.SanitizePathForLog(folderName), LoggingHelper.SanitizePathForLog(normalizedSeriesFromFolder));
+                normalizedMetadata.Series = normalizedSeriesFromFolder;
+            }
+        }
+        // Set title to standard format
+        string normalizedTitle = CreateNormalizedTitle(normalizedMetadata.Issue);
+        if(normalizedTitle != null && normalizedTitle != normalizedMetadata.Title)
+        {
+            _logger.LogDebug("Setting title to standard format: {Title}", normalizedTitle);
+            normalizedMetadata.Title = normalizedTitle;
+        }
+        
+        return normalizedMetadata;
     }
 
     /// <summary>

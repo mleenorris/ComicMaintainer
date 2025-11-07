@@ -1367,7 +1367,7 @@ public class ComicProcessorService : IComicProcessorService
             return false;
         }
 
-        if (hasTitleAndIssue && metadata.Title == CreateNormalizedTitle(metadata.Issue))
+        if (hasTitleAndIssue && metadata.Title.Equals(CreateNormalizedTitle(metadata.Issue)))
         {
             return false;
         }
@@ -1406,8 +1406,8 @@ public class ComicProcessorService : IComicProcessorService
             }
         }
         // Set title to standard format
-        string normalizedTitle = CreateNormalizedTitle(normalizedMetadata.Issue);
-        if(normalizedTitle != null && normalizedTitle != normalizedMetadata.Title)
+        string? normalizedTitle = CreateNormalizedTitle(normalizedMetadata.Issue);
+        if(normalizedTitle != null && normalizedTitle.Equals(normalizedMetadata.Title))
         {
             _logger.LogDebug("Setting title to standard format: {Title}", normalizedTitle);
             normalizedMetadata.Title = normalizedTitle;

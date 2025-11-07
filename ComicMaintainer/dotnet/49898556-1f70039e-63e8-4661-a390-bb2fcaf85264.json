@@ -73,6 +73,11 @@
 		"type": "jwt",
 		"jwt": [
 			{
+				"key": "secret",
+				"value": "R0Ztstjq9gkYWBsozof5uyzbCzBHfaiuZteifS1EhuGhtK6kCWNTWsYYovJeH00/",
+				"type": "string"
+			},
+			{
 				"key": "isSecretBase64Encoded",
 				"value": true,
 				"type": "boolean"
@@ -113,7 +118,7 @@
 		{
 			"listen": "prerequest",
 			"script": {
-				"id": "7f114070-b91c-4614-8eb6-07a836c1728b",
+				"id": "43c21249-af01-4e05-a1b9-f74d33fd6dec",
 				"type": "text/javascript",
 				"packages": {},
 				"requests": {},
@@ -125,7 +130,7 @@
 		{
 			"listen": "test",
 			"script": {
-				"id": "98e9114a-2b20-40ce-b9e7-ccfeb9a81b6d",
+				"id": "04f3095b-d242-4623-a246-a2451393e5b1",
 				"type": "text/javascript",
 				"packages": {},
 				"requests": {},

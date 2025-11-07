@@ -74,7 +74,7 @@
 		"jwt": [
 			{
 				"key": "secret",
-				"value": "{{",
+				"value": "{{vault:ComicFix JWT Secret}}",
 				"type": "string"
 			},
 			{
@@ -118,7 +118,7 @@
 		{
 			"listen": "prerequest",
 			"script": {
-				"id": "59d05727-b073-4a37-b287-4bb5a5e3af4f",
+				"id": "1439fd80-ea3e-429a-b9a6-dec1ba53d3cd",
 				"type": "text/javascript",
 				"packages": {},
 				"requests": {},
@@ -130,7 +130,7 @@
 		{
 			"listen": "test",
 			"script": {
-				"id": "bf9cdb4e-5c5f-4a75-a226-87a388e70367",
+				"id": "68e6ed71-3a50-4b2e-934c-6ba287c3816d",
 				"type": "text/javascript",
 				"packages": {},
 				"requests": {},

@@ -1367,7 +1367,7 @@ public class ComicProcessorService : IComicProcessorService
             return false;
         }
         _logger.LogInformation("Checking title normalization for file: {FilePath}, Current metadata {title} Expected {expectedTitle}", LoggingHelper.SanitizePathForLog(filePath), metadata.Title, CreateNormalizedTitle(metadata.Issue));
-        if (!metadata.Title.Equals(CreateNormalizedTitle(metadata.Issue)))
+        if (!string.IsNullOrEmpty(metadata.Title) && !metadata.Title.Equals(CreateNormalizedTitle(metadata.Issue)))
         {
             return false;
         }
@@ -1378,7 +1378,7 @@ public class ComicProcessorService : IComicProcessorService
     ///<summary>
     /// Helper method to create nomalized title from issue number
     /// </summary>
-    private string? CreateNormalizedTitle(string? issueNumber)
+    private string CreateNormalizedTitle(string? issueNumber)
     {
         if (string.IsNullOrEmpty(issueNumber))
             return "Chapter Unknown";
@@ -1406,8 +1406,8 @@ public class ComicProcessorService : IComicProcessorService
             }
         }
         // Set title to standard format
-        string? normalizedTitle = CreateNormalizedTitle(normalizedMetadata.Issue);
-        if(normalizedTitle != null && !normalizedTitle.Equals(normalizedMetadata.Title))
+        string normalizedTitle = CreateNormalizedTitle(normalizedMetadata.Issue);
+        if(!normalizedTitle.Equals(normalizedMetadata.Title))
         {
             _logger.LogDebug("Setting title to standard format: {Title}", normalizedTitle);
             normalizedMetadata.Title = normalizedTitle;

@@ -281,6 +281,10 @@
             <p>Sign in to manage your comic library</p>
         </div>
         
+        <div id="httpWarning" class="error-message" style="display: none;">
+            ⚠️ <strong>Security Warning:</strong> You are not using HTTPS. Your password will be transmitted in plain text. 
+            Please configure HTTPS to protect your credentials.
+        </div>
         <div id="errorMessage" class="error-message"></div>
         <div id="successMessage" class="success-message"></div>
         
@@ -478,8 +482,21 @@
             }
         });
         
+        // Check if HTTPS is being used and show warning if not
+        function checkHttps() {
+            if (window.location.protocol !== 'https:') {
+                const warning = document.getElementById('httpWarning');
+                if (warning) {
+                    warning.style.display = 'block';
+                }
+            }
+        }
+        
         // Initialize theme on page load
         initTheme();
+        
+        // Check HTTPS
+        checkHttps();
         
         // Check if setup is required first
         checkSetupRequired();

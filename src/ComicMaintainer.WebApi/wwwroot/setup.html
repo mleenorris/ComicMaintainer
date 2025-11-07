@@ -320,6 +320,10 @@
             ⚠️ This is a one-time setup. Choose a strong password and remember your credentials.
         </div>
         
+        <div id="httpWarning" class="error-message" style="display: none;">
+            ⚠️ <strong>Security Warning:</strong> You are not using HTTPS. Your password will be transmitted in plain text. 
+            Please configure HTTPS to protect your credentials.
+        </div>
         <div id="errorMessage" class="error-message"></div>
         <div id="successMessage" class="success-message"></div>
         
@@ -353,7 +357,8 @@
     </div>
     
     <script>
-        // Security Note: Ensure this application is deployed with HTTPS in production
+        // Security Note: This application enforces HTTPS for password transmission.
+        // Configure HTTPS either directly or via a reverse proxy with proper X-Forwarded-Proto headers.
         // to protect credentials during transmission.
         
         // Base path for reverse proxy support
@@ -522,8 +527,21 @@
             }
         });
         
+        // Check if HTTPS is being used and show warning if not
+        function checkHttps() {
+            if (window.location.protocol !== 'https:') {
+                const warning = document.getElementById('httpWarning');
+                if (warning) {
+                    warning.style.display = 'block';
+                }
+            }
+        }
+        
         // Initialize theme on page load
         initTheme();
+        
+        // Check HTTPS
+        checkHttps();
         
         // Check if setup is still required
         checkSetupRequired();

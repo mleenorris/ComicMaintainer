@@ -412,6 +412,10 @@ app.Use(async (context, next) =>
     await next();
 });
 
+// Add HTTPS enforcement middleware for authentication endpoints
+// This prevents passwords from being transmitted in plain text over HTTP
+app.UseMiddleware<HttpsEnforcementMiddleware>();
+
 // Add path validation middleware for security
 app.UseMiddleware<PathValidationMiddleware>();
 

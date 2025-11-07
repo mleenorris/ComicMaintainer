@@ -17,9 +17,20 @@ ComicMaintainer is a service that automatically watches a directory for new or c
 - **Metadata Management**: View and edit comic metadata
 - **Duplicate Detection**: Automatically identifies and handles duplicate files
 - **RESTful API**: Clean API for integration with other tools
+- **Secure Authentication**: Password hashing and HTTPS enforcement for credential protection
 - **Cross-Platform**: Runs on Windows, Linux, macOS
 - **Docker Support**: Easy deployment with Docker
 - **Mobile Ready**: Can be packaged as a mobile app using .NET MAUI
+
+## Security
+
+ComicMaintainer implements robust security measures to protect user credentials:
+
+- **Password Protection**: Passwords are never stored in plain text. All passwords are hashed using ASP.NET Core Identity with PBKDF2.
+- **HTTPS Enforcement**: By default, authentication endpoints require HTTPS to prevent password transmission in plain text.
+- **User Warnings**: The web interface warns users when accessing over HTTP.
+
+For detailed security information, see [docs/PASSWORD_SECURITY.md](docs/PASSWORD_SECURITY.md).
 
 ## Architecture
 

@@ -29,4 +29,11 @@ public class AppSettings
     
     // Database cleanup settings
     public int DatabaseCleanupIntervalHours { get; set; } = 12;
+    
+    // Security settings
+    /// <summary>
+    /// WARNING: Setting this to false will allow passwords to be transmitted over HTTP.
+    /// Only disable in isolated development/testing environments. NEVER in production.
+    /// </summary>
+    public bool RequireHttpsForAuth { get; set; } = true;
 }

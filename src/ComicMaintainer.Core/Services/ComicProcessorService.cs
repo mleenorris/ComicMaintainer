@@ -1415,9 +1415,12 @@ public class ComicProcessorService : IComicProcessorService
     /// Generates the expected title in the normalized format: "Chapter {issue number}"
     /// </summary>
     /// <param name="issueNumber">The issue number to use in the title</param>
-    /// <returns>The normalized title format</returns>
-    private static string GetNormalizedTitle(string issueNumber)
+    /// <returns>The normalized title format, or null if issueNumber is null or empty</returns>
+    private static string? GetNormalizedTitle(string? issueNumber)
     {
+        if (string.IsNullOrEmpty(issueNumber))
+            return null;
+            
         return $"Chapter {issueNumber}";
     }
 
@@ -1429,14 +1432,11 @@ public class ComicProcessorService : IComicProcessorService
     /// <param name="logPrefix">Prefix for log messages (e.g., method name)</param>
     private static void NormalizeMetadataTitle(ComicMetadata metadata, ILogger logger, string logPrefix)
     {
-        if (!string.IsNullOrEmpty(metadata.Issue))
+        var expectedTitle = GetNormalizedTitle(metadata.Issue);
+        if (expectedTitle != null && metadata.Title != expectedTitle)
         {
-            var expectedTitle = GetNormalizedTitle(metadata.Issue);
-            if (metadata.Title != expectedTitle)
-            {
-                logger.LogDebug("{Prefix}: Setting title to standard format: {Title}", logPrefix, expectedTitle);
-                metadata.Title = expectedTitle;
-            }
+            logger.LogDebug("{Prefix}: Setting title to standard format: {Title}", logPrefix, expectedTitle);
+            metadata.Title = expectedTitle;
         }
     }
 

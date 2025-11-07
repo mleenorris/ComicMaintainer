@@ -198,7 +198,7 @@ public class ComicProcessorService : IComicProcessorService
                     {
                         var filename = Path.GetFileName(filePath);
                         await LogHistoryWithChangesAsync(filePath, "Normalize", true, null,
-                            filename, filename, beforeMetadata, metadata, cancellationToken);
+                            filename, filename, beforeMetadata, normalizedMetadata, cancellationToken);
                     }
                     else
                     {
@@ -851,7 +851,7 @@ public class ComicProcessorService : IComicProcessorService
                 // For normalize operations, we log the same metadata as before/after since we're ensuring
                 // the existing metadata is written properly to ComicInfo.xml
                 await LogHistoryWithChangesAsync(filePath, "Normalize", true, null, 
-                    filename, filename, metadata, metadata, cancellationToken);
+                    filename, filename, beforeMetadata, normalizedMetadata, cancellationToken);
             }
             else
             {

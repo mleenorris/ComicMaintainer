@@ -1366,7 +1366,7 @@ public class ComicProcessorService : IComicProcessorService
             // Series exists but doesn't match folder name - not normalized
             return false;
         }
-        _logger.logInformation("Checking title normalization for file: {FilePath}, Current metadata {title} Expected {expectedTitle}", LoggingHelper.SanitizePathForLog(filePath), metadata.Title, CreateNormalizedTitle(metadata.Issue));
+        _logger.LogInformation("Checking title normalization for file: {FilePath}, Current metadata {title} Expected {expectedTitle}", LoggingHelper.SanitizePathForLog(filePath), metadata.Title, CreateNormalizedTitle(metadata.Issue));
         if (hasTitleAndIssue && metadata.Title.Equals(CreateNormalizedTitle(metadata.Issue)))
         {
             return false;

@@ -205,15 +205,7 @@ public class ComicProcessorService : IComicProcessorService
                     }
                     
                     // Set title to "Chapter {issue number}" format if issue number is available
-                    if (!string.IsNullOrEmpty(metadata.Issue))
-                    {
-                        var expectedTitle = $"Chapter {metadata.Issue}";
-                        if (metadata.Title != expectedTitle)
-                        {
-                            _logger.LogDebug("ProcessFileAsync: Setting title to standard format: {Title}", expectedTitle);
-                            metadata.Title = expectedTitle;
-                        }
-                    }
+                    NormalizeMetadataTitle(metadata, _logger, "ProcessFileAsync");
                     
                     normalizeSuccess = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
                     await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
@@ -876,15 +868,7 @@ public class ComicProcessorService : IComicProcessorService
             }
             
             // Set title to "Chapter {issue number}" format if issue number is available
-            if (!string.IsNullOrEmpty(metadata.Issue))
-            {
-                var expectedTitle = $"Chapter {metadata.Issue}";
-                if (metadata.Title != expectedTitle)
-                {
-                    _logger.LogDebug("NormalizeFileAsync: Setting title to standard format: {Title}", expectedTitle);
-                    metadata.Title = expectedTitle;
-                }
-            }
+            NormalizeMetadataTitle(metadata, _logger, "NormalizeFileAsync");
             
             // Update metadata (normalize it by re-writing ComicInfo.xml)
             var success = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
@@ -1416,7 +1400,7 @@ public class ComicProcessorService : IComicProcessorService
         // Check if the title matches the expected "Chapter {issue number}" format
         if (!string.IsNullOrEmpty(metadata.Issue))
         {
-            var expectedTitle = $"Chapter {metadata.Issue}";
+            var expectedTitle = GetNormalizedTitle(metadata.Issue);
             if (metadata.Title != expectedTitle)
             {
                 // Title doesn't match expected format - not normalized
@@ -1425,6 +1409,35 @@ public class ComicProcessorService : IComicProcessorService
         }
         
         return true;
+    }
+
+    /// <summary>
+    /// Generates the expected title in the normalized format: "Chapter {issue number}"
+    /// </summary>
+    /// <param name="issueNumber">The issue number to use in the title</param>
+    /// <returns>The normalized title format</returns>
+    private static string GetNormalizedTitle(string issueNumber)
+    {
+        return $"Chapter {issueNumber}";
+    }
+
+    /// <summary>
+    /// Normalizes the title field in metadata to "Chapter {issue number}" format
+    /// </summary>
+    /// <param name="metadata">The metadata to normalize</param>
+    /// <param name="logger">Logger for debug messages</param>
+    /// <param name="logPrefix">Prefix for log messages (e.g., method name)</param>
+    private static void NormalizeMetadataTitle(ComicMetadata metadata, ILogger logger, string logPrefix)
+    {
+        if (!string.IsNullOrEmpty(metadata.Issue))
+        {
+            var expectedTitle = GetNormalizedTitle(metadata.Issue);
+            if (metadata.Title != expectedTitle)
+            {
+                logger.LogDebug("{Prefix}: Setting title to standard format: {Title}", logPrefix, expectedTitle);
+                metadata.Title = expectedTitle;
+            }
+        }
     }
 
     /// <summary>

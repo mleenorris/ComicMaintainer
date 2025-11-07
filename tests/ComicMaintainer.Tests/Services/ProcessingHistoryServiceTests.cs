@@ -23,10 +23,13 @@ public class ProcessingHistoryServiceTests
         var services = new ServiceCollection();
         services.AddDbContext<ComicMaintainerDbContext>(opt =>
             opt.UseInMemoryDatabase(_dbName));
+        services.AddDbContextFactory<ComicMaintainerDbContext>(opt =>
+            opt.UseInMemoryDatabase(_dbName));
         _serviceProvider = services.BuildServiceProvider();
         
         _mockLogger = new Mock<ILogger<ProcessingHistoryService>>();
-        _service = new ProcessingHistoryService(_serviceProvider, _mockLogger.Object);
+        var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        _service = new ProcessingHistoryService(dbContextFactory, _mockLogger.Object);
     }
 
     [Fact]

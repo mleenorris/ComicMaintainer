@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -15,7 +16,7 @@ public class SettingsControllerTests
     
     private readonly Mock<IOptions<AppSettings>> _appSettingsMock;
     private readonly Mock<ILogger<SettingsController>> _loggerMock;
-    private readonly Mock<IServiceProvider> _serviceProviderMock;
+    private readonly Mock<IDbContextFactory<ComicMaintainer.Core.Data.ComicMaintainerDbContext>> _dbContextFactoryMock;
     private readonly Mock<IComicProcessorService> _processorServiceMock;
     private readonly Mock<IFileStoreService> _fileStoreMock;
     private readonly Mock<ISettingsService> _settingsServiceMock;
@@ -39,7 +40,7 @@ public class SettingsControllerTests
         _appSettingsMock.Setup(x => x.Value).Returns(_appSettings);
         
         _loggerMock = new Mock<ILogger<SettingsController>>();
-        _serviceProviderMock = new Mock<IServiceProvider>();
+        _dbContextFactoryMock = new Mock<IDbContextFactory<ComicMaintainer.Core.Data.ComicMaintainerDbContext>>();
         _processorServiceMock = new Mock<IComicProcessorService>();
         _fileStoreMock = new Mock<IFileStoreService>();
         _settingsServiceMock = new Mock<ISettingsService>();
@@ -48,7 +49,7 @@ public class SettingsControllerTests
         _controller = new SettingsController(
             _appSettingsMock.Object, 
             _loggerMock.Object,
-            _serviceProviderMock.Object,
+            _dbContextFactoryMock.Object,
             _processorServiceMock.Object,
             _fileStoreMock.Object,
             _settingsServiceMock.Object,

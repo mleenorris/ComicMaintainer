@@ -18,7 +18,7 @@ public class SettingsController : ControllerBase
     
     private readonly IOptions<AppSettings> _appSettings;
     private readonly ILogger<SettingsController> _logger;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IComicProcessorService _processorService;
     private readonly IFileStoreService _fileStore;
     private readonly ISettingsService _settingsService;
@@ -27,7 +27,7 @@ public class SettingsController : ControllerBase
     public SettingsController(
         IOptions<AppSettings> appSettings, 
         ILogger<SettingsController> logger,
-        IServiceProvider serviceProvider,
+        IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         IComicProcessorService processorService,
         IFileStoreService fileStore,
         ISettingsService settingsService,
@@ -35,7 +35,7 @@ public class SettingsController : ControllerBase
     {
         _appSettings = appSettings;
         _logger = logger;
-        _serviceProvider = serviceProvider;
+        _dbContextFactory = dbContextFactory;
         _processorService = processorService;
         _fileStore = fileStore;
         _settingsService = settingsService;
@@ -282,8 +282,7 @@ public class SettingsController : ControllerBase
             }
 
             // Clear all database tables
-            using var scope = _serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
             _logger.LogInformation("Deleting processing history...");
             await dbContext.ProcessingHistory.ExecuteDeleteAsync(cancellationToken);

@@ -6,7 +6,6 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -19,16 +18,16 @@ public class FileStoreService : IFileStoreService
     private readonly ConcurrentDictionary<string, bool> _duplicateFiles = new();
     private readonly AppSettings _settings;
     private readonly ILogger<FileStoreService> _logger;
-    private readonly IServiceProvider _serviceProvider;
+    private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
 
     public FileStoreService(
         IOptions<AppSettings> settings,
         ILogger<FileStoreService> logger,
-        IServiceProvider serviceProvider)
+        IDbContextFactory<ComicMaintainerDbContext> dbContextFactory)
     {
         _settings = settings.Value;
         _logger = logger;
-        _serviceProvider = serviceProvider;
+        _dbContextFactory = dbContextFactory;
     }
 
     private static string SanitizeForLogging(string? input)
@@ -172,8 +171,7 @@ public class FileStoreService : IFileStoreService
         
         try
         {
-            using var scope = _serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
             
             var entity = await dbContext.ComicFiles
                 .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
@@ -209,8 +207,7 @@ public class FileStoreService : IFileStoreService
         // Persist to database
         try
         {
-            using var scope = _serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
             
             var entity = await dbContext.ComicFiles
                 .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
@@ -274,8 +271,7 @@ public class FileStoreService : IFileStoreService
         // Remove from database
         try
         {
-            using var scope = _serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
             
             var entity = await dbContext.ComicFiles
                 .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
@@ -334,8 +330,7 @@ public class FileStoreService : IFileStoreService
         // Persist to database
         try
         {
-            using var scope = _serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
             
             var entity = await dbContext.ComicFiles
                 .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
@@ -399,8 +394,7 @@ public class FileStoreService : IFileStoreService
         // Persist to database
         try
         {
-            using var scope = _serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
             
             var entity = await dbContext.ComicFiles
                 .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
@@ -468,8 +462,7 @@ public class FileStoreService : IFileStoreService
         // Persist to database
         try
         {
-            using var scope = _serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
             
             var entity = await dbContext.ComicFiles
                 .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
@@ -542,8 +535,7 @@ public class FileStoreService : IFileStoreService
         {
             _logger.LogInformation("Initializing file store from database");
             
-            using var scope = _serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
             
             // Load all files from database
             var fileEntities = await dbContext.ComicFiles
@@ -644,8 +636,7 @@ public class FileStoreService : IFileStoreService
         {
             _logger.LogInformation("Starting cleanup of stale database entries");
             
-            using var scope = _serviceProvider.CreateScope();
-            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
             
             // Load all file entries from database
             var fileEntities = await dbContext.ComicFiles

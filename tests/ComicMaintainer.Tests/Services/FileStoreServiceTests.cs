@@ -33,10 +33,13 @@ public class FileStoreServiceTests
         var services = new ServiceCollection();
         services.AddDbContext<ComicMaintainerDbContext>(opt =>
             opt.UseInMemoryDatabase(_dbName));
+        services.AddDbContextFactory<ComicMaintainerDbContext>(opt =>
+            opt.UseInMemoryDatabase(_dbName));
         _serviceProvider = services.BuildServiceProvider();
         
         var logger = new Mock<ILogger<FileStoreService>>().Object;
-        _service = new FileStoreService(options, logger, _serviceProvider);
+        var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        _service = new FileStoreService(options, logger, dbContextFactory);
     }
 
     [Fact]
@@ -384,7 +387,8 @@ public class FileStoreServiceTests
         };
         var options = Options.Create(settings);
         var logger = new Mock<ILogger<FileStoreService>>().Object;
-        var newService = new FileStoreService(options, logger, _serviceProvider);
+        var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        var newService = new FileStoreService(options, logger, dbContextFactory);
         
         // Verify data is in database before initialization
         using (var scope = _serviceProvider.CreateScope())
@@ -525,7 +529,8 @@ public class FileStoreServiceTests
         var settings = new AppSettings { WatchedDirectory = _testDirectory };
         var options = Options.Create(settings);
         var logger = new Mock<ILogger<FileStoreService>>().Object;
-        var newService = new FileStoreService(options, logger, _serviceProvider);
+        var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        var newService = new FileStoreService(options, logger, dbContextFactory);
         
         await newService.InitializeFromDatabaseAsync();
         

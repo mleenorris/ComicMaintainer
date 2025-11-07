@@ -74,10 +74,13 @@ public class FileStoreServiceIntegrationTests : IDisposable
         var dbName = $"TestDb_{Guid.NewGuid()}";
         services.AddDbContext<ComicMaintainerDbContext>(opt =>
             opt.UseInMemoryDatabase(dbName));
+        services.AddDbContextFactory<ComicMaintainerDbContext>(opt =>
+            opt.UseInMemoryDatabase(dbName));
         var serviceProvider = services.BuildServiceProvider();
 
         var logger = new Mock<ILogger<FileStoreService>>().Object;
-        var fileStoreService = new FileStoreService(options, logger, serviceProvider);
+        var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        var fileStoreService = new FileStoreService(options, logger, dbContextFactory);
 
         var filePath = Path.Combine(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
@@ -120,10 +123,13 @@ public class FileStoreServiceIntegrationTests : IDisposable
         var dbName = $"TestDb_{Guid.NewGuid()}";
         services.AddDbContext<ComicMaintainerDbContext>(opt =>
             opt.UseInMemoryDatabase(dbName));
+        services.AddDbContextFactory<ComicMaintainerDbContext>(opt =>
+            opt.UseInMemoryDatabase(dbName));
         var serviceProvider = services.BuildServiceProvider();
 
         var logger = new Mock<ILogger<FileStoreService>>().Object;
-        var fileStoreService = new FileStoreService(options, logger, serviceProvider);
+        var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        var fileStoreService = new FileStoreService(options, logger, dbContextFactory);
 
         var filePath = Path.Combine(_testDirectory, "test.cbz");
         File.WriteAllText(filePath, "test content");
@@ -163,10 +169,13 @@ public class FileStoreServiceIntegrationTests : IDisposable
         var dbName = $"TestDb_{Guid.NewGuid()}";
         services.AddDbContext<ComicMaintainerDbContext>(opt =>
             opt.UseInMemoryDatabase(dbName));
+        services.AddDbContextFactory<ComicMaintainerDbContext>(opt =>
+            opt.UseInMemoryDatabase(dbName));
         var serviceProvider = services.BuildServiceProvider();
 
         var logger = new Mock<ILogger<FileStoreService>>().Object;
-        var fileStoreService = new FileStoreService(options, logger, serviceProvider);
+        var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        var fileStoreService = new FileStoreService(options, logger, dbContextFactory);
 
         var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
 

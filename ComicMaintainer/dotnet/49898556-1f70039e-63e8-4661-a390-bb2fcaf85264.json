@@ -73,14 +73,14 @@
 		"type": "jwt",
 		"jwt": [
 			{
+				"key": "isSecretBase64Encoded",
+				"value": true,
+				"type": "boolean"
+			},
+			{
 				"key": "algorithm",
 				"value": "HS256",
 				"type": "string"
-			},
-			{
-				"key": "isSecretBase64Encoded",
-				"value": false,
-				"type": "boolean"
 			},
 			{
 				"key": "payload",
@@ -113,7 +113,7 @@
 		{
 			"listen": "prerequest",
 			"script": {
-				"id": "269c1a1b-c9d2-4a72-8da9-e7751add9153",
+				"id": "7f114070-b91c-4614-8eb6-07a836c1728b",
 				"type": "text/javascript",
 				"packages": {},
 				"requests": {},
@@ -125,7 +125,7 @@
 		{
 			"listen": "test",
 			"script": {
-				"id": "35c5fa46-59d1-4a72-bfb8-14ab5ef8880e",
+				"id": "98e9114a-2b20-40ce-b9e7-ccfeb9a81b6d",
 				"type": "text/javascript",
 				"packages": {},
 				"requests": {},

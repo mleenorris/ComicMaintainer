@@ -860,6 +860,8 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.NotNull(updatedMetadata);
         Assert.Equal("Spider-Man", updatedMetadata.Series);
         Assert.Equal("5", updatedMetadata.Issue);
+        // Verify that the Title is set to "Chapter {issue number}" format
+        Assert.Equal("Chapter 5", updatedMetadata.Title);
     }
 
     [Fact]
@@ -903,6 +905,63 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.NotNull(updatedMetadata);
         Assert.Equal("Batman:The Dark Knight", updatedMetadata.Series);
         Assert.Equal("10", updatedMetadata.Issue);
+    }
+
+    [Fact]
+    public async Task NormalizeFileAsync_WithWrongTitle_UpdatesTitleToChapterFormat()
+    {
+        // Arrange - Create a folder with a specific name
+        var seriesFolder = Path.Combine(_testDirectory, "One Piece");
+        Directory.CreateDirectory(seriesFolder);
+        
+        // Create a file with ComicInfo.xml that has wrong title
+        var fileName = "Chapter 42.cbz";
+        var filePath = Path.Combine(seriesFolder, fileName);
+        
+        var comicInfoXml = @"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>One Piece</Series>
+    <Number>42</Number>
+    <Title>Wrong Title Here</Title>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Enable only normalize (not rename) to keep the file path unchanged
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+
+        // Act
+        var result = await _service.ProcessFileAsync(filePath);
+
+        // Assert
+        Assert.True(result);
+        
+        // Verify the file was normalized
+        _mockFileStore.Verify(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
+        
+        // Read the metadata back to verify title was updated to "Chapter {issue number}" format
+        var updatedMetadata = await _service.GetMetadataAsync(filePath);
+        Assert.NotNull(updatedMetadata);
+        Assert.Equal("One Piece", updatedMetadata.Series);
+        Assert.Equal("42", updatedMetadata.Issue);
+        Assert.Equal("Chapter 42", updatedMetadata.Title);
     }
 
     public void Dispose()

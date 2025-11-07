@@ -204,6 +204,17 @@ public class ComicProcessorService : IComicProcessorService
                         }
                     }
                     
+                    // Set title to "Chapter {issue number}" format if issue number is available
+                    if (!string.IsNullOrEmpty(metadata.Issue))
+                    {
+                        var expectedTitle = $"Chapter {metadata.Issue}";
+                        if (metadata.Title != expectedTitle)
+                        {
+                            _logger.LogDebug("ProcessFileAsync: Setting title to standard format: {Title}", expectedTitle);
+                            metadata.Title = expectedTitle;
+                        }
+                    }
+                    
                     normalizeSuccess = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
                     await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
                     if (normalizeSuccess)
@@ -864,6 +875,17 @@ public class ComicProcessorService : IComicProcessorService
                 }
             }
             
+            // Set title to "Chapter {issue number}" format if issue number is available
+            if (!string.IsNullOrEmpty(metadata.Issue))
+            {
+                var expectedTitle = $"Chapter {metadata.Issue}";
+                if (metadata.Title != expectedTitle)
+                {
+                    _logger.LogDebug("NormalizeFileAsync: Setting title to standard format: {Title}", expectedTitle);
+                    metadata.Title = expectedTitle;
+                }
+            }
+            
             // Update metadata (normalize it by re-writing ComicInfo.xml)
             var success = await UpdateMetadataAsync(filePath, metadata, cancellationToken);
             await _fileStore.MarkFileNormalizedAsync(filePath, success, cancellationToken);
@@ -1389,6 +1411,17 @@ public class ComicProcessorService : IComicProcessorService
         {
             // Series exists but doesn't match folder name - not normalized
             return false;
+        }
+        
+        // Check if the title matches the expected "Chapter {issue number}" format
+        if (!string.IsNullOrEmpty(metadata.Issue))
+        {
+            var expectedTitle = $"Chapter {metadata.Issue}";
+            if (metadata.Title != expectedTitle)
+            {
+                // Title doesn't match expected format - not normalized
+                return false;
+            }
         }
         
         return true;

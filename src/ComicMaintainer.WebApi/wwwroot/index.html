@@ -809,7 +809,9 @@
             if (!path.startsWith('/')) {
                 path = '/' + path;
             }
-            return BASE_PATH + path;
+            const fullUrl = BASE_PATH + path;
+            console.log('[API_URL] Building URL - BASE_PATH:', BASE_PATH, 'path:', path, 'result:', fullUrl);
+            return fullUrl;
         }
     </script>
     <script src="/js/main.js"></script>

@@ -70,7 +70,7 @@
             
             // Proactively check token expiry before making API calls
             if (token && isTokenExpired(token)) {
-                console.log('JWT token expired, redirecting to login');
+                console.log('[AUTH] JWT token expired, redirecting to login');
                 redirectToLogin();
                 return {};
             }
@@ -80,6 +80,9 @@
             };
             if (token) {
                 headers['Authorization'] = `Bearer ${token}`;
+                console.log('[AUTH] Adding authorization header (token present)');
+            } else {
+                console.warn('[AUTH] No JWT token found in localStorage');
             }
             return headers;
         }

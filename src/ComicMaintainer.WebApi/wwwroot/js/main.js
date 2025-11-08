@@ -2489,37 +2489,41 @@
         
         async function openSettings() {
             try {
-                // Load filename format
-                const formatResponse = await fetch(apiUrl('/api/settings'), {
+                // Load all settings
+                const settingsResponse = await fetch(apiUrl('/api/settings'), {
                     headers: getAuthHeaders()
                 });
-                if (handleAuthError(formatResponse)) return;
-                if (!formatResponse.ok) {
-                    throw new Error(`HTTP error! status: ${formatResponse.status}`);
+
+                if (handleAuthError(settingsResponse)) return;
+
+                showMessage('Loading settings... Status: '+settingsResponse.status+' OK: '+settingsResponse.ok, 'info');
+
+                if (settingsResponse.status != 200) {
+                    throw new Error(`HTTP error! status: ${settingsResponse.status}`);
                 }
-                const formatData = await formatResponse.json();
+                const settingsData = await settingsResponse.json();
                 
-                document.getElementById('filenameFormat').value = formatData.filename_format || '';
-                document.getElementById('currentFormat').textContent = formatData.filename_format || '{series} - Chapter {issue}';
+                document.getElementById('filenameFormat').value = settingsData.filename_format || '';
+                document.getElementById('currentFormat').textContent = settingsData.filename_format || '{series} - Chapter {issue}';
                 
                 // Load current theme
                 const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
                 document.getElementById('themeSelect').value = currentTheme;
                 
                 // Load watcher enable rename status
-                document.getElementById('watcherEnableRenameCheckbox').checked = formatData.watcher_enable_rename;
+                document.getElementById('watcherEnableRenameCheckbox').checked = settingsData.watcher_enable_rename;
                 
                 // Load watcher enable normalize status
-                document.getElementById('watcherEnableNormalizeCheckbox').checked = formatData.watcher_enable_normalize;
+                document.getElementById('watcherEnableNormalizeCheckbox').checked = settingsData.watcher_enable_normalize;
                 
                 // Load log max size
-                document.getElementById('logMaxSize').value = Math.round(formatData.log_max_bytes);
+                document.getElementById('logMaxSize').value = Math.round(settingsData.log_max_bytes);
                 
                 // Load issue number padding
-                document.getElementById('issueNumberPadding').value = formatData.issue_number_padding;
+                document.getElementById('issueNumberPadding').value = settingsData.issue_number_padding;
                 
                 // Load database cleanup interval
-                document.getElementById('dbCleanupInterval').value = formatData.database_cleanup_interval_hours;
+                document.getElementById('dbCleanupInterval').value = settingsData.database_cleanup_interval_hours;
                 
                 document.getElementById('settingsModal').classList.add('active');
             } catch (error) {

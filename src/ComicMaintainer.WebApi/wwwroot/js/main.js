@@ -2490,7 +2490,7 @@
         async function openSettings() {
             try {
                 // Load filename format
-                const formatResponse = await fetch(apiUrl('/api/settings/filename-format'), {
+                const formatResponse = await fetch(apiUrl('/api/settings'), {
                     headers: getAuthHeaders()
                 });
                 if (handleAuthError(formatResponse)) return;
@@ -2499,70 +2499,27 @@
                 }
                 const formatData = await formatResponse.json();
                 
-                document.getElementById('filenameFormat').value = formatData.format || '';
-                document.getElementById('currentFormat').textContent = formatData.format || formatData.default;
+                document.getElementById('filenameFormat').value = formatData.filename_format || '';
+                document.getElementById('currentFormat').textContent = formatData.filename_format || '{series} - Chapter {issue}';
                 
                 // Load current theme
                 const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
                 document.getElementById('themeSelect').value = currentTheme;
                 
-                // Load watcher status
-                // Note: Watcher toggle removed - watcher is now automatically controlled by rename/normalize settings
-                
                 // Load watcher enable rename status
-                const watcherRenameResponse = await fetch(apiUrl('/api/settings/watcher-enable-rename'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(watcherRenameResponse)) return;
-                if (!watcherRenameResponse.ok) {
-                    throw new Error(`HTTP error! status: ${watcherRenameResponse.status}`);
-                }
-                const watcherRenameData = await watcherRenameResponse.json();
-                document.getElementById('watcherEnableRenameCheckbox').checked = watcherRenameData.enabled;
+                document.getElementById('watcherEnableRenameCheckbox').checked = formatData.watcher_enable_rename;
                 
                 // Load watcher enable normalize status
-                const watcherNormalizeResponse = await fetch(apiUrl('/api/settings/watcher-enable-normalize'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(watcherNormalizeResponse)) return;
-                if (!watcherNormalizeResponse.ok) {
-                    throw new Error(`HTTP error! status: ${watcherNormalizeResponse.status}`);
-                }
-                const watcherNormalizeData = await watcherNormalizeResponse.json();
-                document.getElementById('watcherEnableNormalizeCheckbox').checked = watcherNormalizeData.enabled;
+                document.getElementById('watcherEnableNormalizeCheckbox').checked = formatData.watcher_enable_normalize;
                 
                 // Load log max size
-                const logResponse = await fetch(apiUrl('/api/settings/log-max-bytes'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(logResponse)) return;
-                if (!logResponse.ok) {
-                    throw new Error(`HTTP error! status: ${logResponse.status}`);
-                }
-                const logData = await logResponse.json();
-                document.getElementById('logMaxSize').value = Math.round(logData.maxMB);
+                document.getElementById('logMaxSize').value = Math.round(formatData.log_max_bytes);
                 
                 // Load issue number padding
-                const paddingResponse = await fetch(apiUrl('/api/settings/issue-number-padding'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(paddingResponse)) return;
-                if (!paddingResponse.ok) {
-                    throw new Error(`HTTP error! status: ${paddingResponse.status}`);
-                }
-                const paddingData = await paddingResponse.json();
-                document.getElementById('issueNumberPadding').value = paddingData.padding;
+                document.getElementById('issueNumberPadding').value = formatData.issue_number_padding;
                 
                 // Load database cleanup interval
-                const cleanupResponse = await fetch(apiUrl('/api/settings/database-cleanup-interval-hours'), {
-                    headers: getAuthHeaders()
-                });
-                if (handleAuthError(cleanupResponse)) return;
-                if (!cleanupResponse.ok) {
-                    throw new Error(`HTTP error! status: ${cleanupResponse.status}`);
-                }
-                const cleanupData = await cleanupResponse.json();
-                document.getElementById('dbCleanupInterval').value = cleanupData.hours;
+                document.getElementById('dbCleanupInterval').value = formatData.database_cleanup_interval_hours;
                 
                 document.getElementById('settingsModal').classList.add('active');
             } catch (error) {

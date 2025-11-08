@@ -2490,18 +2490,25 @@
         async function openSettings() {
             try {
                 // Load all settings
-                const settingsResponse = await fetch(apiUrl('/api/settings'), {
+                const settingsUrl = apiUrl('/api/settings');
+                console.log('[SETTINGS] Fetching settings from URL:', settingsUrl);
+                
+                const settingsResponse = await fetch(settingsUrl, {
                     headers: getAuthHeaders()
                 });
 
+                console.log('[SETTINGS] Response status:', settingsResponse.status, 'OK:', settingsResponse.ok, 'URL:', settingsResponse.url);
+
                 if (handleAuthError(settingsResponse)) return;
 
-                showMessage('Loading settings... Status: '+settingsResponse.status+' OK: '+settingsResponse.ok, 'info');
-
-                if (settingsResponse.status != 200) {
-                    throw new Error(`HTTP error! status: ${settingsResponse.status}`);
+                if (!settingsResponse.ok) {
+                    const errorText = await settingsResponse.text();
+                    console.error('[SETTINGS] Failed to load settings. Status:', settingsResponse.status, 'Response:', errorText);
+                    throw new Error(`HTTP error! status: ${settingsResponse.status} - ${errorText}`);
                 }
+                
                 const settingsData = await settingsResponse.json();
+                console.log('[SETTINGS] Settings data loaded:', settingsData);
                 
                 document.getElementById('filenameFormat').value = settingsData.filename_format || '';
                 document.getElementById('currentFormat').textContent = settingsData.filename_format || '{series} - Chapter {issue}';
@@ -2516,8 +2523,11 @@
                 // Load watcher enable normalize status
                 document.getElementById('watcherEnableNormalizeCheckbox').checked = settingsData.watcher_enable_normalize;
                 
-                // Load log max size
-                document.getElementById('logMaxSize').value = Math.round(settingsData.log_max_bytes);
+                // Load log max size (convert bytes to MB)
+                const BYTES_PER_MB = 1048576;
+                const logMaxMB = settingsData.log_max_bytes / BYTES_PER_MB;
+                document.getElementById('logMaxSize').value = Math.round(logMaxMB);
+                console.log('[SETTINGS] Log max bytes:', settingsData.log_max_bytes, 'converted to MB:', Math.round(logMaxMB));
                 
                 // Load issue number padding
                 document.getElementById('issueNumberPadding').value = settingsData.issue_number_padding;
@@ -2525,8 +2535,10 @@
                 // Load database cleanup interval
                 document.getElementById('dbCleanupInterval').value = settingsData.database_cleanup_interval_hours;
                 
+                console.log('[SETTINGS] All settings loaded successfully, opening modal');
                 document.getElementById('settingsModal').classList.add('active');
             } catch (error) {
+                console.error('[SETTINGS] Error in openSettings():', error);
                 showMessage('Failed to load settings: ' + error.message, 'error');
             }
         }

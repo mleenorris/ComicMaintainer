@@ -66,6 +66,16 @@ public class SettingsControllerTests
         var okResult = Assert.IsType<ActionResult<object>>(result);
         var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
         Assert.NotNull(objectResult.Value);
+        
+        // Verify format property
+        var formatProperty = objectResult.Value?.GetType().GetProperty("format");
+        Assert.NotNull(formatProperty);
+        Assert.Equal("{series} - Chapter {issue}", formatProperty.GetValue(objectResult.Value));
+        
+        // Verify default property is included
+        var defaultProperty = objectResult.Value?.GetType().GetProperty("default");
+        Assert.NotNull(defaultProperty);
+        Assert.Equal("{series} - Chapter {issue}", defaultProperty.GetValue(objectResult.Value));
     }
 
     [Fact]

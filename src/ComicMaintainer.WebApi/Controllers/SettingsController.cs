@@ -60,7 +60,10 @@ public class SettingsController : ControllerBase
     [HttpGet("filename-format")]
     public ActionResult<object> GetFilenameFormat()
     {
-        return Ok(new { format = _appSettings.Value.FilenameFormat });
+        return Ok(new { 
+            format = _appSettings.Value.FilenameFormat,
+            @default = "{series} - Chapter {issue}" // Default format matching AppSettings default
+        });
     }
 
     // RESTful endpoint: PUT /api/settings/filename-format

@@ -305,7 +305,7 @@ var logger = app.Services.GetRequiredService<ILogger<Program>>();
 var version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0";
 logger.LogInformation("╔══════════════════════════════════════════════════╗");
 logger.LogInformation("║         Comic Maintainer - .NET Edition          ║");
-logger.LogInformation("║                  Version {Version}                  ║", version.PadRight(21));
+logger.LogInformation("║                  Version {Version}║", version.PadRight(24));
 logger.LogInformation("╚══════════════════════════════════════════════════╝");
 
 // Initialize database and seed roles

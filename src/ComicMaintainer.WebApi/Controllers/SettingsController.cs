@@ -46,7 +46,9 @@ public class SettingsController : ControllerBase
     [HttpGet]
     public ActionResult<object> GetAllSettings()
     {
-        return Ok(new
+        _logger.LogInformation("GetAllSettings endpoint called");
+        
+        var settings = new
         {
             filename_format = _appSettings.Value.FilenameFormat,
             issue_number_padding = _appSettings.Value.IssueNumberPadding,
@@ -54,7 +56,13 @@ public class SettingsController : ControllerBase
             watcher_enable_normalize = _appSettings.Value.WatcherEnableNormalize,
             log_max_bytes = _appSettings.Value.LogMaxBytes,
             database_cleanup_interval_hours = _appSettings.Value.DatabaseCleanupIntervalHours
-        });
+        };
+        
+        _logger.LogDebug("Returning settings: FilenameFormat={FilenameFormat}, IssueNumberPadding={IssueNumberPadding}, WatcherEnableRename={WatcherEnableRename}, WatcherEnableNormalize={WatcherEnableNormalize}, LogMaxBytes={LogMaxBytes}, DatabaseCleanupIntervalHours={DatabaseCleanupIntervalHours}",
+            settings.filename_format, settings.issue_number_padding, settings.watcher_enable_rename, 
+            settings.watcher_enable_normalize, settings.log_max_bytes, settings.database_cleanup_interval_hours);
+        
+        return Ok(settings);
     }
 
     [HttpGet("filename-format")]

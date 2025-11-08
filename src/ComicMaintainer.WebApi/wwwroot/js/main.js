@@ -2516,8 +2516,9 @@
                 // Load watcher enable normalize status
                 document.getElementById('watcherEnableNormalizeCheckbox').checked = settingsData.watcher_enable_normalize;
                 
-                // Load log max size
-                document.getElementById('logMaxSize').value = Math.round(settingsData.log_max_bytes);
+                // Load log max size (convert bytes to MB)
+                const BYTES_PER_MB = 1048576;
+                document.getElementById('logMaxSize').value = Math.round(settingsData.log_max_bytes / BYTES_PER_MB);
                 
                 // Load issue number padding
                 document.getElementById('issueNumberPadding').value = settingsData.issue_number_padding;

@@ -1,0 +1,21 @@
+{
+  "name": "comicmaintainer-tests",
+  "version": "1.0.0",
+  "description": "JavaScript tests for ComicMaintainer",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:integration": "node tests/js/run-integration-test.js"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "playwright": "^1.40.1"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "testMatch": [
+      "**/tests/js/**/*.test.js"
+    ]
+  }
+}

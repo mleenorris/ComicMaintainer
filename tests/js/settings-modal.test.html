@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings Modal Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-result { margin: 10px 0; padding: 10px; border-radius: 4px; }
+        .pass { background-color: #d4edda; color: #155724; }
+        .fail { background-color: #f8d7da; color: #721c24; }
+        #logMaxSize { padding: 8px; width: 200px; }
+    </style>
+</head>
+<body>
+    <h1>Settings Modal Integration Test</h1>
+    <p>Testing the conversion of log_max_bytes from bytes to MB</p>
+    
+    <div id="testResults"></div>
+    
+    <h2>Test Input Field</h2>
+    <label for="logMaxSize">Log Max Size (MB):</label>
+    <input type="number" id="logMaxSize" />
+    <p id="displayValue"></p>
+
+    <script>
+        // Simulate the API response
+        const mockSettingsData = {
+            filename_format: "{series} - Chapter {issue}",
+            issue_number_padding: 4,
+            watcher_enable_rename: true,
+            watcher_enable_normalize: true,
+            log_max_bytes: 5242880,  // 5 MB in bytes
+            database_cleanup_interval_hours: 12
+        };
+
+        // The fixed code from main.js
+        function loadLogMaxSizeFixed(settingsData) {
+            const BYTES_PER_MB = 1048576;
+            const logMaxSizeInput = document.getElementById('logMaxSize');
+            logMaxSizeInput.value = Math.round(settingsData.log_max_bytes / BYTES_PER_MB);
+            return parseInt(logMaxSizeInput.value);
+        }
+
+        // The old buggy code (for comparison)
+        function loadLogMaxSizeBuggy(settingsData) {
+            const logMaxSizeInput = document.getElementById('logMaxSize');
+            logMaxSizeInput.value = Math.round(settingsData.log_max_bytes);
+            return parseInt(logMaxSizeInput.value);
+        }
+
+        // Run tests
+        function runTests() {
+            const results = [];
+            const resultsDiv = document.getElementById('testResults');
+            
+            // Test 1: Fixed code should convert bytes to MB correctly
+            const fixedResult = loadLogMaxSizeFixed(mockSettingsData);
+            const expectedMB = 5;
+            const test1Pass = fixedResult === expectedMB;
+            results.push({
+                name: 'Test 1: Fixed code converts 5242880 bytes to 5 MB',
+                pass: test1Pass,
+                expected: expectedMB,
+                actual: fixedResult
+            });
+
+            // Test 2: Buggy code would set value in bytes (incorrect)
+            const buggyResult = loadLogMaxSizeBuggy(mockSettingsData);
+            const test2Pass = buggyResult === mockSettingsData.log_max_bytes;
+            results.push({
+                name: 'Test 2: Buggy code incorrectly sets value to bytes (5242880)',
+                pass: test2Pass,
+                expected: mockSettingsData.log_max_bytes,
+                actual: buggyResult
+            });
+
+            // Test 3: Different values
+            const testData2 = { ...mockSettingsData, log_max_bytes: 10485760 }; // 10 MB
+            const fixedResult2 = loadLogMaxSizeFixed(testData2);
+            const test3Pass = fixedResult2 === 10;
+            results.push({
+                name: 'Test 3: Fixed code converts 10485760 bytes to 10 MB',
+                pass: test3Pass,
+                expected: 10,
+                actual: fixedResult2
+            });
+
+            // Test 4: Edge case - 1 MB
+            const testData3 = { ...mockSettingsData, log_max_bytes: 1048576 }; // 1 MB
+            const fixedResult3 = loadLogMaxSizeFixed(testData3);
+            const test4Pass = fixedResult3 === 1;
+            results.push({
+                name: 'Test 4: Fixed code converts 1048576 bytes to 1 MB',
+                pass: test4Pass,
+                expected: 1,
+                actual: fixedResult3
+            });
+
+            // Test 5: Rounding case
+            const testData4 = { ...mockSettingsData, log_max_bytes: 1572864 }; // 1.5 MB
+            const fixedResult4 = loadLogMaxSizeFixed(testData4);
+            const test5Pass = fixedResult4 === 2; // Should round to 2
+            results.push({
+                name: 'Test 5: Fixed code rounds 1572864 bytes (1.5 MB) to 2 MB',
+                pass: test5Pass,
+                expected: 2,
+                actual: fixedResult4
+            });
+
+            // Display results
+            results.forEach(result => {
+                const div = document.createElement('div');
+                div.className = `test-result ${result.pass ? 'pass' : 'fail'}`;
+                div.innerHTML = `
+                    <strong>${result.pass ? '✓ PASS' : '✗ FAIL'}</strong>: ${result.name}<br>
+                    Expected: ${result.expected}, Got: ${result.actual}
+                `;
+                resultsDiv.appendChild(div);
+            });
+
+            // Summary
+            const passed = results.filter(r => r.pass).length;
+            const total = results.length;
+            const summaryDiv = document.createElement('div');
+            summaryDiv.className = `test-result ${passed === total ? 'pass' : 'fail'}`;
+            summaryDiv.innerHTML = `<strong>Summary: ${passed}/${total} tests passed</strong>`;
+            resultsDiv.appendChild(summaryDiv);
+
+            // Update display
+            document.getElementById('displayValue').textContent = 
+                `Current value in input: ${document.getElementById('logMaxSize').value} MB`;
+
+            // Return results for programmatic access
+            return { passed, total, results };
+        }
+
+        // Run tests when page loads
+        window.addEventListener('load', () => {
+            const testResults = runTests();
+            
+            // Set global variable for Playwright to access
+            window.testResults = testResults;
+            
+            // Mark test as complete
+            document.body.setAttribute('data-test-complete', 'true');
+        });
+    </script>
+</body>
+</html>

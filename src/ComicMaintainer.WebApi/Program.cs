@@ -128,12 +128,27 @@ builder.Services.Configure<JwtSettings>(options =>
 var configDirectory = builder.Configuration["AppSettings:ConfigDirectory"] ?? "/Config";
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
     ?? $"Data Source={Path.Combine(configDirectory, "comicmaintainer.db")}";
-builder.Services.AddDbContext<ComicMaintainerDbContext>(options =>
-    options.UseSqlite(connectionString));
 
-// Register DbContextFactory for singleton services that need scoped DbContext access
-builder.Services.AddDbContextFactory<ComicMaintainerDbContext>(options =>
-    options.UseSqlite(connectionString));
+// Register DbContextOptions as singleton for use by the factory
+var dbContextOptions = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+    .UseSqlite(connectionString)
+    .Options;
+
+builder.Services.AddSingleton(dbContextOptions);
+
+// Register IDbContextFactory using a simple implementation
+builder.Services.AddSingleton<IDbContextFactory<ComicMaintainerDbContext>>(sp =>
+{
+    var options = sp.GetRequiredService<DbContextOptions<ComicMaintainerDbContext>>();
+    return new SimpleDbContextFactory(options);
+});
+
+// Also register DbContext for scoped services (like Identity)  
+builder.Services.AddScoped(sp =>
+{
+    var options = sp.GetRequiredService<DbContextOptions<ComicMaintainerDbContext>>();
+    return new ComicMaintainerDbContext(options);
+});
 
 // Configure Data Protection to persist keys in Config directory
 try
@@ -551,6 +566,22 @@ static void LoadUserSettings(string configDir, AppSettings options)
     catch
     {
         // If any error occurs, just continue with default values
+    }
+}
+
+// Simple factory implementation for IDbContextFactory
+class SimpleDbContextFactory : IDbContextFactory<ComicMaintainerDbContext>
+{
+    private readonly DbContextOptions<ComicMaintainerDbContext> _options;
+
+    public SimpleDbContextFactory(DbContextOptions<ComicMaintainerDbContext> options)
+    {
+        _options = options;
+    }
+
+    public ComicMaintainerDbContext CreateDbContext()
+    {
+        return new ComicMaintainerDbContext(_options);
     }
 }
 

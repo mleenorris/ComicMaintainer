@@ -146,13 +146,13 @@ jobs:
         with:
           context: .
           push: false
-          tags: comictagger-watcher:scan
+          tags: comictagger-watcher:latest
           load: true
       
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'comictagger-watcher:scan'
+          image-ref: 'comictagger-watcher:latest'
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH,MEDIUM'
@@ -166,7 +166,7 @@ jobs:
       - name: Run Trivy vulnerability scanner (table format)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'comictagger-watcher:scan'
+          image-ref: 'comictagger-watcher:latest'
           format: 'table'
           output: 'trivy-results.txt'
           severity: 'CRITICAL,HIGH,MEDIUM'

@@ -2,6 +2,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -93,6 +94,7 @@ public class ComicReaderController : ControllerBase
     /// <param name="filePath">Path to the comic file</param>
     /// <param name="page">Page number (1-based index)</param>
     [HttpGet("page")]
+    [OutputCache(PolicyName = "ComicPages")]
     public async Task<IActionResult> GetPage([FromQuery] string filePath, [FromQuery] int page = 1)
     {
         if (string.IsNullOrEmpty(filePath))

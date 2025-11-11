@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Rar;
@@ -29,7 +30,7 @@ public class ComicReaderService : IComicReaderService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting page count for {FilePath}", filePath);
+            _logger.LogError(ex, "Error getting page count for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return 0;
         }
     }
@@ -40,7 +41,7 @@ public class ComicReaderService : IComicReaderService
         {
             if (!File.Exists(filePath))
             {
-                _logger.LogWarning("File not found: {FilePath}", filePath);
+                _logger.LogWarning("File not found: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 return null;
             }
 
@@ -60,7 +61,7 @@ public class ComicReaderService : IComicReaderService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting page {PageNumber} from {FilePath}", pageNumber, filePath);
+            _logger.LogError(ex, "Error getting page {PageNumber} from {FilePath}", pageNumber, LoggingHelper.SanitizePathForLog(filePath));
             return null;
         }
     }
@@ -71,7 +72,7 @@ public class ComicReaderService : IComicReaderService
         {
             if (!File.Exists(filePath))
             {
-                _logger.LogWarning("File not found: {FilePath}", filePath);
+                _logger.LogWarning("File not found: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 return new List<string>();
             }
 
@@ -91,7 +92,7 @@ public class ComicReaderService : IComicReaderService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting page names from {FilePath}", filePath);
+            _logger.LogError(ex, "Error getting page names from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return new List<string>();
         }
     }

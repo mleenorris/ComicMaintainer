@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
@@ -83,7 +84,7 @@ public class ComicReaderController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting comic info for {FilePath}", filePath);
+            _logger.LogError(ex, "Error getting comic info for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error reading comic file" });
         }
     }
@@ -104,7 +105,7 @@ public class ComicReaderController : ControllerBase
 
         if (!IsPathSafe(filePath))
         {
-            _logger.LogWarning("Attempt to access file outside watched directory: {FilePath}", filePath);
+            _logger.LogWarning("Attempt to access file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
@@ -136,7 +137,7 @@ public class ComicReaderController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting page {Page} from {FilePath}", page, filePath);
+            _logger.LogError(ex, "Error getting page {Page} from {FilePath}", page, LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error reading page" });
         }
     }
@@ -155,7 +156,7 @@ public class ComicReaderController : ControllerBase
 
         if (!IsPathSafe(filePath))
         {
-            _logger.LogWarning("Attempt to access file outside watched directory: {FilePath}", filePath);
+            _logger.LogWarning("Attempt to access file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
@@ -171,7 +172,7 @@ public class ComicReaderController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting pages from {FilePath}", filePath);
+            _logger.LogError(ex, "Error getting pages from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error reading comic file" });
         }
     }

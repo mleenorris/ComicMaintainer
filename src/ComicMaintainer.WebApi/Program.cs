@@ -247,6 +247,9 @@ builder.Services.AddSwaggerGen();
 // Add SignalR
 builder.Services.AddSignalR();
 
+// Add health checks
+builder.Services.AddHealthChecks();
+
 // Add CORS with security-conscious configuration
 builder.Services.AddCors(options =>
 {
@@ -290,6 +293,7 @@ builder.Services.AddSingleton<IComicProcessorService, ComicProcessorService>();
 builder.Services.AddSingleton<IFileWatcherService, FileWatcherService>();
 builder.Services.AddSingleton<IProcessingHistoryService, ProcessingHistoryService>();
 builder.Services.AddSingleton<ISettingsService, SettingsService>();
+builder.Services.AddSingleton<IComicReaderService, ComicReaderService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 
 // Add hosted service for file watcher
@@ -424,6 +428,9 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<ProgressHub>("/hubs/progress");
+
+// Map health check endpoints
+app.MapHealthChecks("/health");
 
 // Map default route to serve index.html for non-API routes only
 // This prevents the fallback from catching API requests, ensuring they always return JSON

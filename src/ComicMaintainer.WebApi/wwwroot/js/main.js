@@ -1110,6 +1110,9 @@
                                         <button class="dropdown-item" onclick="viewTags('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                             👁️ View/Edit
                                         </button>
+                                        <button class="dropdown-item" onclick="readComic('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                            📖 Read Comic
+                                        </button>
                                         <div class="dropdown-divider"></div>
                                         <button class="dropdown-item" onclick="processSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                             🚀 Process
@@ -1452,6 +1455,11 @@
             } catch (error) {
                 showMessage('Failed to load tags: ' + error.message, 'error');
             }
+        }
+        
+        function readComic(filepath) {
+            // Open comic reader in a new window/tab
+            window.open(`/reader.html?file=${encodeURIComponent(filepath)}`, '_blank');
         }
         
         function closeModal() {

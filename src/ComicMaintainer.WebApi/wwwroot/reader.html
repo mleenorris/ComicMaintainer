@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Comic Reader - Comic Maintainer</title>
+    <link rel="stylesheet" href="/css/style.css">
+    <style>
+        body.reader-mode {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: #000;
+            color: #fff;
+        }
+
+        .reader-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .reader-header {
+            background: rgba(0, 0, 0, 0.9);
+            padding: 0.5rem 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #333;
+            z-index: 1000;
+        }
+
+        .reader-header h1 {
+            font-size: 1rem;
+            margin: 0;
+            font-weight: normal;
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .reader-controls {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .reader-controls button,
+        .reader-controls select {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        .reader-controls button:hover,
+        .reader-controls select:hover {
+            background: #444;
+        }
+
+        .reader-controls button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .page-info {
+            font-size: 0.9rem;
+            color: #aaa;
+            white-space: nowrap;
+        }
+
+        .reader-content {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .page-image {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        .loading {
+            color: #fff;
+            font-size: 1.2rem;
+        }
+
+        .error {
+            color: #f44;
+            font-size: 1.2rem;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        .reader-footer {
+            background: rgba(0, 0, 0, 0.9);
+            padding: 1rem;
+            border-top: 1px solid #333;
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+        }
+
+        .reader-footer button {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 0.75rem 1.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .reader-footer button:hover {
+            background: #444;
+        }
+
+        .reader-footer button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .fullscreen-mode {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 9999;
+        }
+
+        .fullscreen-mode .reader-header,
+        .fullscreen-mode .reader-footer {
+            transition: opacity 0.3s;
+        }
+
+        .fullscreen-mode.auto-hide .reader-header,
+        .fullscreen-mode.auto-hide .reader-footer {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .fullscreen-mode.auto-hide:hover .reader-header,
+        .fullscreen-mode.auto-hide:hover .reader-footer {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        /* Keyboard shortcuts help */
+        .shortcuts-help {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.95);
+            border: 1px solid #555;
+            border-radius: 8px;
+            padding: 2rem;
+            z-index: 10000;
+            max-width: 400px;
+            display: none;
+        }
+
+        .shortcuts-help.show {
+            display: block;
+        }
+
+        .shortcuts-help h2 {
+            margin-top: 0;
+        }
+
+        .shortcuts-help ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .shortcuts-help li {
+            padding: 0.5rem 0;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .shortcuts-help kbd {
+            background: #333;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+
+        .close-help {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            width: 2rem;
+            height: 2rem;
+        }
+    </style>
+</head>
+<body class="reader-mode">
+    <div class="reader-container" id="readerContainer">
+        <div class="reader-header">
+            <button onclick="goBack()" title="Back to files">← Back</button>
+            <h1 id="comicTitle">Loading...</h1>
+            <div class="reader-controls">
+                <span class="page-info" id="pageInfo">Page 1 / 1</span>
+                <select id="pageSelect" onchange="goToPage(this.value)">
+                    <option value="1">Page 1</option>
+                </select>
+                <button onclick="toggleFullscreen()" id="fullscreenBtn">Fullscreen</button>
+                <button onclick="showHelp()" title="Keyboard shortcuts">?</button>
+            </div>
+        </div>
+        
+        <div class="reader-content" id="readerContent">
+            <div class="loading">Loading comic...</div>
+        </div>
+        
+        <div class="reader-footer">
+            <button id="prevBtn" onclick="previousPage()" disabled>← Previous</button>
+            <button onclick="toggleFullscreen()">Toggle Fullscreen</button>
+            <button id="nextBtn" onclick="nextPage()" disabled>Next →</button>
+        </div>
+    </div>
+
+    <div class="shortcuts-help" id="shortcutsHelp">
+        <button class="close-help" onclick="hideHelp()">×</button>
+        <h2>Keyboard Shortcuts</h2>
+        <ul>
+            <li><span>Previous Page</span> <kbd>←</kbd> or <kbd>A</kbd></li>
+            <li><span>Next Page</span> <kbd>→</kbd> or <kbd>D</kbd></li>
+            <li><span>First Page</span> <kbd>Home</kbd></li>
+            <li><span>Last Page</span> <kbd>End</kbd></li>
+            <li><span>Toggle Fullscreen</span> <kbd>F</kbd></li>
+            <li><span>Show Help</span> <kbd>?</kbd></li>
+            <li><span>Exit Reader</span> <kbd>Esc</kbd></li>
+        </ul>
+    </div>
+
+    <script>
+        let currentPage = 1;
+        let totalPages = 1;
+        let comicFilePath = '';
+        let token = '';
+
+        // Get parameters from URL
+        function getQueryParam(param) {
+            const urlParams = new URLSearchParams(window.location.search);
+            return urlParams.get(param);
+        }
+
+        // Initialize reader
+        async function initReader() {
+            comicFilePath = getQueryParam('file');
+            token = localStorage.getItem('token') || '';
+
+            if (!comicFilePath) {
+                showError('No comic file specified');
+                return;
+            }
+
+            if (!token) {
+                window.location.href = '/login.html';
+                return;
+            }
+
+            try {
+                // Get comic info
+                const response = await fetch(`/api/ComicReader/info?filePath=${encodeURIComponent(comicFilePath)}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        window.location.href = '/login.html';
+                        return;
+                    }
+                    throw new Error('Failed to load comic info');
+                }
+
+                const data = await response.json();
+                totalPages = data.pageCount;
+                
+                document.getElementById('comicTitle').textContent = data.fileName;
+                document.title = `${data.fileName} - Comic Reader`;
+                
+                // Populate page select
+                const pageSelect = document.getElementById('pageSelect');
+                pageSelect.innerHTML = '';
+                for (let i = 1; i <= totalPages; i++) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = `Page ${i}`;
+                    pageSelect.appendChild(option);
+                }
+
+                // Load first page
+                await loadPage(1);
+            } catch (error) {
+                console.error('Error initializing reader:', error);
+                showError('Failed to load comic: ' + error.message);
+            }
+        }
+
+        // Load a specific page
+        async function loadPage(pageNum) {
+            if (pageNum < 1 || pageNum > totalPages) {
+                return;
+            }
+
+            currentPage = pageNum;
+            updateUI();
+
+            const content = document.getElementById('readerContent');
+            content.innerHTML = '<div class="loading">Loading page...</div>';
+
+            try {
+                const response = await fetch(
+                    `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${token}`
+                        }
+                    }
+                );
+
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        window.location.href = '/login.html';
+                        return;
+                    }
+                    throw new Error('Failed to load page');
+                }
+
+                const blob = await response.blob();
+                const imageUrl = URL.createObjectURL(blob);
+                
+                content.innerHTML = `<img src="${imageUrl}" class="page-image" alt="Page ${pageNum}">`;
+            } catch (error) {
+                console.error('Error loading page:', error);
+                showError('Failed to load page: ' + error.message);
+            }
+        }
+
+        // Update UI elements
+        function updateUI() {
+            document.getElementById('pageInfo').textContent = `Page ${currentPage} / ${totalPages}`;
+            document.getElementById('pageSelect').value = currentPage;
+            document.getElementById('prevBtn').disabled = currentPage <= 1;
+            document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+        }
+
+        // Navigation functions
+        function previousPage() {
+            if (currentPage > 1) {
+                loadPage(currentPage - 1);
+            }
+        }
+
+        function nextPage() {
+            if (currentPage < totalPages) {
+                loadPage(currentPage + 1);
+            }
+        }
+
+        function goToPage(pageNum) {
+            loadPage(parseInt(pageNum));
+        }
+
+        function goBack() {
+            window.location.href = '/';
+        }
+
+        // Fullscreen functionality
+        function toggleFullscreen() {
+            const container = document.getElementById('readerContainer');
+            
+            if (!document.fullscreenElement) {
+                container.requestFullscreen().then(() => {
+                    container.classList.add('fullscreen-mode', 'auto-hide');
+                    document.getElementById('fullscreenBtn').textContent = 'Exit Fullscreen';
+                }).catch(err => {
+                    console.error('Error entering fullscreen:', err);
+                });
+            } else {
+                document.exitFullscreen().then(() => {
+                    container.classList.remove('fullscreen-mode', 'auto-hide');
+                    document.getElementById('fullscreenBtn').textContent = 'Fullscreen';
+                });
+            }
+        }
+
+        // Listen for fullscreen changes
+        document.addEventListener('fullscreenchange', () => {
+            const container = document.getElementById('readerContainer');
+            if (!document.fullscreenElement) {
+                container.classList.remove('fullscreen-mode', 'auto-hide');
+                document.getElementById('fullscreenBtn').textContent = 'Fullscreen';
+            }
+        });
+
+        // Help dialog
+        function showHelp() {
+            document.getElementById('shortcutsHelp').classList.add('show');
+        }
+
+        function hideHelp() {
+            document.getElementById('shortcutsHelp').classList.remove('show');
+        }
+
+        // Show error
+        function showError(message) {
+            const content = document.getElementById('readerContent');
+            content.innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Don't handle shortcuts if help is shown
+            if (document.getElementById('shortcutsHelp').classList.contains('show')) {
+                if (e.key === 'Escape') {
+                    hideHelp();
+                }
+                return;
+            }
+
+            switch (e.key) {
+                case 'ArrowLeft':
+                case 'a':
+                case 'A':
+                    previousPage();
+                    break;
+                case 'ArrowRight':
+                case 'd':
+                case 'D':
+                    nextPage();
+                    break;
+                case 'Home':
+                    loadPage(1);
+                    break;
+                case 'End':
+                    loadPage(totalPages);
+                    break;
+                case 'f':
+                case 'F':
+                    toggleFullscreen();
+                    break;
+                case '?':
+                    showHelp();
+                    break;
+                case 'Escape':
+                    if (document.fullscreenElement) {
+                        document.exitFullscreen();
+                    } else {
+                        goBack();
+                    }
+                    break;
+            }
+        });
+
+        // Initialize on load
+        window.addEventListener('DOMContentLoaded', initReader);
+    </script>
+</body>
+</html>

@@ -117,7 +117,7 @@
                         <span id="progressIndicatorText">⏳ Processing...</span>
                     </button>
                     <div class="header-search">
-                        <input type="text" id="headerSearchInput" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
+                        <input type="text" id="headerSearchInput" name="headerSearch" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
                     </div>
                     <div class="header-filter-dropdown">
                         <button class="header-filter-toggle" onclick="toggleHeaderFilterDropdown(event)" id="headerFilterToggle">
@@ -248,7 +248,7 @@
                 <button class="btn btn-small" id="nextBtn" onclick="nextPage()" disabled>Next →</button>
                 <div style="display: flex; align-items: center; gap: 8px; margin-left: 15px;">
                     <label for="perPageSelect" style="color: var(--text-secondary); font-size: 14px;">Files per page:</label>
-                    <select id="perPageSelect" onchange="changePerPage()" style="padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer;">
+                    <select id="perPageSelect" name="perPageSelect" onchange="changePerPage()" style="padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer;">
                         <option value="25">25</option>
                         <option value="50">50</option>
                         <option value="100" selected>100</option>
@@ -272,43 +272,43 @@
                 <form id="tagForm">
                     <div class="form-group">
                         <label for="title">Title</label>
-                        <input type="text" id="title" name="title">
+                        <input type="text" id="title" name="title" autocomplete="off">
                     </div>
                     <div class="form-group">
                         <label for="series">Series</label>
-                        <input type="text" id="series" name="series">
+                        <input type="text" id="series" name="series" autocomplete="off">
                     </div>
                     <div class="form-group">
                         <label for="issue">Issue</label>
-                        <input type="text" id="issue" name="issue">
+                        <input type="text" id="issue" name="issue" autocomplete="off">
                     </div>
                     <div class="form-group">
                         <label for="volume">Volume</label>
-                        <input type="text" id="volume" name="volume">
+                        <input type="text" id="volume" name="volume" autocomplete="off">
                     </div>
                     <div class="form-group">
                         <label for="publisher">Publisher</label>
-                        <input type="text" id="publisher" name="publisher">
+                        <input type="text" id="publisher" name="publisher" autocomplete="off">
                     </div>
                     <div class="form-group">
                         <label for="year">Year</label>
-                        <input type="text" id="year" name="year">
+                        <input type="text" id="year" name="year" autocomplete="off">
                     </div>
                     <div class="form-group">
                         <label for="month">Month</label>
-                        <input type="text" id="month" name="month">
+                        <input type="text" id="month" name="month" autocomplete="off">
                     </div>
                     <div class="form-group">
                         <label for="writer">Writer</label>
-                        <input type="text" id="writer" name="writer">
+                        <input type="text" id="writer" name="writer" autocomplete="off">
                     </div>
                     <div class="form-group">
                         <label for="summary">Summary</label>
-                        <textarea id="summary" name="summary"></textarea>
+                        <textarea id="summary" name="summary" autocomplete="off"></textarea>
                     </div>
                     <div class="form-group">
                         <label for="notes">Notes</label>
-                        <textarea id="notes" name="notes"></textarea>
+                        <textarea id="notes" name="notes" autocomplete="off"></textarea>
                     </div>
                 </form>
             </div>
@@ -334,19 +334,19 @@
                 <form id="batchForm">
                     <div class="form-group">
                         <label for="batch_series">Series</label>
-                        <input type="text" id="batch_series" name="series">
+                        <input type="text" id="batch_series" name="series" autocomplete="off">
                     </div>
                     <div class="form-group">
                         <label for="batch_publisher">Publisher</label>
-                        <input type="text" id="batch_publisher" name="publisher">
+                        <input type="text" id="batch_publisher" name="publisher" autocomplete="off">
                     </div>
                     <div class="form-group">
                         <label for="batch_year">Year</label>
-                        <input type="text" id="batch_year" name="year">
+                        <input type="text" id="batch_year" name="year" autocomplete="off">
                     </div>
                     <div class="form-group">
                         <label for="batch_writer">Writer</label>
-                        <input type="text" id="batch_writer" name="writer">
+                        <input type="text" id="batch_writer" name="writer" autocomplete="off">
                     </div>
                 </form>
             </div>
@@ -521,7 +521,7 @@
                 <h3 style="margin-bottom: 10px; color: var(--text-secondary);">Appearance</h3>
                 <div class="form-group">
                     <label for="themeSelect">Theme</label>
-                    <select id="themeSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);" onchange="updateThemeFromSettings()">
+                    <select id="themeSelect" name="theme" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);" onchange="updateThemeFromSettings()">
                         <option value="light">Light Mode</option>
                         <option value="dark">Dark Mode</option>
                     </select>
@@ -536,7 +536,7 @@
                 
                 <div class="form-group">
                     <label for="watcherEnableRenameCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="watcherEnableRenameCheckbox" onchange="updateWatcherEnableRename()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <input type="checkbox" id="watcherEnableRenameCheckbox" name="watcherEnableRename" onchange="updateWatcherEnableRename()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
                         <span>Enable file rename (🔵 renamed indicator)</span>
                     </label>
                     <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
@@ -546,7 +546,7 @@
                 
                 <div class="form-group" style="margin-top: 15px;">
                     <label for="watcherEnableNormalizeCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="watcherEnableNormalizeCheckbox" onchange="updateWatcherEnableNormalize()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <input type="checkbox" id="watcherEnableNormalizeCheckbox" name="watcherEnableNormalize" onchange="updateWatcherEnableNormalize()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
                         <span>Enable metadata normalize (🔴 normalized indicator)</span>
                     </label>
                     <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
@@ -557,7 +557,7 @@
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Log Rotation</h3>
                 <div class="form-group">
                     <label for="logMaxSize">Maximum Log File Size (MB)</label>
-                    <input type="number" id="logMaxSize" min="1" max="100" step="1" placeholder="5" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="100" step="1" placeholder="5" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
                         When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. Changes take effect on restart.
                     </small>
@@ -569,7 +569,7 @@
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Database Cleanup</h3>
                 <div class="form-group">
                     <label for="dbCleanupInterval">Cleanup Interval (Hours)</label>
-                    <input type="number" id="dbCleanupInterval" min="0" step="1" placeholder="12" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <input type="number" id="dbCleanupInterval" name="dbCleanupInterval" min="0" step="1" placeholder="12" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
                         How often the database should be cleaned of stale entries for files that no longer exist. Set to 0 to only run on startup. Changes take effect on restart.
                     </small>
@@ -593,7 +593,7 @@
                 </p>
                 <div class="form-group">
                     <label for="filenameFormat">Filename Template</label>
-                    <input type="text" id="filenameFormat" placeholder="{series} - Chapter {issue}">
+                    <input type="text" id="filenameFormat" name="filenameFormat" placeholder="{series} - Chapter {issue}" autocomplete="off">
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
                         Available placeholders:
                     </small>
@@ -620,7 +620,7 @@
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Issue Number Padding</h3>
                 <div class="form-group">
                     <label for="issueNumberPadding">Number of Digits for {issue} Placeholder</label>
-                    <input type="number" id="issueNumberPadding" min="0" max="10" step="1" placeholder="4" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <input type="number" id="issueNumberPadding" name="issueNumberPadding" min="0" max="10" step="1" placeholder="4" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
                         Controls how many digits the <code>{issue}</code> placeholder uses (default: 4). For example, with padding set to 4, issue 5 becomes 0005, with padding 3 it becomes 005, and with padding 0 it remains 5.
                     </small>
@@ -701,17 +701,17 @@
             <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
                 <div style="display: flex; gap: 10px; margin-bottom: 15px; align-items: center; flex-wrap: wrap;">
                     <label for="logType" style="color: var(--text-secondary); font-weight: 500;">Log Type:</label>
-                    <select id="logType" onchange="onLogTypeChange()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="logType" name="logType" onchange="onLogTypeChange()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
                         <option value="app" selected>Application Logs</option>
                         <option value="watcher">Watcher Logs</option>
                         <option value="debug">Debug Logs</option>
                     </select>
                     <label for="logFile" style="color: var(--text-secondary); font-weight: 500; margin-left: 10px;">Log File:</label>
-                    <select id="logFile" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary); min-width: 200px;">
+                    <select id="logFile" name="logFile" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary); min-width: 200px;">
                         <option value="">Loading...</option>
                     </select>
                     <label for="logLines" style="color: var(--text-secondary); font-weight: 500; margin-left: 10px;">Lines:</label>
-                    <select id="logLines" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="logLines" name="logLines" onchange="loadLogs()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
                         <option value="100">Last 100</option>
                         <option value="500" selected>Last 500</option>
                         <option value="1000">Last 1000</option>

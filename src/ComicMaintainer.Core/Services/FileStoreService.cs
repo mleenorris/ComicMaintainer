@@ -762,4 +762,77 @@ public class FileStoreService : IFileStoreService
             await MarkFileReadAsync(filePath, read, cancellationToken);
         }
     }
+
+    public async Task SaveReadingProgressAsync(string filePath, int currentPage, CancellationToken cancellationToken = default)
+    {
+        if (currentPage < 1)
+        {
+            _logger.LogWarning("Invalid page number {Page} for {FilePath}, must be >= 1", currentPage, SanitizeForLogging(filePath));
+            return;
+        }
+
+        try
+        {
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            
+            var readStatus = await dbContext.FileReadStatuses
+                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+
+            if (readStatus != null)
+            {
+                readStatus.CurrentPage = currentPage;
+                readStatus.LastReadDate = DateTime.UtcNow;
+                readStatus.UpdatedAt = DateTime.UtcNow;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                _logger.LogDebug("Updated reading progress for {FilePath} to page {Page}", SanitizeForLogging(filePath), currentPage);
+            }
+            else
+            {
+                // Create new read status entry
+                readStatus = new FileReadStatusEntity
+                {
+                    FilePath = filePath,
+                    CurrentPage = currentPage,
+                    IsRead = false,
+                    LastReadDate = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                dbContext.FileReadStatuses.Add(readStatus);
+                await dbContext.SaveChangesAsync(cancellationToken);
+                _logger.LogDebug("Created read status and set page {Page} for {FilePath}", currentPage, SanitizeForLogging(filePath));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error saving reading progress for {FilePath}", SanitizeForLogging(filePath));
+        }
+    }
+
+    public async Task<int> GetReadingProgressAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            
+            var readStatus = await dbContext.FileReadStatuses
+                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+
+            if (readStatus != null)
+            {
+                _logger.LogDebug("Retrieved reading progress for {FilePath}: page {Page}", SanitizeForLogging(filePath), readStatus.CurrentPage);
+                return readStatus.CurrentPage;
+            }
+            else
+            {
+                _logger.LogDebug("No reading progress found for {FilePath}, returning page 1", SanitizeForLogging(filePath));
+                return 1; // Default to page 1 if no progress saved
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting reading progress for {FilePath}", SanitizeForLogging(filePath));
+            return 1; // Default to page 1 on error
+        }
+    }
 }

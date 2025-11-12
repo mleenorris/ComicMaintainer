@@ -86,6 +86,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.FilePath).IsRequired().HasMaxLength(2048);
+            entity.Property(e => e.CurrentPage).HasDefaultValue(1);
             entity.HasIndex(e => e.FilePath).IsUnique();
             entity.HasIndex(e => e.IsRead);
             entity.HasIndex(e => e.LastReadDate);
@@ -152,6 +153,7 @@ public class FileReadStatusEntity
     public int Id { get; set; }
     public string FilePath { get; set; } = string.Empty;
     public bool IsRead { get; set; }
+    public int CurrentPage { get; set; } = 1; // Track current page for resuming reading
     public DateTime? LastReadDate { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

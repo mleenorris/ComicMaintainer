@@ -223,7 +223,11 @@
         // Server-Sent Events connection for real-time updates
         let eventSource = null;
         let eventSourceReconnectTimer = null;
-        const EVENT_SOURCE_RECONNECT_DELAY = 5000; // 5 seconds
+        const EVENT_SOURCE_RECONNECT_DELAY = 5000; // Initial delay: 5 seconds
+        const EVENT_SOURCE_MAX_RETRY_DELAY = 60000; // Maximum delay: 60 seconds
+        const EVENT_SOURCE_MAX_RETRIES = 20; // Stop trying after 20 consecutive failures
+        let eventSourceRetryCount = 0;
+        let eventSourceRetryDelay = EVENT_SOURCE_RECONNECT_DELAY;
         
         // Initialize SSE connection
         function initEventSource() {
@@ -233,17 +237,37 @@
             }
             
             try {
+                // Check if we've exceeded max retry attempts
+                if (eventSourceRetryCount >= EVENT_SOURCE_MAX_RETRIES) {
+                    console.error('SSE: Maximum retry attempts reached. Please refresh the page or check your connection.');
+                    showMessage('Real-time updates unavailable. Please refresh the page.', 'error');
+                    return;
+                }
+                
                 // EventSource doesn't support custom headers, so we pass the token as a query parameter
                 // This is only needed for JWT authentication; Authelia uses cookies/headers from the proxy
                 const token = localStorage.getItem('jwt_token');
+                
+                // Check if token exists and is expired (for JWT auth)
+                if (token && isTokenExpired(token)) {
+                    console.warn('SSE: JWT token is expired, redirecting to login');
+                    redirectToLogin();
+                    return;
+                }
+                
                 const streamUrl = token 
                     ? apiUrl(`/api/events/stream?access_token=${encodeURIComponent(token)}`)
                     : apiUrl('/api/events/stream');
                 
+                console.log('SSE: Connecting to event stream...');
                 eventSource = new EventSource(streamUrl);
                 
                 eventSource.onopen = () => {
                     console.log('SSE: Connected to event stream');
+                    
+                    // Reset retry counters on successful connection
+                    eventSourceRetryCount = 0;
+                    eventSourceRetryDelay = EVENT_SOURCE_RECONNECT_DELAY;
                     
                     // When SSE reconnects and we have an active job, poll for its current status
                     // This ensures we don't miss updates that occurred while disconnected
@@ -263,19 +287,57 @@
                 };
                 
                 eventSource.onerror = (error) => {
-                    console.warn('SSE: Connection error, will retry in 5s', error);
-                    eventSource.close();
+                    // EventSource automatically attempts to reconnect, but readyState tells us the status
+                    // readyState 0 = CONNECTING, 1 = OPEN, 2 = CLOSED
+                    const state = eventSource.readyState;
                     
-                    // Auto-reconnect after delay
-                    if (eventSourceReconnectTimer) {
-                        clearTimeout(eventSourceReconnectTimer);
+                    if (state === EventSource.CLOSED) {
+                        eventSourceRetryCount++;
+                        console.warn(`SSE: Connection closed (attempt ${eventSourceRetryCount}/${EVENT_SOURCE_MAX_RETRIES}), will retry in ${eventSourceRetryDelay/1000}s`);
+                        
+                        // Close the connection to stop automatic retry attempts
+                        eventSource.close();
+                        
+                        // Check if token is expired (for JWT auth)
+                        const token = localStorage.getItem('jwt_token');
+                        if (token && isTokenExpired(token)) {
+                            console.warn('SSE: JWT token expired during connection');
+                            redirectToLogin();
+                            return;
+                        }
+                        
+                        // Schedule reconnection with exponential backoff
+                        if (eventSourceReconnectTimer) {
+                            clearTimeout(eventSourceReconnectTimer);
+                        }
+                        eventSourceReconnectTimer = setTimeout(() => {
+                            initEventSource();
+                            // Increase delay for next retry (exponential backoff)
+                            eventSourceRetryDelay = Math.min(eventSourceRetryDelay * 1.5, EVENT_SOURCE_MAX_RETRY_DELAY);
+                        }, eventSourceRetryDelay);
+                    } else if (state === EventSource.CONNECTING) {
+                        // EventSource is attempting to reconnect automatically
+                        console.log('SSE: Reconnecting...');
                     }
-                    eventSourceReconnectTimer = setTimeout(initEventSource, EVENT_SOURCE_RECONNECT_DELAY);
                 };
             } catch (error) {
                 console.error('SSE: Failed to initialize EventSource:', error);
-                // Fallback to polling if SSE is not supported
-                console.log('SSE: Falling back to polling mechanisms');
+                eventSourceRetryCount++;
+                
+                // Retry with exponential backoff
+                if (eventSourceRetryCount < EVENT_SOURCE_MAX_RETRIES) {
+                    console.log(`SSE: Will retry in ${eventSourceRetryDelay/1000}s (attempt ${eventSourceRetryCount}/${EVENT_SOURCE_MAX_RETRIES})`);
+                    if (eventSourceReconnectTimer) {
+                        clearTimeout(eventSourceReconnectTimer);
+                    }
+                    eventSourceReconnectTimer = setTimeout(() => {
+                        initEventSource();
+                        eventSourceRetryDelay = Math.min(eventSourceRetryDelay * 1.5, EVENT_SOURCE_MAX_RETRY_DELAY);
+                    }, eventSourceRetryDelay);
+                } else {
+                    console.error('SSE: Maximum retry attempts reached');
+                    showMessage('Real-time updates unavailable. Please refresh the page.', 'error');
+                }
             }
         }
         
@@ -415,6 +477,9 @@
                 eventSource.close();
                 eventSource = null;
             }
+            // Reset retry counters
+            eventSourceRetryCount = 0;
+            eventSourceRetryDelay = EVENT_SOURCE_RECONNECT_DELAY;
         }
         
         // API helper functions for server-side preferences

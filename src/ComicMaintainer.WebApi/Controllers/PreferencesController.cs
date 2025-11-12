@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -36,9 +37,9 @@ public class PreferencesController : ControllerBase
         // For now, just acknowledge the save
         // In the future, this could be persisted to the database
         _logger.LogInformation("Preferences updated: Theme={Theme}, PerPage={PerPage}, ReadingMode={ReadingMode}", 
-            preferences.Theme ?? "not specified", 
+            LoggingHelper.SanitizeForLog(preferences.Theme ?? "not specified"), 
             preferences.PerPage,
-            preferences.ReadingMode ?? "not specified");
+            LoggingHelper.SanitizeForLog(preferences.ReadingMode ?? "not specified"));
         return Ok(new { message = "Preferences updated successfully" });
     }
 

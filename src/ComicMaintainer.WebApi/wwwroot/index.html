@@ -14,6 +14,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="ComicMaintainer">
     
+    <!-- Cache Control for HTML -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    
     <!-- PWA Manifest -->
     <link rel="manifest" href="/manifest.json">
     
@@ -23,7 +28,30 @@
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     
     <!-- External CSS -->
-    <link rel="stylesheet" href="/css/main.css">
+    <link rel="stylesheet" href="/css/main.css" id="mainCss">
+    
+    <!-- Version-based cache busting script -->
+    <script>
+        // Fetch version and update asset URLs to include version parameter for cache busting
+        (async function() {
+            try {
+                const response = await fetch('/api/version');
+                const data = await response.json();
+                const version = data.version;
+                
+                // Update CSS link with version parameter
+                const cssLink = document.getElementById('mainCss');
+                if (cssLink) {
+                    cssLink.href = `/css/main.css?v=${version}`;
+                }
+                
+                // Store version for JS file to use later
+                window.APP_VERSION = version;
+            } catch (error) {
+                console.error('Failed to fetch version for cache busting:', error);
+            }
+        })();
+    </script>
 </head>
 <body>
     <div class="header">
@@ -842,7 +870,13 @@
             console.log('[API_URL] Building URL - BASE_PATH:', BASE_PATH, 'path:', path, 'result:', fullUrl);
             return fullUrl;
         }
+        
+        // Dynamically load main.js with version for cache busting
+        (function() {
+            const script = document.createElement('script');
+            script.src = window.APP_VERSION ? `/js/main.js?v=${window.APP_VERSION}` : '/js/main.js';
+            document.body.appendChild(script);
+        })();
     </script>
-    <script src="/js/main.js"></script>
 </body>
 </html>

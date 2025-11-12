@@ -267,7 +267,7 @@
         // Initialize reader
         async function initReader() {
             comicFilePath = getQueryParam('file');
-            token = localStorage.getItem('token') || '';
+            token = localStorage.getItem('jwt_token') || '';
 
             if (!comicFilePath) {
                 showError('No comic file specified');

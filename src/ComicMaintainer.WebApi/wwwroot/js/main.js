@@ -155,7 +155,23 @@
             }
             
             try {
-                eventSource = new EventSource(apiUrl('/api/events/stream'));
+                // Get JWT token for authentication
+                const token = localStorage.getItem('jwt_token');
+                if (!token) {
+                    console.warn('SSE: No JWT token available, cannot establish connection');
+                    return;
+                }
+                
+                // Check if token is expired before connecting
+                if (isTokenExpired(token)) {
+                    console.log('SSE: JWT token expired, redirecting to login');
+                    redirectToLogin();
+                    return;
+                }
+                
+                // Pass token as query parameter since EventSource doesn't support custom headers
+                const streamUrl = apiUrl('/api/events/stream') + '?token=' + encodeURIComponent(token);
+                eventSource = new EventSource(streamUrl);
                 
                 eventSource.onopen = () => {
                     console.log('SSE: Connected to event stream');

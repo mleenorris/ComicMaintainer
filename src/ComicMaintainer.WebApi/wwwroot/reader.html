@@ -517,6 +517,48 @@
                 console.error(`Error loading page ${pageNum}:`, error);
             }
         }
+        
+        // Load a single page in webcomic mode and return the image element
+        async function loadWebcomicPageWithReturn(pageNum, container) {
+            if (loadedPages.has(pageNum)) return null;
+            
+            try {
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const fetchOptions = {
+                    credentials: 'include'
+                };
+                
+                if (!isAutheliaAuth && token) {
+                    fetchOptions.headers = {
+                        'Authorization': `Bearer ${token}`
+                    };
+                }
+                
+                const response = await fetch(
+                    `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
+                    fetchOptions
+                );
+
+                if (!response.ok) {
+                    throw new Error('Failed to load page');
+                }
+
+                const blob = await response.blob();
+                const imageUrl = URL.createObjectURL(blob);
+                
+                const img = document.createElement('img');
+                img.src = imageUrl;
+                img.alt = `Page ${pageNum}`;
+                img.dataset.page = pageNum;
+                container.appendChild(img);
+                
+                loadedPages.add(pageNum);
+                return img;
+            } catch (error) {
+                console.error(`Error loading page ${pageNum}:`, error);
+                return null;
+            }
+        }
 
         // Setup scroll listener for webcomic mode
         function setupWebcomicScrollListener() {
@@ -593,7 +635,7 @@
                 const loadingDiv = document.createElement('div');
                 loadingDiv.className = 'loading-indicator';
                 loadingDiv.textContent = `Loading next: ${nextComicInfo.fileName}...`;
-                loadingDiv.id = 'nextComicLoadingIndicator'; // Add ID to reference it for scroll position
+                loadingDiv.id = 'nextComicLoadingIndicator';
                 container.appendChild(loadingDiv);
                 
                 // Load next comic info
@@ -624,29 +666,48 @@
                     // Reset hasMarkedAsRead for the new comic
                     hasMarkedAsRead = false;
                     
-                    // Save scroll position before removing loading indicator
-                    const scrollPositionBeforeLoad = loadingDiv.offsetTop;
-                    
                     // Remove loading indicator
                     loadingDiv.remove();
                     
-                    // Mark the start position for the new comic
+                    // Mark the start position for the new comic BEFORE loading pages
                     const startMarker = document.createElement('div');
                     startMarker.id = 'newComicStartMarker';
                     startMarker.style.height = '1px';
                     container.appendChild(startMarker);
                     
-                    // Load all pages of next comic
+                    // Keep track of the first image element for proper scrolling
+                    const firstImageIndex = container.children.length;
+                    
+                    // Load all pages of next comic and collect image elements
+                    const imageElements = [];
                     for (let i = 1; i <= totalPages; i++) {
-                        await loadWebcomicPage(i, container);
+                        const imgElement = await loadWebcomicPageWithReturn(i, container);
+                        if (imgElement) {
+                            imageElements.push(imgElement);
+                        }
                     }
                     
-                    // Scroll to the beginning of the new comic
-                    const content = document.getElementById('readerContent');
-                    startMarker.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    
-                    // Remove the marker after scrolling
-                    setTimeout(() => startMarker.remove(), 100);
+                    // Wait for the first image to actually load before scrolling
+                    if (imageElements.length > 0) {
+                        const firstImage = imageElements[0];
+                        if (firstImage.complete) {
+                            // Image already loaded, scroll immediately
+                            scrollToStartMarker(startMarker);
+                        } else {
+                            // Wait for first image to load
+                            firstImage.addEventListener('load', () => {
+                                scrollToStartMarker(startMarker);
+                            }, { once: true });
+                            
+                            // Fallback in case load event doesn't fire
+                            setTimeout(() => {
+                                scrollToStartMarker(startMarker);
+                            }, 1000);
+                        }
+                    } else {
+                        // No images, just scroll to marker
+                        scrollToStartMarker(startMarker);
+                    }
                     
                     // Prefetch the next one
                     await prefetchNextComic();
@@ -656,6 +717,18 @@
                 console.error('Error loading next comic:', error);
                 isLoadingNext = false;
             }
+        }
+        
+        // Helper function to scroll to the start marker
+        function scrollToStartMarker(marker) {
+            const content = document.getElementById('readerContent');
+            marker.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            // Remove the marker after scrolling
+            setTimeout(() => {
+                if (marker.parentNode) {
+                    marker.remove();
+                }
+            }, 100);
         }
 
         // Load a specific page

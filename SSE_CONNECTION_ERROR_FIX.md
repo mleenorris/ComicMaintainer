@@ -12,29 +12,73 @@ EventSource {readyState: 2, ...}  // readyState 2 = CLOSED
 This created an infinite retry loop that:
 - Generated excessive console warnings
 - Created unnecessary network traffic
-- Didn't handle authentication failures properly
+- Didn't handle authentication failures properly (for both JWT and Authelia)
 - Provided no feedback to users about the issue
 - Made debugging difficult
 
 ## Root Causes
 
-1. **No Token Expiration Check**: The code didn't check if JWT tokens were expired before attempting connection
-2. **Infinite Retries**: No maximum retry limit - would retry forever even if the issue was permanent
-3. **Fixed Retry Delay**: Always retried after 5 seconds, regardless of failure count
-4. **Poor Error Detection**: Didn't check EventSource readyState to understand connection status
-5. **Limited Logging**: Minimal information about retry attempts and delays
+1. **No Authentication Check**: The code didn't check if authentication was still valid before attempting connection
+2. **JWT-Only Validation**: Only checked JWT token expiration, ignoring Authelia session expiration
+3. **Infinite Retries**: No maximum retry limit - would retry forever even if the issue was permanent
+4. **Fixed Retry Delay**: Always retried after 5 seconds, regardless of failure count
+5. **Poor Error Detection**: Didn't check EventSource readyState to understand connection status
+6. **Limited Logging**: Minimal information about retry attempts and delays
 
 ## Solution Implemented
 
-### 1. Token Expiration Validation
+### 1. Authentication Status Validation (JWT and Authelia)
+
+**New Helper Function:**
+```javascript
+async function checkAuthenticationStatus() {
+    try {
+        // First check if using Authelia authentication
+        const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+        
+        if (isAutheliaAuth) {
+            // For Authelia, check server auth status to verify session is still valid
+            const response = await fetch(apiUrl('/api/auth/status'), {
+                credentials: 'include' // Important for Authelia cookies
+            });
+            
+            if (response.ok) {
+                const authStatus = await response.json();
+                if (authStatus.autheliaEnabled && authStatus.isAuthenticated) {
+                    return true; // Authelia session is still valid
+                }
+            }
+            // If we get here, Authelia session is invalid
+            console.warn('[AUTH] Authelia session expired or invalid');
+            return false;
+        } else {
+            // For JWT authentication, check if token exists and is not expired
+            const token = localStorage.getItem('jwt_token');
+            if (!token) {
+                console.warn('[AUTH] No JWT token found');
+                return false;
+            }
+            
+            if (isTokenExpired(token)) {
+                console.warn('[AUTH] JWT token expired');
+                return false;
+            }
+            
+            return true; // JWT token is valid
+        }
+    } catch (error) {
+        console.error('[AUTH] Error checking authentication status:', error);
+        return false;
+    }
+}
+```
 
 **Before Connection:**
 ```javascript
-const token = localStorage.getItem('jwt_token');
-
-// Check if token exists and is expired (for JWT auth)
-if (token && isTokenExpired(token)) {
-    console.warn('SSE: JWT token is expired, redirecting to login');
+// Check authentication status for both JWT and Authelia before connecting
+const isAuthenticated = await checkAuthenticationStatus();
+if (!isAuthenticated) {
+    console.warn('SSE: Authentication invalid, redirecting to login');
     redirectToLogin();
     return;
 }
@@ -42,19 +86,36 @@ if (token && isTokenExpired(token)) {
 
 **During Error Handling:**
 ```javascript
-// Check if token is expired (for JWT auth)
-const token = localStorage.getItem('jwt_token');
-if (token && isTokenExpired(token)) {
-    console.warn('SSE: JWT token expired during connection');
+// Check authentication status for both JWT and Authelia
+const isAuthenticated = await checkAuthenticationStatus();
+if (!isAuthenticated) {
+    console.warn('SSE: Authentication expired during connection');
     redirectToLogin();
     return;
 }
 ```
 
 **Benefits:**
-- Prevents connection attempts with expired tokens
-- Redirects users to login immediately
+- Works with both JWT and Authelia authentication
+- Prevents connection attempts with expired/invalid authentication
+- Detects Authelia session expiration by checking server auth status
+- Redirects users to login immediately when authentication fails
 - Avoids infinite retry loops with invalid credentials
+
+**How It Works:**
+
+For **JWT Authentication**:
+1. Checks if JWT token exists in localStorage
+2. Validates token hasn't expired using `isTokenExpired()`
+3. Returns true if valid, false if expired or missing
+
+For **Authelia Authentication**:
+1. Detects Authelia mode by checking `authelia_authenticated` flag in localStorage
+2. Makes API call to `/api/auth/status` with cookies
+3. Server validates Authelia session via forwarded headers from reverse proxy
+4. Returns true if session is valid, false if expired or invalid
+
+This ensures both authentication methods are properly validated before and during SSE connection attempts.
 
 ### 2. Exponential Backoff
 
@@ -325,11 +386,20 @@ const EVENT_SOURCE_MAX_RETRIES = 20; // Stop trying after 20 consecutive failure
 ### Issue: Still seeing connection errors
 
 **Solution:**
+
+**For JWT Authentication:**
 1. Check browser console for specific error messages
 2. Verify token is present in localStorage: `localStorage.getItem('jwt_token')`
 3. Check if token is expired: Open Developer Tools → Application → Local Storage
 4. Try logging out and back in to get a fresh token
 5. Check network tab for actual HTTP response from `/api/events/stream`
+
+**For Authelia Authentication:**
+1. Check if `authelia_authenticated` flag is set: `localStorage.getItem('authelia_authenticated')`
+2. Verify Authelia session is still valid by accessing `/api/auth/status`
+3. Check that Authelia cookies are being sent (Network tab → Cookies)
+4. Verify reverse proxy is forwarding authentication headers correctly
+5. Check Authelia logs for session expiration or authentication errors
 
 ### Issue: Gets to max retries and stops
 
@@ -338,24 +408,39 @@ const EVENT_SOURCE_MAX_RETRIES = 20; // Stop trying after 20 consecutive failure
 2. Check server logs for authentication errors
 3. Verify the `/api/events/stream` endpoint is accessible
 4. Ensure proper CORS/proxy configuration
-5. Refresh the page to reset and try again
+5. **For Authelia**: Verify reverse proxy configuration and header forwarding
+6. Refresh the page to reset and try again
 
-### Issue: Token keeps expiring
+### Issue: Authentication keeps expiring (JWT)
 
 **Solution:**
 1. Check token expiration time (default is usually 24 hours)
 2. Implement token refresh mechanism if needed
 3. Increase token lifetime in backend configuration
-4. Consider using Authelia which uses cookies instead
+4. Consider using Authelia which uses session cookies instead
+
+### Issue: Authentication keeps expiring (Authelia)
+
+**Solution:**
+1. Check Authelia session configuration (session.expiration, session.inactivity)
+2. Verify cookies are not being cleared by browser or extensions
+3. Ensure reverse proxy is maintaining session state
+4. Check if Authelia session is being refreshed on activity
+5. Review Authelia logs for session expiration events
 
 ## Files Modified
 
 - **src/ComicMaintainer.WebApi/wwwroot/js/main.js**
-  - Added retry counter and delay variables
-  - Enhanced `initEventSource()` function with token checks and retry logic
-  - Improved error handling in `eventSource.onerror`
+  - Added `checkAuthenticationStatus()` helper function for both JWT and Authelia
+  - Made `initEventSource()` function async to support authentication checks
+  - Enhanced authentication validation before connection attempts
+  - Made `eventSource.onerror` handler async
+  - Improved error handling to check both JWT and Authelia authentication
   - Updated `cleanupEventSource()` to reset counters
   - Added detailed logging throughout
+- **SSE_CONNECTION_ERROR_FIX.md**
+  - Updated documentation to include Authelia authentication support
+  - Added troubleshooting sections for both JWT and Authelia
 
 ## Related Documentation
 

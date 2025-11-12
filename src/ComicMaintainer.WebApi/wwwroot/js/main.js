@@ -229,8 +229,50 @@
         let eventSourceRetryCount = 0;
         let eventSourceRetryDelay = EVENT_SOURCE_RECONNECT_DELAY;
         
+        // Helper function to check if user is still authenticated (supports both JWT and Authelia)
+        async function checkAuthenticationStatus() {
+            try {
+                // First check if using Authelia authentication
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                
+                if (isAutheliaAuth) {
+                    // For Authelia, check server auth status to verify session is still valid
+                    const response = await fetch(apiUrl('/api/auth/status'), {
+                        credentials: 'include' // Important for Authelia cookies
+                    });
+                    
+                    if (response.ok) {
+                        const authStatus = await response.json();
+                        if (authStatus.autheliaEnabled && authStatus.isAuthenticated) {
+                            return true; // Authelia session is still valid
+                        }
+                    }
+                    // If we get here, Authelia session is invalid
+                    console.warn('[AUTH] Authelia session expired or invalid');
+                    return false;
+                } else {
+                    // For JWT authentication, check if token exists and is not expired
+                    const token = localStorage.getItem('jwt_token');
+                    if (!token) {
+                        console.warn('[AUTH] No JWT token found');
+                        return false;
+                    }
+                    
+                    if (isTokenExpired(token)) {
+                        console.warn('[AUTH] JWT token expired');
+                        return false;
+                    }
+                    
+                    return true; // JWT token is valid
+                }
+            } catch (error) {
+                console.error('[AUTH] Error checking authentication status:', error);
+                return false;
+            }
+        }
+        
         // Initialize SSE connection
-        function initEventSource() {
+        async function initEventSource() {
             // Close existing connection if any
             if (eventSource) {
                 eventSource.close();
@@ -244,16 +286,17 @@
                     return;
                 }
                 
-                // EventSource doesn't support custom headers, so we pass the token as a query parameter
-                // This is only needed for JWT authentication; Authelia uses cookies/headers from the proxy
-                const token = localStorage.getItem('jwt_token');
-                
-                // Check if token exists and is expired (for JWT auth)
-                if (token && isTokenExpired(token)) {
-                    console.warn('SSE: JWT token is expired, redirecting to login');
+                // Check authentication status for both JWT and Authelia before connecting
+                const isAuthenticated = await checkAuthenticationStatus();
+                if (!isAuthenticated) {
+                    console.warn('SSE: Authentication invalid, redirecting to login');
                     redirectToLogin();
                     return;
                 }
+                
+                // EventSource doesn't support custom headers, so we pass the token as a query parameter
+                // This is only needed for JWT authentication; Authelia uses cookies/headers from the proxy
+                const token = localStorage.getItem('jwt_token');
                 
                 const streamUrl = token 
                     ? apiUrl(`/api/events/stream?access_token=${encodeURIComponent(token)}`)
@@ -286,7 +329,7 @@
                     }
                 };
                 
-                eventSource.onerror = (error) => {
+                eventSource.onerror = async (error) => {
                     // EventSource automatically attempts to reconnect, but readyState tells us the status
                     // readyState 0 = CONNECTING, 1 = OPEN, 2 = CLOSED
                     const state = eventSource.readyState;
@@ -298,10 +341,10 @@
                         // Close the connection to stop automatic retry attempts
                         eventSource.close();
                         
-                        // Check if token is expired (for JWT auth)
-                        const token = localStorage.getItem('jwt_token');
-                        if (token && isTokenExpired(token)) {
-                            console.warn('SSE: JWT token expired during connection');
+                        // Check authentication status for both JWT and Authelia
+                        const isAuthenticated = await checkAuthenticationStatus();
+                        if (!isAuthenticated) {
+                            console.warn('SSE: Authentication expired during connection');
                             redirectToLogin();
                             return;
                         }

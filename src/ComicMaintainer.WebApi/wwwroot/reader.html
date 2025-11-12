@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Comic Reader - Comic Maintainer</title>
-    <link rel="stylesheet" href="/css/style.css">
+    <link rel="stylesheet" href="/css/main.css">
     <style>
         body.reader-mode {
             margin: 0;
@@ -603,11 +603,6 @@
             } catch (error) {
                 console.error('Error loading next comic:', error);
                 isLoadingNext = false;
-            }
-        }
-            } catch (error) {
-                console.error('Error initializing reader:', error);
-                showError('Failed to load comic: ' + error.message);
             }
         }
 

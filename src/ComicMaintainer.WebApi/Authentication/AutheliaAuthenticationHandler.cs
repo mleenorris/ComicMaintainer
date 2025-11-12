@@ -232,10 +232,22 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
     private static string GenerateRandomPassword()
     {
         // Generate a secure random password (won't be used but required for user creation)
+        // Using RandomNumberGenerator for cryptographic randomness
         const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
-        var random = new Random();
-        return new string(Enumerable.Repeat(chars, 32)
-            .Select(s => s[random.Next(s.Length)]).ToArray());
+        var password = new char[32];
+        var randomBytes = new byte[32];
+        
+        using (var rng = System.Security.Cryptography.RandomNumberGenerator.Create())
+        {
+            rng.GetBytes(randomBytes);
+        }
+        
+        for (int i = 0; i < 32; i++)
+        {
+            password[i] = chars[randomBytes[i] % chars.Length];
+        }
+        
+        return new string(password);
     }
 }
 

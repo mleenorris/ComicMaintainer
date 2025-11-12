@@ -369,6 +369,85 @@ public class AuthControllerTests
         Assert.NotNull(okResult.Value);
     }
 
+    [Fact]
+    public void GetCurrentUser_WithAutheliaAuthentication_ReturnsAutheliaUsername()
+    {
+        // Arrange - Simulate Authelia authentication with username from header
+        // This tests the fix for the issue where "admin" was shown instead of the Authelia username
+        var autheliaUsername = "john.doe";
+        var autheliaEmail = "john@example.com";
+        
+        // Setup authenticated user with Authelia auth method claim
+        var claims = new List<System.Security.Claims.Claim>
+        {
+            new(System.Security.Claims.ClaimTypes.NameIdentifier, "user-id-456"),
+            new(System.Security.Claims.ClaimTypes.Name, autheliaUsername),  // This should be from Authelia header
+            new(System.Security.Claims.ClaimTypes.Email, autheliaEmail),
+            new(System.Security.Claims.ClaimTypes.Role, "User"),
+            new("auth_method", "authelia")
+        };
+        
+        var identity = new System.Security.Claims.ClaimsIdentity(claims, "Authelia");
+        var claimsPrincipal = new System.Security.Claims.ClaimsPrincipal(identity);
+        
+        _controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
+        {
+            HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
+            {
+                User = claimsPrincipal
+            }
+        };
+
+        // Act
+        var result = _controller.GetCurrentUser();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        var value = okResult.Value;
+        Assert.NotNull(value);
+        
+        // Verify username is from Authelia (not from database)
+        var usernameProperty = value.GetType().GetProperty("username");
+        Assert.NotNull(usernameProperty);
+        Assert.Equal(autheliaUsername, usernameProperty.GetValue(value));
+        
+        // Verify auth method is Authelia
+        var authMethodProperty = value.GetType().GetProperty("authMethod");
+        Assert.NotNull(authMethodProperty);
+        Assert.Equal("authelia", authMethodProperty.GetValue(value));
+    }
+
+    [Fact]
+    public void GetAuthStatus_WithAutheliaAuthenticatedUser_ReturnsCorrectUsername()
+    {
+        // Arrange - Simulate Authelia authentication
+        var autheliaUsername = "jane.doe";
+        _mockAutheliaSettings.Setup(x => x.Value).Returns(new AutheliaSettings { Enabled = true });
+        
+        var controller = new AuthController(
+            _mockAuthService.Object, 
+            _mockLogger.Object,
+            _mockAutheliaSettings.Object);
+        
+        SetupAuthenticatedUserOnController(controller, "user-id-789", autheliaUsername);
+
+        // Act
+        var result = controller.GetAuthStatus();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        var value = okResult.Value;
+        Assert.NotNull(value);
+        
+        var usernameProperty = value.GetType().GetProperty("username");
+        Assert.NotNull(usernameProperty);
+        Assert.Equal(autheliaUsername, usernameProperty.GetValue(value));
+        
+        var isAuthenticatedProperty = value.GetType().GetProperty("isAuthenticated");
+        Assert.NotNull(isAuthenticatedProperty);
+        Assert.True((bool)isAuthenticatedProperty.GetValue(value)!);
+    }
+
     private void SetupAuthenticatedUser(string userId, string? username = null, string? email = null, string[]? roles = null)
     {
         SetupAuthenticatedUserOnController(_controller, userId, username, email, roles);

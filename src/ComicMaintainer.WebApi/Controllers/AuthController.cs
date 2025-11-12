@@ -146,6 +146,35 @@ public class AuthController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Get a JWT token for SSE connections when authenticated via Authelia
+    /// This allows Authelia-authenticated users to establish SSE connections
+    /// which cannot send custom headers
+    /// </summary>
+    [Authorize]
+    [HttpGet("sse-token")]
+    public async Task<ActionResult> GetSseToken()
+    {
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var username = User.Identity?.Name;
+        
+        if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(username))
+        {
+            return Unauthorized();
+        }
+
+        // Generate a JWT token for this user
+        var (success, token, error) = await _authService.GenerateTokenForUserAsync(userId);
+        
+        if (!success)
+        {
+            _logger.LogError("Failed to generate SSE token for user {Username}: {Error}", username, error);
+            return StatusCode(500, new { error = "Failed to generate token" });
+        }
+
+        return Ok(new { token });
+    }
+
     [Authorize]
     [HttpGet("user")]
     public ActionResult GetCurrentUser()

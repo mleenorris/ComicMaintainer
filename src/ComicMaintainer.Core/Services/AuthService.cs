@@ -192,6 +192,23 @@ public class AuthService : IAuthService
         return (true, null);
     }
 
+    public async Task<(bool Success, string Token, string? Error)> GenerateTokenForUserAsync(string userId)
+    {
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user == null)
+        {
+            return (false, string.Empty, "User not found");
+        }
+
+        if (!user.IsActive)
+        {
+            return (false, string.Empty, "Account is disabled");
+        }
+
+        var token = await GenerateJwtTokenAsync(user);
+        return (true, token, null);
+    }
+
     private static string GenerateSecureApiKey()
     {
         var randomBytes = new byte[32];

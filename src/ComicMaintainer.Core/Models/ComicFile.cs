@@ -14,6 +14,7 @@ public class ComicFile
     public bool IsRenamed { get; set; }
     public bool IsNormalized { get; set; }
     public bool IsDuplicate { get; set; }
+    public bool IsRead { get; set; }
     public ComicMetadata? Metadata { get; set; }
 }
 

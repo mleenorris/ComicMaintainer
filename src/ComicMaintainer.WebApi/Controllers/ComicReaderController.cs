@@ -231,4 +231,35 @@ public class ComicReaderController : ControllerBase
             return StatusCode(500, new { error = "Error finding adjacent file" });
         }
     }
+
+    /// <summary>
+    /// Mark a file as read
+    /// </summary>
+    /// <param name="filePath">Path to the comic file</param>
+    [HttpPost("mark-read")]
+    public async Task<ActionResult> MarkAsRead([FromQuery] string filePath, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(filePath))
+        {
+            return BadRequest(new { error = "File path is required" });
+        }
+
+        if (!IsPathSafe(filePath))
+        {
+            _logger.LogWarning("Attempt to mark file read outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return BadRequest(new { error = "File path is outside the allowed directory" });
+        }
+
+        try
+        {
+            await _fileStore.MarkFileReadAsync(filePath, true, cancellationToken);
+            _logger.LogDebug("Marked file as read: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return Ok();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error marking file as read: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return StatusCode(500, new { error = "Error marking file as read" });
+        }
+    }
 }

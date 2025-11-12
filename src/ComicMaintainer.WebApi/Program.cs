@@ -336,7 +336,8 @@ builder.Services.AddRateLimiter(options =>
 // Add output caching for better performance  
 builder.Services.AddOutputCache(options =>
 {
-    options.AddBasePolicy(builder => builder.Cache());
+    // Don't cache by default - caching should be explicit
+    options.AddBasePolicy(builder => builder.NoCache());
     // Cache comic pages for 1 hour since they don't change frequently
     options.AddPolicy("ComicPages", builder => builder
         .Expire(TimeSpan.FromHours(1))
@@ -517,11 +518,12 @@ app.Use(async (context, next) =>
         }
     }
     
-    // Prevent caching for API endpoints
+    // Prevent caching for API endpoints and HTML pages
     if (context.Request.Path.StartsWithSegments("/api"))
     {
         context.Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private";
         context.Response.Headers["Pragma"] = "no-cache";
+        context.Response.Headers["Expires"] = "0";
     }
     
     await next();
@@ -530,8 +532,25 @@ app.Use(async (context, next) =>
 // Add path validation middleware for security
 app.UseMiddleware<PathValidationMiddleware>();
 
-// Serve static files from wwwroot (we'll copy the Python templates/static there)
-app.UseStaticFiles();
+// Serve static files from wwwroot with cache control
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        // Don't cache HTML files to ensure users always get the latest version
+        if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private";
+            ctx.Context.Response.Headers["Pragma"] = "no-cache";
+            ctx.Context.Response.Headers["Expires"] = "0";
+        }
+        // Cache other static assets (CSS, JS, images) for 1 hour
+        else
+        {
+            ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=3600";
+        }
+    }
+});
 
 app.UseRouting();
 app.UseAuthentication();

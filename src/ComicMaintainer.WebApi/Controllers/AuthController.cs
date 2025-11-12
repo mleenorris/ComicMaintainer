@@ -1,6 +1,8 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
@@ -10,11 +12,16 @@ public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
     private readonly ILogger<AuthController> _logger;
+    private readonly AutheliaSettings _autheliaSettings;
 
-    public AuthController(IAuthService authService, ILogger<AuthController> logger)
+    public AuthController(
+        IAuthService authService, 
+        ILogger<AuthController> logger,
+        IOptions<AutheliaSettings> autheliaSettings)
     {
         _authService = authService;
         _logger = logger;
+        _autheliaSettings = autheliaSettings.Value;
     }
 
     [HttpPost("login")]
@@ -119,6 +126,47 @@ public class AuthController : ControllerBase
         }
 
         return Ok(new { message = "Admin user created successfully" });
+    }
+
+    [HttpGet("status")]
+    public ActionResult GetAuthStatus()
+    {
+        // Return authentication configuration and user status
+        var isAuthenticated = User.Identity?.IsAuthenticated ?? false;
+        var username = User.Identity?.Name;
+        var authMethod = User.FindFirst("auth_method")?.Value;
+
+        return Ok(new 
+        { 
+            autheliaEnabled = _autheliaSettings.Enabled,
+            isAuthenticated = isAuthenticated,
+            username = username,
+            authMethod = authMethod ?? "jwt",
+            requiresLogin = !_autheliaSettings.Enabled || !isAuthenticated
+        });
+    }
+
+    [Authorize]
+    [HttpGet("user")]
+    public ActionResult GetCurrentUser()
+    {
+        // Return current user information
+        var username = User.Identity?.Name;
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var email = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value;
+        var roles = User.FindAll(System.Security.Claims.ClaimTypes.Role)
+            .Select(c => c.Value)
+            .ToList();
+        var authMethod = User.FindFirst("auth_method")?.Value ?? "jwt";
+
+        return Ok(new 
+        { 
+            username = username,
+            userId = userId,
+            email = email,
+            roles = roles,
+            authMethod = authMethod
+        });
     }
 }
 

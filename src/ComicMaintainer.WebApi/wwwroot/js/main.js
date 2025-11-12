@@ -45,27 +45,90 @@
         function redirectToLogin() {
             localStorage.removeItem('jwt_token');
             localStorage.removeItem('username');
+            localStorage.removeItem('authelia_authenticated');
             window.location.href = '/login.html';
         }
         
-        // Authentication check - redirect to login if no token or token is expired
-        (function checkAuth() {
-            const token = localStorage.getItem('jwt_token');
-            if (!token) {
-                redirectToLogin();
-                return;
-            }
-            
-            // Check if token is expired
-            if (isTokenExpired(token)) {
-                console.log('JWT token has expired, redirecting to login');
-                redirectToLogin();
-                return;
+        // Authentication check - check server auth status first (supports Authelia)
+        (async function checkAuth() {
+            try {
+                // First check server auth status (includes Authelia check)
+                const response = await fetch(apiUrl('/api/auth/status'), {
+                    credentials: 'include' // Important for Authelia cookies
+                });
+                
+                if (response.ok) {
+                    const authStatus = await response.json();
+                    console.log('[AUTH] Server auth status:', authStatus);
+                    
+                    // If Authelia is enabled and user is authenticated, no need for JWT token
+                    if (authStatus.autheliaEnabled && authStatus.isAuthenticated) {
+                        console.log('[AUTH] Authenticated via Authelia as:', authStatus.username);
+                        localStorage.setItem('authelia_authenticated', 'true');
+                        localStorage.setItem('username', authStatus.username);
+                        return; // User is authenticated via Authelia, continue loading page
+                    }
+                    
+                    // If Authelia is not enabled or user not authenticated, check JWT token
+                    const token = localStorage.getItem('jwt_token');
+                    if (!token) {
+                        console.log('[AUTH] No JWT token and not authenticated via Authelia');
+                        redirectToLogin();
+                        return;
+                    }
+                    
+                    // Check if JWT token is expired
+                    if (isTokenExpired(token)) {
+                        console.log('[AUTH] JWT token has expired, redirecting to login');
+                        redirectToLogin();
+                        return;
+                    }
+                    
+                    console.log('[AUTH] Authenticated via JWT token');
+                } else {
+                    // Fallback to JWT token check if status endpoint fails
+                    const token = localStorage.getItem('jwt_token');
+                    if (!token) {
+                        redirectToLogin();
+                        return;
+                    }
+                    
+                    if (isTokenExpired(token)) {
+                        console.log('[AUTH] JWT token has expired, redirecting to login');
+                        redirectToLogin();
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.error('[AUTH] Error checking auth status:', error);
+                // Fallback to JWT token check on error
+                const token = localStorage.getItem('jwt_token');
+                if (!token) {
+                    redirectToLogin();
+                    return;
+                }
+                
+                if (isTokenExpired(token)) {
+                    console.log('[AUTH] JWT token has expired, redirecting to login');
+                    redirectToLogin();
+                    return;
+                }
             }
         })();
         
         // Helper function to get auth headers
         function getAuthHeaders() {
+            const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+            
+            // If authenticated via Authelia, don't need Authorization header
+            // The cookies will be sent automatically with credentials: 'include'
+            if (isAutheliaAuth) {
+                console.log('[AUTH] Using Authelia authentication (cookies)');
+                return {
+                    'Content-Type': 'application/json'
+                };
+            }
+            
             const token = localStorage.getItem('jwt_token');
             
             // Proactively check token expiry before making API calls
@@ -96,6 +159,21 @@
                 return true;
             }
             return false;
+        }
+        
+        // Helper function to get fetch options with proper credentials
+        function getFetchOptions(method = 'GET', body = null) {
+            const options = {
+                method: method,
+                headers: getAuthHeaders(),
+                credentials: 'include' // Always include credentials for Authelia support
+            };
+            
+            if (body) {
+                options.body = typeof body === 'string' ? body : JSON.stringify(body);
+            }
+            
+            return options;
         }
         
         // Helper function to encode filepath for RESTful URL

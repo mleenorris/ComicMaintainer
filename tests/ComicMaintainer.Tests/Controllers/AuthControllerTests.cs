@@ -1,7 +1,9 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace ComicMaintainer.Tests.Controllers;
@@ -10,13 +12,22 @@ public class AuthControllerTests
 {
     private readonly Mock<IAuthService> _mockAuthService;
     private readonly Mock<ILogger<AuthController>> _mockLogger;
+    private readonly Mock<IOptions<AutheliaSettings>> _mockAutheliaSettings;
     private readonly AuthController _controller;
 
     public AuthControllerTests()
     {
         _mockAuthService = new Mock<IAuthService>();
         _mockLogger = new Mock<ILogger<AuthController>>();
-        _controller = new AuthController(_mockAuthService.Object, _mockLogger.Object);
+        _mockAutheliaSettings = new Mock<IOptions<AutheliaSettings>>();
+        
+        // Setup default Authelia settings (disabled by default)
+        _mockAutheliaSettings.Setup(x => x.Value).Returns(new AutheliaSettings { Enabled = false });
+        
+        _controller = new AuthController(
+            _mockAuthService.Object, 
+            _mockLogger.Object,
+            _mockAutheliaSettings.Object);
     }
 
     [Fact]
@@ -265,17 +276,134 @@ public class AuthControllerTests
         Assert.NotNull(badRequestResult.Value);
     }
 
-    private void SetupAuthenticatedUser(string userId)
+    [Fact]
+    public void GetAuthStatus_WithAutheliaDisabled_ReturnsCorrectStatus()
+    {
+        // Arrange
+        SetupEmptyUserContext();
+        
+        // Act
+        var result = _controller.GetAuthStatus();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        var value = okResult.Value;
+        Assert.NotNull(value);
+        
+        var autheliaEnabledProperty = value.GetType().GetProperty("autheliaEnabled");
+        Assert.NotNull(autheliaEnabledProperty);
+        Assert.False((bool)autheliaEnabledProperty.GetValue(value)!);
+        
+        var requiresLoginProperty = value.GetType().GetProperty("requiresLogin");
+        Assert.NotNull(requiresLoginProperty);
+        Assert.True((bool)requiresLoginProperty.GetValue(value)!);
+    }
+
+    [Fact]
+    public void GetAuthStatus_WithAutheliaEnabled_ReturnsCorrectStatus()
+    {
+        // Arrange
+        _mockAutheliaSettings.Setup(x => x.Value).Returns(new AutheliaSettings { Enabled = true });
+        var controller = new AuthController(
+            _mockAuthService.Object, 
+            _mockLogger.Object,
+            _mockAutheliaSettings.Object);
+        SetupAuthenticatedUserOnController(controller, "user-id-123", "testuser");
+
+        // Act
+        var result = controller.GetAuthStatus();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        var value = okResult.Value;
+        Assert.NotNull(value);
+        
+        var autheliaEnabledProperty = value.GetType().GetProperty("autheliaEnabled");
+        Assert.NotNull(autheliaEnabledProperty);
+        Assert.True((bool)autheliaEnabledProperty.GetValue(value)!);
+        
+        var isAuthenticatedProperty = value.GetType().GetProperty("isAuthenticated");
+        Assert.NotNull(isAuthenticatedProperty);
+        Assert.True((bool)isAuthenticatedProperty.GetValue(value)!);
+        
+        var requiresLoginProperty = value.GetType().GetProperty("requiresLogin");
+        Assert.NotNull(requiresLoginProperty);
+        Assert.False((bool)requiresLoginProperty.GetValue(value)!);
+    }
+
+    [Fact]
+    public void GetCurrentUser_WithAuthenticatedUser_ReturnsUserInfo()
+    {
+        // Arrange
+        SetupAuthenticatedUser("user-id-123", "testuser", "test@example.com", new[] { "Admin", "User" });
+
+        // Act
+        var result = _controller.GetCurrentUser();
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        var value = okResult.Value;
+        Assert.NotNull(value);
+        
+        var usernameProperty = value.GetType().GetProperty("username");
+        Assert.NotNull(usernameProperty);
+        Assert.Equal("testuser", usernameProperty.GetValue(value));
+        
+        var emailProperty = value.GetType().GetProperty("email");
+        Assert.NotNull(emailProperty);
+        Assert.Equal("test@example.com", emailProperty.GetValue(value));
+    }
+
+    [Fact]
+    public void GetCurrentUser_WithoutAuthentication_ReturnsEmptyUserInfo()
+    {
+        // Arrange
+        SetupEmptyUserContext();
+
+        // Act
+        var result = _controller.GetCurrentUser();
+
+        // Assert - endpoint returns OK with null/empty values when not authenticated
+        // The [Authorize] attribute should prevent access, but in tests we're testing the controller directly
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
+    }
+
+    private void SetupAuthenticatedUser(string userId, string? username = null, string? email = null, string[]? roles = null)
+    {
+        SetupAuthenticatedUserOnController(_controller, userId, username, email, roles);
+    }
+
+    private void SetupAuthenticatedUserOnController(AuthController controller, string userId, string? username = null, string? email = null, string[]? roles = null)
     {
         // Setup a mock user with claims
         var claims = new List<System.Security.Claims.Claim>
         {
             new(System.Security.Claims.ClaimTypes.NameIdentifier, userId)
         };
+        
+        if (username != null)
+        {
+            claims.Add(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, username));
+        }
+        
+        if (email != null)
+        {
+            claims.Add(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Email, email));
+        }
+        
+        if (roles != null)
+        {
+            foreach (var role in roles)
+            {
+                claims.Add(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, role));
+            }
+        }
+        
         var identity = new System.Security.Claims.ClaimsIdentity(claims, "TestAuth");
         var claimsPrincipal = new System.Security.Claims.ClaimsPrincipal(identity);
         
-        _controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
+        controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
         {
             HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
             {

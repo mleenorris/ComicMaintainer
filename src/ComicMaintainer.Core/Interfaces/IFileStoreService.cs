@@ -51,6 +51,16 @@ public interface IFileStoreService
     Task MarkFileDuplicateAsync(string filePath, bool duplicate, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Mark a file as read
+    /// </summary>
+    Task MarkFileReadAsync(string filePath, bool read, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Mark multiple files as read or unread
+    /// </summary>
+    Task MarkFilesReadAsync(IEnumerable<string> filePaths, bool read, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Get file count statistics
     /// </summary>
     Task<(int total, int processed, int unprocessed, int duplicates)> GetFileCountsAsync(CancellationToken cancellationToken = default);

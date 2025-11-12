@@ -32,6 +32,9 @@ public class FileDto
     [JsonPropertyName("duplicate")]
     public bool Duplicate { get; set; }
 
+    [JsonPropertyName("read")]
+    public bool Read { get; set; }
+
     /// <summary>
     /// Create a FileDto from a ComicFile
     /// </summary>
@@ -48,7 +51,8 @@ public class FileDto
             Processed = file.IsProcessed,
             Renamed = file.IsRenamed,
             Normalized = file.IsNormalized,
-            Duplicate = file.IsDuplicate
+            Duplicate = file.IsDuplicate,
+            Read = file.IsRead
         };
     }
 }

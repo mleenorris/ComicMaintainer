@@ -305,6 +305,7 @@
         let isLoadingNext = false;
         let nextComicInfo = null;
         let hasScrolledToBottom = false;
+        let hasMarkedAsRead = false;
 
         // Get parameters from URL
         function getQueryParam(param) {
@@ -503,6 +504,12 @@
             if (scrollHeight - scrollPosition < 200 && !isLoadingNext && nextComicInfo && nextComicInfo.hasAdjacent) {
                 isLoadingNext = true;
                 hasScrolledToBottom = true;
+                
+                // Mark current comic as read before loading next
+                if (!hasMarkedAsRead) {
+                    await markFileAsRead();
+                }
+                
                 await loadNextComic();
             }
         }
@@ -648,6 +655,11 @@
                 const imageUrl = URL.createObjectURL(blob);
                 
                 content.innerHTML = `<img src="${imageUrl}" class="page-image" alt="Page ${pageNum}">`;
+                
+                // Mark as read when reaching last page in manga mode
+                if (pageNum === totalPages && !hasMarkedAsRead) {
+                    await markFileAsRead();
+                }
             } catch (error) {
                 console.error('Error loading page:', error);
                 showError('Failed to load page: ' + error.message);
@@ -786,6 +798,39 @@
                     break;
             }
         });
+
+        // Mark the current file as read
+        async function markFileAsRead() {
+            if (hasMarkedAsRead) return;
+            
+            try {
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const fetchOptions = {
+                    method: 'POST',
+                    credentials: 'include'
+                };
+                
+                if (!isAutheliaAuth && token) {
+                    fetchOptions.headers = {
+                        'Authorization': `Bearer ${token}`
+                    };
+                }
+                
+                const response = await fetch(
+                    `/api/ComicReader/mark-read?filePath=${encodeURIComponent(comicFilePath)}`,
+                    fetchOptions
+                );
+                
+                if (response.ok) {
+                    hasMarkedAsRead = true;
+                    console.log('Marked file as read:', comicFilePath);
+                } else {
+                    console.error('Failed to mark file as read:', response.status);
+                }
+            } catch (error) {
+                console.error('Error marking file as read:', error);
+            }
+        }
 
         // Initialize on load
         window.addEventListener('DOMContentLoaded', initReader);

@@ -144,6 +144,12 @@
                             <button class="header-dropdown-item" onclick="setHeaderFilter('normalized')" data-filter="normalized">
                                 📋 Normalized
                             </button>
+                            <button class="header-dropdown-item" onclick="setHeaderFilter('read')" data-filter="read">
+                                👁️ Read
+                            </button>
+                            <button class="header-dropdown-item" onclick="setHeaderFilter('unread')" data-filter="unread">
+                                📚 Unread
+                            </button>
                         </div>
                     </div>
                     <div class="header-sort-dropdown">
@@ -223,6 +229,27 @@
                             </button>
                             <button class="action-dropdown-item" id="normalizeSelectedItem" onclick="normalizeSelectedFiles(); closeAllActionDropdowns();" disabled>
                                 🔧 Normalize Selected
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Mark Read Dropdown -->
+                    <div class="action-dropdown">
+                        <button class="action-dropdown-toggle mark" onclick="toggleActionDropdown(event, 'markDropdown')">
+                            👁️<span> Mark</span>
+                        </button>
+                        <div class="action-dropdown-menu" id="markDropdown">
+                            <button class="action-dropdown-item" onclick="markAllFilesRead(); closeAllActionDropdowns();">
+                                ✅ Mark All Read
+                            </button>
+                            <button class="action-dropdown-item" onclick="markAllFilesUnread(); closeAllActionDropdowns();">
+                                📚 Mark All Unread
+                            </button>
+                            <button class="action-dropdown-item" id="markSelectedReadItem" onclick="markSelectedFilesRead(); closeAllActionDropdowns();" disabled>
+                                ✅ Mark Selected Read
+                            </button>
+                            <button class="action-dropdown-item" id="markSelectedUnreadItem" onclick="markSelectedFilesUnread(); closeAllActionDropdowns();" disabled>
+                                📚 Mark Selected Unread
                             </button>
                         </div>
                     </div>

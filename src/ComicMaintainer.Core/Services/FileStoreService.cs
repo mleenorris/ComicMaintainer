@@ -124,6 +124,8 @@ public class FileStoreService : IFileStoreService
                 "duplicates" => files.Where(f => f.IsDuplicate),
                 "renamed" => files.Where(f => f.IsRenamed),
                 "normalized" => files.Where(f => f.IsNormalized),
+                "read" => files.Where(f => f.IsRead),
+                "unread" => files.Where(f => !f.IsRead),
                 _ => files
             };
             
@@ -560,6 +562,7 @@ public class FileStoreService : IFileStoreService
                         IsRenamed = entity.IsRenamed,
                         IsNormalized = entity.IsNormalized,
                         IsDuplicate = entity.IsDuplicate,
+                        IsRead = entity.IsRead,
                         Metadata = entity.Metadata
                     };
                     
@@ -687,6 +690,76 @@ public class FileStoreService : IFileStoreService
         {
             _logger.LogError(ex, "Error during cleanup of stale database entries");
             return 0;
+        }
+    }
+
+    public async Task MarkFileReadAsync(string filePath, bool read, CancellationToken cancellationToken = default)
+    {
+        if (_files.TryGetValue(filePath, out var file))
+        {
+            file.IsRead = read;
+        }
+
+        // Persist to database
+        try
+        {
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            
+            var entity = await dbContext.ComicFiles
+                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+
+            if (entity != null)
+            {
+                entity.IsRead = read;
+                entity.UpdatedAt = DateTime.UtcNow;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                _logger.LogDebug("Updated read status for {FilePath} to {Status}", SanitizeForLogging(filePath), read);
+            }
+            else
+            {
+                // Create entity if it doesn't exist
+                if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
+                {
+                    try
+                    {
+                        entity = CreateFileEntity(filePath);
+                        entity.IsRead = read;
+                        dbContext.ComicFiles.Add(entity);
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                        _logger.LogDebug("Created file entity and set read status for {FilePath} to {Status}", SanitizeForLogging(filePath), read);
+                    }
+                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx && 
+                                                        sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
+                    {
+                        // Race condition: entity was created by another thread between our check and insert
+                        _logger.LogDebug("File entity already exists (race condition), retrying update for {FilePath}", SanitizeForLogging(filePath));
+                        entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+                        if (entity != null)
+                        {
+                            entity.IsRead = read;
+                            entity.UpdatedAt = DateTime.UtcNow;
+                            await dbContext.SaveChangesAsync(cancellationToken);
+                            _logger.LogDebug("Updated read status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), read);
+                        }
+                    }
+                }
+                else
+                {
+                    _logger.LogDebug("File {FilePath} not found on filesystem or outside allowed directories, skipping database creation", SanitizeForLogging(filePath));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating read status in database for {FilePath}", SanitizeForLogging(filePath));
+        }
+    }
+
+    public async Task MarkFilesReadAsync(IEnumerable<string> filePaths, bool read, CancellationToken cancellationToken = default)
+    {
+        foreach (var filePath in filePaths)
+        {
+            await MarkFileReadAsync(filePath, read, cancellationToken);
         }
     }
 }

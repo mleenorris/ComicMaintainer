@@ -903,7 +903,9 @@
                 'marked': '✅ Marked',
                 'duplicates': '🔁 Duplicates',
                 'renamed': '📝 Renamed',
-                'normalized': '📋 Normalized'
+                'normalized': '📋 Normalized',
+                'read': '👁️ Read',
+                'unread': '📚 Unread'
             };
             
             document.getElementById('headerFilterLabel').textContent = filterLabels[mode];
@@ -1129,6 +1131,15 @@
                     const isSelected = selectedFiles.has(file.relative_path);
                     const fileSize = formatFileSize(file.size);
                     const modifiedDate = formatModifiedDate(file.modified);
+                    
+                    // Determine read status indicator
+                    let readIcon = '';
+                    let readTitle = '';
+                    if (file.read) {
+                        readIcon = '👁️';
+                        readTitle = 'Read';
+                    }
+                    
                     // Determine status icon and class based on processing state
                     // Priority: duplicate > fully processed (both) > renamed only > normalized only > unmarked
                     let statusIcon = '';
@@ -1177,7 +1188,7 @@
                             </div>
                             <div>
                                 <div class="file-name" title="${escapeHtml(file.name)}">
-                                    ${filenameHtml}
+                                    ${readIcon ? `<span class="read-indicator" title="${readTitle}">${readIcon}</span> ` : ''}${filenameHtml}
                                 </div>
                                 ${!dir ? `<div class="file-path">${escapeHtml(file.relative_path)}</div>` : ''}
                             </div>
@@ -1198,6 +1209,15 @@
                                         <button class="dropdown-item" onclick="readComic('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                             📖 Read Comic
                                         </button>
+                                        <div class="dropdown-divider"></div>
+                                        ${file.read 
+                                            ? `<button class="dropdown-item" onclick="markFileUnread('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                                📚 Mark Unread
+                                            </button>`
+                                            : `<button class="dropdown-item" onclick="markFileRead('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                                ✅ Mark Read
+                                            </button>`
+                                        }
                                         <div class="dropdown-divider"></div>
                                         <button class="dropdown-item" onclick="processSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                             🚀 Process
@@ -1367,6 +1387,8 @@
             const processSelectedItem = document.getElementById('processSelectedItem');
             const renameSelectedItem = document.getElementById('renameSelectedItem');
             const normalizeSelectedItem = document.getElementById('normalizeSelectedItem');
+            const markSelectedReadItem = document.getElementById('markSelectedReadItem');
+            const markSelectedUnreadItem = document.getElementById('markSelectedUnreadItem');
             
             if (count === 0) {
                 info.textContent = 'No files selected';
@@ -1375,6 +1397,8 @@
                 if (processSelectedItem) processSelectedItem.disabled = true;
                 if (renameSelectedItem) renameSelectedItem.disabled = true;
                 if (normalizeSelectedItem) normalizeSelectedItem.disabled = true;
+                if (markSelectedReadItem) markSelectedReadItem.disabled = true;
+                if (markSelectedUnreadItem) markSelectedUnreadItem.disabled = true;
             } else {
                 info.textContent = `${count} file${count > 1 ? 's' : ''} selected`;
                 batchBtn.disabled = false;
@@ -1382,6 +1406,8 @@
                 if (processSelectedItem) processSelectedItem.disabled = false;
                 if (renameSelectedItem) renameSelectedItem.disabled = false;
                 if (normalizeSelectedItem) normalizeSelectedItem.disabled = false;
+                if (markSelectedReadItem) markSelectedReadItem.disabled = false;
+                if (markSelectedUnreadItem) markSelectedUnreadItem.disabled = false;
             }
         }
         
@@ -2562,6 +2588,180 @@
                 await loadFiles(currentPage, true);
             } catch (error) {
                 showMessage('Failed to delete file: ' + error.message, 'error');
+            }
+        }
+        
+        async function markFileRead(filepath) {
+            try {
+                showMessage('Marking file as read...', 'info');
+                
+                const encodedPath = encodeFilePathForUrl(filepath);
+                const response = await fetch(apiUrl(`/api/files/${encodedPath}/read`), {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ read: true })
+                });
+                
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                showMessage('File marked as read!', 'success');
+                await loadFiles(currentPage, true);
+            } catch (error) {
+                showMessage('Failed to mark file as read: ' + error.message, 'error');
+            }
+        }
+        
+        async function markFileUnread(filepath) {
+            try {
+                showMessage('Marking file as unread...', 'info');
+                
+                const encodedPath = encodeFilePathForUrl(filepath);
+                const response = await fetch(apiUrl(`/api/files/${encodedPath}/read`), {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ read: false })
+                });
+                
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                showMessage('File marked as unread!', 'success');
+                await loadFiles(currentPage, true);
+            } catch (error) {
+                showMessage('Failed to mark file as unread: ' + error.message, 'error');
+            }
+        }
+        
+        async function markAllFilesRead() {
+            if (!confirm('Mark all files as read?')) {
+                return;
+            }
+            
+            try {
+                showMessage('Marking all files as read...', 'info');
+                
+                const allFilePaths = files.map(f => f.relative_path);
+                const response = await fetch(apiUrl('/api/files/read-batch'), {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ files: allFilePaths, read: true })
+                });
+                
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                showMessage('All files marked as read!', 'success');
+                await loadFiles(currentPage, true);
+            } catch (error) {
+                showMessage('Failed to mark files as read: ' + error.message, 'error');
+            }
+        }
+        
+        async function markAllFilesUnread() {
+            if (!confirm('Mark all files as unread?')) {
+                return;
+            }
+            
+            try {
+                showMessage('Marking all files as unread...', 'info');
+                
+                const allFilePaths = files.map(f => f.relative_path);
+                const response = await fetch(apiUrl('/api/files/read-batch'), {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ files: allFilePaths, read: false })
+                });
+                
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                showMessage('All files marked as unread!', 'success');
+                await loadFiles(currentPage, true);
+            } catch (error) {
+                showMessage('Failed to mark files as unread: ' + error.message, 'error');
+            }
+        }
+        
+        async function markSelectedFilesRead() {
+            if (selectedFiles.size === 0) {
+                showMessage('No files selected', 'warning');
+                return;
+            }
+            
+            try {
+                showMessage('Marking selected files as read...', 'info');
+                
+                const selectedFilePaths = Array.from(selectedFiles);
+                const response = await fetch(apiUrl('/api/files/read-batch'), {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ files: selectedFilePaths, read: true })
+                });
+                
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                showMessage(`${selectedFiles.size} file(s) marked as read!`, 'success');
+                await loadFiles(currentPage, true);
+            } catch (error) {
+                showMessage('Failed to mark files as read: ' + error.message, 'error');
+            }
+        }
+        
+        async function markSelectedFilesUnread() {
+            if (selectedFiles.size === 0) {
+                showMessage('No files selected', 'warning');
+                return;
+            }
+            
+            try {
+                showMessage('Marking selected files as unread...', 'info');
+                
+                const selectedFilePaths = Array.from(selectedFiles);
+                const response = await fetch(apiUrl('/api/files/read-batch'), {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ files: selectedFilePaths, read: false })
+                });
+                
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                showMessage(`${selectedFiles.size} file(s) marked as unread!`, 'success');
+                await loadFiles(currentPage, true);
+            } catch (error) {
+                showMessage('Failed to mark files as unread: ' + error.message, 'error');
             }
         }
         

@@ -17,6 +17,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
 
     public DbSet<ComicFileEntity> ComicFiles { get; set; } = null!;
     public DbSet<ProcessingHistoryEntity> ProcessingHistory { get; set; } = null!;
+    public DbSet<FileReadStatusEntity> FileReadStatuses { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -34,6 +35,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.HasIndex(e => e.IsRenamed);
             entity.HasIndex(e => e.IsNormalized);
             entity.HasIndex(e => e.IsDuplicate);
+            entity.HasIndex(e => e.IsRead);
             
             // Configure owned type for metadata
             entity.OwnsOne(e => e.Metadata, metadata =>
@@ -78,6 +80,16 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.BeforeVolume).HasMaxLength(50);
             entity.Property(e => e.AfterVolume).HasMaxLength(50);
         });
+
+        // Configure FileReadStatusEntity
+        modelBuilder.Entity<FileReadStatusEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.FilePath).IsRequired().HasMaxLength(2048);
+            entity.HasIndex(e => e.FilePath).IsUnique();
+            entity.HasIndex(e => e.IsRead);
+            entity.HasIndex(e => e.LastReadDate);
+        });
     }
 }
 
@@ -96,6 +108,7 @@ public class ComicFileEntity
     public bool IsRenamed { get; set; }
     public bool IsNormalized { get; set; }
     public bool IsDuplicate { get; set; }
+    public bool IsRead { get; set; }
     public ComicMetadata? Metadata { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
@@ -129,4 +142,17 @@ public class ProcessingHistoryEntity
     public int? AfterYear { get; set; }
     public string? BeforeVolume { get; set; }
     public string? AfterVolume { get; set; }
+}
+
+/// <summary>
+/// Database entity for file read status tracking
+/// </summary>
+public class FileReadStatusEntity
+{
+    public int Id { get; set; }
+    public string FilePath { get; set; } = string.Empty;
+    public bool IsRead { get; set; }
+    public DateTime? LastReadDate { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

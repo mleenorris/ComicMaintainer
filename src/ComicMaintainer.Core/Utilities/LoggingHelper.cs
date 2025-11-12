@@ -35,7 +35,8 @@ public static class LoggingHelper
 
         try
         {
-            return Path.GetFileName(filePath) ?? string.Empty;
+            var filename = Path.GetFileName(filePath) ?? string.Empty;
+            return SanitizeForLog(filename);
         }
         catch
         {

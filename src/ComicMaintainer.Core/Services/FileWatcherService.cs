@@ -15,6 +15,7 @@ public class FileWatcherService : IFileWatcherService
     private readonly ILogger<FileWatcherService> _logger;
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
+    private readonly IEventBroadcaster? _eventBroadcaster;
     private FileSystemWatcher? _watcher;
     private bool _enabled;
     private readonly object _lock = new();
@@ -26,12 +27,14 @@ public class FileWatcherService : IFileWatcherService
         IOptions<AppSettings> settings,
         ILogger<FileWatcherService> logger,
         IFileStoreService fileStore,
-        IComicProcessorService processor)
+        IComicProcessorService processor,
+        IEventBroadcaster? eventBroadcaster = null)
     {
         _settings = settings.Value;
         _logger = logger;
         _fileStore = fileStore;
         _processor = processor;
+        _eventBroadcaster = eventBroadcaster;
         // Watcher is enabled if either rename or normalize is enabled
         _enabled = _settings.WatcherEnableRename || _settings.WatcherEnableNormalize;
     }
@@ -83,6 +86,19 @@ public class FileWatcherService : IFileWatcherService
             {
                 shouldInitialize = true;
                 _initialized = true;
+            }
+        }
+        
+        // Broadcast watcher status change
+        if (_eventBroadcaster != null)
+        {
+            try
+            {
+                await _eventBroadcaster.BroadcastWatcherStatusAsync(IsRunning, _enabled);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast watcher status change");
             }
         }
         
@@ -197,7 +213,7 @@ public class FileWatcherService : IFileWatcherService
         }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken = default)
+    public async Task StopAsync(CancellationToken cancellationToken = default)
     {
         lock (_lock)
         {
@@ -210,7 +226,18 @@ public class FileWatcherService : IFileWatcherService
             }
         }
 
-        return Task.CompletedTask;
+        // Broadcast watcher status change
+        if (_eventBroadcaster != null)
+        {
+            try
+            {
+                await _eventBroadcaster.BroadcastWatcherStatusAsync(false, _enabled);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast watcher status change");
+            }
+        }
     }
 
     /// <summary>

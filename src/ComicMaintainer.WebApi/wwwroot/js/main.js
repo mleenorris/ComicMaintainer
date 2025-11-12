@@ -294,10 +294,33 @@
                     return;
                 }
                 
-                // EventSource doesn't support custom headers, so we pass the token as a query parameter
-                // This is only needed for JWT authentication; Authelia uses cookies/headers from the proxy
-                const token = localStorage.getItem('jwt_token');
+                // Get token for SSE connection
+                // For JWT auth, use the stored token
+                // For Authelia auth, request a JWT token specifically for SSE
+                let token = localStorage.getItem('jwt_token');
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
                 
+                if (isAutheliaAuth && !token) {
+                    // For Authelia users, get an SSE token from the backend
+                    console.log('SSE: Fetching token for Authelia-authenticated user');
+                    try {
+                        const response = await fetch(apiUrl('/api/auth/sse-token'), {
+                            credentials: 'include',
+                            headers: getAuthHeaders()
+                        });
+                        if (response.ok) {
+                            const data = await response.json();
+                            token = data.token;
+                            console.log('SSE: Received SSE token for Authelia user');
+                        } else {
+                            console.error('SSE: Failed to get SSE token:', response.status);
+                        }
+                    } catch (error) {
+                        console.error('SSE: Error fetching SSE token:', error);
+                    }
+                }
+                
+                // EventSource doesn't support custom headers, so we pass the token as a query parameter
                 const streamUrl = token 
                     ? apiUrl(`/api/events/stream?access_token=${encodeURIComponent(token)}`)
                     : apiUrl('/api/events/stream');

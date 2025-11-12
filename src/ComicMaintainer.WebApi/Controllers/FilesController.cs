@@ -70,6 +70,8 @@ public class FilesController : ControllerBase
                 "duplicates" => "duplicates",
                 "renamed" => "renamed",
                 "normalized" => "normalized",
+                "read" => "read",
+                "unread" => "unread",
                 _ => null
             };
 

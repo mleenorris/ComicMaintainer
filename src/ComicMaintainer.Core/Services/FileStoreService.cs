@@ -124,6 +124,8 @@ public class FileStoreService : IFileStoreService
                 "duplicates" => files.Where(f => f.IsDuplicate),
                 "renamed" => files.Where(f => f.IsRenamed),
                 "normalized" => files.Where(f => f.IsNormalized),
+                "read" => files.Where(f => f.IsRead),
+                "unread" => files.Where(f => !f.IsRead),
                 _ => files
             };
             

@@ -903,7 +903,9 @@
                 'marked': '✅ Marked',
                 'duplicates': '🔁 Duplicates',
                 'renamed': '📝 Renamed',
-                'normalized': '📋 Normalized'
+                'normalized': '📋 Normalized',
+                'read': '👁️ Read',
+                'unread': '📚 Unread'
             };
             
             document.getElementById('headerFilterLabel').textContent = filterLabels[mode];

@@ -1,11 +1,13 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
 [ApiController]
 [Route("api")]
+[Authorize]
 public class ProcessController : ControllerBase
 {
     private readonly IComicProcessorService _processor;

@@ -1,7 +1,9 @@
 // Service Worker for Comic Maintainer PWA
 // Provides basic offline support and caching
 
-const CACHE_NAME = 'comic-maintainer-v2';
+// Cache version will be determined dynamically from the API
+let CACHE_NAME = 'comic-maintainer-v2'; // Default fallback
+const CACHE_PREFIX = 'comic-maintainer-';
 const urlsToCache = [
   '/',
   '/manifest.json',
@@ -14,13 +16,29 @@ const urlsToCache = [
   '/icons/favicon-16x16.png'
 ];
 
+// Fetch current version from API and set cache name
+async function updateCacheName() {
+  try {
+    const response = await fetch('/api/version');
+    if (response.ok) {
+      const data = await response.json();
+      const version = data.version.replace(/\./g, '-'); // Replace dots with dashes for cache name
+      CACHE_NAME = `${CACHE_PREFIX}${version}`;
+      console.log('Service Worker: Using cache version:', CACHE_NAME);
+    }
+  } catch (error) {
+    console.log('Service Worker: Failed to fetch version, using default cache name', error);
+  }
+}
+
 // Install event - cache essential resources
 self.addEventListener('install', (event) => {
   console.log('Service Worker: Installing...');
   event.waitUntil(
-    caches.open(CACHE_NAME)
+    updateCacheName()
+      .then(() => caches.open(CACHE_NAME))
       .then((cache) => {
-        console.log('Service Worker: Caching essential files');
+        console.log('Service Worker: Caching essential files with cache name:', CACHE_NAME);
         return cache.addAll(urlsToCache);
       })
       .then(() => self.skipWaiting())
@@ -31,16 +49,19 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   console.log('Service Worker: Activating...');
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
-            console.log('Service Worker: Deleting old cache:', cacheName);
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    }).then(() => self.clients.claim())
+    updateCacheName()
+      .then(() => caches.keys())
+      .then((cacheNames) => {
+        return Promise.all(
+          cacheNames.map((cacheName) => {
+            // Delete any cache that starts with our prefix but isn't the current version
+            if (cacheName.startsWith(CACHE_PREFIX) && cacheName !== CACHE_NAME) {
+              console.log('Service Worker: Deleting old cache:', cacheName);
+              return caches.delete(cacheName);
+            }
+          })
+        );
+      }).then(() => self.clients.claim())
   );
 });
 
@@ -48,6 +69,12 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
+  
+  // Never cache the service worker file itself or HTML pages
+  if (url.pathname === '/sw.js' || url.pathname.endsWith('.html')) {
+    event.respondWith(fetch(request));
+    return;
+  }
   
   // Network-first strategy for API calls and dynamic content
   if (url.pathname.startsWith('/api/')) {

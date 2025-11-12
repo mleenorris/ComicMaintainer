@@ -733,6 +733,27 @@
                 })
                     .then((registration) => {
                         console.log('PWA: Service Worker registered successfully:', registration.scope);
+                        
+                        // Check for updates periodically
+                        setInterval(() => {
+                            registration.update();
+                        }, 60000); // Check every minute
+                        
+                        // Listen for updates
+                        registration.addEventListener('updatefound', () => {
+                            const newWorker = registration.installing;
+                            console.log('PWA: New service worker installing...');
+                            
+                            newWorker.addEventListener('statechange', () => {
+                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                    // New service worker available, notify user
+                                    console.log('PWA: New version available! Reloading page...');
+                                    // Automatically reload to get the new version
+                                    // This ensures users always get the latest version
+                                    window.location.reload();
+                                }
+                            });
+                        });
                     })
                     .catch((error) => {
                         console.log('PWA: Service Worker registration failed:', error);

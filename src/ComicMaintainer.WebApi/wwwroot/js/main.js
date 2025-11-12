@@ -1458,8 +1458,8 @@
         }
         
         function readComic(filepath) {
-            // Open comic reader in a new window/tab
-            window.open(`/reader.html?file=${encodeURIComponent(filepath)}`, '_blank');
+            // Open comic reader in the same window
+            window.location.href = `/reader.html?file=${encodeURIComponent(filepath)}`;
         }
         
         function closeModal() {

@@ -1,5 +1,10 @@
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Xunit;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Linq;
 
 namespace ComicMaintainer.Tests.Security;
 
@@ -10,6 +15,16 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
     public SecurityHeadersTests(WebApplicationFactory<Program> factory)
     {
         _factory = factory;
+    }
+
+    // Helper class to inject X-Forwarded-Proto header for testing reverse proxy scenarios
+    private class ForwardedProtoHandler : DelegatingHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            request.Headers.Add("X-Forwarded-Proto", "https");
+            return base.SendAsync(request, cancellationToken);
+        }
     }
 
     [Fact]
@@ -89,14 +104,30 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
     public async Task SecurityHeaders_WithHttpsForwardedProto_HstsIsPresent()
     {
         // Arrange
-        var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Forwarded-Proto", "https");
+        // Create a custom factory with middleware that simulates reverse proxy behavior
+        var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                // Services are configured correctly by default
+            });
+        });
+
+        // Use the server instance to add the header directly to the request
+        var client = customFactory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/version");
+        request.Headers.Add("X-Forwarded-Proto", "https");
 
         // Act
-        var response = await client.GetAsync("/api/version");
+        var response = await client.SendAsync(request);
 
         // Assert
-        Assert.True(response.Headers.Contains("Strict-Transport-Security"));
+        Assert.True(response.Headers.Contains("Strict-Transport-Security"),
+            $"Expected Strict-Transport-Security header. Headers: {string.Join(", ", response.Headers.Select(h => h.Key))}");
         var hsts = response.Headers.GetValues("Strict-Transport-Security").First();
         Assert.Contains("max-age=31536000", hsts);
         Assert.Contains("includeSubDomains", hsts);
@@ -106,14 +137,29 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
     public async Task SecurityHeaders_WithHttpsForwardedProto_CspIsPresent()
     {
         // Arrange
-        var client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Forwarded-Proto", "https");
+        // Create a custom factory with middleware that simulates reverse proxy behavior
+        var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                // Services are configured correctly by default
+            });
+        });
+
+        var client = customFactory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/version");
+        request.Headers.Add("X-Forwarded-Proto", "https");
 
         // Act
-        var response = await client.GetAsync("/api/version");
+        var response = await client.SendAsync(request);
 
         // Assert
-        Assert.True(response.Headers.Contains("Content-Security-Policy"));
+        Assert.True(response.Headers.Contains("Content-Security-Policy"),
+            $"Expected Content-Security-Policy header. Headers: {string.Join(", ", response.Headers.Select(h => h.Key))}");
         Assert.Equal("upgrade-insecure-requests", response.Headers.GetValues("Content-Security-Policy").First());
     }
 

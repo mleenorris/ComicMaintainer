@@ -142,12 +142,13 @@ public class FilesControllerTests
     public async Task GetMetadata_WithValidPath_ReturnsOkWithMetadata()
     {
         // Arrange
+        var testFilePath = Path.Combine(Path.GetTempPath(), "file.cbz");
         var metadata = new ComicMetadata { Series = "Batman", Issue = "12" };
-        _mockProcessor.Setup(p => p.GetMetadataAsync("/test/file.cbz", It.IsAny<CancellationToken>()))
+        _mockProcessor.Setup(p => p.GetMetadataAsync(testFilePath, It.IsAny<CancellationToken>()))
             .ReturnsAsync(metadata);
 
         // Act
-        var result = await _controller.GetMetadata("/test/file.cbz");
+        var result = await _controller.GetMetadata(testFilePath);
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
@@ -169,11 +170,12 @@ public class FilesControllerTests
     public async Task GetMetadata_WhenMetadataNotFound_ReturnsNotFound()
     {
         // Arrange
+        var testFilePath = Path.Combine(Path.GetTempPath(), "file.cbz");
         _mockProcessor.Setup(p => p.GetMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ComicMetadata?)null);
 
         // Act
-        var result = await _controller.GetMetadata("/test/file.cbz");
+        var result = await _controller.GetMetadata(testFilePath);
 
         // Assert
         Assert.IsType<NotFoundResult>(result.Result);
@@ -183,12 +185,13 @@ public class FilesControllerTests
     public async Task UpdateMetadata_WithValidData_ReturnsOk()
     {
         // Arrange
+        var testFilePath = Path.Combine(Path.GetTempPath(), "file.cbz");
         var metadata = new ComicMetadata { Series = "Superman", Issue = "5" };
-        _mockProcessor.Setup(p => p.UpdateMetadataAsync("/test/file.cbz", metadata, It.IsAny<CancellationToken>()))
+        _mockProcessor.Setup(p => p.UpdateMetadataAsync(testFilePath, metadata, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         // Act
-        var result = await _controller.UpdateMetadata("/test/file.cbz", metadata);
+        var result = await _controller.UpdateMetadata(testFilePath, metadata);
 
         // Assert
         Assert.IsType<OkResult>(result);
@@ -226,11 +229,12 @@ public class FilesControllerTests
     public async Task ProcessFile_WithValidPath_ReturnsOk()
     {
         // Arrange
-        _mockProcessor.Setup(p => p.ProcessFileAsync("/test/file.cbz", It.IsAny<CancellationToken>()))
+        var testFilePath = Path.Combine(Path.GetTempPath(), "file.cbz");
+        _mockProcessor.Setup(p => p.ProcessFileAsync(testFilePath, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         // Act
-        var result = await _controller.ProcessFile("/test/file.cbz");
+        var result = await _controller.ProcessFile(testFilePath);
 
         // Assert
         Assert.IsType<OkResult>(result);

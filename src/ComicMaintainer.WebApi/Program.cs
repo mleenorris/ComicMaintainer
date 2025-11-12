@@ -152,12 +152,17 @@ builder.Services.Configure<AutheliaSettings>(options =>
 var configDirectory = builder.Configuration["AppSettings:ConfigDirectory"] ?? "/Config";
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
     ?? $"Data Source={Path.Combine(configDirectory, "comicmaintainer.db")}";
+
+// Register DbContext for Identity and scoped usage
 builder.Services.AddDbContext<ComicMaintainerDbContext>(options =>
     options.UseSqlite(connectionString));
 
-// Register DbContextFactory for singleton services that need scoped DbContext access
-builder.Services.AddDbContextFactory<ComicMaintainerDbContext>(options =>
-    options.UseSqlite(connectionString));
+// Register DbContextFactory for singleton services that need DbContext access
+// Create a custom factory that creates independent DbContext instances
+builder.Services.AddSingleton<IDbContextFactory<ComicMaintainerDbContext>>(sp =>
+{
+    return new ComicMaintainerDbContextFactory(connectionString);
+});
 
 // Configure Data Protection to persist keys in Config directory
 try
@@ -674,3 +679,21 @@ static void LoadUserSettings(string configDir, AppSettings options)
 
 // Make the implicit Program class public so test projects can access it
 public partial class Program { }
+
+// Helper class to create DbContext instances independently without lifetime conflicts
+internal class ComicMaintainerDbContextFactory : IDbContextFactory<ComicMaintainerDbContext>
+{
+    private readonly string _connectionString;
+
+    public ComicMaintainerDbContextFactory(string connectionString)
+    {
+        _connectionString = connectionString;
+    }
+
+    public ComicMaintainerDbContext CreateDbContext()
+    {
+        var optionsBuilder = new DbContextOptionsBuilder<ComicMaintainerDbContext>();
+        optionsBuilder.UseSqlite(_connectionString);
+        return new ComicMaintainerDbContext(optionsBuilder.Options);
+    }
+}

@@ -5,6 +5,7 @@ using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Middleware;
 using ComicMaintainer.WebApi.Services;
@@ -124,6 +125,29 @@ builder.Services.Configure<JwtSettings>(options =>
         options.Secret = jwtSecret;
 });
 
+// Configure Authelia settings
+builder.Services.Configure<AutheliaSettings>(options =>
+{
+    builder.Configuration.GetSection("AutheliaSettings").Bind(options);
+    
+    // Override with environment variables if present
+    var autheliaEnabled = Environment.GetEnvironmentVariable("AUTHELIA_ENABLED");
+    if (!string.IsNullOrEmpty(autheliaEnabled))
+        options.Enabled = autheliaEnabled.Equals("true", StringComparison.OrdinalIgnoreCase);
+    
+    var autheliaUserHeader = Environment.GetEnvironmentVariable("AUTHELIA_USER_HEADER");
+    if (!string.IsNullOrEmpty(autheliaUserHeader))
+        options.UserHeader = autheliaUserHeader;
+    
+    var autheliaDefaultRole = Environment.GetEnvironmentVariable("AUTHELIA_DEFAULT_ROLE");
+    if (!string.IsNullOrEmpty(autheliaDefaultRole))
+        options.DefaultRole = autheliaDefaultRole;
+    
+    var autheliaAdminGroups = Environment.GetEnvironmentVariable("AUTHELIA_ADMIN_GROUPS");
+    if (!string.IsNullOrEmpty(autheliaAdminGroups))
+        options.AdminGroups = autheliaAdminGroups;
+});
+
 // Configure database
 var configDirectory = builder.Configuration["AppSettings:ConfigDirectory"] ?? "/Config";
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
@@ -197,12 +221,41 @@ if (jwtSecret == defaultSecret)
     Log.Warning("⚠️ Set JWT_SECRET environment variable to use a secure, persistent secret.");
 }
 
-builder.Services.AddAuthentication(options =>
+// Check if Authelia is enabled
+var autheliaSettings = builder.Configuration.GetSection("AutheliaSettings").Get<AutheliaSettings>() ?? new AutheliaSettings();
+var autheliaEnabled = Environment.GetEnvironmentVariable("AUTHELIA_ENABLED");
+if (!string.IsNullOrEmpty(autheliaEnabled))
 {
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-})
-.AddJwtBearer(options =>
+    autheliaSettings.Enabled = autheliaEnabled.Equals("true", StringComparison.OrdinalIgnoreCase);
+}
+
+// Configure authentication schemes
+var authBuilder = builder.Services.AddAuthentication(options =>
+{
+    // Set Authelia as default if enabled, otherwise use JWT
+    if (autheliaSettings.Enabled)
+    {
+        options.DefaultAuthenticateScheme = "Authelia";
+        options.DefaultChallengeScheme = "Authelia";
+        Log.Information("✅ Authelia authentication enabled - forward auth headers will be trusted");
+    }
+    else
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    }
+});
+
+// Add Authelia authentication handler if enabled
+if (autheliaSettings.Enabled)
+{
+    authBuilder.AddScheme<AutheliaAuthenticationOptions, AutheliaAuthenticationHandler>(
+        "Authelia",
+        options => { });
+}
+
+// Always add JWT Bearer for backward compatibility and API access
+authBuilder.AddJwtBearer(options =>
 {
     options.TokenValidationParameters = new TokenValidationParameters
     {

@@ -177,6 +177,10 @@ docker exec -it swag htpasswd -c /config/nginx/.htpasswd username
 ```
 
 ### Authelia
+
+Authelia provides forward authentication with support for two-factor authentication (2FA) and single sign-on (SSO).
+
+**SWAG Configuration:**
 ```nginx
 # In the server block, uncomment:
 include /config/nginx/authelia-server.conf;
@@ -184,6 +188,22 @@ include /config/nginx/authelia-server.conf;
 # In the location block, uncomment:
 include /config/nginx/authelia-location.conf;
 ```
+
+**ComicMaintainer Configuration:**
+```yaml
+environment:
+  - AUTHELIA_ENABLED=true              # Enable Authelia mode
+  - AUTHELIA_DEFAULT_ROLE=User         # Default role for users
+  - AUTHELIA_ADMIN_GROUPS=admins,admin # Groups that get Admin role
+```
+
+**Important**: When using Authelia, ComicMaintainer will:
+- Trust authentication headers from Authelia
+- Automatically create user accounts on first login
+- Synchronize user information (email, display name) from Authelia
+- Map Authelia groups to application roles
+
+For detailed setup instructions, see the [Authelia Integration Guide](../../AUTHELIA.md).
 
 ### Authentik
 ```nginx

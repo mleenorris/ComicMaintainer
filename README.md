@@ -145,6 +145,13 @@ For direct HTTPS support without a reverse proxy:
 #### Reverse Proxy Support (Optional)
 - `BASE_PATH`: Path prefix for subdirectory deployments (default: empty). Set to serve the application from a subdirectory, e.g., `/comics` to access at `example.com/comics`. Must start with a forward slash. The application automatically handles reverse proxy headers (`X-Forwarded-*`) for proper URL generation and **automatically enables security headers (HSTS, CSP) when accessed via HTTPS**. See [Reverse Proxy Guide](docs/REVERSE_PROXY.md) for detailed configuration examples (SWAG, Nginx, Traefik, Apache, Caddy). **Ready-to-use SWAG configuration files** are available in [docs/swag-configs/](docs/swag-configs/).
 
+#### Authelia Integration (Optional)
+ComicMaintainer supports [Authelia](https://www.authelia.com/) for forward authentication with 2FA and SSO:
+- `AUTHELIA_ENABLED`: Enable Authelia authentication mode (default: `false`). When enabled, the application trusts authentication headers from Authelia.
+- `AUTHELIA_DEFAULT_ROLE`: Default role for authenticated users (default: `User`). Options: `Admin`, `User`, `ReadOnly`.
+- `AUTHELIA_ADMIN_GROUPS`: Comma-separated list of Authelia groups that receive Admin role (e.g., `admins,administrators`).
+- See [Authelia Integration Guide](docs/AUTHELIA.md) for complete setup instructions.
+
 #### Debug Logging and Error Reporting (Optional)
 - `DEBUG_MODE`: Enable extensive debug logging throughout the application (default: `false`). Set to `true` to enable detailed debug output including function entry/exit, parameter values, and operation details.
 - `GITHUB_TOKEN`: GitHub Personal Access Token for automatic issue creation on errors (optional). When set, errors will automatically create GitHub issues with full context and stack traces.
@@ -665,6 +672,7 @@ See [STABLE_BRANCH_CREATION.md](STABLE_BRANCH_CREATION.md) for details about the
 - **[Postman API Collection](POSTMAN_API_COLLECTION.md)** - Import into Postman for easy API testing (.NET version)
 - **[HTTPS Setup Guide](docs/HTTPS_SETUP.md)** - Configure HTTPS with native support or reverse proxy
 - **[Reverse Proxy Setup Guide](docs/REVERSE_PROXY.md)** - Deploy behind SWAG, Nginx, Traefik, Apache, or Caddy
+- **[Authelia Integration Guide](docs/AUTHELIA.md)** - Configure Authelia for 2FA and SSO authentication
 - **[SWAG Configuration Guide](docs/swag-configs/README.md)** - Ready-to-use SWAG proxy configs
 - **[Performance Tuning Guide](docs/PERFORMANCE_TUNING.md)** - Optimize performance for your system
 - **[Automated Versioning](docs/AUTOMATED_VERSIONING.md)** - How automatic version bumping works

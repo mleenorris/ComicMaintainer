@@ -287,18 +287,24 @@
                 }
                 
                 // Check authentication status for both JWT and Authelia before connecting
+                console.log('SSE: Checking authentication status...');
                 const isAuthenticated = await checkAuthenticationStatus();
                 if (!isAuthenticated) {
-                    console.warn('SSE: Authentication invalid, redirecting to login');
+                    console.error('SSE: Authentication check failed - cannot establish SSE connection');
+                    console.error('SSE: User will be redirected to login page');
                     redirectToLogin();
                     return;
                 }
+                console.log('SSE: Authentication check passed');
                 
                 // Get token for SSE connection
                 // For JWT auth, use the stored token
                 // For Authelia auth, request a JWT token specifically for SSE
                 let token = localStorage.getItem('jwt_token');
                 const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                
+                console.log('SSE: Authentication mode -', isAutheliaAuth ? 'Authelia' : 'JWT');
+                console.log('SSE: Existing token -', token ? 'Present' : 'None');
                 
                 if (isAutheliaAuth && !token) {
                     // For Authelia users, get an SSE token from the backend
@@ -313,19 +319,33 @@
                             token = data.token;
                             console.log('SSE: Received SSE token for Authelia user');
                         } else {
-                            console.error('SSE: Failed to get SSE token:', response.status);
+                            console.error('SSE: Failed to get SSE token - status:', response.status);
+                            console.error('SSE: This may indicate an authentication issue with Authelia');
+                            // Don't retry immediately if we get auth errors
+                            if (response.status === 401 || response.status === 403) {
+                                console.error('SSE: Authentication failed. SSE connection cannot be established.');
+                                throw new Error(`Authentication failed (${response.status}). Please check Authelia configuration.`);
+                            }
                         }
                     } catch (error) {
                         console.error('SSE: Error fetching SSE token:', error);
+                        // Re-throw to be caught by outer try-catch for proper error handling
+                        throw error;
                     }
                 }
                 
-                // EventSource doesn't support custom headers, so we pass the token as a query parameter
-                const streamUrl = token 
-                    ? apiUrl(`/api/events/stream?access_token=${encodeURIComponent(token)}`)
-                    : apiUrl('/api/events/stream');
+                // Ensure we have a token before attempting connection
+                if (!token) {
+                    console.error('SSE: No authentication token available. Cannot establish SSE connection.');
+                    console.error('SSE: For JWT auth, check if jwt_token exists in localStorage');
+                    console.error('SSE: For Authelia auth, check if /api/auth/sse-token endpoint is accessible');
+                    throw new Error('No authentication token available for SSE connection');
+                }
                 
-                console.log('SSE: Connecting to event stream...');
+                // EventSource doesn't support custom headers, so we pass the token as a query parameter
+                const streamUrl = apiUrl(`/api/events/stream?access_token=${encodeURIComponent(token)}`);
+                
+                console.log('SSE: Connecting to event stream with authentication token...');
                 eventSource = new EventSource(streamUrl);
                 
                 eventSource.onopen = () => {

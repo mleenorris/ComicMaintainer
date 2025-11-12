@@ -7,6 +7,7 @@
     
     <!-- PWA Meta Tags -->
     <meta name="description" content="Manage and process your comic archive files with ComicTagger">
+    <!-- Note: theme-color is not supported by Firefox but is widely supported by Chrome, Safari, and Edge -->
     <meta name="theme-color" content="#2c3e50">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -117,6 +118,7 @@
                         <span id="progressIndicatorText">⏳ Processing...</span>
                     </button>
                     <div class="header-search">
+                        <label for="headerSearchInput" class="visually-hidden">Search files</label>
                         <input type="text" id="headerSearchInput" name="headerSearch" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
                     </div>
                     <div class="header-filter-dropdown">

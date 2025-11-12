@@ -291,7 +291,7 @@ authBuilder.AddJwtBearer(options =>
             // Override the default behavior to return JSON instead of redirecting
             context.HandleResponse();
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            context.Response.ContentType = "application/json";
+            context.Response.ContentType = "application/json; charset=utf-8";
             
             var result = JsonSerializer.Serialize(new { error = "Unauthorized", message = "Authentication required" });
             return context.Response.WriteAsync(result);
@@ -299,7 +299,7 @@ authBuilder.AddJwtBearer(options =>
         OnForbidden = context =>
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            context.Response.ContentType = "application/json";
+            context.Response.ContentType = "application/json; charset=utf-8";
             
             var result = JsonSerializer.Serialize(new { error = "Forbidden", message = "Insufficient permissions" });
             return context.Response.WriteAsync(result);
@@ -506,12 +506,6 @@ app.Use(async (context, next) =>
     // Prevent MIME type sniffing
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     
-    // Prevent clickjacking
-    context.Response.Headers["X-Frame-Options"] = "DENY";
-    
-    // Enable XSS protection
-    context.Response.Headers["X-XSS-Protection"] = "1; mode=block";
-    
     // Control referrer information
     context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
     
@@ -526,19 +520,25 @@ app.Use(async (context, next) =>
         // HSTS: Force HTTPS for 1 year
         context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
         
-        // CSP: Upgrade insecure requests
+        // CSP: Upgrade insecure requests and prevent framing (replaces X-Frame-Options)
         if (!context.Response.Headers.ContainsKey("Content-Security-Policy"))
         {
-            context.Response.Headers["Content-Security-Policy"] = "upgrade-insecure-requests";
+            context.Response.Headers["Content-Security-Policy"] = "upgrade-insecure-requests; frame-ancestors 'none'";
+        }
+    }
+    else
+    {
+        // CSP: Prevent framing even without HTTPS (replaces X-Frame-Options)
+        if (!context.Response.Headers.ContainsKey("Content-Security-Policy"))
+        {
+            context.Response.Headers["Content-Security-Policy"] = "frame-ancestors 'none'";
         }
     }
     
     // Prevent caching for API endpoints and HTML pages
     if (context.Request.Path.StartsWithSegments("/api"))
     {
-        context.Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private";
-        context.Response.Headers["Pragma"] = "no-cache";
-        context.Response.Headers["Expires"] = "0";
+        context.Response.Headers["Cache-Control"] = "no-store, private";
     }
     
     await next();
@@ -555,11 +555,9 @@ app.UseStaticFiles(new StaticFileOptions
         // Don't cache HTML files to ensure users always get the latest version
         if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
         {
-            ctx.Context.Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private";
-            ctx.Context.Response.Headers["Pragma"] = "no-cache";
-            ctx.Context.Response.Headers["Expires"] = "0";
+            ctx.Context.Response.Headers["Cache-Control"] = "no-store, private";
         }
-        // Cache other static assets (CSS, JS, images) for 1 hour
+        // Cache other static assets (CSS, JS, images) for 1 hour with cache busting via query string
         else
         {
             ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=3600";
@@ -589,7 +587,7 @@ app.MapFallbackToFile("index.html").Add(endpointBuilder =>
             context.Request.Path.StartsWithSegments("/hubs"))
         {
             context.Response.StatusCode = 404;
-            context.Response.ContentType = "application/json";
+            context.Response.ContentType = "application/json; charset=utf-8";
             await context.Response.WriteAsync("{\"error\":\"Not Found\",\"message\":\"The requested endpoint does not exist\"}");
             return;
         }

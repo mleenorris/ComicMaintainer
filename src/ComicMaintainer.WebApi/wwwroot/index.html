@@ -227,6 +227,27 @@
                         </div>
                     </div>
                     
+                    <!-- Mark Read Dropdown -->
+                    <div class="action-dropdown">
+                        <button class="action-dropdown-toggle mark" onclick="toggleActionDropdown(event, 'markDropdown')">
+                            👁️<span> Mark</span>
+                        </button>
+                        <div class="action-dropdown-menu" id="markDropdown">
+                            <button class="action-dropdown-item" onclick="markAllFilesRead(); closeAllActionDropdowns();">
+                                ✅ Mark All Read
+                            </button>
+                            <button class="action-dropdown-item" onclick="markAllFilesUnread(); closeAllActionDropdowns();">
+                                📚 Mark All Unread
+                            </button>
+                            <button class="action-dropdown-item" id="markSelectedReadItem" onclick="markSelectedFilesRead(); closeAllActionDropdowns();" disabled>
+                                ✅ Mark Selected Read
+                            </button>
+                            <button class="action-dropdown-item" id="markSelectedUnreadItem" onclick="markSelectedFilesUnread(); closeAllActionDropdowns();" disabled>
+                                📚 Mark Selected Unread
+                            </button>
+                        </div>
+                    </div>
+                    
                     <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>✏️<span> Update Selected</span></button>
                     <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteSelectedBtn" disabled>🗑️<span> Delete Selected</span></button>
                 </div>

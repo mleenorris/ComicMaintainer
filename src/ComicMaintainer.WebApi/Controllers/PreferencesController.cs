@@ -24,7 +24,8 @@ public class PreferencesController : ControllerBase
             perPage = 100,
             filenameFormat = "{series} - Chapter {issue}",
             issueNumberPadding = 4,
-            watcherEnabled = true
+            watcherEnabled = true,
+            readingMode = "manga" // Default reading mode: "manga" or "webcomic"
         });
     }
 
@@ -34,9 +35,10 @@ public class PreferencesController : ControllerBase
     {
         // For now, just acknowledge the save
         // In the future, this could be persisted to the database
-        _logger.LogInformation("Preferences updated: Theme={Theme}, PerPage={PerPage}", 
+        _logger.LogInformation("Preferences updated: Theme={Theme}, PerPage={PerPage}, ReadingMode={ReadingMode}", 
             preferences.Theme ?? "not specified", 
-            preferences.PerPage);
+            preferences.PerPage,
+            preferences.ReadingMode ?? "not specified");
         return Ok(new { message = "Preferences updated successfully" });
     }
 
@@ -58,5 +60,6 @@ public class PreferencesController : ControllerBase
         public string? FilenameFormat { get; set; }
         public int? IssueNumberPadding { get; set; }
         public bool? WatcherEnabled { get; set; }
+        public string? ReadingMode { get; set; } // "manga" or "webcomic"
     }
 }

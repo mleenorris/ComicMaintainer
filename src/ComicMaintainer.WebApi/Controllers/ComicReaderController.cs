@@ -17,15 +17,18 @@ namespace ComicMaintainer.WebApi.Controllers;
 public class ComicReaderController : ControllerBase
 {
     private readonly IComicReaderService _readerService;
+    private readonly IFileStoreService _fileStore;
     private readonly ILogger<ComicReaderController> _logger;
     private readonly AppSettings _settings;
 
     public ComicReaderController(
         IComicReaderService readerService,
+        IFileStoreService fileStore,
         ILogger<ComicReaderController> logger,
         IOptions<AppSettings> settings)
     {
         _readerService = readerService;
+        _fileStore = fileStore;
         _logger = logger;
         _settings = settings.Value;
     }
@@ -174,6 +177,58 @@ public class ComicReaderController : ControllerBase
         {
             _logger.LogError(ex, "Error getting pages from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error reading comic file" });
+        }
+    }
+
+    /// <summary>
+    /// Get the next or previous comic file in the directory
+    /// </summary>
+    /// <param name="filePath">Current file path</param>
+    /// <param name="direction">"next" or "prev"</param>
+    [HttpGet("adjacent")]
+    public async Task<ActionResult<object>> GetAdjacentFile([FromQuery] string filePath, [FromQuery] string direction = "next")
+    {
+        if (string.IsNullOrEmpty(filePath))
+        {
+            return BadRequest(new { error = "File path is required" });
+        }
+
+        if (!IsPathSafe(filePath))
+        {
+            _logger.LogWarning("Attempt to access file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return BadRequest(new { error = "File path is outside the allowed directory" });
+        }
+
+        try
+        {
+            var allFiles = await _fileStore.GetFilteredFilesAsync(null);
+            var sortedFiles = allFiles.OrderBy(f => f.FileName).ToList();
+            
+            var currentIndex = sortedFiles.FindIndex(f => f.FilePath == filePath);
+            
+            if (currentIndex == -1)
+            {
+                return NotFound(new { error = "Current file not found in library" });
+            }
+
+            int adjacentIndex = direction.ToLower() == "next" ? currentIndex + 1 : currentIndex - 1;
+            
+            if (adjacentIndex < 0 || adjacentIndex >= sortedFiles.Count)
+            {
+                return Ok(new { hasAdjacent = false, filePath = (string?)null, fileName = (string?)null });
+            }
+
+            var adjacentFile = sortedFiles[adjacentIndex];
+            return Ok(new { 
+                hasAdjacent = true, 
+                filePath = adjacentFile.FilePath, 
+                fileName = adjacentFile.FileName 
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting adjacent file for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return StatusCode(500, new { error = "Error finding adjacent file" });
         }
     }
 }

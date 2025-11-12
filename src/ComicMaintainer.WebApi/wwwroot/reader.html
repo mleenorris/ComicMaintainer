@@ -268,24 +268,34 @@
         async function initReader() {
             comicFilePath = getQueryParam('file');
             token = localStorage.getItem('jwt_token') || '';
+            const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
 
             if (!comicFilePath) {
                 showError('No comic file specified');
                 return;
             }
 
-            if (!token) {
+            // Check authentication - allow either JWT token or Authelia authentication
+            if (!token && !isAutheliaAuth) {
                 window.location.href = '/login.html';
                 return;
             }
 
             try {
-                // Get comic info
-                const response = await fetch(`/api/ComicReader/info?filePath=${encodeURIComponent(comicFilePath)}`, {
-                    headers: {
+                // Prepare fetch options with proper authentication
+                const fetchOptions = {
+                    credentials: 'include' // Important for Authelia cookies
+                };
+                
+                // Add Authorization header only for JWT authentication
+                if (!isAutheliaAuth && token) {
+                    fetchOptions.headers = {
                         'Authorization': `Bearer ${token}`
-                    }
-                });
+                    };
+                }
+
+                // Get comic info
+                const response = await fetch(`/api/ComicReader/info?filePath=${encodeURIComponent(comicFilePath)}`, fetchOptions);
 
                 if (!response.ok) {
                     if (response.status === 401) {
@@ -332,13 +342,23 @@
             content.innerHTML = '<div class="loading">Loading page...</div>';
 
             try {
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                
+                // Prepare fetch options with proper authentication
+                const fetchOptions = {
+                    credentials: 'include' // Important for Authelia cookies
+                };
+                
+                // Add Authorization header only for JWT authentication
+                if (!isAutheliaAuth && token) {
+                    fetchOptions.headers = {
+                        'Authorization': `Bearer ${token}`
+                    };
+                }
+                
                 const response = await fetch(
                     `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
-                    {
-                        headers: {
-                            'Authorization': `Bearer ${token}`
-                        }
-                    }
+                    fetchOptions
                 );
 
                 if (!response.ok) {

@@ -171,7 +171,7 @@ public class FilesController : ControllerBase
             // Validate path is within watched directory to prevent path traversal attacks
             if (!IsPathSafe(filePath))
             {
-                _logger.LogWarning("Attempt to get metadata for file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                _logger.LogWarning("Attempt to get metadata for file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(filePath)));
                 return BadRequest("File path is outside the allowed directory");
             }
 
@@ -199,7 +199,7 @@ public class FilesController : ControllerBase
             // Validate path is within watched directory to prevent path traversal attacks
             if (!IsPathSafe(filePath))
             {
-                _logger.LogWarning("Attempt to update metadata for file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                _logger.LogWarning("Attempt to update metadata for file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(filePath)));
                 return BadRequest("File path is outside the allowed directory");
             }
 
@@ -239,7 +239,7 @@ public class FilesController : ControllerBase
             // Validate path is within watched directory to prevent path traversal attacks
             if (!IsPathSafe(filePath))
             {
-                _logger.LogWarning("Attempt to process file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                _logger.LogWarning("Attempt to process file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(filePath)));
                 return BadRequest("File path is outside the allowed directory");
             }
 
@@ -370,7 +370,7 @@ public class FilesController : ControllerBase
             // Validate path is within watched directory to prevent path traversal attacks
             if (!IsPathSafe(filePath))
             {
-                _logger.LogWarning("Attempt to process file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                _logger.LogWarning("Attempt to process file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(filePath)));
                 return BadRequest("File path is outside the allowed directory");
             }
 

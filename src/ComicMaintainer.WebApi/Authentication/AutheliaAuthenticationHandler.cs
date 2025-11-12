@@ -83,7 +83,7 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, user.Id),
-            new(ClaimTypes.Name, user.UserName ?? username),
+            new(ClaimTypes.Name, username),  // Always use the username from Authelia header
             new(ClaimTypes.Email, user.Email ?? email ?? $"{username}@authelia.local"),
             new("auth_method", "authelia")
         };

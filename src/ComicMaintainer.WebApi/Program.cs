@@ -10,6 +10,7 @@ using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Middleware;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -257,6 +258,8 @@ if (autheliaSettings.Enabled)
     authBuilder.AddScheme<AutheliaAuthenticationOptions, AutheliaAuthenticationHandler>(
         "Authelia",
         options => { });
+    
+    Log.Information("Authelia authentication configured with fallback to JWT for SSE connections");
 }
 
 // Always add JWT Bearer for backward compatibility and API access
@@ -305,6 +308,29 @@ authBuilder.AddJwtBearer(options =>
             return context.Response.WriteAsync(result);
         }
     };
+});
+
+// Configure authorization policies to support multiple authentication schemes
+builder.Services.AddAuthorization(options =>
+{
+    // Default policy that accepts both Authelia and JWT authentication
+    // This allows SSE connections to work with JWT tokens even when Authelia is the default
+    if (autheliaSettings.Enabled)
+    {
+        options.DefaultPolicy = new AuthorizationPolicyBuilder()
+            .AddAuthenticationSchemes("Authelia", JwtBearerDefaults.AuthenticationScheme)
+            .RequireAuthenticatedUser()
+            .Build();
+        
+        Log.Information("Authorization policy configured to accept both Authelia and JWT Bearer tokens");
+    }
+    else
+    {
+        options.DefaultPolicy = new AuthorizationPolicyBuilder()
+            .AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme)
+            .RequireAuthenticatedUser()
+            .Build();
+    }
 });
 
 // Add services to the container

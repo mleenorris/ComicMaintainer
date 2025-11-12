@@ -244,8 +244,57 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
+// Add response compression for better performance
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+});
+
+// Add request timeout (ASP.NET Core 9 best practice)
+builder.Services.AddRequestTimeouts(options =>
+{
+    options.DefaultPolicy = new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutPolicy
+    {
+        Timeout = TimeSpan.FromSeconds(30)
+    };
+    // Longer timeout for comic page operations
+    options.AddPolicy("ComicOperations", TimeSpan.FromMinutes(2));
+});
+
+// Add rate limiting (ASP.NET Core 9 best practice)
+builder.Services.AddRateLimiter(options =>
+{
+    options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(context =>
+    {
+        // Allow 100 requests per minute per IP
+        return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 100,
+                Window = TimeSpan.FromMinutes(1),
+                QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
+                QueueLimit = 10
+            });
+    });
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+});
+
+// Add output caching for better performance  
+builder.Services.AddOutputCache(options =>
+{
+    options.AddBasePolicy(builder => builder.Cache());
+    // Cache comic pages for 1 hour since they don't change frequently
+    options.AddPolicy("ComicPages", builder => builder
+        .Expire(TimeSpan.FromHours(1))
+        .SetVaryByQuery("filePath", "page"));
+});
+
 // Add SignalR
 builder.Services.AddSignalR();
+
+// Add health checks
+builder.Services.AddHealthChecks();
 
 // Add CORS with security-conscious configuration
 builder.Services.AddCors(options =>
@@ -290,6 +339,7 @@ builder.Services.AddSingleton<IComicProcessorService, ComicProcessorService>();
 builder.Services.AddSingleton<IFileWatcherService, FileWatcherService>();
 builder.Services.AddSingleton<IProcessingHistoryService, ProcessingHistoryService>();
 builder.Services.AddSingleton<ISettingsService, SettingsService>();
+builder.Services.AddSingleton<IComicReaderService, ComicReaderService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 
 // Add hosted service for file watcher
@@ -369,6 +419,18 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 
+// Use rate limiter
+app.UseRateLimiter();
+
+// Use request timeouts
+app.UseRequestTimeouts();
+
+// Use response compression
+app.UseResponseCompression();
+
+// Use output caching
+app.UseOutputCache();
+
 // Add security headers middleware
 app.Use(async (context, next) =>
 {
@@ -424,6 +486,9 @@ app.UseAuthorization();
 
 app.MapControllers();
 app.MapHub<ProgressHub>("/hubs/progress");
+
+// Map health check endpoints
+app.MapHealthChecks("/health");
 
 // Map default route to serve index.html for non-API routes only
 // This prevents the fallback from catching API requests, ensuring they always return JSON

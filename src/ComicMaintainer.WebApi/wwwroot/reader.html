@@ -376,11 +376,15 @@
                 readingMode = localStorage.getItem('readingMode') || 'manga';
                 updateModeUI();
 
+                // Load saved reading progress
+                const savedPage = await loadReadingProgress();
+                currentPage = Math.min(savedPage, totalPages); // Ensure page is within bounds
+
                 // Load first page or all pages depending on mode
                 if (readingMode === 'webcomic') {
                     await loadWebcomicMode();
                 } else {
-                    await loadPage(1);
+                    await loadPage(currentPage);
                 }
 
                 // Prefetch next comic info for seamless transition
@@ -563,6 +567,7 @@
                 const loadingDiv = document.createElement('div');
                 loadingDiv.className = 'loading-indicator';
                 loadingDiv.textContent = `Loading next: ${nextComicInfo.fileName}...`;
+                loadingDiv.id = 'nextComicLoadingIndicator'; // Add ID to reference it for scroll position
                 container.appendChild(loadingDiv);
                 
                 // Load next comic info
@@ -590,13 +595,32 @@
                     totalPages = data.pageCount;
                     document.getElementById('comicTitle').textContent = data.fileName;
                     
+                    // Reset hasMarkedAsRead for the new comic
+                    hasMarkedAsRead = false;
+                    
+                    // Save scroll position before removing loading indicator
+                    const scrollPositionBeforeLoad = loadingDiv.offsetTop;
+                    
                     // Remove loading indicator
                     loadingDiv.remove();
+                    
+                    // Mark the start position for the new comic
+                    const startMarker = document.createElement('div');
+                    startMarker.id = 'newComicStartMarker';
+                    startMarker.style.height = '1px';
+                    container.appendChild(startMarker);
                     
                     // Load all pages of next comic
                     for (let i = 1; i <= totalPages; i++) {
                         await loadWebcomicPage(i, container);
                     }
+                    
+                    // Scroll to the beginning of the new comic
+                    const content = document.getElementById('readerContent');
+                    startMarker.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    
+                    // Remove the marker after scrolling
+                    setTimeout(() => startMarker.remove(), 100);
                     
                     // Prefetch the next one
                     await prefetchNextComic();
@@ -652,6 +676,9 @@
                 const imageUrl = URL.createObjectURL(blob);
                 
                 content.innerHTML = `<img src="${imageUrl}" class="page-image" alt="Page ${pageNum}">`;
+                
+                // Save reading progress
+                await saveReadingProgress(pageNum);
                 
                 // Mark as read when reaching last page in manga mode
                 if (pageNum === totalPages && !hasMarkedAsRead) {
@@ -826,6 +853,69 @@
                 }
             } catch (error) {
                 console.error('Error marking file as read:', error);
+            }
+        }
+
+        // Save reading progress
+        async function saveReadingProgress(pageNum) {
+            try {
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const fetchOptions = {
+                    method: 'POST',
+                    credentials: 'include'
+                };
+                
+                if (!isAutheliaAuth && token) {
+                    fetchOptions.headers = {
+                        'Authorization': `Bearer ${token}`
+                    };
+                }
+                
+                const response = await fetch(
+                    `/api/ComicReader/progress?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
+                    fetchOptions
+                );
+                
+                if (response.ok) {
+                    console.log('Saved reading progress:', comicFilePath, 'page', pageNum);
+                } else {
+                    console.error('Failed to save reading progress:', response.status);
+                }
+            } catch (error) {
+                console.error('Error saving reading progress:', error);
+            }
+        }
+
+        // Load reading progress
+        async function loadReadingProgress() {
+            try {
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const fetchOptions = {
+                    credentials: 'include'
+                };
+                
+                if (!isAutheliaAuth && token) {
+                    fetchOptions.headers = {
+                        'Authorization': `Bearer ${token}`
+                    };
+                }
+                
+                const response = await fetch(
+                    `/api/ComicReader/progress?filePath=${encodeURIComponent(comicFilePath)}`,
+                    fetchOptions
+                );
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Loaded reading progress:', comicFilePath, 'page', data.currentPage);
+                    return data.currentPage;
+                } else {
+                    console.error('Failed to load reading progress:', response.status);
+                    return 1; // Default to page 1
+                }
+            } catch (error) {
+                console.error('Error loading reading progress:', error);
+                return 1; // Default to page 1
             }
         }
 

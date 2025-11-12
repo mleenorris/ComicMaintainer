@@ -61,6 +61,16 @@ public interface IFileStoreService
     Task MarkFilesReadAsync(IEnumerable<string> filePaths, bool read, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Save reading progress (current page) for a comic file
+    /// </summary>
+    Task SaveReadingProgressAsync(string filePath, int currentPage, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Get reading progress (current page) for a comic file
+    /// </summary>
+    Task<int> GetReadingProgressAsync(string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Get file count statistics
     /// </summary>
     Task<(int total, int processed, int unprocessed, int duplicates)> GetFileCountsAsync(CancellationToken cancellationToken = default);

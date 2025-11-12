@@ -262,4 +262,71 @@ public class ComicReaderController : ControllerBase
             return StatusCode(500, new { error = "Error marking file as read" });
         }
     }
+
+    /// <summary>
+    /// Save reading progress for a comic file
+    /// </summary>
+    /// <param name="filePath">Path to the comic file</param>
+    /// <param name="page">Current page number</param>
+    [HttpPost("progress")]
+    public async Task<ActionResult> SaveProgress([FromQuery] string filePath, [FromQuery] int page, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(filePath))
+        {
+            return BadRequest(new { error = "File path is required" });
+        }
+
+        if (page < 1)
+        {
+            return BadRequest(new { error = "Page number must be 1 or greater" });
+        }
+
+        if (!IsPathSafe(filePath))
+        {
+            _logger.LogWarning("Attempt to save progress for file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return BadRequest(new { error = "File path is outside the allowed directory" });
+        }
+
+        try
+        {
+            await _fileStore.SaveReadingProgressAsync(filePath, page, cancellationToken);
+            _logger.LogDebug("Saved reading progress for {FilePath}: page {Page}", LoggingHelper.SanitizePathForLog(filePath), page);
+            return Ok();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error saving reading progress for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return StatusCode(500, new { error = "Error saving reading progress" });
+        }
+    }
+
+    /// <summary>
+    /// Get reading progress for a comic file
+    /// </summary>
+    /// <param name="filePath">Path to the comic file</param>
+    [HttpGet("progress")]
+    public async Task<ActionResult<object>> GetProgress([FromQuery] string filePath, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(filePath))
+        {
+            return BadRequest(new { error = "File path is required" });
+        }
+
+        if (!IsPathSafe(filePath))
+        {
+            _logger.LogWarning("Attempt to get progress for file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return BadRequest(new { error = "File path is outside the allowed directory" });
+        }
+
+        try
+        {
+            var progress = await _fileStore.GetReadingProgressAsync(filePath, cancellationToken);
+            return Ok(new { currentPage = progress });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting reading progress for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return StatusCode(500, new { error = "Error getting reading progress" });
+        }
+    }
 }

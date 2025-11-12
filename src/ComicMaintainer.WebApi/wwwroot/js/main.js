@@ -223,27 +223,94 @@
         // Server-Sent Events connection for real-time updates
         let eventSource = null;
         let eventSourceReconnectTimer = null;
-        const EVENT_SOURCE_RECONNECT_DELAY = 5000; // 5 seconds
+        const EVENT_SOURCE_RECONNECT_DELAY = 5000; // Initial delay: 5 seconds
+        const EVENT_SOURCE_MAX_RETRY_DELAY = 60000; // Maximum delay: 60 seconds
+        const EVENT_SOURCE_MAX_RETRIES = 20; // Stop trying after 20 consecutive failures
+        let eventSourceRetryCount = 0;
+        let eventSourceRetryDelay = EVENT_SOURCE_RECONNECT_DELAY;
+        
+        // Helper function to check if user is still authenticated (supports both JWT and Authelia)
+        async function checkAuthenticationStatus() {
+            try {
+                // First check if using Authelia authentication
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                
+                if (isAutheliaAuth) {
+                    // For Authelia, check server auth status to verify session is still valid
+                    const response = await fetch(apiUrl('/api/auth/status'), {
+                        credentials: 'include' // Important for Authelia cookies
+                    });
+                    
+                    if (response.ok) {
+                        const authStatus = await response.json();
+                        if (authStatus.autheliaEnabled && authStatus.isAuthenticated) {
+                            return true; // Authelia session is still valid
+                        }
+                    }
+                    // If we get here, Authelia session is invalid
+                    console.warn('[AUTH] Authelia session expired or invalid');
+                    return false;
+                } else {
+                    // For JWT authentication, check if token exists and is not expired
+                    const token = localStorage.getItem('jwt_token');
+                    if (!token) {
+                        console.warn('[AUTH] No JWT token found');
+                        return false;
+                    }
+                    
+                    if (isTokenExpired(token)) {
+                        console.warn('[AUTH] JWT token expired');
+                        return false;
+                    }
+                    
+                    return true; // JWT token is valid
+                }
+            } catch (error) {
+                console.error('[AUTH] Error checking authentication status:', error);
+                return false;
+            }
+        }
         
         // Initialize SSE connection
-        function initEventSource() {
+        async function initEventSource() {
             // Close existing connection if any
             if (eventSource) {
                 eventSource.close();
             }
             
             try {
+                // Check if we've exceeded max retry attempts
+                if (eventSourceRetryCount >= EVENT_SOURCE_MAX_RETRIES) {
+                    console.error('SSE: Maximum retry attempts reached. Please refresh the page or check your connection.');
+                    showMessage('Real-time updates unavailable. Please refresh the page.', 'error');
+                    return;
+                }
+                
+                // Check authentication status for both JWT and Authelia before connecting
+                const isAuthenticated = await checkAuthenticationStatus();
+                if (!isAuthenticated) {
+                    console.warn('SSE: Authentication invalid, redirecting to login');
+                    redirectToLogin();
+                    return;
+                }
+                
                 // EventSource doesn't support custom headers, so we pass the token as a query parameter
                 // This is only needed for JWT authentication; Authelia uses cookies/headers from the proxy
                 const token = localStorage.getItem('jwt_token');
+                
                 const streamUrl = token 
                     ? apiUrl(`/api/events/stream?access_token=${encodeURIComponent(token)}`)
                     : apiUrl('/api/events/stream');
                 
+                console.log('SSE: Connecting to event stream...');
                 eventSource = new EventSource(streamUrl);
                 
                 eventSource.onopen = () => {
                     console.log('SSE: Connected to event stream');
+                    
+                    // Reset retry counters on successful connection
+                    eventSourceRetryCount = 0;
+                    eventSourceRetryDelay = EVENT_SOURCE_RECONNECT_DELAY;
                     
                     // When SSE reconnects and we have an active job, poll for its current status
                     // This ensures we don't miss updates that occurred while disconnected
@@ -262,20 +329,58 @@
                     }
                 };
                 
-                eventSource.onerror = (error) => {
-                    console.warn('SSE: Connection error, will retry in 5s', error);
-                    eventSource.close();
+                eventSource.onerror = async (error) => {
+                    // EventSource automatically attempts to reconnect, but readyState tells us the status
+                    // readyState 0 = CONNECTING, 1 = OPEN, 2 = CLOSED
+                    const state = eventSource.readyState;
                     
-                    // Auto-reconnect after delay
-                    if (eventSourceReconnectTimer) {
-                        clearTimeout(eventSourceReconnectTimer);
+                    if (state === EventSource.CLOSED) {
+                        eventSourceRetryCount++;
+                        console.warn(`SSE: Connection closed (attempt ${eventSourceRetryCount}/${EVENT_SOURCE_MAX_RETRIES}), will retry in ${eventSourceRetryDelay/1000}s`);
+                        
+                        // Close the connection to stop automatic retry attempts
+                        eventSource.close();
+                        
+                        // Check authentication status for both JWT and Authelia
+                        const isAuthenticated = await checkAuthenticationStatus();
+                        if (!isAuthenticated) {
+                            console.warn('SSE: Authentication expired during connection');
+                            redirectToLogin();
+                            return;
+                        }
+                        
+                        // Schedule reconnection with exponential backoff
+                        if (eventSourceReconnectTimer) {
+                            clearTimeout(eventSourceReconnectTimer);
+                        }
+                        eventSourceReconnectTimer = setTimeout(() => {
+                            initEventSource();
+                            // Increase delay for next retry (exponential backoff)
+                            eventSourceRetryDelay = Math.min(eventSourceRetryDelay * 1.5, EVENT_SOURCE_MAX_RETRY_DELAY);
+                        }, eventSourceRetryDelay);
+                    } else if (state === EventSource.CONNECTING) {
+                        // EventSource is attempting to reconnect automatically
+                        console.log('SSE: Reconnecting...');
                     }
-                    eventSourceReconnectTimer = setTimeout(initEventSource, EVENT_SOURCE_RECONNECT_DELAY);
                 };
             } catch (error) {
                 console.error('SSE: Failed to initialize EventSource:', error);
-                // Fallback to polling if SSE is not supported
-                console.log('SSE: Falling back to polling mechanisms');
+                eventSourceRetryCount++;
+                
+                // Retry with exponential backoff
+                if (eventSourceRetryCount < EVENT_SOURCE_MAX_RETRIES) {
+                    console.log(`SSE: Will retry in ${eventSourceRetryDelay/1000}s (attempt ${eventSourceRetryCount}/${EVENT_SOURCE_MAX_RETRIES})`);
+                    if (eventSourceReconnectTimer) {
+                        clearTimeout(eventSourceReconnectTimer);
+                    }
+                    eventSourceReconnectTimer = setTimeout(() => {
+                        initEventSource();
+                        eventSourceRetryDelay = Math.min(eventSourceRetryDelay * 1.5, EVENT_SOURCE_MAX_RETRY_DELAY);
+                    }, eventSourceRetryDelay);
+                } else {
+                    console.error('SSE: Maximum retry attempts reached');
+                    showMessage('Real-time updates unavailable. Please refresh the page.', 'error');
+                }
             }
         }
         
@@ -415,6 +520,9 @@
                 eventSource.close();
                 eventSource = null;
             }
+            // Reset retry counters
+            eventSourceRetryCount = 0;
+            eventSourceRetryDelay = EVENT_SOURCE_RECONNECT_DELAY;
         }
         
         // API helper functions for server-side preferences

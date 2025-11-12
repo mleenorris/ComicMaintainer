@@ -168,6 +168,13 @@ public class FilesController : ControllerBase
             if (string.IsNullOrEmpty(filePath))
                 return BadRequest("File path is required");
 
+            // Validate path is within watched directory to prevent path traversal attacks
+            if (!IsPathSafe(filePath))
+            {
+                _logger.LogWarning("Attempt to get metadata for file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                return BadRequest("File path is outside the allowed directory");
+            }
+
             var metadata = await _processor.GetMetadataAsync(filePath);
             if (metadata == null)
                 return NotFound();
@@ -188,6 +195,13 @@ public class FilesController : ControllerBase
         {
             if (string.IsNullOrEmpty(filePath))
                 return BadRequest("File path is required");
+
+            // Validate path is within watched directory to prevent path traversal attacks
+            if (!IsPathSafe(filePath))
+            {
+                _logger.LogWarning("Attempt to update metadata for file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                return BadRequest("File path is outside the allowed directory");
+            }
 
             // Capture before state
             var beforeMetadata = await _processor.GetMetadataAsync(filePath);
@@ -221,6 +235,13 @@ public class FilesController : ControllerBase
         {
             if (string.IsNullOrEmpty(filePath))
                 return BadRequest("File path is required");
+
+            // Validate path is within watched directory to prevent path traversal attacks
+            if (!IsPathSafe(filePath))
+            {
+                _logger.LogWarning("Attempt to process file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                return BadRequest("File path is outside the allowed directory");
+            }
 
             var success = await _processor.ProcessFileAsync(filePath);
             if (!success)
@@ -346,6 +367,13 @@ public class FilesController : ControllerBase
     {
         try
         {
+            // Validate path is within watched directory to prevent path traversal attacks
+            if (!IsPathSafe(filePath))
+            {
+                _logger.LogWarning("Attempt to process file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                return BadRequest("File path is outside the allowed directory");
+            }
+
             var success = await _processor.ProcessFileAsync(filePath);
             return success ? Ok() : BadRequest("Failed to process file");
         }

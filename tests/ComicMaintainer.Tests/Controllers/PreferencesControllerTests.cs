@@ -34,6 +34,23 @@ public class PreferencesControllerTests
     }
 
     [Fact]
+    public void GetPreferences_IncludesReadingMode()
+    {
+        // Act
+        var result = _controller.GetPreferences();
+
+        // Assert
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
+        Assert.NotNull(objectResult.Value);
+        
+        var preferences = objectResult.Value;
+        var readingModeProperty = preferences.GetType().GetProperty("readingMode");
+        Assert.NotNull(readingModeProperty);
+        Assert.Equal("manga", readingModeProperty.GetValue(preferences));
+    }
+
+    [Fact]
     public void SavePreferences_ReturnsOkResult()
     {
         // Arrange
@@ -58,7 +75,8 @@ public class PreferencesControllerTests
             PerPage = 50,
             FilenameFormat = "{series} #{issue}",
             IssueNumberPadding = 3,
-            WatcherEnabled = false
+            WatcherEnabled = false,
+            ReadingMode = "webcomic"
         };
 
         // Act
@@ -70,6 +88,23 @@ public class PreferencesControllerTests
         var message = okResult.Value.GetType().GetProperty("message");
         Assert.NotNull(message);
         Assert.Equal("Preferences updated successfully", message.GetValue(okResult.Value));
+    }
+
+    [Fact]
+    public void UpdatePreferences_WithReadingModeOnly_ReturnsOk()
+    {
+        // Arrange - Only update reading mode
+        var request = new PreferencesController.PreferencesRequest
+        {
+            ReadingMode = "manga"
+        };
+
+        // Act
+        var result = _controller.UpdatePreferences(request);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.NotNull(okResult.Value);
     }
 
     [Fact]

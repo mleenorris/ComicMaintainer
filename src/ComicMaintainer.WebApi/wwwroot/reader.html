@@ -210,6 +210,47 @@
             width: 2rem;
             height: 2rem;
         }
+
+        /* Continuous scroll mode styles */
+        .reader-content.webcomic-mode {
+            overflow-y: auto;
+            overflow-x: hidden;
+            align-items: flex-start;
+        }
+
+        .webcomic-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            gap: 0;
+        }
+
+        .webcomic-container img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .loading-indicator {
+            padding: 2rem;
+            text-align: center;
+            color: #aaa;
+        }
+
+        .mode-toggle {
+            background: #444;
+            color: #fff;
+            border: 1px solid #666;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+
+        .mode-toggle:hover {
+            background: #555;
+        }
     </style>
 </head>
 <body class="reader-mode">
@@ -218,6 +259,7 @@
             <button onclick="goBack()" title="Back to files">← Back</button>
             <h1 id="comicTitle">Loading...</h1>
             <div class="reader-controls">
+                <button class="mode-toggle" onclick="toggleReadingMode()" id="modeToggleBtn" title="Toggle reading mode">Mode: Manga</button>
                 <span class="page-info" id="pageInfo">Page 1 / 1</span>
                 <select id="pageSelect" name="pageSelect" onchange="goToPage(this.value)">
                     <option value="1">Page 1</option>
@@ -246,6 +288,7 @@
             <li><span>Next Page</span> <kbd>→</kbd> or <kbd>D</kbd></li>
             <li><span>First Page</span> <kbd>Home</kbd></li>
             <li><span>Last Page</span> <kbd>End</kbd></li>
+            <li><span>Toggle Reading Mode</span> <kbd>M</kbd></li>
             <li><span>Toggle Fullscreen</span> <kbd>F</kbd></li>
             <li><span>Show Help</span> <kbd>?</kbd></li>
             <li><span>Exit Reader</span> <kbd>Esc</kbd></li>
@@ -257,6 +300,11 @@
         let totalPages = 1;
         let comicFilePath = '';
         let token = '';
+        let readingMode = 'manga'; // 'manga' or 'webcomic'
+        let loadedPages = new Set();
+        let isLoadingNext = false;
+        let nextComicInfo = null;
+        let hasScrolledToBottom = false;
 
         // Get parameters from URL
         function getQueryParam(param) {
@@ -321,8 +369,235 @@
                     pageSelect.appendChild(option);
                 }
 
-                // Load first page
-                await loadPage(1);
+                // Load saved reading mode preference
+                readingMode = localStorage.getItem('readingMode') || 'manga';
+                updateModeUI();
+
+                // Load first page or all pages depending on mode
+                if (readingMode === 'webcomic') {
+                    await loadWebcomicMode();
+                } else {
+                    await loadPage(1);
+                }
+
+                // Prefetch next comic info for seamless transition
+                await prefetchNextComic();
+            } catch (error) {
+                console.error('Error initializing reader:', error);
+                showError('Failed to load comic: ' + error.message);
+            }
+        }
+
+        // Toggle between manga and webcomic reading modes
+        async function toggleReadingMode() {
+            readingMode = readingMode === 'manga' ? 'webcomic' : 'manga';
+            localStorage.setItem('readingMode', readingMode);
+            updateModeUI();
+            
+            // Reload content in new mode
+            const content = document.getElementById('readerContent');
+            content.innerHTML = '<div class="loading">Switching mode...</div>';
+            
+            if (readingMode === 'webcomic') {
+                await loadWebcomicMode();
+            } else {
+                await loadPage(currentPage);
+            }
+        }
+
+        // Update UI based on reading mode
+        function updateModeUI() {
+            const modeBtn = document.getElementById('modeToggleBtn');
+            const content = document.getElementById('readerContent');
+            const footer = document.querySelector('.reader-footer');
+            const pageInfo = document.getElementById('pageInfo');
+            const pageSelect = document.getElementById('pageSelect');
+            
+            if (readingMode === 'webcomic') {
+                modeBtn.textContent = 'Mode: Webcomic';
+                content.classList.add('webcomic-mode');
+                footer.style.display = 'none';
+                pageInfo.style.display = 'none';
+                pageSelect.style.display = 'none';
+            } else {
+                modeBtn.textContent = 'Mode: Manga';
+                content.classList.remove('webcomic-mode');
+                footer.style.display = 'flex';
+                pageInfo.style.display = 'inline';
+                pageSelect.style.display = 'inline';
+            }
+        }
+
+        // Load all pages in continuous scroll mode
+        async function loadWebcomicMode() {
+            const content = document.getElementById('readerContent');
+            content.innerHTML = '<div class="webcomic-container" id="webcomicContainer"></div>';
+            
+            const container = document.getElementById('webcomicContainer');
+            loadedPages.clear();
+            
+            // Load all pages of current comic
+            for (let i = 1; i <= totalPages; i++) {
+                await loadWebcomicPage(i, container);
+            }
+            
+            // Set up scroll listener for loading next comic
+            setupWebcomicScrollListener();
+        }
+
+        // Load a single page in webcomic mode
+        async function loadWebcomicPage(pageNum, container) {
+            if (loadedPages.has(pageNum)) return;
+            
+            try {
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const fetchOptions = {
+                    credentials: 'include'
+                };
+                
+                if (!isAutheliaAuth && token) {
+                    fetchOptions.headers = {
+                        'Authorization': `Bearer ${token}`
+                    };
+                }
+                
+                const response = await fetch(
+                    `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
+                    fetchOptions
+                );
+
+                if (!response.ok) {
+                    throw new Error('Failed to load page');
+                }
+
+                const blob = await response.blob();
+                const imageUrl = URL.createObjectURL(blob);
+                
+                const img = document.createElement('img');
+                img.src = imageUrl;
+                img.alt = `Page ${pageNum}`;
+                img.dataset.page = pageNum;
+                container.appendChild(img);
+                
+                loadedPages.add(pageNum);
+            } catch (error) {
+                console.error(`Error loading page ${pageNum}:`, error);
+            }
+        }
+
+        // Setup scroll listener for webcomic mode
+        function setupWebcomicScrollListener() {
+            const content = document.getElementById('readerContent');
+            
+            content.removeEventListener('scroll', handleWebcomicScroll);
+            content.addEventListener('scroll', handleWebcomicScroll);
+        }
+
+        // Handle scroll in webcomic mode
+        async function handleWebcomicScroll() {
+            const content = document.getElementById('readerContent');
+            const scrollPosition = content.scrollTop + content.clientHeight;
+            const scrollHeight = content.scrollHeight;
+            
+            // Check if scrolled near bottom (within 200px)
+            if (scrollHeight - scrollPosition < 200 && !isLoadingNext && nextComicInfo && nextComicInfo.hasAdjacent) {
+                isLoadingNext = true;
+                hasScrolledToBottom = true;
+                await loadNextComic();
+            }
+        }
+
+        // Prefetch next comic information
+        async function prefetchNextComic() {
+            try {
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const fetchOptions = {
+                    credentials: 'include'
+                };
+                
+                if (!isAutheliaAuth && token) {
+                    fetchOptions.headers = {
+                        'Authorization': `Bearer ${token}`
+                    };
+                }
+                
+                const response = await fetch(
+                    `/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=next`,
+                    fetchOptions
+                );
+
+                if (response.ok) {
+                    nextComicInfo = await response.json();
+                }
+            } catch (error) {
+                console.error('Error prefetching next comic:', error);
+            }
+        }
+
+        // Load next comic seamlessly
+        async function loadNextComic() {
+            if (!nextComicInfo || !nextComicInfo.hasAdjacent) {
+                const container = document.getElementById('webcomicContainer');
+                if (container) {
+                    const endMessage = document.createElement('div');
+                    endMessage.className = 'loading-indicator';
+                    endMessage.textContent = 'End of series';
+                    container.appendChild(endMessage);
+                }
+                return;
+            }
+            
+            try {
+                const container = document.getElementById('webcomicContainer');
+                
+                // Add loading indicator
+                const loadingDiv = document.createElement('div');
+                loadingDiv.className = 'loading-indicator';
+                loadingDiv.textContent = `Loading next: ${nextComicInfo.fileName}...`;
+                container.appendChild(loadingDiv);
+                
+                // Load next comic info
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const fetchOptions = {
+                    credentials: 'include'
+                };
+                
+                if (!isAutheliaAuth && token) {
+                    fetchOptions.headers = {
+                        'Authorization': `Bearer ${token}`
+                    };
+                }
+                
+                const response = await fetch(
+                    `/api/ComicReader/info?filePath=${encodeURIComponent(nextComicInfo.filePath)}`,
+                    fetchOptions
+                );
+
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // Update current comic info
+                    comicFilePath = nextComicInfo.filePath;
+                    totalPages = data.pageCount;
+                    document.getElementById('comicTitle').textContent = data.fileName;
+                    
+                    // Remove loading indicator
+                    loadingDiv.remove();
+                    
+                    // Load all pages of next comic
+                    for (let i = 1; i <= totalPages; i++) {
+                        await loadWebcomicPage(i, container);
+                    }
+                    
+                    // Prefetch the next one
+                    await prefetchNextComic();
+                    isLoadingNext = false;
+                }
+            } catch (error) {
+                console.error('Error loading next comic:', error);
+                isLoadingNext = false;
+            }
+        }
             } catch (error) {
                 console.error('Error initializing reader:', error);
                 showError('Failed to load comic: ' + error.message);
@@ -465,18 +740,35 @@
                 case 'ArrowLeft':
                 case 'a':
                 case 'A':
-                    previousPage();
+                    if (readingMode === 'manga') {
+                        previousPage();
+                    }
                     break;
                 case 'ArrowRight':
                 case 'd':
                 case 'D':
-                    nextPage();
+                    if (readingMode === 'manga') {
+                        nextPage();
+                    }
                     break;
                 case 'Home':
-                    loadPage(1);
+                    if (readingMode === 'manga') {
+                        loadPage(1);
+                    } else {
+                        document.getElementById('readerContent').scrollTop = 0;
+                    }
                     break;
                 case 'End':
-                    loadPage(totalPages);
+                    if (readingMode === 'manga') {
+                        loadPage(totalPages);
+                    } else {
+                        const content = document.getElementById('readerContent');
+                        content.scrollTop = content.scrollHeight;
+                    }
+                    break;
+                case 'm':
+                case 'M':
+                    toggleReadingMode();
                     break;
                 case 'f':
                 case 'F':

@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -24,7 +25,8 @@ public class PreferencesController : ControllerBase
             perPage = 100,
             filenameFormat = "{series} - Chapter {issue}",
             issueNumberPadding = 4,
-            watcherEnabled = true
+            watcherEnabled = true,
+            readingMode = "manga" // Default reading mode: "manga" or "webcomic"
         });
     }
 
@@ -34,9 +36,10 @@ public class PreferencesController : ControllerBase
     {
         // For now, just acknowledge the save
         // In the future, this could be persisted to the database
-        _logger.LogInformation("Preferences updated: Theme={Theme}, PerPage={PerPage}", 
-            preferences.Theme ?? "not specified", 
-            preferences.PerPage);
+        _logger.LogInformation("Preferences updated: Theme={Theme}, PerPage={PerPage}, ReadingMode={ReadingMode}", 
+            LoggingHelper.SanitizeForLog(preferences.Theme ?? "not specified"), 
+            preferences.PerPage,
+            LoggingHelper.SanitizeForLog(preferences.ReadingMode ?? "not specified"));
         return Ok(new { message = "Preferences updated successfully" });
     }
 
@@ -58,5 +61,6 @@ public class PreferencesController : ControllerBase
         public string? FilenameFormat { get; set; }
         public int? IssueNumberPadding { get; set; }
         public bool? WatcherEnabled { get; set; }
+        public string? ReadingMode { get; set; } // "manga" or "webcomic"
     }
 }

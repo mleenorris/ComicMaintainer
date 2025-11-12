@@ -49,6 +49,59 @@ public class ReaderIntegrationTests
     }
 
     [Fact]
+    public void ReaderHtml_ContainsReadingModeToggle()
+    {
+        // Arrange
+        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
+        var content = File.ReadAllText(readerPath);
+
+        // Assert - Verify reading mode toggle exists
+        Assert.Contains("toggleReadingMode", content);
+        Assert.Contains("id=\"modeToggleBtn\"", content);
+        Assert.Contains("Mode: Manga", content);
+    }
+
+    [Fact]
+    public void ReaderHtml_ContainsWebcomicModeSupport()
+    {
+        // Arrange
+        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
+        var content = File.ReadAllText(readerPath);
+
+        // Assert - Verify webcomic mode elements exist
+        Assert.Contains("webcomic-mode", content);
+        Assert.Contains("loadWebcomicMode", content);
+        Assert.Contains("webcomicContainer", content);
+    }
+
+    [Fact]
+    public void ReaderHtml_ContainsContinuousScrollLogic()
+    {
+        // Arrange
+        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
+        var content = File.ReadAllText(readerPath);
+
+        // Assert - Verify continuous scroll functions exist
+        Assert.Contains("handleWebcomicScroll", content);
+        Assert.Contains("loadNextComic", content);
+        Assert.Contains("prefetchNextComic", content);
+    }
+
+    [Fact]
+    public void ReaderHtml_ContainsMKeyShortcut()
+    {
+        // Arrange
+        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
+        var content = File.ReadAllText(readerPath);
+
+        // Assert - Verify M key toggle is documented and implemented
+        Assert.Contains("Toggle Reading Mode", content);
+        Assert.Contains("<kbd>M</kbd>", content);
+        Assert.Contains("case 'm':", content);
+        Assert.Contains("case 'M':", content);
+    }
+
+    [Fact]
     public void MainJs_DoesNotContainWindowOpen()
     {
         // Arrange

@@ -574,10 +574,19 @@ app.Use(async (context, next) =>
 app.UseMiddleware<PathValidationMiddleware>();
 
 // Serve static files from wwwroot with cache control
+// Note: sw.js is served via ServiceWorkerController to prevent redirect issues
 app.UseStaticFiles(new StaticFileOptions
 {
     OnPrepareResponse = ctx =>
     {
+        // Service worker files should not be served as static files
+        // They are served via the ServiceWorkerController to avoid redirect issues
+        if (ctx.File.Name.Equals("sw.js", StringComparison.OrdinalIgnoreCase))
+        {
+            ctx.Context.Response.StatusCode = 404;
+            return;
+        }
+        
         // Don't cache HTML files to ensure users always get the latest version
         if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
         {
@@ -608,6 +617,15 @@ app.MapFallbackToFile("index.html").Add(endpointBuilder =>
     var originalRequestDelegate = endpointBuilder.RequestDelegate;
     endpointBuilder.RequestDelegate = async context =>
     {
+        // Don't serve index.html for sw.js - it's handled by ServiceWorkerController
+        if (context.Request.Path.StartsWithSegments("/sw.js"))
+        {
+            context.Response.StatusCode = 404;
+            context.Response.ContentType = "application/json; charset=utf-8";
+            await context.Response.WriteAsync("{\"error\":\"Not Found\",\"message\":\"Service worker not found\"}");
+            return;
+        }
+        
         // Only serve index.html for non-API and non-hub routes
         if (context.Request.Path.StartsWithSegments("/api") || 
             context.Request.Path.StartsWithSegments("/hubs"))

@@ -82,6 +82,19 @@
             box-sizing: border-box;
         }
         
+        /* Visually hidden utility class for accessibility */
+        .visually-hidden {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            margin: -1px;
+            padding: 0;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+        
         html {
             overflow-x: hidden;
         }
@@ -816,6 +829,7 @@
             grid-template-columns: 30px 40px 1fr minmax(100px, auto) minmax(150px, auto) minmax(200px, auto);
             gap: 10px;
             align-items: center;
+            -webkit-user-select: none;
             user-select: none;
             transition: background 0.2s;
         }

@@ -42,7 +42,7 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
     }
 
     [Fact]
-    public async Task SecurityHeaders_XFrameOptions_IsPresent()
+    public async Task SecurityHeaders_CspFrameAncestors_IsPresent()
     {
         // Arrange
         var client = _factory.CreateClient();
@@ -51,12 +51,13 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         var response = await client.GetAsync("/api/version");
 
         // Assert
-        Assert.True(response.Headers.Contains("X-Frame-Options"));
-        Assert.Equal("DENY", response.Headers.GetValues("X-Frame-Options").First());
+        // CSP with frame-ancestors replaces X-Frame-Options (which is deprecated)
+        Assert.True(response.Headers.Contains("Content-Security-Policy"));
+        Assert.Contains("frame-ancestors 'none'", response.Headers.GetValues("Content-Security-Policy").First());
     }
 
     [Fact]
-    public async Task SecurityHeaders_XXssProtection_IsPresent()
+    public async Task SecurityHeaders_NoDeprecatedHeaders()
     {
         // Arrange
         var client = _factory.CreateClient();
@@ -64,9 +65,13 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         // Act
         var response = await client.GetAsync("/api/version");
 
-        // Assert
-        Assert.True(response.Headers.Contains("X-XSS-Protection"));
-        Assert.Equal("1; mode=block", response.Headers.GetValues("X-XSS-Protection").First());
+        // Assert - X-XSS-Protection is deprecated and should not be present
+        Assert.False(response.Headers.Contains("X-XSS-Protection"), 
+            "X-XSS-Protection header should not be present (deprecated)");
+        
+        // X-Frame-Options is deprecated in favor of CSP frame-ancestors
+        Assert.False(response.Headers.Contains("X-Frame-Options"), 
+            "X-Frame-Options header should not be present (superseded by CSP frame-ancestors)");
     }
 
     [Fact]
@@ -160,7 +165,9 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         // Assert
         Assert.True(response.Headers.Contains("Content-Security-Policy"),
             $"Expected Content-Security-Policy header. Headers: {string.Join(", ", response.Headers.Select(h => h.Key))}");
-        Assert.Equal("upgrade-insecure-requests", response.Headers.GetValues("Content-Security-Policy").First());
+        var csp = response.Headers.GetValues("Content-Security-Policy").First();
+        Assert.Contains("upgrade-insecure-requests", csp);
+        Assert.Contains("frame-ancestors 'none'", csp);
     }
 
     [Fact]
@@ -189,13 +196,14 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         Assert.True(response.Headers.Contains("Cache-Control"));
         var cacheControl = response.Headers.GetValues("Cache-Control").First();
         Assert.Contains("no-store", cacheControl);
-        Assert.Contains("no-cache", cacheControl);
-        Assert.Contains("must-revalidate", cacheControl);
         Assert.Contains("private", cacheControl);
+        // Should not have must-revalidate or no-cache alongside no-store (redundant/conflicting directives)
+        Assert.DoesNotContain("must-revalidate", cacheControl);
+        Assert.DoesNotContain("no-cache", cacheControl);
     }
 
     [Fact]
-    public async Task ApiEndpoints_Pragma_IsNoCache()
+    public async Task ApiEndpoints_NoDeprecatedCacheHeaders()
     {
         // Arrange
         var client = _factory.CreateClient();
@@ -203,13 +211,17 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         // Act
         var response = await client.GetAsync("/api/version");
 
-        // Assert
-        Assert.True(response.Headers.Contains("Pragma"));
-        Assert.Equal("no-cache", response.Headers.GetValues("Pragma").First());
+        // Assert - Pragma is deprecated and should not be present
+        Assert.False(response.Headers.Contains("Pragma"), 
+            "Pragma header should not be present (deprecated, request-only header)");
+        
+        // Expires is a content header, not a response header
+        Assert.False(response.Content.Headers.Contains("Expires"), 
+            "Expires header should not be present (superseded by Cache-Control)");
     }
 
     [Fact]
-    public async Task StaticFiles_DoNotHaveNoCacheHeaders()
+    public async Task StaticFiles_HtmlHasNoStoreCache()
     {
         // Arrange
         var client = _factory.CreateClient();
@@ -217,12 +229,28 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         // Act
         var response = await client.GetAsync("/index.html");
 
-        // Assert - Static files should allow caching
-        if (response.Headers.Contains("Cache-Control"))
-        {
-            var cacheControl = response.Headers.GetValues("Cache-Control").First();
-            Assert.DoesNotContain("no-store", cacheControl);
-        }
+        // Assert - HTML files should not be cached to ensure users get the latest version
+        Assert.True(response.Headers.Contains("Cache-Control"));
+        var cacheControl = response.Headers.GetValues("Cache-Control").First();
+        Assert.Contains("no-store", cacheControl);
+        Assert.Contains("private", cacheControl);
+    }
+    
+    [Fact]
+    public async Task StaticFiles_NonHtmlArePublicCached()
+    {
+        // Arrange
+        var client = _factory.CreateClient();
+
+        // Act - CSS files should be cached
+        var response = await client.GetAsync("/css/main.css");
+
+        // Assert - Non-HTML static files should allow caching
+        Assert.True(response.Headers.Contains("Cache-Control"));
+        var cacheControl = response.Headers.GetValues("Cache-Control").First();
+        Assert.Contains("public", cacheControl);
+        Assert.Contains("max-age=3600", cacheControl);
+        Assert.DoesNotContain("no-store", cacheControl);
     }
 
     [Theory]
@@ -236,11 +264,14 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         // Act
         var response = await client.GetAsync(endpoint);
 
-        // Assert - Check all basic security headers
+        // Assert - Check all modern security headers
         Assert.True(response.Headers.Contains("X-Content-Type-Options"), "Missing X-Content-Type-Options");
-        Assert.True(response.Headers.Contains("X-Frame-Options"), "Missing X-Frame-Options");
-        Assert.True(response.Headers.Contains("X-XSS-Protection"), "Missing X-XSS-Protection");
+        Assert.True(response.Headers.Contains("Content-Security-Policy"), "Missing Content-Security-Policy");
         Assert.True(response.Headers.Contains("Referrer-Policy"), "Missing Referrer-Policy");
         Assert.True(response.Headers.Contains("Permissions-Policy"), "Missing Permissions-Policy");
+        
+        // Ensure deprecated headers are not present
+        Assert.False(response.Headers.Contains("X-Frame-Options"), "X-Frame-Options should not be present (superseded by CSP)");
+        Assert.False(response.Headers.Contains("X-XSS-Protection"), "X-XSS-Protection should not be present (deprecated)");
     }
 }

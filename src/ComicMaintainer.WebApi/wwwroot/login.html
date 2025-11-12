@@ -404,8 +404,32 @@
             }
         }
         
-        // Check if already logged in
-        function checkAuth() {
+        // Check if already logged in (including Authelia)
+        async function checkAuth() {
+            try {
+                // First check server auth status (includes Authelia check)
+                const response = await fetch(apiUrl('/api/auth/status'), {
+                    credentials: 'include' // Important for Authelia cookies
+                });
+                
+                if (response.ok) {
+                    const authStatus = await response.json();
+                    console.log('[LOGIN] Server auth status:', authStatus);
+                    
+                    // If Authelia is enabled and user is authenticated, redirect to main page
+                    if (authStatus.autheliaEnabled && authStatus.isAuthenticated) {
+                        console.log('[LOGIN] Already authenticated via Authelia as:', authStatus.username);
+                        localStorage.setItem('authelia_authenticated', 'true');
+                        localStorage.setItem('username', authStatus.username);
+                        window.location.href = '/';
+                        return;
+                    }
+                }
+            } catch (error) {
+                console.error('[LOGIN] Error checking auth status:', error);
+            }
+            
+            // Check JWT token
             const token = localStorage.getItem('jwt_token');
             if (token) {
                 // Check if token is expired

@@ -268,9 +268,19 @@ authBuilder.AddJwtBearer(options =>
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
     };
     
-    // Configure events to return JSON for authentication failures
+    // Configure events to return JSON for authentication failures and support token in query string
     options.Events = new JwtBearerEvents
     {
+        OnMessageReceived = context =>
+        {
+            // Allow token to be passed via query string for EventSource/SSE connections
+            // EventSource API doesn't support custom headers, so we need this for SSE endpoints
+            if (string.IsNullOrEmpty(context.Token) && context.Request.Query.ContainsKey("access_token"))
+            {
+                context.Token = context.Request.Query["access_token"];
+            }
+            return Task.CompletedTask;
+        },
         OnChallenge = context =>
         {
             // Override the default behavior to return JSON instead of redirecting

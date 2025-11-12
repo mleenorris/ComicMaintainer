@@ -233,7 +233,14 @@
             }
             
             try {
-                eventSource = new EventSource(apiUrl('/api/events/stream'));
+                // EventSource doesn't support custom headers, so we pass the token as a query parameter
+                // This is only needed for JWT authentication; Authelia uses cookies/headers from the proxy
+                const token = localStorage.getItem('jwt_token');
+                const streamUrl = token 
+                    ? apiUrl(`/api/events/stream?access_token=${encodeURIComponent(token)}`)
+                    : apiUrl('/api/events/stream');
+                
+                eventSource = new EventSource(streamUrl);
                 
                 eventSource.onopen = () => {
                     console.log('SSE: Connected to event stream');

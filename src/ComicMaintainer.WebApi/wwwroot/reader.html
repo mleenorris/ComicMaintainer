@@ -244,6 +244,13 @@
             overflow-y: auto;
             overflow-x: hidden;
             align-items: flex-start;
+            /* Hide scrollbar for Chrome, Safari and Opera */
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none;  /* IE and Edge */
+        }
+        
+        .reader-content.webcomic-mode::-webkit-scrollbar {
+            display: none; /* Chrome, Safari and Opera */
         }
 
         .webcomic-container {
@@ -389,6 +396,8 @@
         let nextComicInfo = null;
         let hasScrolledToBottom = false;
         let hasMarkedAsRead = false;
+        let pageObserver = null; // Intersection Observer for tracking visible pages
+        let currentVisiblePage = 1; // Track the currently visible page in webcomic mode
 
         // Get parameters from URL
         function getQueryParam(param) {
@@ -506,7 +515,8 @@
                 modeBtn.textContent = 'Mode: Webcomic';
                 content.classList.add('webcomic-mode');
                 footer.style.display = 'none';
-                pageInfo.style.display = 'none';
+                // Keep page info visible in webcomic mode to show current page
+                pageInfo.style.display = 'inline';
                 pageSelect.style.display = 'none';
             } else {
                 modeBtn.textContent = 'Mode: Manga';
@@ -524,6 +534,12 @@
             
             const container = document.getElementById('webcomicContainer');
             loadedPages.clear();
+            
+            // Setup page observer for tracking visible pages
+            setupPageObserver();
+            
+            // Reset current visible page to 1
+            currentVisiblePage = 1;
             
             // Load all pages of current comic
             for (let i = 1; i <= totalPages; i++) {
@@ -568,6 +584,11 @@
                 img.dataset.page = pageNum;
                 container.appendChild(img);
                 
+                // Observe the image for visibility tracking
+                if (pageObserver) {
+                    pageObserver.observe(img);
+                }
+                
                 loadedPages.add(pageNum);
             } catch (error) {
                 console.error(`Error loading page ${pageNum}:`, error);
@@ -608,6 +629,11 @@
                 img.dataset.page = pageNum;
                 container.appendChild(img);
                 
+                // Observe the image for visibility tracking
+                if (pageObserver) {
+                    pageObserver.observe(img);
+                }
+                
                 loadedPages.add(pageNum);
                 return img;
             } catch (error) {
@@ -616,6 +642,41 @@
             }
         }
 
+        // Setup Intersection Observer for page tracking
+        function setupPageObserver() {
+            // Clean up existing observer
+            if (pageObserver) {
+                pageObserver.disconnect();
+            }
+            
+            // Create new observer with threshold to detect when page is mostly visible
+            pageObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting && entry.intersectionRatio > 0.5) {
+                        const pageNum = parseInt(entry.target.dataset.page);
+                        if (!isNaN(pageNum) && pageNum !== currentVisiblePage) {
+                            currentVisiblePage = pageNum;
+                            updatePageInfoInWebcomicMode();
+                            // Save progress as user scrolls through pages
+                            saveReadingProgress(pageNum);
+                        }
+                    }
+                });
+            }, {
+                root: document.getElementById('readerContent'),
+                threshold: [0, 0.5, 1.0], // Trigger when 0%, 50%, or 100% visible
+                rootMargin: '-10% 0px -10% 0px' // Focus on middle 80% of viewport
+            });
+        }
+        
+        // Update page info display in webcomic mode
+        function updatePageInfoInWebcomicMode() {
+            const pageInfo = document.getElementById('pageInfo');
+            if (pageInfo && readingMode === 'webcomic') {
+                pageInfo.textContent = `Page ${currentVisiblePage} / ${totalPages}`;
+            }
+        }
+        
         // Setup scroll listener for webcomic mode
         function setupWebcomicScrollListener() {
             const content = document.getElementById('readerContent');
@@ -735,6 +796,9 @@
                     // Reset hasMarkedAsRead for the new comic
                     hasMarkedAsRead = false;
                     
+                    // Reset current visible page to 1 for the new comic
+                    currentVisiblePage = 1;
+                    
                     // Create a marker at the start of the new comic for scrolling
                     const startMarker = document.createElement('div');
                     startMarker.id = 'newComicStartMarker';
@@ -750,18 +814,19 @@
                         }
                     }
                     
-                    // Scroll to the start marker (beginning of new comic)
-                    // Use a slight delay to ensure all images are in the DOM
-                    setTimeout(() => {
-                        const content = document.getElementById('readerContent');
-                        const marker = document.getElementById('newComicStartMarker');
-                        if (marker && content) {
-                            // Scroll to marker position immediately (no smooth scroll to ensure it's at the top)
-                            const markerPosition = marker.offsetTop;
-                            content.scrollTop = markerPosition;
-                            console.log('Scrolled to new comic start:', markerPosition);
-                        }
-                    }, 100);
+                    // Scroll to the start marker (beginning of new comic) immediately
+                    // This ensures the first image of the next comic is shown
+                    const content = document.getElementById('readerContent');
+                    const marker = document.getElementById('newComicStartMarker');
+                    if (marker && content) {
+                        // Scroll to marker position immediately (no smooth scroll)
+                        const markerPosition = marker.offsetTop;
+                        content.scrollTop = markerPosition;
+                        console.log('Scrolled to new comic start at position:', markerPosition);
+                        
+                        // Update page info to show page 1 of new comic
+                        updatePageInfoInWebcomicMode();
+                    }
                     
                     // Prefetch the next one
                     await prefetchNextComic();

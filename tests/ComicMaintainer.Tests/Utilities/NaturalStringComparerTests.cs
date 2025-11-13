@@ -183,4 +183,66 @@ public class NaturalStringComparerTests
         else
             Assert.Equal(0, result);
     }
+
+    [Fact]
+    public void Compare_WithPureNumericFilenames_SortsNumerically()
+    {
+        // Arrange - Files named with just numbers (common in comics)
+        var names = new List<string> { "14.jpg", "1.jpg", "2.jpg", "10.jpg", "3.jpg", "100.jpg" };
+
+        // Act
+        names.Sort(_comparer);
+
+        // Assert
+        Assert.Equal(new[] { "1.jpg", "2.jpg", "3.jpg", "10.jpg", "14.jpg", "100.jpg" }, names);
+    }
+
+    [Fact]
+    public void Compare_WithZeroPaddedPureNumericFilenames_SortsNumerically()
+    {
+        // Arrange
+        var names = new List<string> { "001.jpg", "010.jpg", "002.jpg", "100.jpg" };
+
+        // Act
+        names.Sort(_comparer);
+
+        // Assert
+        Assert.Equal(new[] { "001.jpg", "002.jpg", "010.jpg", "100.jpg" }, names);
+    }
+
+    [Fact]
+    public void Compare_WithMixedNumericAndNamedPages_SortsCorrectly()
+    {
+        // Arrange - Mix of pure numbers and named pages
+        var names = new List<string> { "14.jpg", "page1.jpg", "2.jpg", "cover.jpg", "10.jpg" };
+
+        // Act
+        names.Sort(_comparer);
+
+        // Assert
+        // Numbers come before "cover" (alphabetically), page files come last
+        Assert.Equal(new[] { "2.jpg", "10.jpg", "14.jpg", "cover.jpg", "page1.jpg" }, names);
+    }
+
+    [Theory]
+    [InlineData("1.jpg", "2.jpg", -1)]     // 1 < 2
+    [InlineData("2.jpg", "1.jpg", 1)]      // 2 > 1
+    [InlineData("1.jpg", "10.jpg", -1)]    // 1 < 10
+    [InlineData("10.jpg", "2.jpg", 1)]     // 10 > 2
+    [InlineData("14.jpg", "3.jpg", 1)]     // 14 > 3
+    [InlineData("01.jpg", "1.jpg", 0)]     // 01 == 1 (numerically equal)
+    [InlineData("001.jpg", "1.jpg", 0)]    // 001 == 1 (numerically equal)
+    public void Compare_WithPureNumericPairs_ReturnsExpectedResult(string x, string y, int expected)
+    {
+        // Act
+        var result = _comparer.Compare(x, y);
+
+        // Assert
+        if (expected < 0)
+            Assert.True(result < 0, $"Expected {x} < {y}, got {result}");
+        else if (expected > 0)
+            Assert.True(result > 0, $"Expected {x} > {y}, got {result}");
+        else
+            Assert.Equal(0, result);
+    }
 }

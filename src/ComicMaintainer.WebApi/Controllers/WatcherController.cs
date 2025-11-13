@@ -1,10 +1,12 @@
 using ComicMaintainer.Core.Interfaces;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class WatcherController : ControllerBase
 {
     private readonly IFileWatcherService _watcher;

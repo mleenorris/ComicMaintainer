@@ -34,27 +34,33 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
-    public async Task GetWatcherStatus_ReturnsSuccess()
+    public async Task GetWatcherStatus_RequiresAuthentication()
     {
         // Act
         var response = await _client.GetAsync("/api/watcher");
 
-        // Assert
-        response.EnsureSuccessStatusCode();
+        // Assert - Watcher endpoint now requires authentication
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        
+        // Verify it returns JSON, not HTML
         var content = await response.Content.ReadAsStringAsync();
-        Assert.Contains("enabled", content, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("<!DOCTYPE", content);
+        Assert.Contains("application/json", response.Content.Headers.ContentType?.ToString() ?? "");
     }
 
     [Fact]
-    public async Task GetFiles_ReturnsSuccess()
+    public async Task GetFiles_RequiresAuthentication()
     {
         // Act
         var response = await _client.GetAsync("/api/files");
 
-        // Assert
-        response.EnsureSuccessStatusCode();
+        // Assert - Files endpoint now requires authentication
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        
+        // Verify it returns JSON, not HTML
         var content = await response.Content.ReadAsStringAsync();
-        Assert.NotNull(content);
+        Assert.DoesNotContain("<!DOCTYPE", content);
+        Assert.Contains("application/json", response.Content.Headers.ContentType?.ToString() ?? "");
     }
 
     [Fact]
@@ -73,15 +79,18 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
     }
 
     [Fact]
-    public async Task GetJobs_ReturnsSuccess()
+    public async Task GetJobs_RequiresAuthentication()
     {
         // Act
         var response = await _client.GetAsync("/api/jobs");
 
-        // Assert
-        response.EnsureSuccessStatusCode();
+        // Assert - Jobs endpoint now requires authentication
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        
+        // Verify it returns JSON, not HTML
         var content = await response.Content.ReadAsStringAsync();
-        Assert.NotNull(content);
+        Assert.DoesNotContain("<!DOCTYPE", content);
+        Assert.Contains("application/json", response.Content.Headers.ContentType?.ToString() ?? "");
     }
 
     [Fact]
@@ -90,10 +99,7 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         // Arrange - Test endpoints that don't require authentication
         var publicEndpoints = new[]
         {
-            "/api/version",
-            "/api/watcher",
-            "/api/files",
-            "/api/jobs"
+            "/api/version"
         };
 
         foreach (var endpoint in publicEndpoints)
@@ -107,7 +113,14 @@ public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         }
         
         // Test that protected endpoints return JSON for 401 errors
-        var protectedEndpoints = new[] { "/api/settings" };
+        var protectedEndpoints = new[] 
+        { 
+            "/api/settings",
+            "/api/watcher",
+            "/api/files",
+            "/api/jobs",
+            "/api/preferences"
+        };
         foreach (var endpoint in protectedEndpoints)
         {
             var response = await _client.GetAsync(endpoint);

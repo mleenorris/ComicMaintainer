@@ -331,55 +331,58 @@
         /* Comic transition separator */
         .comic-transition {
             width: 100%;
-            padding: 3rem 2rem;
-            background: linear-gradient(180deg, rgba(0,0,0,0.95) 0%, rgba(30,30,30,0.95) 50%, rgba(0,0,0,0.95) 100%);
-            border-top: 3px solid #444;
-            border-bottom: 3px solid #444;
+            padding: 1.5rem 1rem;
+            background: linear-gradient(180deg, #000 0%, #111 50%, #000 100%);
+            border-top: 1px solid #222;
+            border-bottom: 1px solid #222;
             text-align: center;
             display: flex;
             flex-direction: column;
-            gap: 1.5rem;
+            gap: 1rem;
             align-items: center;
-            margin: 2rem 0;
-        }
-
-        .comic-transition-title {
-            font-size: 1.5rem;
-            font-weight: bold;
-            color: #fff;
             margin: 0;
         }
 
+        .comic-transition-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #888;
+            margin: 0;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
         .comic-transition-subtitle {
-            font-size: 1rem;
-            color: #aaa;
+            font-size: 0.85rem;
+            color: #666;
             margin: 0;
         }
 
         .comic-transition-arrow {
-            font-size: 2rem;
-            color: #666;
+            font-size: 1.5rem;
+            color: #444;
         }
 
         .comic-transition-info {
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
-            padding: 1rem;
-            background: rgba(0,0,0,0.5);
-            border-radius: 8px;
-            min-width: 300px;
+            padding: 1rem 1.5rem;
+            background: rgba(0,0,0,0.3);
+            border-radius: 4px;
+            min-width: 250px;
+            max-width: 90%;
         }
 
         .comic-transition-leaving {
-            color: #888;
-            font-size: 0.9rem;
+            color: #666;
+            font-size: 0.85rem;
         }
 
         .comic-transition-entering {
-            color: #4CAF50;
-            font-size: 1.1rem;
-            font-weight: bold;
+            color: #999;
+            font-size: 0.95rem;
+            font-weight: 600;
         }
     </style>
 </head>
@@ -853,13 +856,13 @@
                 const transitionDiv = document.createElement('div');
                 transitionDiv.className = 'comic-transition';
                 transitionDiv.innerHTML = `
-                    <div class="comic-transition-title">End of Comic</div>
+                    <div class="comic-transition-title">◆ ◆ ◆</div>
                     <div class="comic-transition-info">
                         <div class="comic-transition-leaving">Finished: ${escapeHtml(leavingComicName)}</div>
                         <div class="comic-transition-arrow">↓</div>
-                        <div class="comic-transition-entering">Next: ${escapeHtml(enteringComicName)}</div>
+                        <div class="comic-transition-entering">Continue: ${escapeHtml(enteringComicName)}</div>
                     </div>
-                    <div class="comic-transition-subtitle">Scroll down to continue reading</div>
+                    <div class="comic-transition-subtitle">Automatically loading next comic...</div>
                 `;
                 container.appendChild(transitionDiv);
                 
@@ -893,7 +896,8 @@
                     // Reset hasMarkedAsRead for the new comic
                     hasMarkedAsRead = false;
                     
-                    // Reset current visible page to 1 for the new comic
+                    // Reset page tracking to 1 for the new comic
+                    currentPage = 1;
                     currentVisiblePage = 1;
                     
                     // Create a marker at the start of the new comic for scrolling

@@ -279,6 +279,49 @@
         .mode-toggle:hover {
             background: #555;
         }
+
+        /* Toast notification styles */
+        .toast-container {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10001;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 0.3s, transform 0.3s;
+            pointer-events: auto;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .toast.info {
+            border-left: 4px solid #3b82f6;
+        }
+
+        .toast.error {
+            border-left: 4px solid #ef4444;
+        }
+
+        .toast.success {
+            border-left: 4px solid #10b981;
+        }
     </style>
 </head>
 <body class="reader-mode">
@@ -322,6 +365,8 @@
             <li><span>Exit Reader</span> <kbd>Esc</kbd></li>
         </ul>
     </div>
+
+    <div class="toast-container" id="toastContainer"></div>
 
     <script>
         let currentPage = 1;
@@ -402,9 +447,22 @@
                 readingMode = localStorage.getItem('readingMode') || 'manga';
                 updateModeUI();
 
-                // Load saved reading progress
-                const savedPage = await loadReadingProgress();
-                currentPage = Math.min(savedPage, totalPages); // Ensure page is within bounds
+                // Check if URL hash indicates we should go to last page
+                const urlHash = window.location.hash;
+                let initialPage = 1;
+                
+                if (urlHash === '#lastpage') {
+                    // Navigate to last page (for previous comic navigation)
+                    initialPage = totalPages;
+                    // Clear the hash from URL
+                    history.replaceState(null, '', window.location.pathname + window.location.search);
+                } else {
+                    // Load saved reading progress
+                    const savedPage = await loadReadingProgress();
+                    initialPage = Math.min(savedPage, totalPages); // Ensure page is within bounds
+                }
+                
+                currentPage = initialPage;
 
                 // Load first page or all pages depending on mode
                 if (readingMode === 'webcomic') {
@@ -793,20 +851,125 @@
         function updateUI() {
             document.getElementById('pageInfo').textContent = `Page ${currentPage} / ${totalPages}`;
             document.getElementById('pageSelect').value = currentPage;
-            document.getElementById('prevBtn').disabled = currentPage <= 1;
-            document.getElementById('nextBtn').disabled = currentPage >= totalPages;
-        }
-
-        // Navigation functions
-        function previousPage() {
-            if (currentPage > 1) {
-                loadPage(currentPage - 1);
+            
+            // In manga mode, keep navigation buttons enabled at boundaries to allow comic navigation
+            // In webcomic mode, buttons are hidden anyway by updateModeUI()
+            if (readingMode === 'manga') {
+                // Buttons are always enabled in manga mode to allow navigation between comics
+                document.getElementById('prevBtn').disabled = false;
+                document.getElementById('nextBtn').disabled = false;
+            } else {
+                // In other modes (if any), use traditional boundary checking
+                document.getElementById('prevBtn').disabled = currentPage <= 1;
+                document.getElementById('nextBtn').disabled = currentPage >= totalPages;
             }
         }
 
-        function nextPage() {
+        // Navigation functions
+        async function previousPage() {
+            if (currentPage > 1) {
+                loadPage(currentPage - 1);
+            } else if (currentPage === 1 && readingMode === 'manga') {
+                // On first page in manga mode, try to go to previous comic
+                await navigateToPreviousComic();
+            }
+        }
+
+        async function nextPage() {
             if (currentPage < totalPages) {
                 loadPage(currentPage + 1);
+            } else if (currentPage === totalPages && readingMode === 'manga') {
+                // On last page in manga mode, try to go to next comic
+                await navigateToNextComic();
+            }
+        }
+        
+        // Navigate to the next comic in the list
+        async function navigateToNextComic() {
+            try {
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const fetchOptions = {
+                    credentials: 'include'
+                };
+                
+                if (!isAutheliaAuth && token) {
+                    fetchOptions.headers = {
+                        'Authorization': `Bearer ${token}`
+                    };
+                }
+                
+                const response = await fetch(
+                    `/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=next`,
+                    fetchOptions
+                );
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch next comic info');
+                }
+                
+                const nextInfo = await response.json();
+                
+                if (nextInfo.hasAdjacent && nextInfo.filePath) {
+                    // Navigate to the first page of the next comic
+                    window.location.href = `/reader.html?file=${encodeURIComponent(nextInfo.filePath)}`;
+                } else {
+                    // No next comic available
+                    showMessage('You are at the last comic in the list', 'info');
+                }
+            } catch (error) {
+                console.error('Error navigating to next comic:', error);
+                showMessage('Failed to load next comic', 'error');
+            }
+        }
+        
+        // Navigate to the previous comic in the list
+        async function navigateToPreviousComic() {
+            try {
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const fetchOptions = {
+                    credentials: 'include'
+                };
+                
+                if (!isAutheliaAuth && token) {
+                    fetchOptions.headers = {
+                        'Authorization': `Bearer ${token}`
+                    };
+                }
+                
+                const response = await fetch(
+                    `/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=prev`,
+                    fetchOptions
+                );
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch previous comic info');
+                }
+                
+                const prevInfo = await response.json();
+                
+                if (prevInfo.hasAdjacent && prevInfo.filePath) {
+                    // Get the page count of the previous comic to navigate to its last page
+                    const infoResponse = await fetch(
+                        `/api/ComicReader/info?filePath=${encodeURIComponent(prevInfo.filePath)}`,
+                        fetchOptions
+                    );
+                    
+                    if (infoResponse.ok) {
+                        const comicInfo = await infoResponse.json();
+                        // Navigate to the last page of the previous comic
+                        // We'll use URL hash to indicate we should start at the last page
+                        window.location.href = `/reader.html?file=${encodeURIComponent(prevInfo.filePath)}#lastpage`;
+                    } else {
+                        // If we can't get page count, just navigate to the comic (will start at page 1)
+                        window.location.href = `/reader.html?file=${encodeURIComponent(prevInfo.filePath)}`;
+                    }
+                } else {
+                    // No previous comic available
+                    showMessage('You are at the first comic in the list', 'info');
+                }
+            } catch (error) {
+                console.error('Error navigating to previous comic:', error);
+                showMessage('Failed to load previous comic', 'error');
             }
         }
 
@@ -859,6 +1022,29 @@
         function showError(message) {
             const content = document.getElementById('readerContent');
             content.innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        // Show toast notification
+        function showMessage(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            
+            container.appendChild(toast);
+            
+            // Trigger animation
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 10);
+            
+            // Remove after 3 seconds
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    toast.remove();
+                }, 300);
+            }, 3000);
         }
 
         // Keyboard shortcuts

@@ -104,7 +104,7 @@ public class ComicReaderService : IComicReaderService
             using var archive = ZipFile.OpenRead(filePath);
             return archive.Entries
                 .Where(e => !e.FullName.EndsWith('/') && IsImageFile(e.FullName))
-                .OrderBy(e => e.FullName, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(e => e.FullName, new NaturalStringComparer())
                 .Select(e => e.FullName)
                 .ToList();
         });
@@ -117,7 +117,7 @@ public class ComicReaderService : IComicReaderService
             using var archive = RarArchive.Open(filePath);
             return archive.Entries
                 .Where(e => !e.IsDirectory && IsImageFile(e.Key ?? ""))
-                .OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(e => e.Key, new NaturalStringComparer())
                 .Select(e => e.Key ?? "")
                 .ToList();
         });
@@ -130,7 +130,7 @@ public class ComicReaderService : IComicReaderService
             using var archive = ZipFile.OpenRead(filePath);
             var imageEntries = archive.Entries
                 .Where(e => !e.FullName.EndsWith('/') && IsImageFile(e.FullName))
-                .OrderBy(e => e.FullName, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(e => e.FullName, new NaturalStringComparer())
                 .ToList();
 
             if (pageNumber < 1 || pageNumber > imageEntries.Count)
@@ -156,7 +156,7 @@ public class ComicReaderService : IComicReaderService
             using var archive = RarArchive.Open(filePath);
             var imageEntries = archive.Entries
                 .Where(e => !e.IsDirectory && IsImageFile(e.Key ?? ""))
-                .OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(e => e.Key, new NaturalStringComparer())
                 .ToList();
 
             if (pageNumber < 1 || pageNumber > imageEntries.Count)

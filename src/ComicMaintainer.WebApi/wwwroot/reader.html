@@ -279,6 +279,60 @@
         .mode-toggle:hover {
             background: #555;
         }
+
+        /* Comic transition separator */
+        .comic-transition {
+            width: 100%;
+            padding: 3rem 2rem;
+            background: linear-gradient(180deg, rgba(0,0,0,0.95) 0%, rgba(30,30,30,0.95) 50%, rgba(0,0,0,0.95) 100%);
+            border-top: 3px solid #444;
+            border-bottom: 3px solid #444;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            align-items: center;
+            margin: 2rem 0;
+        }
+
+        .comic-transition-title {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #fff;
+            margin: 0;
+        }
+
+        .comic-transition-subtitle {
+            font-size: 1rem;
+            color: #aaa;
+            margin: 0;
+        }
+
+        .comic-transition-arrow {
+            font-size: 2rem;
+            color: #666;
+        }
+
+        .comic-transition-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            padding: 1rem;
+            background: rgba(0,0,0,0.5);
+            border-radius: 8px;
+            min-width: 300px;
+        }
+
+        .comic-transition-leaving {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .comic-transition-entering {
+            color: #4CAF50;
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body class="reader-mode">
@@ -327,6 +381,7 @@
         let currentPage = 1;
         let totalPages = 1;
         let comicFilePath = '';
+        let currentComicName = '';
         let token = '';
         let readingMode = 'manga'; // 'manga' or 'webcomic'
         let loadedPages = new Set();
@@ -384,6 +439,7 @@
 
                 const data = await response.json();
                 totalPages = data.pageCount;
+                currentComicName = data.fileName;
                 
                 document.getElementById('comicTitle').textContent = data.fileName;
                 document.title = `${data.fileName} - Comic Reader`;
@@ -631,12 +687,23 @@
             try {
                 const container = document.getElementById('webcomicContainer');
                 
-                // Add loading indicator
-                const loadingDiv = document.createElement('div');
-                loadingDiv.className = 'loading-indicator';
-                loadingDiv.textContent = `Loading next: ${nextComicInfo.fileName}...`;
-                loadingDiv.id = 'nextComicLoadingIndicator';
-                container.appendChild(loadingDiv);
+                // Store the name of the comic we're leaving
+                const leavingComicName = currentComicName;
+                const enteringComicName = nextComicInfo.fileName;
+                
+                // Add comic transition separator
+                const transitionDiv = document.createElement('div');
+                transitionDiv.className = 'comic-transition';
+                transitionDiv.innerHTML = `
+                    <div class="comic-transition-title">End of Comic</div>
+                    <div class="comic-transition-info">
+                        <div class="comic-transition-leaving">Finished: ${escapeHtml(leavingComicName)}</div>
+                        <div class="comic-transition-arrow">↓</div>
+                        <div class="comic-transition-entering">Next: ${escapeHtml(enteringComicName)}</div>
+                    </div>
+                    <div class="comic-transition-subtitle">Scroll down to continue reading</div>
+                `;
+                container.appendChild(transitionDiv);
                 
                 // Load next comic info
                 const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
@@ -659,26 +726,22 @@
                     const data = await response.json();
                     
                     // Update current comic info
+                    const previousComicPath = comicFilePath;
                     comicFilePath = nextComicInfo.filePath;
+                    currentComicName = data.fileName;
                     totalPages = data.pageCount;
                     document.getElementById('comicTitle').textContent = data.fileName;
                     
                     // Reset hasMarkedAsRead for the new comic
                     hasMarkedAsRead = false;
                     
-                    // Remove loading indicator
-                    loadingDiv.remove();
-                    
-                    // Mark the start position for the new comic BEFORE loading pages
+                    // Create a marker at the start of the new comic for scrolling
                     const startMarker = document.createElement('div');
                     startMarker.id = 'newComicStartMarker';
-                    startMarker.style.height = '1px';
+                    startMarker.dataset.comicPath = comicFilePath;
                     container.appendChild(startMarker);
                     
-                    // Keep track of the first image element for proper scrolling
-                    const firstImageIndex = container.children.length;
-                    
-                    // Load all pages of next comic and collect image elements
+                    // Load all pages of next comic
                     const imageElements = [];
                     for (let i = 1; i <= totalPages; i++) {
                         const imgElement = await loadWebcomicPageWithReturn(i, container);
@@ -687,27 +750,18 @@
                         }
                     }
                     
-                    // Wait for the first image to actually load before scrolling
-                    if (imageElements.length > 0) {
-                        const firstImage = imageElements[0];
-                        if (firstImage.complete) {
-                            // Image already loaded, scroll immediately
-                            scrollToStartMarker(startMarker);
-                        } else {
-                            // Wait for first image to load
-                            firstImage.addEventListener('load', () => {
-                                scrollToStartMarker(startMarker);
-                            }, { once: true });
-                            
-                            // Fallback in case load event doesn't fire
-                            setTimeout(() => {
-                                scrollToStartMarker(startMarker);
-                            }, 1000);
+                    // Scroll to the start marker (beginning of new comic)
+                    // Use a slight delay to ensure all images are in the DOM
+                    setTimeout(() => {
+                        const content = document.getElementById('readerContent');
+                        const marker = document.getElementById('newComicStartMarker');
+                        if (marker && content) {
+                            // Scroll to marker position immediately (no smooth scroll to ensure it's at the top)
+                            const markerPosition = marker.offsetTop;
+                            content.scrollTop = markerPosition;
+                            console.log('Scrolled to new comic start:', markerPosition);
                         }
-                    } else {
-                        // No images, just scroll to marker
-                        scrollToStartMarker(startMarker);
-                    }
+                    }, 100);
                     
                     // Prefetch the next one
                     await prefetchNextComic();
@@ -719,16 +773,11 @@
             }
         }
         
-        // Helper function to scroll to the start marker
-        function scrollToStartMarker(marker) {
-            const content = document.getElementById('readerContent');
-            marker.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            // Remove the marker after scrolling
-            setTimeout(() => {
-                if (marker.parentNode) {
-                    marker.remove();
-                }
-            }, 100);
+        // Helper function to escape HTML for safe display
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // Load a specific page

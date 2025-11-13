@@ -11,6 +11,7 @@ namespace ComicMaintainer.WebApi.Controllers;
 /// ServiceWorker specification requires the script to be served without redirects.
 /// </summary>
 [ApiController]
+[Route("")]
 public class ServiceWorkerController : ControllerBase
 {
     private readonly IWebHostEnvironment _environment;

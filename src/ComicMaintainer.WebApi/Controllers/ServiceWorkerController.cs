@@ -29,6 +29,7 @@ public class ServiceWorkerController : ControllerBase
 
     /// <summary>
     /// Serves the service worker JavaScript file with proper headers to prevent redirect issues.
+    /// Injects version information into the service worker content to force browser updates.
     /// </summary>
     /// <returns>The service worker JavaScript file</returns>
     [HttpGet("sw.js")]
@@ -47,6 +48,17 @@ public class ServiceWorkerController : ControllerBase
 
             var swContent = System.IO.File.ReadAllText(swPath);
             
+            // Inject version into service worker content to force browser updates
+            // This ensures the browser detects changes to the service worker file
+            var version = System.Reflection.Assembly.GetExecutingAssembly()
+                .GetName()
+                .Version?
+                .ToString() ?? "1.0.0";
+            
+            // Add version as a comment at the top of the file
+            // Browsers use byte-for-byte comparison to detect SW changes
+            swContent = $"// Service Worker Version: {version}\n{swContent}";
+            
             // Set proper headers to prevent caching and ensure correct MIME type
             // This prevents redirect issues that can occur with cached or improperly served files
             Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
@@ -58,6 +70,40 @@ public class ServiceWorkerController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error serving service worker");
+            return StatusCode(500);
+        }
+    }
+
+    /// <summary>
+    /// Serves the PWA manifest file with proper cache headers.
+    /// While the manifest doesn't change often, we ensure it's not cached indefinitely
+    /// to allow for updates when the application is updated.
+    /// </summary>
+    /// <returns>The manifest.json file</returns>
+    [HttpGet("manifest.json")]
+    [ResponseCache(Duration = 3600, Location = ResponseCacheLocation.Any, VaryByQueryKeys = new[] { "v" })]
+    public IActionResult GetManifest()
+    {
+        try
+        {
+            var manifestPath = Path.Combine(_environment.WebRootPath, "manifest.json");
+            
+            if (!System.IO.File.Exists(manifestPath))
+            {
+                _logger.LogError("Manifest file not found at: {Path}", manifestPath);
+                return NotFound();
+            }
+
+            var manifestContent = System.IO.File.ReadAllText(manifestPath);
+            
+            // Allow caching for 1 hour, but use version query parameter for cache busting
+            Response.Headers["Cache-Control"] = "public, max-age=3600";
+            
+            return Content(manifestContent, "application/manifest+json; charset=utf-8");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error serving manifest");
             return StatusCode(500);
         }
     }

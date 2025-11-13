@@ -20,7 +20,7 @@
     <meta http-equiv="Expires" content="0">
     
     <!-- PWA Manifest -->
-    <link rel="manifest" href="/manifest.json">
+    <link rel="manifest" href="/manifest.json" id="manifestLink">
     
     <!-- Favicons and Icons -->
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
@@ -43,6 +43,12 @@
                 const cssLink = document.getElementById('mainCss');
                 if (cssLink) {
                     cssLink.href = `/css/main.css?v=${version}`;
+                }
+                
+                // Update manifest link with version parameter
+                const manifestLink = document.getElementById('manifestLink');
+                if (manifestLink) {
+                    manifestLink.href = `/manifest.json?v=${version}`;
                 }
                 
                 // Store version for JS file to use later

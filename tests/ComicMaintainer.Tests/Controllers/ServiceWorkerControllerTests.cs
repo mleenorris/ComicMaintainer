@@ -58,7 +58,11 @@ public class ServiceWorkerControllerTests
         // Assert
         var contentResult = Assert.IsType<ContentResult>(result);
         Assert.Equal("application/javascript; charset=utf-8", contentResult.ContentType);
-        Assert.Equal(swContent, contentResult.Content);
+        
+        // Verify content includes version comment (injected by controller) and original content
+        Assert.NotNull(contentResult.Content);
+        Assert.StartsWith("// Service Worker Version:", contentResult.Content);
+        Assert.Contains(swContent, contentResult.Content);
         
         // Verify cache control headers were set
         Assert.True(_controller.Response.Headers.ContainsKey("Cache-Control"));
@@ -113,5 +117,39 @@ public class ServiceWorkerControllerTests
         Assert.NotNull(cacheAttribute);
         Assert.True(cacheAttribute.NoStore);
         Assert.Equal(ResponseCacheLocation.None, cacheAttribute.Location);
+    }
+
+    [Fact]
+    public void GetManifest_WhenFileExists_ReturnsContentWithCorrectContentType()
+    {
+        // Arrange
+        var manifestContent = "{\"name\": \"Comic Maintainer\", \"short_name\": \"ComicMaintainer\"}";
+        var manifestPath = Path.Combine(_tempDirectory, "manifest.json");
+        File.WriteAllText(manifestPath, manifestContent);
+
+        // Act
+        var result = _controller.GetManifest();
+
+        // Assert
+        var contentResult = Assert.IsType<ContentResult>(result);
+        Assert.Equal("application/manifest+json; charset=utf-8", contentResult.ContentType);
+        Assert.Equal(manifestContent, contentResult.Content);
+        
+        // Verify cache control headers were set
+        Assert.True(_controller.Response.Headers.ContainsKey("Cache-Control"));
+        Assert.Equal("public, max-age=3600", _controller.Response.Headers["Cache-Control"].ToString());
+        
+        // Cleanup
+        File.Delete(manifestPath);
+    }
+
+    [Fact]
+    public void GetManifest_WhenFileDoesNotExist_ReturnsNotFound()
+    {
+        // Act
+        var result = _controller.GetManifest();
+
+        // Assert
+        Assert.IsType<NotFoundResult>(result);
     }
 }

@@ -1,5 +1,6 @@
 // Service Worker for Comic Maintainer PWA
 // Provides basic offline support and caching
+// Version is dynamically injected by the server to force browser updates
 
 // Cache version will be determined dynamically from the API
 let CACHE_NAME = 'comic-maintainer-v2'; // Default fallback

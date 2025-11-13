@@ -854,7 +854,8 @@
             });
         }
         
-        document.addEventListener('DOMContentLoaded', async function() {
+        // Initialization function that runs after DOM is ready
+        async function initializeApp() {
             // Initialize non-async operations immediately
             initTheme();
             
@@ -889,7 +890,7 @@
             const jobCheckPromise = checkAndResumeActiveJob();
             
             // Start loading files immediately without waiting for preferences or job check
-            // The file list will use default values (perPage=DEFAULT_PER_PAGE) and update when preferences arrive
+            // The file list will use default values (perPage=DEFAULT_PER_DEFAULT) and update when preferences arrive
             loadFiles();
             
             // Fetch initial watcher status in parallel
@@ -937,7 +938,16 @@
             
             // Job check runs in parallel - no need to await
             // The modal will appear immediately if there's an active job
-        });
+        }
+        
+        // Check if DOM is already loaded (script loaded after DOMContentLoaded fired)
+        if (document.readyState === 'loading') {
+            // DOM is still loading, wait for DOMContentLoaded
+            document.addEventListener('DOMContentLoaded', initializeApp);
+        } else {
+            // DOM is already loaded, initialize immediately
+            initializeApp();
+        }
         
         // Warn user before leaving page if there's an active batch job
         // Note: We can't use async in beforeunload, so we track the active job in a variable

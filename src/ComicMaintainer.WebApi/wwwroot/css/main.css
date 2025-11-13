@@ -613,11 +613,11 @@
         }
         
         .action-dropdown-toggle {
-            padding: 8px 12px;
+            padding: 6px 10px;
             border: none;
             border-radius: 5px;
             cursor: pointer;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 500;
             transition: all 0.3s;
             color: white;
@@ -658,6 +658,14 @@
         
         .action-dropdown-toggle.normalize:hover {
             background: #138d75;
+        }
+        
+        .action-dropdown-toggle.mark {
+            background: #3498db;
+        }
+        
+        .action-dropdown-toggle.mark:hover {
+            background: #2980b9;
         }
         
         .action-dropdown-toggle:disabled {
@@ -710,15 +718,15 @@
         
         .button-group {
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
+            grid-template-columns: repeat(6, 1fr);
             gap: 8px;
             align-items: stretch;
             flex: 1;
         }
         
         .button-group .btn {
-            padding: 8px 12px;
-            font-size: 13px;
+            padding: 6px 10px;
+            font-size: 12px;
             min-width: 0;
             display: flex;
             align-items: center;
@@ -1606,7 +1614,7 @@
             
             .button-group {
                 display: grid;
-                grid-template-columns: repeat(5, 1fr);
+                grid-template-columns: repeat(6, 1fr);
                 gap: 6px;
                 flex: 1;
                 padding: 0 10px;

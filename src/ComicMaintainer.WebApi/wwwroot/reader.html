@@ -716,33 +716,6 @@
             }
         }
 
-        // Setup Intersection Observer for page tracking
-        function setupPageObserver() {
-            // Clean up existing observer
-            if (pageObserver) {
-                pageObserver.disconnect();
-            }
-            
-            // Create new observer with threshold to detect when page is mostly visible
-            pageObserver = new IntersectionObserver((entries) => {
-                entries.forEach(entry => {
-                    if (entry.isIntersecting && entry.intersectionRatio > 0.5) {
-                        const pageNum = parseInt(entry.target.dataset.page);
-                        if (!isNaN(pageNum) && pageNum !== currentVisiblePage) {
-                            currentVisiblePage = pageNum;
-                            updatePageInfoInWebcomicMode();
-                            // Save progress as user scrolls through pages
-                            saveReadingProgress(pageNum);
-                        }
-                    }
-                });
-            }, {
-                root: document.getElementById('readerContent'),
-                threshold: [0, 0.5, 1.0], // Trigger when 0%, 50%, or 100% visible
-                rootMargin: '-10% 0px -10% 0px' // Focus on middle 80% of viewport
-            });
-        }
-        
         // Update page info display in webcomic mode
         function updatePageInfoInWebcomicMode() {
             const pageInfo = document.getElementById('pageInfo');
@@ -782,13 +755,19 @@
                     }
                 });
                 
-                // Update currentPage based on the most visible image
+                // Update currentPage and currentVisiblePage based on the most visible image
                 if (mostVisible && mostVisible.isIntersecting) {
                     const pageNum = parseInt(mostVisible.target.dataset.page);
-                    if (!isNaN(pageNum) && pageNum !== currentPage) {
-                        currentPage = pageNum;
-                        // Save progress as the user scrolls
-                        saveReadingProgress(pageNum);
+                    if (!isNaN(pageNum)) {
+                        if (pageNum !== currentPage) {
+                            currentPage = pageNum;
+                            // Save progress as the user scrolls
+                            saveReadingProgress(pageNum);
+                        }
+                        if (pageNum !== currentVisiblePage) {
+                            currentVisiblePage = pageNum;
+                            updatePageInfoInWebcomicMode();
+                        }
                     }
                 }
             }, {

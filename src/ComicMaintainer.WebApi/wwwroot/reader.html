@@ -444,6 +444,11 @@
         let hasMarkedAsRead = false;
         let pageObserver = null; // Intersection Observer for tracking visible pages
         let currentVisiblePage = 1; // Track the currently visible page in webcomic mode
+        let bufferPages = 5; // Number of pages to prefetch ahead/behind
+        let allImagesLoaded = false; // Whether all prefetched images have loaded
+        let isScrolling = false; // Whether a scrollTo() operation is in progress
+        let prevScrollPosition = 0; // Track scroll position to determine direction
+        let scrollDirection = 'forward'; // 'forward' or 'backward'
 
         // Get parameters from URL
         function getQueryParam(param) {
@@ -558,6 +563,11 @@
             const content = document.getElementById('readerContent');
             content.innerHTML = '<div class="loading">Switching mode...</div>';
             
+            // Reset state for mode switch
+            isScrolling = true;
+            allImagesLoaded = false;
+            prevScrollPosition = 0;
+            
             if (readingMode === 'webcomic') {
                 await loadWebcomicMode(pageBeforeSwitch);
             } else {
@@ -589,42 +599,73 @@
             }
         }
 
-        // Load all pages in continuous scroll mode
+        // Load pages in continuous scroll mode with buffering (Kavita-style)
         async function loadWebcomicMode(startPage = 1) {
             const content = document.getElementById('readerContent');
             content.innerHTML = '<div class="webcomic-container" id="webcomicContainer"></div>';
             
             const container = document.getElementById('webcomicContainer');
             loadedPages.clear();
+            allImagesLoaded = false;
+            
+            // Reset current visible page
+            currentVisiblePage = startPage;
+            currentPage = startPage;
             
             // Setup page observer for tracking visible pages
             setupPageObserver();
             
-            // Reset current visible page to 1
-            currentVisiblePage = 1;
+            // Calculate initial prefetch range based on buffer
+            const [startIdx, endIdx] = calculatePrefetchIndices(startPage);
             
-            // Load all pages of current comic
-            for (let i = 1; i <= totalPages; i++) {
+            console.log('Initial prefetch: pages', startIdx, 'to', endIdx);
+            
+            // Load buffered pages instead of all pages
+            for (let i = startIdx; i <= endIdx; i++) {
                 await loadWebcomicPage(i, container);
             }
             
-            // Scroll to the specified starting page if not page 1
-            if (startPage > 1 && startPage <= totalPages) {
-                const pageImages = container.querySelectorAll('img');
-                if (pageImages.length >= startPage) {
-                    const targetImage = pageImages[startPage - 1];
-                    // Wait a bit for images to render
+            // Wait for initial images to load, then scroll to starting page
+            await waitForImagesToLoad();
+            
+            // Scroll to the specified starting page
+            if (startPage > startIdx) {
+                const targetImage = document.querySelector(`img[data-page="${startPage}"]`);
+                if (targetImage) {
                     setTimeout(() => {
                         targetImage.scrollIntoView({ behavior: 'auto', block: 'start' });
+                        isScrolling = false;
                     }, 100);
+                } else {
+                    isScrolling = false;
                 }
+            } else {
+                isScrolling = false;
             }
-            
-            // Set up intersection observer to track which page is visible
-            setupPageObserver();
             
             // Set up scroll listener for loading next comic
             setupWebcomicScrollListener();
+        }
+        
+        // Calculate prefetch indices based on current page and buffer
+        function calculatePrefetchIndices(pageNum = currentPage) {
+            const startIdx = Math.max(1, pageNum - bufferPages);
+            const endIdx = Math.min(totalPages, pageNum + bufferPages);
+            return [startIdx, endIdx];
+        }
+        
+        // Wait for all pending images to load
+        function waitForImagesToLoad() {
+            return Promise.all(
+                Array.from(document.querySelectorAll('img[data-page]'))
+                    .filter(img => !img.complete)
+                    .map(img => new Promise(resolve => {
+                        img.onload = img.onerror = resolve;
+                    }))
+            ).then(() => {
+                allImagesLoaded = true;
+                console.log('All prefetched images loaded');
+            });
         }
 
         // Load a single page in webcomic mode
@@ -672,51 +713,62 @@
             }
         }
         
-        // Load a single page in webcomic mode and return the image element
-        async function loadWebcomicPageWithReturn(pageNum, container) {
-            if (loadedPages.has(pageNum)) return null;
+        // Load a single page in webcomic mode (async, non-blocking)
+        function loadWebcomicPageAsync(pageNum, container) {
+            if (loadedPages.has(pageNum)) return;
             
-            try {
-                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
-                const fetchOptions = {
-                    credentials: 'include'
+            // Mark as being loaded
+            loadedPages.add(pageNum);
+            
+            const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+            const fetchOptions = {
+                credentials: 'include'
+            };
+            
+            if (!isAutheliaAuth && token) {
+                fetchOptions.headers = {
+                    'Authorization': `Bearer ${token}`
                 };
-                
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
-                }
-                
-                const response = await fetch(
-                    `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
-                    fetchOptions
-                );
-
-                if (!response.ok) {
-                    throw new Error('Failed to load page');
-                }
-
-                const blob = await response.blob();
+            }
+            
+            fetch(
+                `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
+                fetchOptions
+            )
+            .then(response => {
+                if (!response.ok) throw new Error('Failed to load page');
+                return response.blob();
+            })
+            .then(blob => {
                 const imageUrl = URL.createObjectURL(blob);
                 
                 const img = document.createElement('img');
                 img.src = imageUrl;
                 img.alt = `Page ${pageNum}`;
                 img.dataset.page = pageNum;
-                container.appendChild(img);
+                
+                // Insert in correct position
+                const existingImages = Array.from(container.querySelectorAll('img[data-page]'));
+                const insertBefore = existingImages.find(img => parseInt(img.dataset.page) > pageNum);
+                
+                if (insertBefore) {
+                    container.insertBefore(img, insertBefore);
+                } else {
+                    container.appendChild(img);
+                }
                 
                 // Observe the image for visibility tracking
                 if (pageObserver) {
                     pageObserver.observe(img);
                 }
                 
-                loadedPages.add(pageNum);
-                return img;
-            } catch (error) {
+                console.log('Loaded page', pageNum, 'asynchronously');
+            })
+            .catch(error => {
                 console.error(`Error loading page ${pageNum}:`, error);
-                return null;
-            }
+                // Remove from loaded set so we can retry
+                loadedPages.delete(pageNum);
+            });
         }
 
         // Update page info display in webcomic mode
@@ -727,12 +779,78 @@
             }
         }
         
-        // Setup scroll listener for webcomic mode
+        // Setup scroll listener for webcomic mode with direction tracking
         function setupWebcomicScrollListener() {
             const content = document.getElementById('readerContent');
             
-            content.removeEventListener('scroll', handleWebcomicScroll);
-            content.addEventListener('scroll', handleWebcomicScroll);
+            let scrollTimeout;
+            
+            const handleScroll = () => {
+                const scrollPosition = content.scrollTop;
+                
+                // Determine scroll direction
+                if (scrollPosition > prevScrollPosition) {
+                    scrollDirection = 'forward';
+                } else if (scrollPosition < prevScrollPosition) {
+                    scrollDirection = 'backward';
+                }
+                prevScrollPosition = scrollPosition;
+                
+                // Clear existing timeout
+                if (scrollTimeout) {
+                    clearTimeout(scrollTimeout);
+                }
+                
+                // Set new timeout for scroll end detection
+                scrollTimeout = setTimeout(() => {
+                    handleScrollEnd();
+                }, 150);
+                
+                // Check if should load next comic
+                handleWebcomicScroll();
+            };
+            
+            const handleScrollEnd = () => {
+                // Find closest visible image when scrolling stops
+                if (!isScrolling && allImagesLoaded) {
+                    const images = Array.from(document.querySelectorAll('img[data-page]'));
+                    const closestImage = findClosestVisibleImage(images);
+                    
+                    if (closestImage) {
+                        const pageNum = parseInt(closestImage.dataset.page);
+                        if (!isNaN(pageNum) && pageNum !== currentPage) {
+                            currentPage = pageNum;
+                            currentVisiblePage = pageNum;
+                            updatePageInfoInWebcomicMode();
+                            saveReadingProgress(pageNum);
+                        }
+                    }
+                }
+            };
+            
+            content.removeEventListener('scroll', handleScroll);
+            content.addEventListener('scroll', handleScroll);
+        }
+        
+        // Find the closest visible image to the top of the viewport
+        function findClosestVisibleImage(images) {
+            let closestImage = null;
+            let closestDistance = Number.MAX_VALUE;
+            
+            for (const image of images) {
+                const rect = image.getBoundingClientRect();
+                const distanceToTop = Math.abs(rect.top);
+                
+                // Check if image is visible and closer to top
+                if (rect.bottom >= 0 && rect.top <= window.innerHeight) {
+                    if (distanceToTop < closestDistance) {
+                        closestDistance = distanceToTop;
+                        closestImage = image;
+                    }
+                }
+            }
+            
+            return closestImage;
         }
 
         // Setup IntersectionObserver to track which page is currently visible in webcomic mode
@@ -745,16 +863,28 @@
             const container = document.getElementById('webcomicContainer');
             if (!container) return;
             
-            // Create observer to track which page is most visible
+            // Create observer to track which page is most visible and trigger prefetching
             pageObserver = new IntersectionObserver((entries) => {
+                if (!allImagesLoaded || isScrolling) {
+                    return; // Skip if images are still loading or scrolling
+                }
+                
                 // Find the entry with the highest intersection ratio
                 let mostVisible = null;
                 let highestRatio = 0;
                 
                 entries.forEach(entry => {
-                    if (entry.intersectionRatio > highestRatio) {
+                    if (entry.intersectionRatio > highestRatio && entry.isIntersecting) {
                         highestRatio = entry.intersectionRatio;
                         mostVisible = entry;
+                    }
+                    
+                    // Trigger prefetch when a page becomes visible
+                    if (entry.isIntersecting) {
+                        const pageNum = parseInt(entry.target.dataset.page);
+                        if (!isNaN(pageNum)) {
+                            prefetchPages(pageNum);
+                        }
                     }
                 });
                 
@@ -779,10 +909,26 @@
             });
             
             // Observe all page images
-            const images = container.querySelectorAll('img');
+            const images = container.querySelectorAll('img[data-page]');
             images.forEach(img => {
                 pageObserver.observe(img);
             });
+        }
+        
+        // Prefetch pages based on current page and scroll direction
+        function prefetchPages(visiblePage) {
+            const [startIdx, endIdx] = calculatePrefetchIndices(visiblePage);
+            
+            console.log('Prefetching pages', startIdx, 'to', endIdx, 'from visible page', visiblePage);
+            
+            const container = document.getElementById('webcomicContainer');
+            if (!container) return;
+            
+            for (let i = startIdx; i <= endIdx; i++) {
+                if (!loadedPages.has(i)) {
+                    loadWebcomicPageAsync(i, container);
+                }
+            }
         }
 
         // Handle scroll in webcomic mode
@@ -832,7 +978,7 @@
             }
         }
 
-        // Load next comic seamlessly
+        // Load next comic seamlessly with buffered loading
         async function loadNextComic() {
             if (!nextComicInfo || !nextComicInfo.hasAdjacent) {
                 const container = document.getElementById('webcomicContainer');
@@ -887,9 +1033,9 @@
                     const data = await response.json();
                     
                     // Update current comic info
-                    const previousComicPath = comicFilePath;
                     comicFilePath = nextComicInfo.filePath;
                     currentComicName = data.fileName;
+                    const previousTotalPages = totalPages;
                     totalPages = data.pageCount;
                     document.getElementById('comicTitle').textContent = data.fileName;
                     
@@ -906,21 +1052,22 @@
                     startMarker.dataset.comicPath = comicFilePath;
                     container.appendChild(startMarker);
                     
-                    // Load all pages of next comic
-                    const imageElements = [];
-                    for (let i = 1; i <= totalPages; i++) {
-                        const imgElement = await loadWebcomicPageWithReturn(i, container);
-                        if (imgElement) {
-                            imageElements.push(imgElement);
-                        }
+                    // Use buffered loading for next comic (Kavita approach)
+                    const [startIdx, endIdx] = calculatePrefetchIndices(1);
+                    console.log('Loading next comic, prefetching pages', startIdx, 'to', endIdx);
+                    
+                    // Load buffered pages of next comic
+                    for (let i = startIdx; i <= endIdx; i++) {
+                        await loadWebcomicPageForNextComic(i, container, previousTotalPages);
                     }
                     
+                    // Wait for new images to load
+                    await waitForImagesToLoad();
+                    
                     // Scroll to the start marker (beginning of new comic) immediately
-                    // This ensures the first image of the next comic is shown
                     const content = document.getElementById('readerContent');
                     const marker = document.getElementById('newComicStartMarker');
                     if (marker && content) {
-                        // Scroll to marker position immediately (no smooth scroll)
                         const markerPosition = marker.offsetTop;
                         content.scrollTop = markerPosition;
                         console.log('Scrolled to new comic start at position:', markerPosition);
@@ -936,6 +1083,57 @@
             } catch (error) {
                 console.error('Error loading next comic:', error);
                 isLoadingNext = false;
+            }
+        }
+        
+        // Load a page for the next comic (needed to maintain correct page numbering)
+        async function loadWebcomicPageForNextComic(pageNum, container, pageOffset) {
+            // Use a modified page number for the data attribute to avoid conflicts
+            const globalPageNum = pageOffset + pageNum;
+            
+            if (loadedPages.has(globalPageNum)) return;
+            
+            try {
+                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const fetchOptions = {
+                    credentials: 'include'
+                };
+                
+                if (!isAutheliaAuth && token) {
+                    fetchOptions.headers = {
+                        'Authorization': `Bearer ${token}`
+                    };
+                }
+                
+                const response = await fetch(
+                    `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
+                    fetchOptions
+                );
+
+                if (!response.ok) {
+                    throw new Error('Failed to load page');
+                }
+
+                const blob = await response.blob();
+                const imageUrl = URL.createObjectURL(blob);
+                
+                const img = document.createElement('img');
+                img.src = imageUrl;
+                img.alt = `Page ${pageNum}`;
+                img.dataset.page = pageNum; // Use actual page number for new comic
+                img.dataset.globalPage = globalPageNum; // Track global position
+                container.appendChild(img);
+                
+                // Observe the image for visibility tracking
+                if (pageObserver) {
+                    pageObserver.observe(img);
+                }
+                
+                loadedPages.add(globalPageNum);
+                return img;
+            } catch (error) {
+                console.error(`Error loading page ${pageNum}:`, error);
+                return null;
             }
         }
         

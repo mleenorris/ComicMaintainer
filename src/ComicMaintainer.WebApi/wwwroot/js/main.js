@@ -50,7 +50,8 @@
         }
         
         // Authentication check - check server auth status first (supports Authelia)
-        (async function checkAuth() {
+        // Returns a promise that resolves when authentication is verified or rejects if auth fails
+        async function checkAuth() {
             try {
                 // First check server auth status (includes Authelia check)
                 const response = await fetch(apiUrl('/api/auth/status'), {
@@ -66,7 +67,7 @@
                         console.log('[AUTH] Authenticated via Authelia as:', authStatus.username);
                         localStorage.setItem('authelia_authenticated', 'true');
                         localStorage.setItem('username', authStatus.username);
-                        return; // User is authenticated via Authelia, continue loading page
+                        return true; // User is authenticated via Authelia
                     }
                     
                     // If Authelia is not enabled or user not authenticated, check JWT token
@@ -74,30 +75,32 @@
                     if (!token) {
                         console.log('[AUTH] No JWT token and not authenticated via Authelia');
                         redirectToLogin();
-                        return;
+                        return false;
                     }
                     
                     // Check if JWT token is expired
                     if (isTokenExpired(token)) {
                         console.log('[AUTH] JWT token has expired, redirecting to login');
                         redirectToLogin();
-                        return;
+                        return false;
                     }
                     
                     console.log('[AUTH] Authenticated via JWT token');
+                    return true;
                 } else {
                     // Fallback to JWT token check if status endpoint fails
                     const token = localStorage.getItem('jwt_token');
                     if (!token) {
                         redirectToLogin();
-                        return;
+                        return false;
                     }
                     
                     if (isTokenExpired(token)) {
                         console.log('[AUTH] JWT token has expired, redirecting to login');
                         redirectToLogin();
-                        return;
+                        return false;
                     }
+                    return true;
                 }
             } catch (error) {
                 console.error('[AUTH] Error checking auth status:', error);
@@ -105,16 +108,17 @@
                 const token = localStorage.getItem('jwt_token');
                 if (!token) {
                     redirectToLogin();
-                    return;
+                    return false;
                 }
                 
                 if (isTokenExpired(token)) {
                     console.log('[AUTH] JWT token has expired, redirecting to login');
                     redirectToLogin();
-                    return;
+                    return false;
                 }
+                return true;
             }
-        })();
+        }
         
         // Helper function to get auth headers
         function getAuthHeaders() {
@@ -850,9 +854,19 @@
             });
         }
         
-        document.addEventListener('DOMContentLoaded', async function() {
+        // Initialization function that runs after DOM is ready
+        async function initializeApp() {
             // Initialize non-async operations immediately
             initTheme();
+            
+            // Check authentication FIRST before doing anything else
+            // This prevents race condition where SSE and API calls start before auth is verified
+            const isAuthenticated = await checkAuth();
+            if (!isAuthenticated) {
+                // Authentication failed, user will be redirected to login
+                // Don't initialize anything else
+                return;
+            }
             
             // Display logged in username
             const username = localStorage.getItem('username');
@@ -876,7 +890,7 @@
             const jobCheckPromise = checkAndResumeActiveJob();
             
             // Start loading files immediately without waiting for preferences or job check
-            // The file list will use default values (perPage=DEFAULT_PER_PAGE) and update when preferences arrive
+            // The file list will use default values (perPage=DEFAULT_PER_DEFAULT) and update when preferences arrive
             loadFiles();
             
             // Fetch initial watcher status in parallel
@@ -924,7 +938,16 @@
             
             // Job check runs in parallel - no need to await
             // The modal will appear immediately if there's an active job
-        });
+        }
+        
+        // Check if DOM is already loaded (script loaded after DOMContentLoaded fired)
+        if (document.readyState === 'loading') {
+            // DOM is still loading, wait for DOMContentLoaded
+            document.addEventListener('DOMContentLoaded', initializeApp);
+        } else {
+            // DOM is already loaded, initialize immediately
+            initializeApp();
+        }
         
         // Warn user before leaving page if there's an active batch job
         // Note: We can't use async in beforeunload, so we track the active job in a variable

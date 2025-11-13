@@ -199,4 +199,55 @@ public class ReaderIntegrationTests
         Assert.Contains("Previous Page", content);
         Assert.Contains("Next Page", content);
     }
+
+    [Fact]
+    public void ReaderHtml_ContainsPageObserverForWebcomicMode()
+    {
+        // Arrange
+        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
+        var content = File.ReadAllText(readerPath);
+
+        // Assert - Verify page observer is set up to track visible pages in webcomic mode
+        Assert.Contains("pageObserver", content);
+        Assert.Contains("setupPageObserver", content);
+        Assert.Contains("IntersectionObserver", content);
+    }
+
+    [Fact]
+    public void ReaderHtml_PreservesPageWhenSwitchingModes()
+    {
+        // Arrange
+        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
+        var content = File.ReadAllText(readerPath);
+
+        // Assert - Verify toggle function stores page before switching
+        var toggleStart = content.IndexOf("async function toggleReadingMode()");
+        Assert.True(toggleStart >= 0, "toggleReadingMode function should exist");
+        
+        var toggleEnd = content.IndexOf("async function", toggleStart + 1);
+        if (toggleEnd == -1) toggleEnd = content.Length;
+        
+        var toggleFunction = content.Substring(toggleStart, toggleEnd - toggleStart);
+        
+        // Should store current page before switching
+        Assert.Contains("pageBeforeSwitch", toggleFunction);
+        
+        // Should pass page to loadWebcomicMode
+        Assert.Contains("loadWebcomicMode(pageBeforeSwitch)", toggleFunction);
+        
+        // Should pass page to loadPage
+        Assert.Contains("loadPage(pageBeforeSwitch)", toggleFunction);
+    }
+
+    [Fact]
+    public void ReaderHtml_WebcomicModeAcceptsStartPage()
+    {
+        // Arrange
+        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
+        var content = File.ReadAllText(readerPath);
+
+        // Assert - Verify loadWebcomicMode accepts a startPage parameter
+        Assert.Contains("async function loadWebcomicMode(startPage", content);
+        Assert.Contains("scrollIntoView", content);
+    }
 }

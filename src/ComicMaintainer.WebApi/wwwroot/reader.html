@@ -334,6 +334,7 @@
         let nextComicInfo = null;
         let hasScrolledToBottom = false;
         let hasMarkedAsRead = false;
+        let pageObserver = null; // IntersectionObserver for tracking visible pages in webcomic mode
 
         // Get parameters from URL
         function getQueryParam(param) {
@@ -408,7 +409,7 @@
 
                 // Load first page or all pages depending on mode
                 if (readingMode === 'webcomic') {
-                    await loadWebcomicMode();
+                    await loadWebcomicMode(currentPage);
                 } else {
                     await loadPage(currentPage);
                 }
@@ -423,6 +424,9 @@
 
         // Toggle between manga and webcomic reading modes
         async function toggleReadingMode() {
+            // Store the current page before switching modes
+            const pageBeforeSwitch = currentPage;
+            
             readingMode = readingMode === 'manga' ? 'webcomic' : 'manga';
             localStorage.setItem('readingMode', readingMode);
             updateModeUI();
@@ -432,9 +436,9 @@
             content.innerHTML = '<div class="loading">Switching mode...</div>';
             
             if (readingMode === 'webcomic') {
-                await loadWebcomicMode();
+                await loadWebcomicMode(pageBeforeSwitch);
             } else {
-                await loadPage(currentPage);
+                await loadPage(pageBeforeSwitch);
             }
         }
 
@@ -462,7 +466,7 @@
         }
 
         // Load all pages in continuous scroll mode
-        async function loadWebcomicMode() {
+        async function loadWebcomicMode(startPage = 1) {
             const content = document.getElementById('readerContent');
             content.innerHTML = '<div class="webcomic-container" id="webcomicContainer"></div>';
             
@@ -473,6 +477,21 @@
             for (let i = 1; i <= totalPages; i++) {
                 await loadWebcomicPage(i, container);
             }
+            
+            // Scroll to the specified starting page if not page 1
+            if (startPage > 1 && startPage <= totalPages) {
+                const pageImages = container.querySelectorAll('img');
+                if (pageImages.length >= startPage) {
+                    const targetImage = pageImages[startPage - 1];
+                    // Wait a bit for images to render
+                    setTimeout(() => {
+                        targetImage.scrollIntoView({ behavior: 'auto', block: 'start' });
+                    }, 100);
+                }
+            }
+            
+            // Set up intersection observer to track which page is visible
+            setupPageObserver();
             
             // Set up scroll listener for loading next comic
             setupWebcomicScrollListener();
@@ -566,6 +585,50 @@
             
             content.removeEventListener('scroll', handleWebcomicScroll);
             content.addEventListener('scroll', handleWebcomicScroll);
+        }
+
+        // Setup IntersectionObserver to track which page is currently visible in webcomic mode
+        function setupPageObserver() {
+            // Clean up existing observer
+            if (pageObserver) {
+                pageObserver.disconnect();
+            }
+            
+            const container = document.getElementById('webcomicContainer');
+            if (!container) return;
+            
+            // Create observer to track which page is most visible
+            pageObserver = new IntersectionObserver((entries) => {
+                // Find the entry with the highest intersection ratio
+                let mostVisible = null;
+                let highestRatio = 0;
+                
+                entries.forEach(entry => {
+                    if (entry.intersectionRatio > highestRatio) {
+                        highestRatio = entry.intersectionRatio;
+                        mostVisible = entry;
+                    }
+                });
+                
+                // Update currentPage based on the most visible image
+                if (mostVisible && mostVisible.isIntersecting) {
+                    const pageNum = parseInt(mostVisible.target.dataset.page);
+                    if (!isNaN(pageNum) && pageNum !== currentPage) {
+                        currentPage = pageNum;
+                        // Save progress as the user scrolls
+                        saveReadingProgress(pageNum);
+                    }
+                }
+            }, {
+                root: document.getElementById('readerContent'),
+                threshold: [0, 0.25, 0.5, 0.75, 1.0] // Multiple thresholds for better tracking
+            });
+            
+            // Observe all page images
+            const images = container.querySelectorAll('img');
+            images.forEach(img => {
+                pageObserver.observe(img);
+            });
         }
 
         // Handle scroll in webcomic mode

@@ -228,7 +228,7 @@ var assemblies = [
       { "name": "ComicMaintainer.Core.Migrations.AddRenamedAndNormalizedFields", "rp": "ComicMaintainer.Core_AddRenamedAndNormalizedFields.html", "cl": 0, "ucl": 436, "cal": 436, "tl": 495, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Migrations.ComicMaintainerDbContextModelSnapshot", "rp": "ComicMaintainer.Core_ComicMaintainerDbContextModelSnapshot.html", "cl": 498, "ucl": 0, "cal": 498, "tl": 533, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Migrations.InitialCreate", "rp": "ComicMaintainer.Core_InitialCreate.html", "cl": 0, "ucl": 216, "cal": 216, "tl": 265, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
-      { "name": "ComicMaintainer.Core.Models.Auth.ApplicationRole", "rp": "ComicMaintainer.Core_ApplicationRole.html", "cl": 0, "ucl": 1, "cal": 1, "tl": 11, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "ComicMaintainer.Core.Models.Auth.ApplicationRole", "rp": "ComicMaintainer.Core_ApplicationRole.html", "cl": 1, "ucl": 0, "cal": 1, "tl": 11, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Models.Auth.ApplicationUser", "rp": "ComicMaintainer.Core_ApplicationUser.html", "cl": 5, "ucl": 0, "cal": 5, "tl": 15, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Models.ComicFile", "rp": "ComicMaintainer.Core_ComicFile.html", "cl": 11, "ucl": 0, "cal": 11, "tl": 112, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Models.ComicInfo", "rp": "ComicMaintainer.Core_ComicInfo.html", "cl": 67, "ucl": 0, "cal": 67, "tl": 193, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
@@ -256,7 +256,7 @@ var assemblies = [
       { "name": "ComicMaintainer.WebApi.Authentication.AutheliaAuthenticationHandler", "rp": "ComicMaintainer.WebApi_AutheliaAuthenticationHandler.html", "cl": 0, "ucl": 147, "cal": 147, "tl": 259, "cb": 0, "tb": 46, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.WebApi.Controllers.AuthController", "rp": "ComicMaintainer.WebApi_AuthController.html", "cl": 83, "ucl": 29, "cal": 112, "tl": 205, "cb": 32, "tb": 56, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.WebApi.Controllers.ChangePasswordRequest", "rp": "ComicMaintainer.WebApi_ChangePasswordRequest.html", "cl": 1, "ucl": 0, "cal": 1, "tl": 205, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
-      { "name": "ComicMaintainer.WebApi.Controllers.ComicReaderController", "rp": "ComicMaintainer.WebApi_ComicReaderController.html", "cl": 43, "ucl": 131, "cal": 174, "tl": 332, "cb": 12, "tb": 48, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "ComicMaintainer.WebApi.Controllers.ComicReaderController", "rp": "ComicMaintainer.WebApi_ComicReaderController.html", "cl": 109, "ucl": 65, "cal": 174, "tl": 332, "cb": 38, "tb": 48, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.WebApi.Controllers.EventsController", "rp": "ComicMaintainer.WebApi_EventsController.html", "cl": 22, "ucl": 9, "cal": 31, "tl": 60, "cb": 1, "tb": 2, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.WebApi.Controllers.FilesController", "rp": "ComicMaintainer.WebApi_FilesController.html", "cl": 262, "ucl": 179, "cal": 441, "tl": 757, "cb": 78, "tb": 156, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.WebApi.Controllers.JobsController", "rp": "ComicMaintainer.WebApi_JobsController.html", "cl": 170, "ucl": 133, "cal": 303, "tl": 502, "cb": 22, "tb": 54, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
@@ -352,12 +352,6 @@ var riskHotspots = [
       { "value": 10, "exceeded": false },
     ]},
   {
-    "assembly": "ComicMaintainer.WebApi", "class": "ComicMaintainer.WebApi.Controllers.ComicReaderController", "reportPath": "ComicMaintainer.WebApi_ComicReaderController.html", "methodName": "GetPage()", "methodShortName": "GetPage()", "fileIndex": 0, "line": 103,
-    "metrics": [
-      { "value": 110, "exceeded": true },
-      { "value": 10, "exceeded": false },
-    ]},
-  {
     "assembly": "ComicMaintainer.Core", "class": "ComicMaintainer.Core.Services.FileWatcherService", "reportPath": "ComicMaintainer.Core_FileWatcherService.html", "methodName": "ScanDirectoryAsync()", "methodShortName": "ScanDirectoryAsync()", "fileIndex": 0, "line": 165,
     "metrics": [
       { "value": 72, "exceeded": true },
@@ -407,24 +401,6 @@ var riskHotspots = [
     ]},
   {
     "assembly": "ComicMaintainer.Core", "class": "ComicMaintainer.Core.Services.FileStoreService", "reportPath": "ComicMaintainer.Core_FileStoreService.html", "methodName": "SaveReadingProgressAsync()", "methodShortName": "SaveReadingProgressAsync()", "fileIndex": 0, "line": 767,
-    "metrics": [
-      { "value": 42, "exceeded": true },
-      { "value": 6, "exceeded": false },
-    ]},
-  {
-    "assembly": "ComicMaintainer.WebApi", "class": "ComicMaintainer.WebApi.Controllers.ComicReaderController", "reportPath": "ComicMaintainer.WebApi_ComicReaderController.html", "methodName": "GetComicInfo()", "methodShortName": "GetComicInfo()", "fileIndex": 0, "line": 59,
-    "metrics": [
-      { "value": 42, "exceeded": true },
-      { "value": 6, "exceeded": false },
-    ]},
-  {
-    "assembly": "ComicMaintainer.WebApi", "class": "ComicMaintainer.WebApi.Controllers.ComicReaderController", "reportPath": "ComicMaintainer.WebApi_ComicReaderController.html", "methodName": "GetPages()", "methodShortName": "GetPages()", "fileIndex": 0, "line": 154,
-    "metrics": [
-      { "value": 42, "exceeded": true },
-      { "value": 6, "exceeded": false },
-    ]},
-  {
-    "assembly": "ComicMaintainer.WebApi", "class": "ComicMaintainer.WebApi.Controllers.ComicReaderController", "reportPath": "ComicMaintainer.WebApi_ComicReaderController.html", "methodName": "SaveProgress()", "methodShortName": "SaveProgress()", "fileIndex": 0, "line": 273,
     "metrics": [
       { "value": 42, "exceeded": true },
       { "value": 6, "exceeded": false },

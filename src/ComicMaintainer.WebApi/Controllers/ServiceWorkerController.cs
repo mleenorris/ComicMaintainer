@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Configuration;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -31,9 +32,11 @@ public class ServiceWorkerController : ControllerBase
     /// <summary>
     /// Serves the service worker JavaScript file with proper headers to prevent redirect issues.
     /// Injects version information into the service worker content to force browser updates.
+    /// This endpoint must be publicly accessible for PWA functionality to work correctly.
     /// </summary>
     /// <returns>The service worker JavaScript file</returns>
     [HttpGet("sw.js")]
+    [AllowAnonymous]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public IActionResult GetServiceWorker()
     {
@@ -66,6 +69,13 @@ public class ServiceWorkerController : ControllerBase
             Response.Headers["Pragma"] = "no-cache";
             Response.Headers["Expires"] = "0";
             
+            // Add CORS headers to allow service worker to be accessed from any origin
+            // This is necessary for PWA functionality to work correctly, especially when
+            // the application is behind a reverse proxy with authentication
+            Response.Headers["Access-Control-Allow-Origin"] = "*";
+            Response.Headers["Access-Control-Allow-Methods"] = "GET, OPTIONS";
+            Response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
+            
             return Content(swContent, "application/javascript; charset=utf-8");
         }
         catch (Exception ex)
@@ -79,9 +89,11 @@ public class ServiceWorkerController : ControllerBase
     /// Serves the PWA manifest file with proper cache headers.
     /// While the manifest doesn't change often, we ensure it's not cached indefinitely
     /// to allow for updates when the application is updated.
+    /// This endpoint must be publicly accessible for PWA installation to work correctly.
     /// </summary>
     /// <returns>The manifest.json file</returns>
     [HttpGet("manifest.json")]
+    [AllowAnonymous]
     [ResponseCache(Duration = 3600, Location = ResponseCacheLocation.Any, VaryByQueryKeys = new[] { "v" })]
     public IActionResult GetManifest()
     {
@@ -99,6 +111,13 @@ public class ServiceWorkerController : ControllerBase
             
             // Allow caching for 1 hour, but use version query parameter for cache busting
             Response.Headers["Cache-Control"] = "public, max-age=3600";
+            
+            // Add CORS headers to allow manifest.json to be accessed from any origin
+            // This is necessary for PWA installation to work correctly, especially when
+            // the application is behind a reverse proxy with authentication
+            Response.Headers["Access-Control-Allow-Origin"] = "*";
+            Response.Headers["Access-Control-Allow-Methods"] = "GET, OPTIONS";
+            Response.Headers["Access-Control-Allow-Headers"] = "Content-Type";
             
             return Content(manifestContent, "application/manifest+json; charset=utf-8");
         }

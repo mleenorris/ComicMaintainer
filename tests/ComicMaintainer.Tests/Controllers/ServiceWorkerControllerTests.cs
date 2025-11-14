@@ -68,6 +68,12 @@ public class ServiceWorkerControllerTests
         Assert.True(_controller.Response.Headers.ContainsKey("Cache-Control"));
         Assert.Equal("no-cache, no-store, must-revalidate", _controller.Response.Headers["Cache-Control"].ToString());
         
+        // Verify CORS headers were set
+        Assert.True(_controller.Response.Headers.ContainsKey("Access-Control-Allow-Origin"));
+        Assert.Equal("*", _controller.Response.Headers["Access-Control-Allow-Origin"].ToString());
+        Assert.True(_controller.Response.Headers.ContainsKey("Access-Control-Allow-Methods"));
+        Assert.Equal("GET, OPTIONS", _controller.Response.Headers["Access-Control-Allow-Methods"].ToString());
+        
         // Cleanup
         File.Delete(swPath);
     }
@@ -139,6 +145,12 @@ public class ServiceWorkerControllerTests
         Assert.True(_controller.Response.Headers.ContainsKey("Cache-Control"));
         Assert.Equal("public, max-age=3600", _controller.Response.Headers["Cache-Control"].ToString());
         
+        // Verify CORS headers were set
+        Assert.True(_controller.Response.Headers.ContainsKey("Access-Control-Allow-Origin"));
+        Assert.Equal("*", _controller.Response.Headers["Access-Control-Allow-Origin"].ToString());
+        Assert.True(_controller.Response.Headers.ContainsKey("Access-Control-Allow-Methods"));
+        Assert.Equal("GET, OPTIONS", _controller.Response.Headers["Access-Control-Allow-Methods"].ToString());
+        
         // Cleanup
         File.Delete(manifestPath);
     }
@@ -151,5 +163,33 @@ public class ServiceWorkerControllerTests
 
         // Assert
         Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public void GetServiceWorker_HasAllowAnonymousAttribute()
+    {
+        // Arrange
+        var method = typeof(ServiceWorkerController).GetMethod("GetServiceWorker");
+
+        // Act
+        var attributes = method?.GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute), false);
+
+        // Assert
+        Assert.NotNull(attributes);
+        Assert.Single(attributes);
+    }
+
+    [Fact]
+    public void GetManifest_HasAllowAnonymousAttribute()
+    {
+        // Arrange
+        var method = typeof(ServiceWorkerController).GetMethod("GetManifest");
+
+        // Act
+        var attributes = method?.GetCustomAttributes(typeof(Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute), false);
+
+        // Assert
+        Assert.NotNull(attributes);
+        Assert.Single(attributes);
     }
 }

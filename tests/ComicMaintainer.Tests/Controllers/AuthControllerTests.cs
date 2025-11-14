@@ -506,3 +506,77 @@ public class AuthControllerTests
         };
     }
 }
+
+// Tests for record types
+public class AuthRequestRecordsTests
+{
+    [Fact]
+    public void LoginRequest_CanBeCreated()
+    {
+        // Act
+        var request = new LoginRequest("testuser", "password123");
+
+        // Assert
+        Assert.Equal("testuser", request.Username);
+        Assert.Equal("password123", request.Password);
+    }
+
+    [Fact]
+    public void RegisterRequest_CanBeCreated()
+    {
+        // Act
+        var request = new RegisterRequest("testuser", "password123", "test@example.com", "Test User");
+
+        // Assert
+        Assert.Equal("testuser", request.Username);
+        Assert.Equal("password123", request.Password);
+        Assert.Equal("test@example.com", request.Email);
+        Assert.Equal("Test User", request.FullName);
+    }
+
+    [Fact]
+    public void RegisterRequest_WithNullFullName_CanBeCreated()
+    {
+        // Act
+        var request = new RegisterRequest("testuser", "password123", "test@example.com", null);
+
+        // Assert
+        Assert.Equal("testuser", request.Username);
+        Assert.Null(request.FullName);
+    }
+
+    [Fact]
+    public void ChangePasswordRequest_CanBeCreated()
+    {
+        // Act
+        var request = new ChangePasswordRequest("oldpass", "newpass");
+
+        // Assert
+        Assert.Equal("oldpass", request.CurrentPassword);
+        Assert.Equal("newpass", request.NewPassword);
+    }
+
+    [Fact]
+    public void SetupRequest_CanBeCreated()
+    {
+        // Act
+        var request = new SetupRequest("admin", "password123", "admin@example.com");
+
+        // Assert
+        Assert.Equal("admin", request.Username);
+        Assert.Equal("password123", request.Password);
+        Assert.Equal("admin@example.com", request.Email);
+    }
+
+    [Fact]
+    public void SetupRequest_WithNullEmail_CanBeCreated()
+    {
+        // Act
+        var request = new SetupRequest("admin", "password123", null);
+
+        // Assert
+        Assert.Equal("admin", request.Username);
+        Assert.Equal("password123", request.Password);
+        Assert.Null(request.Email);
+    }
+}

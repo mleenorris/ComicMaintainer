@@ -1,22 +1,22 @@
 Summary
-  Generated on: 11/14/2025 - 18:45:00
-  Coverage date: 11/14/2025 - 18:44:37
+  Generated on: 11/14/2025 - 18:53:52
+  Coverage date: 11/14/2025 - 18:49:00
   Parser: Cobertura
   Assemblies: 2
   Classes: 61
   Files: 55
   Line coverage: 47.5%
-  Covered lines: 4317
-  Uncovered lines: 4755
+  Covered lines: 4318
+  Uncovered lines: 4754
   Coverable lines: 9072
   Total lines: 12997
   Branch coverage: 55.9% (740 of 1322)
   Covered branches: 740
   Total branches: 1322
-  Method coverage: 83.2% (428 of 514)
-  Full method coverage: 64.7% (333 of 514)
-  Covered methods: 428
-  Fully covered methods: 333
+  Method coverage: 83.4% (429 of 514)
+  Full method coverage: 64.9% (334 of 514)
+  Covered methods: 429
+  Fully covered methods: 334
   Total methods: 514
 
 ComicMaintainer.Core                                                      40.6%
@@ -57,7 +57,7 @@ ComicMaintainer.Core                                                      40.6%
   ComicMaintainer.Core.Utilities.LoggingHelper                            91.4%
   ComicMaintainer.Core.Utilities.NaturalStringComparer                     100%
 
-ComicMaintainer.WebApi                                                    64.7%
+ComicMaintainer.WebApi                                                    64.8%
   ComicMaintainer.WebApi.Authentication.AutheliaAuthenticationHandler        0%
   ComicMaintainer.WebApi.Controllers.AuthController                       74.1%
   ComicMaintainer.WebApi.Controllers.ChangePasswordRequest                 100%
@@ -73,7 +73,7 @@ ComicMaintainer.WebApi                                                    64.7%
   ComicMaintainer.WebApi.Controllers.RegisterRequest                       100%
   ComicMaintainer.WebApi.Controllers.ServiceWorkerController              92.3%
   ComicMaintainer.WebApi.Controllers.SettingsController                   57.5%
-  ComicMaintainer.WebApi.Controllers.SetupRequest                            0%
+  ComicMaintainer.WebApi.Controllers.SetupRequest                          100%
   ComicMaintainer.WebApi.Controllers.VersionController                     100%
   ComicMaintainer.WebApi.Controllers.WatcherController                    89.1%
   ComicMaintainer.WebApi.Hubs.ProgressHub                                  100%

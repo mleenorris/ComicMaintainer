@@ -1,25 +1,25 @@
 Summary
-  Generated on: 11/17/2025 - 21:43:37
-  Coverage date: 11/17/2025 - 21:43:09
+  Generated on: 11/17/2025 - 22:52:53
+  Coverage date: 11/17/2025 - 22:52:02
   Parser: Cobertura
   Assemblies: 2
   Classes: 61
   Files: 55
-  Line coverage: 79.9%
-  Covered lines: 7255
-  Uncovered lines: 1817
+  Line coverage: 49.2%
+  Covered lines: 4472
+  Uncovered lines: 4600
   Coverable lines: 9072
   Total lines: 12997
-  Branch coverage: 59.3% (785 of 1322)
-  Covered branches: 785
+  Branch coverage: 59.3% (784 of 1322)
+  Covered branches: 784
   Total branches: 1322
-  Method coverage: 88.9% (457 of 514)
-  Full method coverage: 68.2% (351 of 514)
-  Covered methods: 457
-  Fully covered methods: 351
+  Method coverage: 86.5% (445 of 514)
+  Full method coverage: 65.9% (339 of 514)
+  Covered methods: 445
+  Fully covered methods: 339
   Total methods: 514
 
-ComicMaintainer.Core                                                      84.9%
+ComicMaintainer.Core                                                        42%
   ComicMaintainer.Core.Configuration.AppSettings                           100%
   ComicMaintainer.Core.Configuration.AutheliaSettings                      100%
   ComicMaintainer.Core.Configuration.JwtSettings                           100%
@@ -28,13 +28,13 @@ ComicMaintainer.Core                                                      84.9%
   ComicMaintainer.Core.Data.ComicMaintainerDbContextFactory                100%
   ComicMaintainer.Core.Data.FileReadStatusEntity                           100%
   ComicMaintainer.Core.Data.ProcessingHistoryEntity                        100%
-  ComicMaintainer.Core.Migrations.AddCurrentPageToReadStatus                99%
-  ComicMaintainer.Core.Migrations.AddHistoryBeforeAfterFields             92.4%
-  ComicMaintainer.Core.Migrations.AddIdentity                             97.2%
-  ComicMaintainer.Core.Migrations.AddReadStatusFields                     98.1%
-  ComicMaintainer.Core.Migrations.AddRenamedAndNormalizedFields           96.7%
+  ComicMaintainer.Core.Migrations.AddCurrentPageToReadStatus                 0%
+  ComicMaintainer.Core.Migrations.AddHistoryBeforeAfterFields                0%
+  ComicMaintainer.Core.Migrations.AddIdentity                                0%
+  ComicMaintainer.Core.Migrations.AddReadStatusFields                        0%
+  ComicMaintainer.Core.Migrations.AddRenamedAndNormalizedFields              0%
   ComicMaintainer.Core.Migrations.ComicMaintainerDbContextModelSnapshot    100%
-  ComicMaintainer.Core.Migrations.InitialCreate                           97.2%
+  ComicMaintainer.Core.Migrations.InitialCreate                              0%
   ComicMaintainer.Core.Models.Auth.ApplicationRole                         100%
   ComicMaintainer.Core.Models.Auth.ApplicationUser                         100%
   ComicMaintainer.Core.Models.ComicFile                                    100%
@@ -57,7 +57,7 @@ ComicMaintainer.Core                                                      84.9%
   ComicMaintainer.Core.Utilities.LoggingHelper                            91.4%
   ComicMaintainer.Core.Utilities.NaturalStringComparer                     100%
 
-ComicMaintainer.WebApi                                                    67.6%
+ComicMaintainer.WebApi                                                    67.3%
   ComicMaintainer.WebApi.Authentication.AutheliaAuthenticationHandler        0%
   ComicMaintainer.WebApi.Controllers.AuthController                       74.1%
   ComicMaintainer.WebApi.Controllers.ChangePasswordRequest                 100%
@@ -82,4 +82,4 @@ ComicMaintainer.WebApi                                                    67.6%
   ComicMaintainer.WebApi.Services.EventBroadcasterService                  100%
   ComicMaintainer.WebApi.Services.FileWatcherHostedService                 100%
   ComicMaintainerDbContextFactory                                          100%
-  Program                                                                   77%
+  Program                                                                 75.8%

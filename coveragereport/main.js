@@ -216,11 +216,11 @@ var assemblies = [
       { "name": "ComicMaintainer.Core.Configuration.AppSettings", "rp": "ComicMaintainer.Core_AppSettings.html", "cl": 18, "ucl": 0, "cal": 18, "tl": 32, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Configuration.AutheliaSettings", "rp": "ComicMaintainer.Core_AutheliaSettings.html", "cl": 7, "ucl": 0, "cal": 7, "tl": 45, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Configuration.JwtSettings", "rp": "ComicMaintainer.Core_JwtSettings.html", "cl": 4, "ucl": 0, "cal": 4, "tl": 12, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
-      { "name": "ComicMaintainer.Core.Data.ComicFileEntity", "rp": "ComicMaintainer.Core_ComicFileEntity.html", "cl": 13, "ucl": 1, "cal": 14, "tl": 160, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "ComicMaintainer.Core.Data.ComicFileEntity", "rp": "ComicMaintainer.Core_ComicFileEntity.html", "cl": 14, "ucl": 0, "cal": 14, "tl": 160, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Data.ComicMaintainerDbContext", "rp": "ComicMaintainer.Core_ComicMaintainerDbContext.html", "cl": 72, "ucl": 0, "cal": 72, "tl": 160, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Data.ComicMaintainerDbContextFactory", "rp": "ComicMaintainer.Core_ComicMaintainerDbContextFactory.html", "cl": 5, "ucl": 0, "cal": 5, "tl": 18, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Data.FileReadStatusEntity", "rp": "ComicMaintainer.Core_FileReadStatusEntity.html", "cl": 7, "ucl": 0, "cal": 7, "tl": 160, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
-      { "name": "ComicMaintainer.Core.Data.ProcessingHistoryEntity", "rp": "ComicMaintainer.Core_ProcessingHistoryEntity.html", "cl": 20, "ucl": 1, "cal": 21, "tl": 160, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "ComicMaintainer.Core.Data.ProcessingHistoryEntity", "rp": "ComicMaintainer.Core_ProcessingHistoryEntity.html", "cl": 21, "ucl": 0, "cal": 21, "tl": 160, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Migrations.AddCurrentPageToReadStatus", "rp": "ComicMaintainer.Core_AddCurrentPageToReadStatus.html", "cl": 0, "ucl": 511, "cal": 511, "tl": 565, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Migrations.AddHistoryBeforeAfterFields", "rp": "ComicMaintainer.Core_AddHistoryBeforeAfterFields.html", "cl": 0, "ucl": 582, "cal": 582, "tl": 661, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Migrations.AddIdentity", "rp": "ComicMaintainer.Core_AddIdentity.html", "cl": 0, "ucl": 582, "cal": 582, "tl": 655, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
@@ -242,8 +242,8 @@ var assemblies = [
       { "name": "ComicMaintainer.Core.Services.ComicFileProcessor", "rp": "ComicMaintainer.Core_ComicFileProcessor.html", "cl": 137, "ucl": 25, "cal": 162, "tl": 282, "cb": 52, "tb": 64, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Services.ComicProcessorService", "rp": "ComicMaintainer.Core_ComicProcessorService.html", "cl": 645, "ucl": 402, "cal": 1047, "tl": 1473, "cb": 128, "tb": 208, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Services.ComicReaderService", "rp": "ComicMaintainer.Core_ComicReaderService.html", "cl": 85, "ucl": 55, "cal": 140, "tl": 197, "cb": 22, "tb": 44, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
-      { "name": "ComicMaintainer.Core.Services.FileStoreService", "rp": "ComicMaintainer.Core_FileStoreService.html", "cl": 310, "ucl": 295, "cal": 605, "tl": 838, "cb": 94, "tb": 174, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
-      { "name": "ComicMaintainer.Core.Services.FileWatcherService", "rp": "ComicMaintainer.Core_FileWatcherService.html", "cl": 185, "ucl": 122, "cal": 307, "tl": 460, "cb": 47, "tb": 72, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "ComicMaintainer.Core.Services.FileStoreService", "rp": "ComicMaintainer.Core_FileStoreService.html", "cl": 391, "ucl": 214, "cal": 605, "tl": 838, "cb": 112, "tb": 174, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "ComicMaintainer.Core.Services.FileWatcherService", "rp": "ComicMaintainer.Core_FileWatcherService.html", "cl": 189, "ucl": 118, "cal": 307, "tl": 460, "cb": 47, "tb": 72, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Services.ProcessingHistoryService", "rp": "ComicMaintainer.Core_ProcessingHistoryService.html", "cl": 76, "ucl": 8, "cal": 84, "tl": 125, "cb": 8, "tb": 12, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Services.SettingsService", "rp": "ComicMaintainer.Core_SettingsService.html", "cl": 78, "ucl": 18, "cal": 96, "tl": 165, "cb": 16, "tb": 20, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Utilities.ComicFileExtensions", "rp": "ComicMaintainer.Core_ComicFileExtensions.html", "cl": 19, "ucl": 0, "cal": 19, "tl": 55, "cb": 4, "tb": 4, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
@@ -316,12 +316,6 @@ var riskHotspots = [
       { "value": 60, "exceeded": true },
     ]},
   {
-    "assembly": "ComicMaintainer.Core", "class": "ComicMaintainer.Core.Services.FileStoreService", "reportPath": "ComicMaintainer.Core_FileStoreService.html", "methodName": "MarkFileReadAsync()", "methodShortName": "MarkFileReadAsync()", "fileIndex": 0, "line": 697,
-    "metrics": [
-      { "value": 156, "exceeded": true },
-      { "value": 12, "exceeded": false },
-    ]},
-  {
     "assembly": "ComicMaintainer.WebApi", "class": "ComicMaintainer.WebApi.Authentication.AutheliaAuthenticationHandler", "reportPath": "ComicMaintainer.WebApi_AutheliaAuthenticationHandler.html", "methodName": "EnsureUserRoleAsync()", "methodShortName": "EnsureUserRoleAsync()", "fileIndex": 0, "line": 186,
     "metrics": [
       { "value": 156, "exceeded": true },
@@ -382,6 +376,12 @@ var riskHotspots = [
       { "value": 14, "exceeded": false },
     ]},
   {
+    "assembly": "ComicMaintainer.Core", "class": "ComicMaintainer.Core.Services.FileStoreService", "reportPath": "ComicMaintainer.Core_FileStoreService.html", "methodName": "MarkFileReadAsync()", "methodShortName": "MarkFileReadAsync()", "fileIndex": 0, "line": 697,
+    "metrics": [
+      { "value": 50, "exceeded": true },
+      { "value": 12, "exceeded": false },
+    ]},
+  {
     "assembly": "ComicMaintainer.Core", "class": "ComicMaintainer.Core.Services.ComicProcessorService", "reportPath": "ComicMaintainer.Core_ComicProcessorService.html", "methodName": "ProcessFileAsync()", "methodShortName": "ProcessFileAsync()", "fileIndex": 0, "line": 45,
     "metrics": [
       { "value": 47, "exceeded": true },
@@ -398,12 +398,6 @@ var riskHotspots = [
     "metrics": [
       { "value": 43, "exceeded": true },
       { "value": 42, "exceeded": true },
-    ]},
-  {
-    "assembly": "ComicMaintainer.Core", "class": "ComicMaintainer.Core.Services.FileStoreService", "reportPath": "ComicMaintainer.Core_FileStoreService.html", "methodName": "SaveReadingProgressAsync()", "methodShortName": "SaveReadingProgressAsync()", "fileIndex": 0, "line": 767,
-    "metrics": [
-      { "value": 42, "exceeded": true },
-      { "value": 6, "exceeded": false },
     ]},
   {
     "assembly": "ComicMaintainer.Core", "class": "ComicMaintainer.Core.Services.FileStoreService", "reportPath": "ComicMaintainer.Core_FileStoreService.html", "methodName": "AddFileAsync()", "methodShortName": "AddFileAsync()", "fileIndex": 0, "line": 156,

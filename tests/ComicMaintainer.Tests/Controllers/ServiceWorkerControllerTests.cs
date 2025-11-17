@@ -192,4 +192,41 @@ public class ServiceWorkerControllerTests
         Assert.NotNull(attributes);
         Assert.Single(attributes);
     }
+
+    [Fact]
+    public void GetManifest_WhenExceptionOccurs_ReturnsServerError()
+    {
+        // Arrange - Set WebRootPath to null to cause an exception
+        _mockEnvironment.Setup(e => e.WebRootPath).Returns((string)null!);
+
+        var controller = new ServiceWorkerController(
+            _mockEnvironment.Object,
+            _mockLogger.Object,
+            _mockAppSettings.Object);
+
+        // Act
+        var result = controller.GetManifest();
+
+        // Assert
+        var statusCodeResult = Assert.IsType<StatusCodeResult>(result);
+        Assert.Equal(500, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public void GetManifest_HasResponseCacheAttribute()
+    {
+        // Arrange
+        var method = typeof(ServiceWorkerController).GetMethod("GetManifest");
+
+        // Act
+        var attributes = method?.GetCustomAttributes(typeof(ResponseCacheAttribute), false);
+
+        // Assert
+        Assert.NotNull(attributes);
+        Assert.Single(attributes);
+        var cacheAttribute = attributes[0] as ResponseCacheAttribute;
+        Assert.NotNull(cacheAttribute);
+        Assert.Equal(3600, cacheAttribute.Duration);
+        Assert.Equal(ResponseCacheLocation.Any, cacheAttribute.Location);
+    }
 }

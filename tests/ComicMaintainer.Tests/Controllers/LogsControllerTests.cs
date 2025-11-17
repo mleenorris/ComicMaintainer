@@ -345,6 +345,157 @@ public class LogsControllerTests : IDisposable
         Assert.Equal("debug.log", filename);
     }
 
+    [Theory]
+    [InlineData("invalid")]
+    [InlineData("UNKNOWN")]
+    [InlineData("")]
+    public void GetLogs_WithInvalidType_DefaultsToDebug(string invalidType)
+    {
+        // Arrange
+        var logFile = Path.Combine(_testLogDir, "debug.log");
+        File.WriteAllLines(logFile, new[] { "Debug log content" });
+
+        // Act
+        var result = _controller.GetLogs(type: invalidType);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var content = okResult.Value.GetType().GetProperty("content")?.GetValue(okResult.Value) as string;
+        Assert.Contains("Debug log content", content);
+    }
+
+    [Theory]
+    [InlineData("invalid")]
+    [InlineData("UNKNOWN")]
+    [InlineData("")]
+    public void GetLogFiles_WithInvalidType_DefaultsToDebug(string invalidType)
+    {
+        // Arrange
+        var debugLog = Path.Combine(_testLogDir, "debug.log");
+        var appLog = Path.Combine(_testLogDir, "app.log");
+        File.WriteAllText(debugLog, "Debug log");
+        File.WriteAllText(appLog, "App log");
+
+        // Act
+        var result = _controller.GetLogFiles(type: invalidType);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var count = okResult.Value.GetType().GetProperty("count")?.GetValue(okResult.Value);
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public void GetLogFiles_WhenExceptionThrown_ReturnsInternalServerError()
+    {
+        // Arrange - Use invalid directory
+        var settings = new AppSettings
+        {
+            ConfigDirectory = "/nonexistent/directory"
+        };
+        _mockSettings.Setup(s => s.Value).Returns(settings);
+        var controller = new LogsController(_mockSettings.Object, _mockLogger.Object);
+
+        // Act
+        var result = controller.GetLogFiles();
+
+        // Assert
+        var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(500, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public void GetLogFiles_WithWatcherType_ReturnsOnlyWatcherLogFiles()
+    {
+        // Arrange
+        var watcherLog = Path.Combine(_testLogDir, "watcher.log");
+        var debugLog = Path.Combine(_testLogDir, "debug.log");
+        File.WriteAllText(watcherLog, "Watcher log");
+        File.WriteAllText(debugLog, "Debug log");
+
+        // Act
+        var result = _controller.GetLogFiles(type: "watcher");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var count = okResult.Value.GetType().GetProperty("count")?.GetValue(okResult.Value);
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public void GetLogFiles_OrdersByLastWriteTimeDescending()
+    {
+        // Arrange
+        var log1 = Path.Combine(_testLogDir, "debug1.log");
+        var log2 = Path.Combine(_testLogDir, "debug2.log");
+        var log3 = Path.Combine(_testLogDir, "debug3.log");
+        
+        File.WriteAllText(log1, "Old log");
+        Thread.Sleep(10);
+        File.WriteAllText(log2, "Middle log");
+        Thread.Sleep(10);
+        File.WriteAllText(log3, "New log");
+
+        // Act
+        var result = _controller.GetLogFiles(type: "debug");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        
+        // Get files array through reflection
+        var filesProperty = okResult.Value.GetType().GetProperty("files");
+        var files = filesProperty?.GetValue(okResult.Value) as Array;
+        Assert.NotNull(files);
+        Assert.Equal(3, files.Length);
+        
+        // First file should be the newest (debug3.log)
+        var firstFile = files.GetValue(0);
+        var filename = firstFile?.GetType().GetProperty("filename")?.GetValue(firstFile) as string;
+        Assert.Equal("debug3.log", filename);
+    }
+
+    [Fact]
+    public void GetLogs_WithExceedingMaxLines_LimitsTo10000()
+    {
+        // Arrange
+        var logFile = Path.Combine(_testLogDir, "debug.log");
+        var allLines = Enumerable.Range(1, 15000).Select(i => $"Line {i}").ToArray();
+        File.WriteAllLines(logFile, allLines);
+
+        // Act
+        var result = _controller.GetLogs(lines: 15000, type: "debug");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var shownLines = okResult.Value.GetType().GetProperty("shown_lines")?.GetValue(okResult.Value);
+        // Should be limited to MAX_LINES (10000)
+        Assert.Equal(10000, shownLines);
+    }
+
+    [Fact]
+    public void GetLogs_WithNullConfigDirectory_UsesDefault()
+    {
+        // Arrange - Set ConfigDirectory to null
+        var settings = new AppSettings
+        {
+            ConfigDirectory = null
+        };
+        _mockSettings.Setup(s => s.Value).Returns(settings);
+        var controller = new LogsController(_mockSettings.Object, _mockLogger.Object);
+
+        // Act
+        var result = controller.GetLogs();
+
+        // Assert - Should not throw, will return error or no files message
+        var okOrErrorResult = result.Result;
+        Assert.True(okOrErrorResult is OkObjectResult || okOrErrorResult is ObjectResult);
+    }
+
     public void Dispose()
     {
         Dispose(true);

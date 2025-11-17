@@ -1,25 +1,25 @@
 Summary
-  Generated on: 11/17/2025 - 19:02:23
-  Coverage date: 11/17/2025 - 19:02:10
+  Generated on: 11/17/2025 - 20:55:40
+  Coverage date: 11/17/2025 - 20:55:13
   Parser: Cobertura
   Assemblies: 2
   Classes: 61
   Files: 55
-  Line coverage: 48.3%
-  Covered lines: 4387
-  Uncovered lines: 4685
+  Line coverage: 79%
+  Covered lines: 7169
+  Uncovered lines: 1903
   Coverable lines: 9072
   Total lines: 12997
-  Branch coverage: 57.9% (766 of 1322)
-  Covered branches: 766
+  Branch coverage: 58% (767 of 1322)
+  Covered branches: 767
   Total branches: 1322
-  Method coverage: 85.2% (438 of 514)
-  Full method coverage: 65.5% (337 of 514)
-  Covered methods: 438
-  Fully covered methods: 337
+  Method coverage: 87.5% (450 of 514)
+  Full method coverage: 67.8% (349 of 514)
+  Covered methods: 450
+  Fully covered methods: 349
   Total methods: 514
 
-ComicMaintainer.Core                                                      40.7%
+ComicMaintainer.Core                                                      83.6%
   ComicMaintainer.Core.Configuration.AppSettings                           100%
   ComicMaintainer.Core.Configuration.AutheliaSettings                      100%
   ComicMaintainer.Core.Configuration.JwtSettings                           100%
@@ -28,13 +28,13 @@ ComicMaintainer.Core                                                      40.7%
   ComicMaintainer.Core.Data.ComicMaintainerDbContextFactory                100%
   ComicMaintainer.Core.Data.FileReadStatusEntity                           100%
   ComicMaintainer.Core.Data.ProcessingHistoryEntity                        100%
-  ComicMaintainer.Core.Migrations.AddCurrentPageToReadStatus                 0%
-  ComicMaintainer.Core.Migrations.AddHistoryBeforeAfterFields                0%
-  ComicMaintainer.Core.Migrations.AddIdentity                                0%
-  ComicMaintainer.Core.Migrations.AddReadStatusFields                        0%
-  ComicMaintainer.Core.Migrations.AddRenamedAndNormalizedFields              0%
+  ComicMaintainer.Core.Migrations.AddCurrentPageToReadStatus                99%
+  ComicMaintainer.Core.Migrations.AddHistoryBeforeAfterFields             92.4%
+  ComicMaintainer.Core.Migrations.AddIdentity                             97.2%
+  ComicMaintainer.Core.Migrations.AddReadStatusFields                     98.1%
+  ComicMaintainer.Core.Migrations.AddRenamedAndNormalizedFields           96.7%
   ComicMaintainer.Core.Migrations.ComicMaintainerDbContextModelSnapshot    100%
-  ComicMaintainer.Core.Migrations.InitialCreate                              0%
+  ComicMaintainer.Core.Migrations.InitialCreate                           97.2%
   ComicMaintainer.Core.Models.Auth.ApplicationRole                         100%
   ComicMaintainer.Core.Models.Auth.ApplicationUser                         100%
   ComicMaintainer.Core.Models.ComicFile                                    100%
@@ -50,14 +50,14 @@ ComicMaintainer.Core                                                      40.7%
   ComicMaintainer.Core.Services.ComicProcessorService                     61.6%
   ComicMaintainer.Core.Services.ComicReaderService                        60.7%
   ComicMaintainer.Core.Services.FileStoreService                          51.2%
-  ComicMaintainer.Core.Services.FileWatcherService                        60.2%
+  ComicMaintainer.Core.Services.FileWatcherService                        61.5%
   ComicMaintainer.Core.Services.ProcessingHistoryService                  90.4%
   ComicMaintainer.Core.Services.SettingsService                           81.2%
   ComicMaintainer.Core.Utilities.ComicFileExtensions                       100%
   ComicMaintainer.Core.Utilities.LoggingHelper                            91.4%
   ComicMaintainer.Core.Utilities.NaturalStringComparer                     100%
 
-ComicMaintainer.WebApi                                                    67.3%
+ComicMaintainer.WebApi                                                    67.4%
   ComicMaintainer.WebApi.Authentication.AutheliaAuthenticationHandler        0%
   ComicMaintainer.WebApi.Controllers.AuthController                       74.1%
   ComicMaintainer.WebApi.Controllers.ChangePasswordRequest                 100%
@@ -82,4 +82,4 @@ ComicMaintainer.WebApi                                                    67.3%
   ComicMaintainer.WebApi.Services.EventBroadcasterService                  100%
   ComicMaintainer.WebApi.Services.FileWatcherHostedService                 100%
   ComicMaintainerDbContextFactory                                          100%
-  Program                                                                 75.8%
+  Program                                                                 76.1%

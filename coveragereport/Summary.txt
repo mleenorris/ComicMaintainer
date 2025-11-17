@@ -1,33 +1,33 @@
 Summary
-  Generated on: 11/14/2025 - 19:19:32
-  Coverage date: 11/14/2025 - 19:19:17
+  Generated on: 11/17/2025 - 19:02:23
+  Coverage date: 11/17/2025 - 19:02:10
   Parser: Cobertura
   Assemblies: 2
   Classes: 61
   Files: 55
   Line coverage: 48.3%
-  Covered lines: 4385
-  Uncovered lines: 4687
+  Covered lines: 4387
+  Uncovered lines: 4685
   Coverable lines: 9072
   Total lines: 12997
   Branch coverage: 57.9% (766 of 1322)
   Covered branches: 766
   Total branches: 1322
-  Method coverage: 84.8% (436 of 514)
-  Full method coverage: 65.1% (335 of 514)
-  Covered methods: 436
-  Fully covered methods: 335
+  Method coverage: 85.2% (438 of 514)
+  Full method coverage: 65.5% (337 of 514)
+  Covered methods: 438
+  Fully covered methods: 337
   Total methods: 514
 
-ComicMaintainer.Core                                                      40.6%
+ComicMaintainer.Core                                                      40.7%
   ComicMaintainer.Core.Configuration.AppSettings                           100%
   ComicMaintainer.Core.Configuration.AutheliaSettings                      100%
   ComicMaintainer.Core.Configuration.JwtSettings                           100%
-  ComicMaintainer.Core.Data.ComicFileEntity                               92.8%
+  ComicMaintainer.Core.Data.ComicFileEntity                                100%
   ComicMaintainer.Core.Data.ComicMaintainerDbContext                       100%
   ComicMaintainer.Core.Data.ComicMaintainerDbContextFactory                100%
   ComicMaintainer.Core.Data.FileReadStatusEntity                           100%
-  ComicMaintainer.Core.Data.ProcessingHistoryEntity                       95.2%
+  ComicMaintainer.Core.Data.ProcessingHistoryEntity                        100%
   ComicMaintainer.Core.Migrations.AddCurrentPageToReadStatus                 0%
   ComicMaintainer.Core.Migrations.AddHistoryBeforeAfterFields                0%
   ComicMaintainer.Core.Migrations.AddIdentity                                0%

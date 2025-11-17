@@ -218,4 +218,50 @@ public class ProcessingHistoryServiceTests
         Assert.Equal(entry.BeforeVolume, savedEntry.BeforeVolume);
         Assert.Equal(entry.AfterVolume, savedEntry.AfterVolume);
     }
+
+    [Theory]
+    [InlineData(0)] // Below minimum
+    [InlineData(1001)] // Above maximum
+    [InlineData(-1)] // Negative
+    public async Task GetHistoryAsync_WithInvalidLimit_ThrowsArgumentOutOfRangeException(int invalidLimit)
+    {
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            async () => await _service.GetHistoryAsync(limit: invalidLimit));
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-100)]
+    public async Task GetHistoryAsync_WithNegativeOffset_ThrowsArgumentOutOfRangeException(int invalidOffset)
+    {
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            async () => await _service.GetHistoryAsync(offset: invalidOffset));
+    }
+
+    [Fact]
+    public async Task AddHistoryEntryAsync_WithEmptyId_GeneratesNewId()
+    {
+        // Arrange
+        var entry = new ProcessingHistoryEntry
+        {
+            Id = Guid.Empty, // Empty ID should be replaced
+            FilePath = "/test/file.cbz",
+            Action = "Process",
+            Timestamp = DateTime.UtcNow,
+            Success = true
+        };
+
+        // Act
+        await _service.AddHistoryEntryAsync(entry);
+
+        // Assert
+        using var scope = _serviceProvider.CreateScope();
+        var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+        var savedEntry = await dbContext.ProcessingHistory.FirstOrDefaultAsync();
+        
+        Assert.NotNull(savedEntry);
+        Assert.NotEqual(Guid.Empty, savedEntry.EntryId);
+    }
 }

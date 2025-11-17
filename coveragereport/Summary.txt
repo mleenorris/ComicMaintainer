@@ -1,25 +1,25 @@
 Summary
-  Generated on: 11/17/2025 - 20:55:40
-  Coverage date: 11/17/2025 - 20:55:13
+  Generated on: 11/17/2025 - 21:43:37
+  Coverage date: 11/17/2025 - 21:43:09
   Parser: Cobertura
   Assemblies: 2
   Classes: 61
   Files: 55
-  Line coverage: 79%
-  Covered lines: 7169
-  Uncovered lines: 1903
+  Line coverage: 79.9%
+  Covered lines: 7255
+  Uncovered lines: 1817
   Coverable lines: 9072
   Total lines: 12997
-  Branch coverage: 58% (767 of 1322)
-  Covered branches: 767
+  Branch coverage: 59.3% (785 of 1322)
+  Covered branches: 785
   Total branches: 1322
-  Method coverage: 87.5% (450 of 514)
-  Full method coverage: 67.8% (349 of 514)
-  Covered methods: 450
-  Fully covered methods: 349
+  Method coverage: 88.9% (457 of 514)
+  Full method coverage: 68.2% (351 of 514)
+  Covered methods: 457
+  Fully covered methods: 351
   Total methods: 514
 
-ComicMaintainer.Core                                                      83.6%
+ComicMaintainer.Core                                                      84.9%
   ComicMaintainer.Core.Configuration.AppSettings                           100%
   ComicMaintainer.Core.Configuration.AutheliaSettings                      100%
   ComicMaintainer.Core.Configuration.JwtSettings                           100%
@@ -49,7 +49,7 @@ ComicMaintainer.Core                                                      83.6%
   ComicMaintainer.Core.Services.ComicFileProcessor                        84.5%
   ComicMaintainer.Core.Services.ComicProcessorService                     61.6%
   ComicMaintainer.Core.Services.ComicReaderService                        60.7%
-  ComicMaintainer.Core.Services.FileStoreService                          51.2%
+  ComicMaintainer.Core.Services.FileStoreService                          64.6%
   ComicMaintainer.Core.Services.FileWatcherService                        61.5%
   ComicMaintainer.Core.Services.ProcessingHistoryService                  90.4%
   ComicMaintainer.Core.Services.SettingsService                           81.2%
@@ -57,7 +57,7 @@ ComicMaintainer.Core                                                      83.6%
   ComicMaintainer.Core.Utilities.LoggingHelper                            91.4%
   ComicMaintainer.Core.Utilities.NaturalStringComparer                     100%
 
-ComicMaintainer.WebApi                                                    67.4%
+ComicMaintainer.WebApi                                                    67.6%
   ComicMaintainer.WebApi.Authentication.AutheliaAuthenticationHandler        0%
   ComicMaintainer.WebApi.Controllers.AuthController                       74.1%
   ComicMaintainer.WebApi.Controllers.ChangePasswordRequest                 100%
@@ -82,4 +82,4 @@ ComicMaintainer.WebApi                                                    67.4%
   ComicMaintainer.WebApi.Services.EventBroadcasterService                  100%
   ComicMaintainer.WebApi.Services.FileWatcherHostedService                 100%
   ComicMaintainerDbContextFactory                                          100%
-  Program                                                                 76.1%
+  Program                                                                   77%

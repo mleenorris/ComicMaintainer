@@ -634,4 +634,258 @@ public class FileStoreServiceTests
         // Assert
         Assert.Equal(0, removedCount);
     }
+
+    [Fact]
+    public async Task MarkFileReadAsync_NewFile_MarksAsRead()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+
+        // Act
+        await _service.MarkFileReadAsync(filePath, true);
+
+        // Assert
+        var files = await _service.GetAllFilesAsync();
+        var file = files.First();
+        Assert.True(file.IsRead);
+    }
+
+    [Fact]
+    public async Task MarkFileReadAsync_UnmarkRead_RemovesReadStatus()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+        await _service.MarkFileReadAsync(filePath, true);
+
+        // Act
+        await _service.MarkFileReadAsync(filePath, false);
+
+        // Assert
+        var files = await _service.GetAllFilesAsync();
+        var file = files.First();
+        Assert.False(file.IsRead);
+    }
+
+    [Fact]
+    public async Task SaveReadingProgressAsync_NewProgress_SavesPage()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+
+        // Act
+        await _service.SaveReadingProgressAsync(filePath, 5);
+
+        // Assert
+        var progress = await _service.GetReadingProgressAsync(filePath);
+        Assert.Equal(5, progress);
+    }
+
+    [Fact]
+    public async Task SaveReadingProgressAsync_UpdateProgress_UpdatesPage()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+        await _service.SaveReadingProgressAsync(filePath, 5);
+
+        // Act
+        await _service.SaveReadingProgressAsync(filePath, 10);
+
+        // Assert
+        var progress = await _service.GetReadingProgressAsync(filePath);
+        Assert.Equal(10, progress);
+    }
+
+    [Fact]
+    public async Task GetReadingProgressAsync_NoProgress_ReturnsOne()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+
+        // Act
+        var progress = await _service.GetReadingProgressAsync(filePath);
+
+        // Assert
+        Assert.Equal(1, progress);
+    }
+
+    [Fact]
+    public async Task GetReadingProgressAsync_NonExistentFile_ReturnsOne()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
+
+        // Act
+        var progress = await _service.GetReadingProgressAsync(filePath);
+
+        // Assert
+        Assert.Equal(1, progress);
+    }
+
+    [Fact]
+    public async Task IsFileRenamedAsync_NotRenamed_ReturnsFalse()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+
+        // Act
+        var isRenamed = await _service.IsFileRenamedAsync(filePath);
+
+        // Assert
+        Assert.False(isRenamed);
+    }
+
+    [Fact]
+    public async Task IsFileRenamedAsync_AfterMarkingRenamed_ReturnsTrue()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+        await _service.MarkFileRenamedAsync(filePath, true);
+
+        // Act
+        var isRenamed = await _service.IsFileRenamedAsync(filePath);
+
+        // Assert
+        Assert.True(isRenamed);
+    }
+
+    [Fact]
+    public async Task IsFileNormalizedAsync_NotNormalized_ReturnsFalse()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+
+        // Act
+        var isNormalized = await _service.IsFileNormalizedAsync(filePath);
+
+        // Assert
+        Assert.False(isNormalized);
+    }
+
+    [Fact]
+    public async Task IsFileNormalizedAsync_AfterMarkingNormalized_ReturnsTrue()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+        await _service.MarkFileNormalizedAsync(filePath, true);
+
+        // Act
+        var isNormalized = await _service.IsFileNormalizedAsync(filePath);
+
+        // Assert
+        Assert.True(isNormalized);
+    }
+
+    [Fact]
+    public async Task FileExistsAsync_ExistingFile_ReturnsTrue()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+
+        // Act
+        var exists = await _service.FileExistsAsync(filePath);
+
+        // Assert
+        Assert.True(exists);
+    }
+
+    [Fact]
+    public async Task FileExistsAsync_NonExistentFile_ReturnsFalse()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "nonexistent.cbz");
+
+        // Act
+        var exists = await _service.FileExistsAsync(filePath);
+
+        // Assert
+        Assert.False(exists);
+    }
+
+    [Fact]
+    public async Task MarkFilesReadAsync_MultipleFiles_MarksAllAsRead()
+    {
+        // Arrange
+        var file1 = Path.Combine(_testDirectory, "test1.cbz");
+        var file2 = Path.Combine(_testDirectory, "test2.cbz");
+        var file3 = Path.Combine(_testDirectory, "test3.cbz");
+        
+        File.WriteAllText(file1, "test content 1");
+        File.WriteAllText(file2, "test content 2");
+        File.WriteAllText(file3, "test content 3");
+        
+        await _service.AddFileAsync(file1);
+        await _service.AddFileAsync(file2);
+        await _service.AddFileAsync(file3);
+
+        // Act
+        await _service.MarkFilesReadAsync(new[] { file1, file2, file3 }, true);
+
+        // Assert
+        var files = await _service.GetAllFilesAsync();
+        Assert.All(files, f => Assert.True(f.IsRead));
+    }
+
+    [Fact]
+    public async Task MarkFilesReadAsync_EmptyList_DoesNotThrow()
+    {
+        // Arrange
+        var emptyList = Array.Empty<string>();
+
+        // Act & Assert - Should not throw
+        await _service.MarkFilesReadAsync(emptyList, true);
+    }
+
+    [Fact]
+    public async Task MarkFileRenamedAsync_SetFalse_UnmarksRenamed()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+        await _service.MarkFileRenamedAsync(filePath, true);
+
+        // Act
+        await _service.MarkFileRenamedAsync(filePath, false);
+
+        // Assert
+        var isRenamed = await _service.IsFileRenamedAsync(filePath);
+        Assert.False(isRenamed);
+    }
+
+    [Fact]
+    public async Task MarkFileNormalizedAsync_SetFalse_UnmarksNormalized()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+        await _service.MarkFileNormalizedAsync(filePath, true);
+
+        // Act
+        await _service.MarkFileNormalizedAsync(filePath, false);
+
+        // Assert
+        var isNormalized = await _service.IsFileNormalizedAsync(filePath);
+        Assert.False(isNormalized);
+    }
 }

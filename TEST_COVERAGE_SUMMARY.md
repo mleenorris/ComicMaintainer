@@ -10,21 +10,24 @@ This PR significantly improves test coverage for the ComicMaintainer project by 
 - Branch coverage: 54.3% (719/1322 branches)
 - Method coverage: 80.5% (414/514 methods)
 
-### After (Application Code Only)
-- Method coverage: 84.8% (436/514 methods) - **+4.3%**
-- Branch coverage: 57.9% (766/1322 branches) - **+3.6%**
-- Line coverage: 48.3% (excluding migrations) / 78.3% (with migrations properly counted)
+### After (Current Status)
+- **Method coverage: 85.2% (438/514 methods)** - **+4.7%** improvement
+- **Branch coverage: 57.9% (766/1322 branches)** - **+3.6%** improvement
+- **Line coverage: 48.3% (excluding migrations)** - Migrations showing as 0% (auto-generated code)
+- **Total tests: 586** (was 520, **+66 new tests**)
 
 ### Classes Brought to 100% Coverage ✅
 1. **ComicMaintainer.Core.Data.ComicMaintainerDbContextFactory** - 100% (was 0%)
 2. **ComicMaintainer.Core.Data.FileReadStatusEntity** - 100% (was 0%)
-3. **ComicMaintainer.Core.Models.ApplicationRole** - 100% (was 0%)
-4. **ComicMaintainer.Core.Models.ComicPageInfo** - 100% (was 0%)
-5. **ComicMaintainer.Core.Models.ComicInfo** - 100% (was 55.2%)
-6. **ComicMaintainer.WebApi.Controllers.SetupRequest** - 100% (was 0%)
-7. **ComicMaintainer.WebApi.Controllers.ChangePasswordRequest** - 100% (maintained)
-8. **ComicMaintainer.WebApi.Controllers.LoginRequest** - 100% (maintained)
-9. **ComicMaintainer.WebApi.Controllers.RegisterRequest** - 100% (maintained)
+3. **ComicMaintainer.Core.Data.ComicFileEntity** - 100% (was 92.8%)
+4. **ComicMaintainer.Core.Data.ProcessingHistoryEntity** - 100% (was 95.2%)
+5. **ComicMaintainer.Core.Models.ApplicationRole** - 100% (was 0%)
+6. **ComicMaintainer.Core.Models.ComicPageInfo** - 100% (was 0%)
+7. **ComicMaintainer.Core.Models.ComicInfo** - 100% (was 55.2%)
+8. **ComicMaintainer.WebApi.Controllers.SetupRequest** - 100% (was 0%)
+9. **ComicMaintainer.WebApi.Controllers.ChangePasswordRequest** - 100% (maintained)
+10. **ComicMaintainer.WebApi.Controllers.LoginRequest** - 100% (maintained)
+11. **ComicMaintainer.WebApi.Controllers.RegisterRequest** - 100% (maintained)
 
 ### Classes Significantly Improved ⬆️
 - **ComicMaintainer.Core.Services.ComicReaderService** - 60.7% (was 0%) - **+60.7%**
@@ -143,6 +146,18 @@ This PR significantly improves test coverage for the ComicMaintainer project by 
 
 **Coverage**: Comprehensive tests for all ComicReaderController endpoints including path validation, error handling, and edge cases. Increased controller coverage from 24.7% to 62.6%.
 
+### 7. Enhanced ComicMaintainerDbContextFactoryTests.cs (Entity Tests)
+**Location**: `/tests/ComicMaintainer.Tests/Data/`
+
+**New Tests Added** (5 tests):
+- `ComicFileEntity_DefaultConstructor_SetsDefaults`
+- `ComicFileEntity_AllPropertiesCanBeSet`
+- `ProcessingHistoryEntity_DefaultConstructor_SetsDefaults`
+- `ProcessingHistoryEntity_AllPropertiesCanBeSet`
+- `ProcessingHistoryEntity_WithError_StoresErrorMessage`
+
+**Coverage**: Tests for data entities including all properties, metadata handling, and error states. Brought ComicFileEntity from 92.8% to 100% and ProcessingHistoryEntity from 95.2% to 100%.
+
 ## Testing Patterns Used
 
 ### Unit Test Best Practices
@@ -191,8 +206,8 @@ Excluding auto-generated migrations, the application code coverage is significan
 
 ### Total Tests
 - **Before**: 520 tests
-- **After**: 581 tests  
-- **New Tests Added**: 61 tests
+- **After**: 586 tests  
+- **New Tests Added**: 66 tests
 
 ### Test Execution
 - ✅ All new tests passing
@@ -248,14 +263,14 @@ Excluding auto-generated migrations, the application code coverage is significan
 ## Conclusion
 
 This PR successfully improves test coverage by:
-1. ✅ Adding 61 new comprehensive unit tests
-2. ✅ Bringing 6 classes from 0% to 100% coverage
+1. ✅ Adding 66 new comprehensive unit tests
+2. ✅ Bringing 8 classes from 0% or low coverage to 100% coverage
 3. ✅ Improving ComicReaderService from 0% to 60.7% coverage
 4. ✅ Improving ComicReaderController from 24.7% to 62.6% coverage
-5. ✅ Increasing method coverage by 4.3% (from 80.5% to 84.8%)
+5. ✅ Increasing method coverage by 4.7% (from 80.5% to 85.2%)
 6. ✅ Increasing branch coverage by 3.6% (from 54.3% to 57.9%)
 7. ✅ Following existing test patterns and best practices
-8. ✅ Maintaining all existing passing tests (581 tests passing)
+8. ✅ Maintaining all existing passing tests (586 tests passing)
 9. ✅ No regressions introduced
 
-The project now has significantly better test coverage for business logic, models, controllers, and services, with clear opportunities identified for future testing efforts to reach 100% coverage.
+The project now has significantly better test coverage for business logic, models, controllers, entities, and services. Method coverage has increased from 80.5% to 85.2%, moving closer to the 100% coverage goal. Further improvements can focus on remaining controller endpoints, service methods, and the complex AutheliaAuthenticationHandler.

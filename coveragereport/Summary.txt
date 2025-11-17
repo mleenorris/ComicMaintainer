@@ -1,7 +1,7 @@
 Summary
-  Generated on: 11/17/2025 - 22:58:48
-  Coverage date: 11/17/2025 - 22:52:02 - 11/17/2025 - 22:58:37
-  Parser: MultiReport (3x Cobertura)
+  Generated on: 11/17/2025 - 23:03:47
+  Coverage date: 11/17/2025 - 22:52:02 - 11/17/2025 - 23:03:35
+  Parser: MultiReport (5x Cobertura)
   Assemblies: 2
   Classes: 54
   Files: 42
@@ -10,13 +10,13 @@ Summary
   Uncovered lines: 1636
   Coverable lines: 5720
   Total lines: 9230
-  Branch coverage: 59.3% (790 of 1332)
-  Covered branches: 790
+  Branch coverage: 59.6% (794 of 1332)
+  Covered branches: 794
   Total branches: 1332
   Method coverage: 89.7% (446 of 497)
-  Full method coverage: 69.4% (345 of 497)
+  Full method coverage: 69.2% (344 of 497)
   Covered methods: 446
-  Fully covered methods: 345
+  Fully covered methods: 344
   Total methods: 497
 
 ComicMaintainer.Core                                                    74.5%

@@ -1,69 +1,85 @@
 Summary
-  Generated on: 11/02/2025 - 16:06:39
-  Coverage date: 11/02/2025 - 16:06:09
+  Generated on: 11/17/2025 - 21:43:37
+  Coverage date: 11/17/2025 - 21:43:09
   Parser: Cobertura
   Assemblies: 2
-  Classes: 45
-  Files: 38
-  Line coverage: 45.5%
-  Covered lines: 1963
-  Uncovered lines: 2347
-  Coverable lines: 4310
-  Total lines: 6538
-  Branch coverage: 57.2% (371 of 648)
-  Covered branches: 371
-  Total branches: 648
-  Method coverage: 80.8% (282 of 349)
-  Full method coverage: 65.6% (229 of 349)
-  Covered methods: 282
-  Fully covered methods: 229
-  Total methods: 349
+  Classes: 61
+  Files: 55
+  Line coverage: 79.9%
+  Covered lines: 7255
+  Uncovered lines: 1817
+  Coverable lines: 9072
+  Total lines: 12997
+  Branch coverage: 59.3% (785 of 1322)
+  Covered branches: 785
+  Total branches: 1322
+  Method coverage: 88.9% (457 of 514)
+  Full method coverage: 68.2% (351 of 514)
+  Covered methods: 457
+  Fully covered methods: 351
+  Total methods: 514
 
-ComicMaintainer.Core                                                        38%
-  ComicMaintainer.Core.Configuration.AppSettings                          94.4%
+ComicMaintainer.Core                                                      84.9%
+  ComicMaintainer.Core.Configuration.AppSettings                           100%
+  ComicMaintainer.Core.Configuration.AutheliaSettings                      100%
   ComicMaintainer.Core.Configuration.JwtSettings                           100%
-  ComicMaintainer.Core.Data.ComicFileEntity                               90.9%
+  ComicMaintainer.Core.Data.ComicFileEntity                                100%
   ComicMaintainer.Core.Data.ComicMaintainerDbContext                       100%
-  ComicMaintainer.Core.Data.ProcessingHistoryEntity                          0%
-  ComicMaintainer.Core.Migrations.AddIdentity                                0%
-  ComicMaintainer.Core.Migrations.ComicMaintainerDbContextModelSnapshot      0%
-  ComicMaintainer.Core.Migrations.InitialCreate                              0%
-  ComicMaintainer.Core.Models.Auth.ApplicationRole                           0%
+  ComicMaintainer.Core.Data.ComicMaintainerDbContextFactory                100%
+  ComicMaintainer.Core.Data.FileReadStatusEntity                           100%
+  ComicMaintainer.Core.Data.ProcessingHistoryEntity                        100%
+  ComicMaintainer.Core.Migrations.AddCurrentPageToReadStatus                99%
+  ComicMaintainer.Core.Migrations.AddHistoryBeforeAfterFields             92.4%
+  ComicMaintainer.Core.Migrations.AddIdentity                             97.2%
+  ComicMaintainer.Core.Migrations.AddReadStatusFields                     98.1%
+  ComicMaintainer.Core.Migrations.AddRenamedAndNormalizedFields           96.7%
+  ComicMaintainer.Core.Migrations.ComicMaintainerDbContextModelSnapshot    100%
+  ComicMaintainer.Core.Migrations.InitialCreate                           97.2%
+  ComicMaintainer.Core.Models.Auth.ApplicationRole                         100%
   ComicMaintainer.Core.Models.Auth.ApplicationUser                         100%
   ComicMaintainer.Core.Models.ComicFile                                    100%
-  ComicMaintainer.Core.Models.ComicInfo                                   55.2%
+  ComicMaintainer.Core.Models.ComicInfo                                    100%
   ComicMaintainer.Core.Models.ComicMetadata                                100%
-  ComicMaintainer.Core.Models.ComicPageInfo                                  0%
+  ComicMaintainer.Core.Models.ComicPageInfo                                100%
   ComicMaintainer.Core.Models.FileDto                                      100%
   ComicMaintainer.Core.Models.ProcessingHistoryEntry                       100%
   ComicMaintainer.Core.Models.ProcessingJob                                100%
-  ComicMaintainer.Core.Services.AuthService                               95.8%
+  ComicMaintainer.Core.Services.AuthService                               88.5%
   ComicMaintainer.Core.Services.ComicArchive                              84.3%
   ComicMaintainer.Core.Services.ComicFileProcessor                        84.5%
-  ComicMaintainer.Core.Services.ComicProcessorService                     45.1%
-  ComicMaintainer.Core.Services.FileStoreService                          68.7%
-  ComicMaintainer.Core.Services.FileWatcherService                        51.1%
-  ComicMaintainer.Core.Services.ProcessingHistoryService                     0%
+  ComicMaintainer.Core.Services.ComicProcessorService                     61.6%
+  ComicMaintainer.Core.Services.ComicReaderService                        60.7%
+  ComicMaintainer.Core.Services.FileStoreService                          64.6%
+  ComicMaintainer.Core.Services.FileWatcherService                        61.5%
+  ComicMaintainer.Core.Services.ProcessingHistoryService                  90.4%
+  ComicMaintainer.Core.Services.SettingsService                           81.2%
   ComicMaintainer.Core.Utilities.ComicFileExtensions                       100%
-  ComicMaintainer.Core.Utilities.LoggingHelper                            89.2%
+  ComicMaintainer.Core.Utilities.LoggingHelper                            91.4%
+  ComicMaintainer.Core.Utilities.NaturalStringComparer                     100%
 
-ComicMaintainer.WebApi                                                    62.2%
-  ComicMaintainer.WebApi.Controllers.AuthController                        100%
+ComicMaintainer.WebApi                                                    67.6%
+  ComicMaintainer.WebApi.Authentication.AutheliaAuthenticationHandler        0%
+  ComicMaintainer.WebApi.Controllers.AuthController                       74.1%
   ComicMaintainer.WebApi.Controllers.ChangePasswordRequest                 100%
+  ComicMaintainer.WebApi.Controllers.ComicReaderController                62.6%
   ComicMaintainer.WebApi.Controllers.EventsController                     70.9%
-  ComicMaintainer.WebApi.Controllers.FilesController                      66.3%
-  ComicMaintainer.WebApi.Controllers.JobsController                       72.9%
+  ComicMaintainer.WebApi.Controllers.FilesController                      59.4%
+  ComicMaintainer.WebApi.Controllers.JobsController                       56.1%
   ComicMaintainer.WebApi.Controllers.LoginRequest                          100%
-  ComicMaintainer.WebApi.Controllers.LogsController                       98.2%
+  ComicMaintainer.WebApi.Controllers.LogsController                       88.2%
   ComicMaintainer.WebApi.Controllers.PreferencesController                 100%
-  ComicMaintainer.WebApi.Controllers.ProcessController                    64.1%
+  ComicMaintainer.WebApi.Controllers.ProcessController                    65.4%
   ComicMaintainer.WebApi.Controllers.ProcessingHistoryController           100%
   ComicMaintainer.WebApi.Controllers.RegisterRequest                       100%
-  ComicMaintainer.WebApi.Controllers.SettingsController                   85.7%
+  ComicMaintainer.WebApi.Controllers.ServiceWorkerController              92.3%
+  ComicMaintainer.WebApi.Controllers.SettingsController                   57.5%
+  ComicMaintainer.WebApi.Controllers.SetupRequest                          100%
   ComicMaintainer.WebApi.Controllers.VersionController                     100%
-  ComicMaintainer.WebApi.Controllers.WatcherController                     100%
+  ComicMaintainer.WebApi.Controllers.WatcherController                    89.1%
   ComicMaintainer.WebApi.Hubs.ProgressHub                                  100%
-  ComicMaintainer.WebApi.Middleware.PathValidationMiddleware                 0%
+  ComicMaintainer.WebApi.Middleware.PathValidationMiddleware              93.1%
+  ComicMaintainer.WebApi.Services.DatabaseCleanupHostedService            75.8%
   ComicMaintainer.WebApi.Services.EventBroadcasterService                  100%
-  ComicMaintainer.WebApi.Services.FileWatcherHostedService                   0%
-  Program                                                                    0%
+  ComicMaintainer.WebApi.Services.FileWatcherHostedService                 100%
+  ComicMaintainerDbContextFactory                                          100%
+  Program                                                                   77%

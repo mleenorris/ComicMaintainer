@@ -189,4 +189,45 @@ public class PathValidationMiddlewareTests
         // Assert
         Assert.Equal(400, context.Response.StatusCode);
     }
+
+    [Fact]
+    public async Task InvokeAsync_WithInvalidPathThrowingException_Returns400()
+    {
+        // Arrange
+        var middleware = new PathValidationMiddleware(
+            _mockNext.Object,
+            _mockLogger.Object,
+            Options.Create(_appSettings));
+
+        var context = new DefaultHttpContext();
+        // Use null character which may cause exception in path operations
+        context.Request.QueryString = new QueryString($"?filePath={Uri.EscapeDataString("\0invalid\0path")}");
+        context.Response.Body = new MemoryStream();
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        Assert.Equal(400, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithMultipleFilePathParameters_UsesFirst()
+    {
+        // Arrange
+        var middleware = new PathValidationMiddleware(
+            _mockNext.Object,
+            _mockLogger.Object,
+            Options.Create(_appSettings));
+
+        var context = new DefaultHttpContext();
+        context.Request.QueryString = new QueryString($"?filePath={Uri.EscapeDataString("/watched_dir/test.cbz")}&filePath=../../etc/passwd");
+        _mockNext.Setup(x => x(It.IsAny<HttpContext>())).Returns(Task.CompletedTask);
+
+        // Act
+        await middleware.InvokeAsync(context);
+
+        // Assert
+        _mockNext.Verify(x => x(It.IsAny<HttpContext>()), Times.Once);
+    }
 }

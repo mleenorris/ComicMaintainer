@@ -59,7 +59,20 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
     {
         _logger.LogInformation("Stopping Database Cleanup Hosted Service");
         _timer?.Change(Timeout.Infinite, 0);
-        _cancellationTokenSource?.Cancel();
+        
+        // Cancel only if not already disposed
+        if (_cancellationTokenSource != null && !_cancellationTokenSource.IsCancellationRequested)
+        {
+            try
+            {
+                _cancellationTokenSource.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Already disposed, ignore
+            }
+        }
+        
         return Task.CompletedTask;
     }
 

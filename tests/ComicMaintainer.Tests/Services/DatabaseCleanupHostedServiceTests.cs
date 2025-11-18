@@ -228,6 +228,75 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
         _service.Dispose();
     }
 
+    [Fact]
+    public async Task StartAsync_WithNegativeInterval_OnlyRunsOnStartup()
+    {
+        // Arrange
+        var appSettings = new AppSettings
+        {
+            DatabaseCleanupIntervalHours = -1
+        };
+        _mockOptions.Setup(x => x.CurrentValue).Returns(appSettings);
+        
+        var service = new DatabaseCleanupHostedService(
+            _mockFileStore.Object,
+            _mockOptions.Object,
+            _mockLogger.Object);
+
+        _mockFileStore
+            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+
+        // Act
+        await service.StartAsync(_cts.Token);
+
+        // Assert - should log "run only on startup"
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("run only on startup")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+        
+        service.Dispose();
+    }
+
+    [Fact]
+    public async Task StopAsync_MultipleTimes_DoesNotThrow()
+    {
+        // Arrange
+        await _service.StartAsync(_cts.Token);
+        await _service.StopAsync(_cts.Token);
+
+        // Act & Assert - calling StopAsync multiple times should not throw
+        await _service.StopAsync(_cts.Token);
+        await _service.StopAsync(_cts.Token);
+    }
+
+    [Fact]
+    public async Task StartAsync_LogsScheduledCleanupMessage()
+    {
+        // Arrange
+        _mockFileStore
+            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+
+        // Act
+        await _service.StartAsync(_cts.Token);
+
+        // Assert - should log starting message
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Starting scheduled database cleanup")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
     public void Dispose()
     {
         _cts.Dispose();

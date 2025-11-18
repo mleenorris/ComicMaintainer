@@ -219,7 +219,7 @@ var assemblies = [
       { "name": "ComicMaintainer.Core.Models.ComicMetadata", "rp": "ComicMaintainer.Core_ComicMetadata.html", "cl": 14, "ucl": 0, "cal": 14, "tl": 112, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Models.FileDto", "rp": "ComicMaintainer.Core_FileDto.html", "cl": 16, "ucl": 0, "cal": 16, "tl": 58, "cb": 2, "tb": 2, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Services.AuthService", "rp": "ComicMaintainer.Core_AuthService.html", "cl": 11, "ucl": 0, "cal": 11, "tl": 219, "cb": 0, "tb": 0, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
-      { "name": "ComicMaintainer.Core.Services.ComicArchive", "rp": "ComicMaintainer.Core_ComicArchive.html", "cl": 108, "ucl": 20, "cal": 128, "tl": 229, "cb": 26, "tb": 36, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
+      { "name": "ComicMaintainer.Core.Services.ComicArchive", "rp": "ComicMaintainer.Core_ComicArchive.html", "cl": 110, "ucl": 18, "cal": 128, "tl": 229, "cb": 27, "tb": 36, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Services.ComicFileProcessor", "rp": "ComicMaintainer.Core_ComicFileProcessor.html", "cl": 137, "ucl": 25, "cal": 162, "tl": 282, "cb": 52, "tb": 64, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Services.ComicProcessorService", "rp": "ComicMaintainer.Core_ComicProcessorService.html", "cl": 443, "ucl": 138, "cal": 581, "tl": 1473, "cb": 62, "tb": 90, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
       { "name": "ComicMaintainer.Core.Services.ComicReaderService", "rp": "ComicMaintainer.Core_ComicReaderService.html", "cl": 17, "ucl": 4, "cal": 21, "tl": 197, "cb": 5, "tb": 12, "cm": 0, "fcm": 0, "tm": 0, "lch": [], "bch": [], "mch": [], "mfch": [], "hc": [], "metrics": { } },
@@ -294,7 +294,7 @@ var riskHotspots = [
   {
     "assembly": "ComicMaintainer.Core", "class": "ComicMaintainer.Core.Services.ComicArchive", "reportPath": "ComicMaintainer.Core_ComicArchive.html", "methodName": "WriteTags(ComicMaintainer.Core.Models.ComicInfo,System.String)", "methodShortName": "WriteTags(...)", "fileIndex": 0, "line": 105,
     "metrics": [
-      { "value": 26, "exceeded": false },
+      { "value": 24, "exceeded": false },
       { "value": 20, "exceeded": true },
     ]},
   {

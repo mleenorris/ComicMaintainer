@@ -1,17 +1,17 @@
 Summary
-  Generated on: 11/17/2025 - 23:57:03
-  Coverage date: 11/17/2025 - 23:52:20 - 11/17/2025 - 23:56:31
-  Parser: MultiReport (2x Cobertura)
+  Generated on: 11/18/2025 - 20:13:00
+  Coverage date: 11/18/2025 - 20:05:31 - 11/18/2025 - 20:12:41
+  Parser: MultiReport (3x Cobertura)
   Assemblies: 2
   Classes: 37
   Files: 37
-  Line coverage: 84.9%
-  Covered lines: 1754
-  Uncovered lines: 310
+  Line coverage: 85%
+  Covered lines: 1756
+  Uncovered lines: 308
   Coverable lines: 2064
   Total lines: 9115
-  Branch coverage: 72.9% (327 of 448)
-  Covered branches: 327
+  Branch coverage: 73.2% (328 of 448)
+  Covered branches: 328
   Total branches: 448
   Method coverage: 90.7% (127 of 140)
   Full method coverage: 67.8% (95 of 140)
@@ -19,14 +19,14 @@ Summary
   Fully covered methods: 95
   Total methods: 140
 
-ComicMaintainer.Core                                                    82.6%
+ComicMaintainer.Core                                                    82.7%
   ComicMaintainer.Core.Data.ComicMaintainerDbContext                     100%
   ComicMaintainer.Core.Data.ComicMaintainerDbContextFactory              100%
   ComicMaintainer.Core.Models.ComicInfo                                  100%
   ComicMaintainer.Core.Models.ComicMetadata                              100%
   ComicMaintainer.Core.Models.FileDto                                    100%
   ComicMaintainer.Core.Services.AuthService                              100%
-  ComicMaintainer.Core.Services.ComicArchive                            84.3%
+  ComicMaintainer.Core.Services.ComicArchive                            85.9%
   ComicMaintainer.Core.Services.ComicFileProcessor                      84.5%
   ComicMaintainer.Core.Services.ComicProcessorService                   76.2%
   ComicMaintainer.Core.Services.ComicReaderService                      80.9%

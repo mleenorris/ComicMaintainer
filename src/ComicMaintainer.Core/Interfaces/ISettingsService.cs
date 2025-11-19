@@ -56,4 +56,9 @@ public interface ISettingsService
     /// Update the database cleanup interval setting (in hours, 0 = only on startup)
     /// </summary>
     Task UpdateDatabaseCleanupIntervalHoursAsync(int hours, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the watched directories list
+    /// </summary>
+    Task UpdateWatchedDirectoriesAsync(List<string> directories, CancellationToken cancellationToken = default);
 }

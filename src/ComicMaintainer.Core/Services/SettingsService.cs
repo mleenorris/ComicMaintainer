@@ -117,6 +117,35 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("DatabaseCleanupIntervalHours", hours, cancellationToken);
     }
 
+    public async Task UpdateWatchedDirectoriesAsync(List<string> directories, CancellationToken cancellationToken = default)
+    {
+        if (directories == null)
+        {
+            throw new ArgumentNullException(nameof(directories));
+        }
+
+        // Validate that all directories are absolute paths and exist
+        foreach (var dir in directories)
+        {
+            if (string.IsNullOrWhiteSpace(dir))
+            {
+                throw new ArgumentException("Directory path cannot be null or whitespace", nameof(directories));
+            }
+
+            if (!Path.IsPathFullyQualified(dir))
+            {
+                throw new ArgumentException($"Directory path must be absolute: {dir}", nameof(directories));
+            }
+
+            if (!Directory.Exists(dir))
+            {
+                throw new ArgumentException($"Directory does not exist: {dir}", nameof(directories));
+            }
+        }
+
+        await UpdateSettingAsync("WatchedDirectories", directories, cancellationToken);
+    }
+
     private async Task UpdateSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);

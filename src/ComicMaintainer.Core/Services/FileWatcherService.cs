@@ -16,12 +16,12 @@ public class FileWatcherService : IFileWatcherService
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly IEventBroadcaster? _eventBroadcaster;
-    private FileSystemWatcher? _watcher;
+    private List<FileSystemWatcher> _watchers = new();
     private bool _enabled;
     private readonly object _lock = new();
     private bool _initialized = false;
 
-    public bool IsRunning => _watcher?.EnableRaisingEvents ?? false;
+    public bool IsRunning => _watchers.Any(w => w.EnableRaisingEvents);
 
     public FileWatcherService(
         IOptions<AppSettings> settings,
@@ -54,32 +54,53 @@ public class FileWatcherService : IFileWatcherService
                 return;
             }
 
-            if (_watcher != null && _watcher.EnableRaisingEvents)
+            if (_watchers.Any(w => w.EnableRaisingEvents))
             {
                 _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Watcher is already running"));
                 return;
             }
 
-            if (!Directory.Exists(_settings.WatchedDirectory))
+            // Get all directories to watch
+            var directoriesToWatch = _settings.GetAllWatchedDirectories().ToList();
+            
+            if (!directoriesToWatch.Any())
             {
-                _logger.LogError(LoggingHelper.WithWatcherPrefix("Watched directory does not exist: {Directory}"), _settings.WatchedDirectory);
+                _logger.LogError(LoggingHelper.WithWatcherPrefix("No directories configured to watch"));
                 return;
             }
 
-            _watcher = new FileSystemWatcher(_settings.WatchedDirectory)
+            // Create a watcher for each directory
+            foreach (var directory in directoriesToWatch)
             {
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
-                Filter = "*.*",
-                IncludeSubdirectories = true
-            };
+                if (!Directory.Exists(directory))
+                {
+                    _logger.LogWarning(LoggingHelper.WithWatcherPrefix("Watched directory does not exist, skipping: {Directory}"), directory);
+                    continue;
+                }
 
-            _watcher.Created += OnFileCreated;
-            _watcher.Changed += OnFileChanged;
-            _watcher.Renamed += OnFileRenamed;
-            _watcher.Deleted += OnFileDeleted;
+                var watcher = new FileSystemWatcher(directory)
+                {
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                    Filter = "*.*",
+                    IncludeSubdirectories = true
+                };
 
-            _watcher.EnableRaisingEvents = true;
-            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File watcher started for directory: {Directory}"), _settings.WatchedDirectory);
+                watcher.Created += OnFileCreated;
+                watcher.Changed += OnFileChanged;
+                watcher.Renamed += OnFileRenamed;
+                watcher.Deleted += OnFileDeleted;
+
+                watcher.EnableRaisingEvents = true;
+                _watchers.Add(watcher);
+                
+                _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File watcher started for directory: {Directory}"), directory);
+            }
+            
+            if (!_watchers.Any())
+            {
+                _logger.LogError(LoggingHelper.WithWatcherPrefix("Failed to start any watchers - no valid directories found"));
+                return;
+            }
             
             // Set flag to initialize outside the lock
             if (!_initialized)
@@ -108,49 +129,66 @@ public class FileWatcherService : IFileWatcherService
             await _fileStore.InitializeFromDatabaseAsync(cancellationToken);
         }
         
-        // Perform initial scan of existing files
+        // Perform initial scan of existing files in all watched directories
         _ = Task.Run(async () => await ScanExistingFilesAsync(cancellationToken));
     }
     
     /// <summary>
-    /// Scans the watched directory for existing comic files and adds them to the file store
+    /// Scans the watched directories for existing comic files and adds them to the file store
     /// Only scans for new files not already in the database
     /// </summary>
     private async Task ScanExistingFilesAsync(CancellationToken cancellationToken)
     {
         try
         {
-            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Starting incremental scan of directory: {Directory}"), _settings.WatchedDirectory);
+            var directoriesToWatch = _settings.GetAllWatchedDirectories().ToList();
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Starting incremental scan of {Count} directories"), directoriesToWatch.Count);
             
-            var comicFiles = Directory.EnumerateFiles(_settings.WatchedDirectory, "*.*", SearchOption.AllDirectories)
-                .Where(IsComicFile)
-                .ToList();
-            
-            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Found {Count} comic files on filesystem"), comicFiles.Count);
-            
-            // Check each file individually to avoid loading all files into memory
-            var newFileCount = 0;
-            foreach (var file in comicFiles)
+            var totalNewFileCount = 0;
+            foreach (var directory in directoriesToWatch)
             {
                 if (cancellationToken.IsCancellationRequested)
                     break;
                     
-                try
+                if (!Directory.Exists(directory))
                 {
-                    // Only add if not already in the store
-                    if (!await _fileStore.FileExistsAsync(file, cancellationToken))
+                    _logger.LogWarning(LoggingHelper.WithWatcherPrefix("Directory does not exist, skipping scan: {Directory}"), directory);
+                    continue;
+                }
+                
+                var comicFiles = Directory.EnumerateFiles(directory, "*.*", SearchOption.AllDirectories)
+                    .Where(IsComicFile)
+                    .ToList();
+                
+                _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Found {Count} comic files in {Directory}"), comicFiles.Count, directory);
+                
+                // Check each file individually to avoid loading all files into memory
+                var newFileCount = 0;
+                foreach (var file in comicFiles)
+                {
+                    if (cancellationToken.IsCancellationRequested)
+                        break;
+                        
+                    try
                     {
-                        await _fileStore.AddFileAsync(file, cancellationToken);
-                        newFileCount++;
+                        // Only add if not already in the store
+                        if (!await _fileStore.FileExistsAsync(file, cancellationToken))
+                        {
+                            await _fileStore.AddFileAsync(file, cancellationToken);
+                            newFileCount++;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error adding file during incremental scan: {File}"), file);
                     }
                 }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error adding file during incremental scan: {File}"), file);
-                }
+                
+                totalNewFileCount += newFileCount;
+                _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Incremental scan of {Directory} completed. Added {Count} new files"), directory, newFileCount);
             }
             
-            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Incremental scan completed. Added {Count} new files"), newFileCount);
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("All directory scans completed. Total new files added: {Count}"), totalNewFileCount);
         }
         catch (Exception ex)
         {
@@ -217,13 +255,13 @@ public class FileWatcherService : IFileWatcherService
     {
         lock (_lock)
         {
-            if (_watcher != null)
+            foreach (var watcher in _watchers)
             {
-                _watcher.EnableRaisingEvents = false;
-                _watcher.Dispose();
-                _watcher = null;
-                _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File watcher stopped"));
+                watcher.EnableRaisingEvents = false;
+                watcher.Dispose();
             }
+            _watchers.Clear();
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("All file watchers stopped"));
         }
 
         // Broadcast watcher status change

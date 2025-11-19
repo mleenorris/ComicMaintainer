@@ -376,4 +376,107 @@ public class SettingsController : ControllerBase
     {
         public int Hours { get; set; }
     }
+
+    public class WatchedDirectoriesRequest
+    {
+        public List<string> Directories { get; set; } = new();
+    }
+
+    public class BrowseDirectoryRequest
+    {
+        public string? Path { get; set; }
+    }
+
+    [HttpGet("watched-directories")]
+    public ActionResult<object> GetWatchedDirectories()
+    {
+        var directories = _appSettings.Value.GetAllWatchedDirectories();
+        return Ok(new { directories = directories.ToList() });
+    }
+
+    [HttpPut("watched-directories")]
+    public async Task<ActionResult> UpdateWatchedDirectories([FromBody] WatchedDirectoriesRequest request, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Watched directories update requested: {Count} directories", request.Directories.Count);
+        
+        try
+        {
+            await _settingsService.UpdateWatchedDirectoriesAsync(request.Directories, cancellationToken);
+            _logger.LogWarning("Watched directories updated. Restart the application for the change to take effect.");
+            return Ok(new { message = "Watched directories updated successfully. Restart required for changes to take effect." });
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Invalid watched directories provided");
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update watched directories");
+            return StatusCode(500, new { error = "Failed to update watched directories" });
+        }
+    }
+
+    [HttpPost("browse-directory")]
+    public ActionResult<object> BrowseDirectory([FromBody] BrowseDirectoryRequest request)
+    {
+        try
+        {
+            // Default to root directories if no path specified
+            string? targetPath = request.Path;
+            
+            if (string.IsNullOrWhiteSpace(targetPath))
+            {
+                // Return root directories (drives on Windows, / on Unix)
+                var drives = DriveInfo.GetDrives()
+                    .Where(d => d.IsReady)
+                    .Select(d => new
+                    {
+                        name = d.Name,
+                        path = d.Name,
+                        isDirectory = true,
+                        type = d.DriveType.ToString()
+                    })
+                    .ToList();
+                
+                return Ok(new { directories = drives, currentPath = "" });
+            }
+
+            // Validate and normalize the path
+            if (!Path.IsPathFullyQualified(targetPath))
+            {
+                return BadRequest(new { error = "Path must be absolute" });
+            }
+
+            if (!Directory.Exists(targetPath))
+            {
+                return BadRequest(new { error = "Directory does not exist" });
+            }
+
+            // Get subdirectories
+            var directories = Directory.GetDirectories(targetPath)
+                .Select(dir => new
+                {
+                    name = Path.GetFileName(dir),
+                    path = dir,
+                    isDirectory = true
+                })
+                .OrderBy(d => d.name)
+                .ToList();
+
+            // Get parent directory for navigation
+            var parentPath = Directory.GetParent(targetPath)?.FullName;
+
+            return Ok(new { directories, currentPath = targetPath, parentPath });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return StatusCode(403, new { error = "Access denied to this directory" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error browsing directory: {Path}", request.Path);
+            return StatusCode(500, new { error = "Error browsing directory" });
+        }
+    }
 }

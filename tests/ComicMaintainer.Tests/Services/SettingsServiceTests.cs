@@ -284,4 +284,100 @@ public class SettingsServiceTests : IDisposable
         Assert.Equal(_appSettings.FilenameFormat, result.FilenameFormat);
         Assert.Equal(_appSettings.IssueNumberPadding, result.IssueNumberPadding);
     }
+    
+    [Fact]
+    public async Task UpdateWatchedDirectories_WithValidDirectories_PersistsSettingToFile()
+    {
+        // Arrange
+        var testDir1 = Path.Combine(_testConfigDir, "watched1");
+        var testDir2 = Path.Combine(_testConfigDir, "watched2");
+        Directory.CreateDirectory(testDir1);
+        Directory.CreateDirectory(testDir2);
+        
+        var newDirectories = new List<string> { testDir1, testDir2 };
+
+        // Act
+        await _service.UpdateWatchedDirectoriesAsync(newDirectories);
+
+        // Assert
+        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        Assert.True(File.Exists(settingsFilePath));
+
+        var json = await File.ReadAllTextAsync(settingsFilePath);
+        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+        
+        Assert.NotNull(settings);
+        Assert.True(settings.ContainsKey("WatchedDirectories"));
+        
+        var savedDirectories = settings["WatchedDirectories"].EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
+        
+        Assert.Equal(2, savedDirectories.Count);
+        Assert.Contains(testDir1, savedDirectories);
+        Assert.Contains(testDir2, savedDirectories);
+    }
+
+    [Fact]
+    public async Task UpdateWatchedDirectories_WithNonExistentDirectory_ThrowsException()
+    {
+        // Arrange
+        var nonExistentDir = Path.Combine(_testConfigDir, "does_not_exist");
+        var directories = new List<string> { nonExistentDir };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(() => 
+            _service.UpdateWatchedDirectoriesAsync(directories));
+    }
+
+    [Fact]
+    public async Task UpdateWatchedDirectories_WithRelativePath_ThrowsException()
+    {
+        // Arrange
+        var directories = new List<string> { "relative/path" };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(() => 
+            _service.UpdateWatchedDirectoriesAsync(directories));
+    }
+
+    [Fact]
+    public async Task UpdateWatchedDirectories_WithEmptyString_ThrowsException()
+    {
+        // Arrange
+        var directories = new List<string> { "" };
+
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentException>(() => 
+            _service.UpdateWatchedDirectoriesAsync(directories));
+    }
+
+    [Fact]
+    public async Task UpdateWatchedDirectories_WithNullList_ThrowsException()
+    {
+        // Act & Assert
+        await Assert.ThrowsAsync<ArgumentNullException>(() => 
+            _service.UpdateWatchedDirectoriesAsync(null!));
+    }
+
+    [Fact]
+    public async Task UpdateWatchedDirectories_WithEmptyList_SuccessfullyPersists()
+    {
+        // Arrange
+        var directories = new List<string>();
+
+        // Act
+        await _service.UpdateWatchedDirectoriesAsync(directories);
+
+        // Assert
+        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        Assert.True(File.Exists(settingsFilePath));
+
+        var json = await File.ReadAllTextAsync(settingsFilePath);
+        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+        
+        Assert.NotNull(settings);
+        Assert.True(settings.ContainsKey("WatchedDirectories"));
+        Assert.Empty(settings["WatchedDirectories"].EnumerateArray());
+    }
 }

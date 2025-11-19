@@ -590,6 +590,26 @@
                     </select>
                 </div>
                 
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Watched Folders</h3>
+                <div class="form-group">
+                    <small style="display: block; margin-bottom: 15px; color: var(--text-muted);">
+                        Configure which folders the watcher monitors for comic files. Multiple folders can be selected. Changes take effect on restart.
+                    </small>
+                </div>
+                
+                <div class="form-group">
+                    <label>Monitored Folders</label>
+                    <div id="watchedDirectoriesList" style="margin: 10px 0; padding: 10px; background: var(--bg-hover); border-radius: 5px; min-height: 60px;">
+                        <div style="color: var(--text-muted); text-align: center;">Loading...</div>
+                    </div>
+                    <button class="btn" onclick="openFolderBrowser()" style="background: var(--accent-primary); color: white; width: 100%; margin-top: 10px;">
+                        📁 Add Folder
+                    </button>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Click "Add Folder" to browse and select folders to monitor. You can remove folders by clicking the × button next to each folder.
+                    </small>
+                </div>
+                
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Watcher</h3>
                 <div class="form-group">
                     <small style="display: block; margin-bottom: 15px; color: var(--text-muted);">
@@ -855,6 +875,38 @@
             <div class="modal-footer">
                 <button class="btn" onclick="closeChangePasswordModal()">Cancel</button>
                 <button class="btn btn-primary" onclick="changePassword()" id="changePasswordBtn">Change Password</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Folder Browser Modal -->
+    <div class="modal" id="folderBrowserModal">
+        <div class="modal-content" style="max-width: 700px; height: 70vh; display: flex; flex-direction: column;">
+            <div class="modal-header">
+                <h2>Browse Folders</h2>
+                <button class="close-btn" onclick="closeFolderBrowser()">&times;</button>
+            </div>
+            <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                <div style="margin-bottom: 15px;">
+                    <div style="display: flex; gap: 10px; align-items: center;">
+                        <button class="btn" onclick="navigateToParentDirectory()" id="parentDirBtn" style="flex-shrink: 0;">
+                            ⬆️ Parent
+                        </button>
+                        <div id="currentPathDisplay" style="flex: 1; padding: 8px; background: var(--bg-hover); border-radius: 5px; overflow-x: auto; white-space: nowrap; font-family: monospace; font-size: 13px; color: var(--text-primary);">
+                            /
+                        </div>
+                    </div>
+                </div>
+                <div id="folderBrowserLoadingIndicator" style="display: none; padding: 20px; text-align: center; color: var(--text-muted);">
+                    Loading directories...
+                </div>
+                <div id="folderList" style="flex: 1; overflow-y: auto; border: 1px solid var(--border-secondary); border-radius: 5px; padding: 10px; background: var(--bg-primary);">
+                    <!-- Folder list will be populated here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeFolderBrowser()">Cancel</button>
+                <button class="btn btn-primary" onclick="addSelectedFolder()" id="addFolderBtn" disabled>Add This Folder</button>
             </div>
         </div>
     </div>

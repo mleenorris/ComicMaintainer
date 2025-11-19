@@ -3026,6 +3026,9 @@
                 // Load database cleanup interval
                 document.getElementById('dbCleanupInterval').value = settingsData.database_cleanup_interval_hours;
                 
+                // Load watched directories
+                await loadWatchedDirectories();
+                
                 console.log('[SETTINGS] All settings loaded successfully, opening modal');
                 document.getElementById('settingsModal').classList.add('active');
             } catch (error) {
@@ -4055,5 +4058,183 @@
                 } else {
                     statusIndicator.title = 'File watcher is disabled';
                 }
+            }
+        }
+        
+        // Folder browser functionality
+        let currentBrowsePath = '';
+        let parentBrowsePath = null;
+        let watchedDirectories = [];
+        
+        async function loadWatchedDirectories() {
+            try {
+                const response = await fetch(apiUrl('/api/settings/watched-directories'), {
+                    headers: getAuthHeaders()
+                });
+                
+                if (handleAuthError(response)) return;
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                watchedDirectories = data.directories || [];
+                
+                // Display watched directories
+                const listContainer = document.getElementById('watchedDirectoriesList');
+                if (watchedDirectories.length === 0) {
+                    listContainer.innerHTML = '<div style="color: var(--text-muted); text-align: center;">No folders configured</div>';
+                } else {
+                    listContainer.innerHTML = watchedDirectories.map((dir, index) => `
+                        <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px; margin: 5px 0; background: var(--bg-primary); border-radius: 5px; border: 1px solid var(--border-secondary);">
+                            <div style="flex: 1; font-family: monospace; font-size: 13px; overflow-x: auto; white-space: nowrap; color: var(--text-primary);">
+                                📁 ${dir}
+                            </div>
+                            <button onclick="removeWatchedDirectory(${index})" style="background: #e74c3c; color: white; border: none; border-radius: 3px; padding: 4px 8px; cursor: pointer; margin-left: 10px; flex-shrink: 0;" title="Remove this folder">
+                                ×
+                            </button>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('Error loading watched directories:', error);
+                showMessage('Failed to load watched directories: ' + error.message, 'error');
+            }
+        }
+        
+        async function removeWatchedDirectory(index) {
+            if (!confirm('Are you sure you want to remove this folder from the watch list?')) {
+                return;
+            }
+            
+            try {
+                watchedDirectories.splice(index, 1);
+                await saveWatchedDirectories();
+                await loadWatchedDirectories();
+                showMessage('Folder removed successfully. Restart required for changes to take effect.', 'success');
+            } catch (error) {
+                console.error('Error removing watched directory:', error);
+                showMessage('Failed to remove folder: ' + error.message, 'error');
+            }
+        }
+        
+        async function saveWatchedDirectories() {
+            try {
+                const response = await fetch(apiUrl('/api/settings/watched-directories'), {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ directories: watchedDirectories })
+                });
+                
+                if (handleAuthError(response)) return;
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                return result;
+            } catch (error) {
+                console.error('Error saving watched directories:', error);
+                throw error;
+            }
+        }
+        
+        async function openFolderBrowser() {
+            currentBrowsePath = '';
+            parentBrowsePath = null;
+            document.getElementById('folderBrowserModal').classList.add('active');
+            await loadDirectories('');
+        }
+        
+        function closeFolderBrowser() {
+            document.getElementById('folderBrowserModal').classList.remove('active');
+        }
+        
+        async function loadDirectories(path) {
+            try {
+                document.getElementById('folderBrowserLoadingIndicator').style.display = 'block';
+                document.getElementById('folderList').style.display = 'none';
+                
+                const response = await fetch(apiUrl('/api/settings/browse-directory'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ path: path || null })
+                });
+                
+                if (handleAuthError(response)) return;
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                currentBrowsePath = data.currentPath || '';
+                parentBrowsePath = data.parentPath || null;
+                
+                // Update UI
+                document.getElementById('currentPathDisplay').textContent = currentBrowsePath || 'Root Drives';
+                document.getElementById('parentDirBtn').disabled = !parentBrowsePath;
+                document.getElementById('addFolderBtn').disabled = !currentBrowsePath;
+                
+                // Display directories
+                const folderList = document.getElementById('folderList');
+                if (data.directories.length === 0) {
+                    folderList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted);">No subdirectories found</div>';
+                } else {
+                    folderList.innerHTML = data.directories.map(dir => `
+                        <div onclick="loadDirectories('${dir.path.replace(/'/g, "\\'")}')" style="padding: 10px; margin: 5px 0; cursor: pointer; border-radius: 5px; border: 1px solid var(--border-secondary); background: var(--bg-hover); transition: background 0.2s;" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background='var(--bg-hover)'">
+                            <span style="margin-right: 8px;">📁</span>
+                            <span style="color: var(--text-primary);">${dir.name}</span>
+                        </div>
+                    `).join('');
+                }
+                
+                document.getElementById('folderBrowserLoadingIndicator').style.display = 'none';
+                document.getElementById('folderList').style.display = 'block';
+            } catch (error) {
+                console.error('Error loading directories:', error);
+                document.getElementById('folderBrowserLoadingIndicator').style.display = 'none';
+                document.getElementById('folderList').innerHTML = '<div style="padding: 20px; text-align: center; color: #e74c3c;">Error: ' + error.message + '</div>';
+                document.getElementById('folderList').style.display = 'block';
+            }
+        }
+        
+        async function navigateToParentDirectory() {
+            if (parentBrowsePath !== null) {
+                await loadDirectories(parentBrowsePath);
+            }
+        }
+        
+        async function addSelectedFolder() {
+            if (!currentBrowsePath) {
+                showMessage('Please select a folder first', 'error');
+                return;
+            }
+            
+            // Check if already added
+            if (watchedDirectories.includes(currentBrowsePath)) {
+                showMessage('This folder is already in the watch list', 'warning');
+                return;
+            }
+            
+            try {
+                watchedDirectories.push(currentBrowsePath);
+                await saveWatchedDirectories();
+                await loadWatchedDirectories();
+                closeFolderBrowser();
+                showMessage('Folder added successfully. Restart required for changes to take effect.', 'success');
+            } catch (error) {
+                console.error('Error adding folder:', error);
+                showMessage('Failed to add folder: ' + error.message, 'error');
             }
         }

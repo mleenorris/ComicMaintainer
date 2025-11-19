@@ -1316,12 +1316,22 @@ public class ComicProcessorService : IComicProcessorService
             var directory = Path.GetDirectoryName(originalPath) ?? _settings.WatchedDirectory;
             var extension = Path.GetExtension(originalPath);
             
-            // Apply filename template
-            var filename = _settings.FilenameFormat
-                .Replace("{series}", metadata.Series ?? "Unknown")
-                .Replace("{title}", metadata.Title ?? "")
-                .Replace("{issue}", metadata.Issue?.PadLeft(_settings.IssueNumberPadding, '0') ?? "")
-                .Replace("{volume}", metadata.Volume ?? "");
+            // Convert ComicMetadata to ComicInfo for use with ComicFileProcessor
+            var comicInfo = ComicInfo.FromMetadata(metadata);
+            
+            // Use ComicFileProcessor.FormatFilename to properly handle decimal issue numbers
+            var filename = ComicFileProcessor.FormatFilename(
+                _settings.FilenameFormat,
+                comicInfo,
+                metadata.Issue ?? "",
+                extension,
+                _settings.IssueNumberPadding);
+            
+            // Remove extension as FormatFilename adds it
+            if (filename.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+            {
+                filename = filename.Substring(0, filename.Length - extension.Length);
+            }
             
             // Clean filename
             foreach (var c in Path.GetInvalidFileNameChars())

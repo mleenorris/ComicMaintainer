@@ -920,4 +920,61 @@ public class ComicProcessorServiceTests : IDisposable
             }
         }
     }
+
+    [Fact]
+    public async Task ProcessFileAsync_WithDecimalIssueNumber_RenamesCorrectly()
+    {
+        // Arrange - Create a comic file with decimal issue number
+        var seriesName = "Second Life Ranker";
+        var issueNumber = "142.5";
+        
+        // Create a series directory
+        var seriesDir = Path.Combine(_testDirectory, seriesName);
+        Directory.CreateDirectory(seriesDir);
+        
+        // Create a comic file with incorrect name
+        var originalFileName = $"{seriesName} - Chapter {issueNumber}.cbz";
+        var originalPath = Path.Combine(seriesDir, originalFileName);
+        
+        // Create ComicInfo.xml with decimal issue
+        var comicInfoXml = $@"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>{seriesName}</Series>
+    <Number>{issueNumber}</Number>
+    <Title>Test Issue</Title>
+</ComicInfo>";
+        
+        using (var archive = ZipFile.Open(originalPath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+        
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+        
+        // Act
+        var result = await _service.ProcessFileAsync(originalPath);
+        
+        // Assert
+        Assert.True(result);
+        
+        // The expected filename should have padded issue number: 0142.5
+        var expectedFileName = $"{seriesName} - Chapter 0{issueNumber}.cbz";
+        var expectedPath = Path.Combine(seriesDir, expectedFileName);
+        
+        // Verify the file was renamed to the correct name
+        _mockFileStore.Verify(f => f.RemoveFileAsync(originalPath, It.IsAny<CancellationToken>()), Times.Once);
+        _mockFileStore.Verify(f => f.AddFileAsync(expectedPath, It.IsAny<CancellationToken>()), Times.Once);
+        _mockFileStore.Verify(f => f.MarkFileRenamedAsync(expectedPath, true, It.IsAny<CancellationToken>()), Times.Once);
+    }
 }

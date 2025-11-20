@@ -4191,12 +4191,17 @@
                 if (data.directories.length === 0) {
                     folderList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted);">No subdirectories found</div>';
                 } else {
-                    folderList.innerHTML = data.directories.map(dir => `
-                        <div onclick="loadDirectories('${dir.path.replace(/'/g, "\\'")}')" style="padding: 10px; margin: 5px 0; cursor: pointer; border-radius: 5px; border: 1px solid var(--border-secondary); background: var(--bg-hover); transition: background 0.2s;" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background='var(--bg-hover)'">
+                    folderList.innerHTML = data.directories.map(dir => {
+                        // Properly escape the path for use in onclick attribute
+                        const escapedPath = dir.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                        // Escape HTML special characters for display
+                        const escapedName = dir.name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+                        return `
+                        <div onclick="loadDirectories('${escapedPath}')" style="padding: 10px; margin: 5px 0; cursor: pointer; border-radius: 5px; border: 1px solid var(--border-secondary); background: var(--bg-hover); transition: background 0.2s;" onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background='var(--bg-hover)'">
                             <span style="margin-right: 8px;">📁</span>
-                            <span style="color: var(--text-primary);">${dir.name}</span>
+                            <span style="color: var(--text-primary);">${escapedName}</span>
                         </div>
-                    `).join('');
+                    `}).join('');
                 }
                 
                 document.getElementById('folderBrowserLoadingIndicator').style.display = 'none';

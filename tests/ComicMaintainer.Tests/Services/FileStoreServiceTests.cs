@@ -915,24 +915,28 @@ public class FileStoreServiceTests
     public async Task RemoveFileAsync_WithEventBroadcaster_BroadcastsFileListUpdate()
     {
         // Arrange
-        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        var filePath = Path.Combine(_testDirectory, "test_remove.cbz");
         File.WriteAllText(filePath, "test content");
         
         var settings = new AppSettings { WatchedDirectory = _testDirectory };
         var options = Options.Create(settings);
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        var mockBroadcaster = new Mock<Core.Interfaces.IEventBroadcaster>();
         
-        var service = new FileStoreService(options, logger, dbContextFactory, mockBroadcaster.Object);
-        await service.AddFileAsync(filePath);
-        mockBroadcaster.Reset(); // Reset to ignore the AddFileAsync broadcast
+        // Use separate mocks for add and remove to avoid using Reset()
+        var mockBroadcasterForAdd = new Mock<Core.Interfaces.IEventBroadcaster>();
+        var serviceForAdd = new FileStoreService(options, logger, dbContextFactory, mockBroadcasterForAdd.Object);
+        await serviceForAdd.AddFileAsync(filePath);
+        
+        // Create fresh mock and service for the remove operation
+        var mockBroadcasterForRemove = new Mock<Core.Interfaces.IEventBroadcaster>();
+        var serviceForRemove = new FileStoreService(options, logger, dbContextFactory, mockBroadcasterForRemove.Object);
 
         // Act
-        await service.RemoveFileAsync(filePath);
+        await serviceForRemove.RemoveFileAsync(filePath);
 
         // Assert
-        mockBroadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
+        mockBroadcasterForRemove.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
     }
 
     [Fact]

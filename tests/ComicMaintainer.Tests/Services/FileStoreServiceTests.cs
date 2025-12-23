@@ -923,20 +923,19 @@ public class FileStoreServiceTests
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         
-        // Use separate mocks for add and remove to avoid using Reset()
-        var mockBroadcasterForAdd = new Mock<Core.Interfaces.IEventBroadcaster>();
-        var serviceForAdd = new FileStoreService(options, logger, dbContextFactory, mockBroadcasterForAdd.Object);
-        await serviceForAdd.AddFileAsync(filePath);
+        // Add file without broadcaster first
+        var serviceWithoutBroadcaster = new FileStoreService(options, logger, dbContextFactory, null);
+        await serviceWithoutBroadcaster.AddFileAsync(filePath);
         
-        // Create fresh mock and service for the remove operation
-        var mockBroadcasterForRemove = new Mock<Core.Interfaces.IEventBroadcaster>();
-        var serviceForRemove = new FileStoreService(options, logger, dbContextFactory, mockBroadcasterForRemove.Object);
+        // Test remove with broadcaster
+        var mockBroadcaster = new Mock<Core.Interfaces.IEventBroadcaster>();
+        var service = new FileStoreService(options, logger, dbContextFactory, mockBroadcaster.Object);
 
         // Act
-        await serviceForRemove.RemoveFileAsync(filePath);
+        await service.RemoveFileAsync(filePath);
 
         // Assert
-        mockBroadcasterForRemove.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
+        mockBroadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
     }
 
     [Fact]

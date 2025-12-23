@@ -25,4 +25,9 @@ public interface IEventBroadcaster
     /// Broadcast watcher status change
     /// </summary>
     Task BroadcastWatcherStatusAsync(bool running, bool enabled);
+    
+    /// <summary>
+    /// Broadcast file list update (when files are added/removed from the file store)
+    /// </summary>
+    Task BroadcastFileListUpdateAsync();
 }

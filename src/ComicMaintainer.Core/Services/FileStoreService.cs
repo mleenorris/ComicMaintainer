@@ -19,15 +19,18 @@ public class FileStoreService : IFileStoreService
     private readonly AppSettings _settings;
     private readonly ILogger<FileStoreService> _logger;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
+    private readonly IEventBroadcaster? _eventBroadcaster;
 
     public FileStoreService(
         IOptions<AppSettings> settings,
         ILogger<FileStoreService> logger,
-        IDbContextFactory<ComicMaintainerDbContext> dbContextFactory)
+        IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
+        IEventBroadcaster? eventBroadcaster = null)
     {
         _settings = settings.Value;
         _logger = logger;
         _dbContextFactory = dbContextFactory;
+        _eventBroadcaster = eventBroadcaster;
     }
 
     private static string SanitizeForLogging(string? input)
@@ -263,6 +266,19 @@ public class FileStoreService : IFileStoreService
         {
             _logger.LogError(ex, "Error persisting file to database: {FilePath}", SanitizeForLogging(filePath));
         }
+        
+        // Broadcast file list update to connected clients
+        if (_eventBroadcaster != null)
+        {
+            try
+            {
+                await _eventBroadcaster.BroadcastFileListUpdateAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast file list update");
+            }
+        }
     }
 
     public async Task RemoveFileAsync(string filePath, CancellationToken cancellationToken = default)
@@ -297,6 +313,19 @@ public class FileStoreService : IFileStoreService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error removing file from database: {FilePath}", SanitizeForLogging(filePath));
+        }
+        
+        // Broadcast file list update to connected clients
+        if (_eventBroadcaster != null)
+        {
+            try
+            {
+                await _eventBroadcaster.BroadcastFileListUpdateAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast file list update");
+            }
         }
     }
 

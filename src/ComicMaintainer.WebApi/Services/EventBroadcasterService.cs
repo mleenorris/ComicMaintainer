@@ -99,6 +99,19 @@ public class EventBroadcasterService : IEventBroadcaster
         _logger.LogDebug("Broadcasted watcher status: Running={Running}, Enabled={Enabled}", running, enabled);
     }
 
+    public async Task BroadcastFileListUpdateAsync()
+    {
+        var eventData = new
+        {
+            type = "file_list_updated",
+            data = new { }
+        };
+
+        await BroadcastEventAsync(eventData);
+        
+        _logger.LogDebug("Broadcasted file list update");
+    }
+
     private async Task BroadcastEventAsync(object eventData)
     {
         var json = JsonSerializer.Serialize(eventData);

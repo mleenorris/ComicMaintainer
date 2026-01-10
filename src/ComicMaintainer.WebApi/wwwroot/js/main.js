@@ -449,6 +449,9 @@
                     // Real-time job progress updates via SSE (no polling needed!)
                     handleJobUpdatedEvent(eventData);
                     break;
+                case 'file_list_updated':
+                    handleFileListUpdatedEvent(eventData);
+                    break;
                 default:
                     console.log('SSE: Unknown event type:', eventType);
             }
@@ -470,6 +473,14 @@
             }
             
             // Refresh file list to show updated status
+            loadFiles(currentPage, false);
+        }
+        
+        // Handle file list updated events
+        function handleFileListUpdatedEvent(data) {
+            console.log('SSE: File list updated');
+            
+            // Refresh file list to show new/removed files
             loadFiles(currentPage, false);
         }
         

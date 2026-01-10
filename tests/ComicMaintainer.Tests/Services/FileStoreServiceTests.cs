@@ -888,4 +888,73 @@ public class FileStoreServiceTests
         var isNormalized = await _service.IsFileNormalizedAsync(filePath);
         Assert.False(isNormalized);
     }
+
+    [Fact]
+    public async Task AddFileAsync_WithEventBroadcaster_BroadcastsFileListUpdate()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        
+        var settings = new AppSettings { WatchedDirectory = _testDirectory };
+        var options = Options.Create(settings);
+        var logger = new Mock<ILogger<FileStoreService>>().Object;
+        var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        var mockBroadcaster = new Mock<Core.Interfaces.IEventBroadcaster>();
+        
+        var service = new FileStoreService(options, logger, dbContextFactory, mockBroadcaster.Object);
+
+        // Act
+        await service.AddFileAsync(filePath);
+
+        // Assert
+        mockBroadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task RemoveFileAsync_WithEventBroadcaster_BroadcastsFileListUpdate()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test_remove.cbz");
+        File.WriteAllText(filePath, "test content");
+        
+        var settings = new AppSettings { WatchedDirectory = _testDirectory };
+        var options = Options.Create(settings);
+        var logger = new Mock<ILogger<FileStoreService>>().Object;
+        var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        
+        // Add file without broadcaster first
+        var serviceWithoutBroadcaster = new FileStoreService(options, logger, dbContextFactory, null);
+        await serviceWithoutBroadcaster.AddFileAsync(filePath);
+        
+        // Test remove with broadcaster
+        var mockBroadcaster = new Mock<Core.Interfaces.IEventBroadcaster>();
+        var service = new FileStoreService(options, logger, dbContextFactory, mockBroadcaster.Object);
+
+        // Act
+        await service.RemoveFileAsync(filePath);
+
+        // Assert
+        mockBroadcaster.Verify(b => b.BroadcastFileListUpdateAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task AddFileAsync_WithoutEventBroadcaster_DoesNotThrow()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test_no_broadcaster.cbz");
+        File.WriteAllText(filePath, "test content");
+        
+        var settings = new AppSettings { WatchedDirectory = _testDirectory };
+        var options = Options.Create(settings);
+        var logger = new Mock<ILogger<FileStoreService>>().Object;
+        var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        
+        var service = new FileStoreService(options, logger, dbContextFactory, null);
+
+        // Act & Assert - should not throw
+        await service.AddFileAsync(filePath);
+        var files = await service.GetAllFilesAsync();
+        Assert.Contains(files, f => f.FilePath == filePath);
+    }
 }

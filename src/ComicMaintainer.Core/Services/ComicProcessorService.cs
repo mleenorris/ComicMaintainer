@@ -17,7 +17,7 @@ namespace ComicMaintainer.Core.Services;
 /// <summary>
 /// Service for processing comic files with SharpCompress integration
 /// </summary>
-public class ComicProcessorService : IComicProcessorService
+public class ComicProcessorService : IComicProcessorService, IDisposable
 {
     private readonly AppSettings _settings;
     private readonly ILogger<ComicProcessorService> _logger;
@@ -26,8 +26,10 @@ public class ComicProcessorService : IComicProcessorService
     private readonly IProcessingHistoryService _historyService;
     private readonly ConcurrentDictionary<Guid, ProcessingJob> _jobs = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _jobCancellationTokens = new();
+    private readonly ConcurrentDictionary<Guid, object> _jobSyncLocks = new();
     private readonly SemaphoreSlim _processingSemaphore;
     private readonly int _maxWorkers;
+    private bool _disposed;
 
     public ComicProcessorService(
         IOptions<AppSettings> settings,
@@ -263,7 +265,7 @@ public class ComicProcessorService : IComicProcessorService
             filePaths,
             "ProcessFilesAsync",
             "processing",
-            ProcessFileAsync,
+            ProcessFileCoreAsync,
             "Processing failed",
             cancellationToken);
     }
@@ -274,7 +276,7 @@ public class ComicProcessorService : IComicProcessorService
             filePaths,
             "RenameFilesAsync",
             "renaming",
-            RenameFileAsync,
+            RenameFileCoreAsync,
             "Rename failed",
             cancellationToken);
     }
@@ -285,7 +287,7 @@ public class ComicProcessorService : IComicProcessorService
             filePaths,
             "NormalizeFilesAsync",
             "normalizing",
-            NormalizeFileAsync,
+            NormalizeFileCoreAsync,
             "Normalize failed",
             cancellationToken);
     }
@@ -296,7 +298,7 @@ public class ComicProcessorService : IComicProcessorService
             filePaths,
             "UpdateMetadataAsync",
             "updating metadata for",
-            (file, token) => UpdateMetadataAsync(file, metadata, token),
+            (file, token) => UpdateMetadataCoreAsync(file, metadata, token),
             "Update metadata failed",
             cancellationToken);
     }
@@ -324,6 +326,7 @@ public class ComicProcessorService : IComicProcessorService
         };
 
         _jobs[jobId] = job;
+        var jobSyncLock = _jobSyncLocks.GetOrAdd(jobId, static _ => new object());
         
         // Create a CancellationTokenSource for this job that can be cancelled independently
         var jobCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -334,15 +337,16 @@ public class ComicProcessorService : IComicProcessorService
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
 
-        var jobLock = new object();
-
         // Process files asynchronously using LongRunning for potentially long batch operations
         _ = Task.Factory.StartNew(async () =>
         {
             try
             {
                 _logger.LogDebug("{OperationName}: Job {JobId} starting execution", operationName, jobId);
-                job.Status = JobStatus.Running;
+                lock (jobSyncLock)
+                {
+                    job.Status = JobStatus.Running;
+                }
                 await BroadcastJobStatusAsync(job);
 
                 var parallelOptions = new ParallelOptions
@@ -364,15 +368,11 @@ public class ComicProcessorService : IComicProcessorService
                             fileList.Count,
                             LoggingHelper.SanitizePathForLog(item.file));
 
-                        lock (jobLock)
-                        {
-                            job.CurrentFile = item.file;
-                        }
-
                         var success = await fileOperation(item.file, token);
 
-                        lock (jobLock)
+                        lock (jobSyncLock)
                         {
+                            job.CurrentFile = item.file;
                             if (success)
                             {
                                 job.ProcessedFiles++;
@@ -405,8 +405,11 @@ public class ComicProcessorService : IComicProcessorService
                         }
                     });
 
-                job.Status = JobStatus.Completed;
-                job.EndTime = DateTime.UtcNow;
+                lock (jobSyncLock)
+                {
+                    job.Status = JobStatus.Completed;
+                    job.EndTime = DateTime.UtcNow;
+                }
                 _logger.LogInformation("{OperationName}: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
                     operationName, jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
                 await BroadcastJobStatusAsync(job);
@@ -414,15 +417,21 @@ public class ComicProcessorService : IComicProcessorService
             catch (OperationCanceledException)
             {
                 _logger.LogInformation("{OperationName}: Job cancelled: {JobId}", operationName, jobId);
-                job.Status = JobStatus.Cancelled;
-                job.EndTime = DateTime.UtcNow;
+                lock (jobSyncLock)
+                {
+                    job.Status = JobStatus.Cancelled;
+                    job.EndTime = DateTime.UtcNow;
+                }
                 await BroadcastJobStatusAsync(job);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "{OperationName}: Error processing batch job: {JobId}", operationName, jobId);
-                job.Status = JobStatus.Failed;
-                job.EndTime = DateTime.UtcNow;
+                lock (jobSyncLock)
+                {
+                    job.Status = JobStatus.Failed;
+                    job.EndTime = DateTime.UtcNow;
+                }
                 await BroadcastJobStatusAsync(job);
             }
             finally
@@ -643,34 +652,50 @@ public class ComicProcessorService : IComicProcessorService
     {
         if (_eventBroadcaster != null)
         {
+            var snapshot = CloneJob(job);
             await _eventBroadcaster.BroadcastJobUpdateAsync(
-                job.JobId,
-                job.Status.ToString().ToLower(),
-                job.ProcessedFiles + job.FailedFiles,
-                job.TotalFiles,
-                job.ProcessedFiles,
-                job.FailedFiles);
+                snapshot.JobId,
+                snapshot.Status.ToString().ToLower(),
+                snapshot.ProcessedFiles + snapshot.FailedFiles,
+                snapshot.TotalFiles,
+                snapshot.ProcessedFiles,
+                snapshot.FailedFiles);
         }
     }
 
     public ProcessingJob? GetJob(Guid jobId)
     {
-        return _jobs.TryGetValue(jobId, out var job) ? job : null;
+        return _jobs.TryGetValue(jobId, out var job) ? CloneJob(job) : null;
     }
 
     public ProcessingJob? GetActiveJob()
     {
         return _jobs.Values
+            .Select(CloneJob)
             .FirstOrDefault(j => j.Status == JobStatus.Running || j.Status == JobStatus.Queued);
     }
 
     public IEnumerable<ProcessingJob> GetAllJobs()
     {
-        return _jobs.Values.OrderByDescending(j => j.StartTime);
+        return _jobs.Values
+            .Select(CloneJob)
+            .OrderByDescending(j => j.StartTime);
     }
 
     public bool DeleteJob(Guid jobId)
     {
+        if (!_jobs.TryGetValue(jobId, out var job))
+        {
+            return false;
+        }
+
+        var snapshot = CloneJob(job);
+        if (snapshot.Status == JobStatus.Running || snapshot.Status == JobStatus.Queued)
+        {
+            _logger.LogWarning("Cannot delete active job: {JobId}", jobId);
+            return false;
+        }
+
         return _jobs.TryRemove(jobId, out _);
     }
 
@@ -685,6 +710,32 @@ public class ComicProcessorService : IComicProcessorService
         
         _logger.LogWarning("Cannot cancel job {JobId}: no active cancellation token found", jobId);
         return false;
+    }
+
+    private ProcessingJob CloneJob(ProcessingJob job)
+    {
+        var syncLock = GetJobSyncLock(job.JobId);
+        lock (syncLock)
+        {
+            return new ProcessingJob
+            {
+                JobId = job.JobId,
+                Status = job.Status,
+                Files = new List<string>(job.Files),
+                TotalFiles = job.TotalFiles,
+                ProcessedFiles = job.ProcessedFiles,
+                FailedFiles = job.FailedFiles,
+                StartTime = job.StartTime,
+                EndTime = job.EndTime,
+                CurrentFile = job.CurrentFile,
+                Errors = new Dictionary<string, string>(job.Errors)
+            };
+        }
+    }
+
+    private object GetJobSyncLock(Guid jobId)
+    {
+        return _jobSyncLocks.GetOrAdd(jobId, static _ => new object());
     }
 
     public Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default)
@@ -720,6 +771,32 @@ public class ComicProcessorService : IComicProcessorService
             _logger.LogError(ex, "Error reading metadata from {FilePath}", filePath);
             return Task.FromResult<ComicMetadata?>(null);
         }
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (disposing)
+        {
+            foreach (var cancellationTokenSource in _jobCancellationTokens.Values)
+            {
+                cancellationTokenSource.Cancel();
+            }
+
+            _processingSemaphore.Dispose();
+        }
+
+        _disposed = true;
+    }
+
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
     }
 
     public async Task<bool> UpdateMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default)

@@ -1333,11 +1333,7 @@ public class ComicProcessorService : IComicProcessorService
                 filename = filename.Substring(0, filename.Length - extension.Length);
             }
             
-            // Clean filename
-            foreach (var c in Path.GetInvalidFileNameChars())
-            {
-                filename = filename.Replace(c, '_');
-            }
+            filename = ComicFileProcessor.SanitizeFileName(filename);
             
             return Path.Combine(directory, filename + extension);
         }

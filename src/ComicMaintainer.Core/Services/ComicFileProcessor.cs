@@ -10,6 +10,8 @@ namespace ComicMaintainer.Core.Services;
 /// </summary>
 public class ComicFileProcessor
 {
+    // Windows-invalid filename characters are added explicitly so generated names remain portable
+    // even when the service is running on a platform with a more permissive filesystem.
     private static readonly char[] CrossPlatformInvalidFileNameChars =
         Path.GetInvalidFileNameChars()
             .Concat("<>:\"/\\|?*".ToCharArray())

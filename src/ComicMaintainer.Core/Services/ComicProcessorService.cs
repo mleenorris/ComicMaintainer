@@ -26,6 +26,8 @@ public class ComicProcessorService : IComicProcessorService
     private readonly IProcessingHistoryService _historyService;
     private readonly ConcurrentDictionary<Guid, ProcessingJob> _jobs = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _jobCancellationTokens = new();
+    private readonly SemaphoreSlim _processingSemaphore;
+    private readonly int _maxWorkers;
 
     public ComicProcessorService(
         IOptions<AppSettings> settings,
@@ -39,9 +41,24 @@ public class ComicProcessorService : IComicProcessorService
         _fileStore = fileStore;
         _historyService = historyService;
         _eventBroadcaster = eventBroadcaster;
+        _maxWorkers = Math.Max(1, _settings.MaxWorkers);
+        _processingSemaphore = new SemaphoreSlim(_maxWorkers, _maxWorkers);
     }
 
     public async Task<bool> ProcessFileAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        await _processingSemaphore.WaitAsync(cancellationToken);
+        try
+        {
+            return await ProcessFileCoreAsync(filePath, cancellationToken);
+        }
+        finally
+        {
+            _processingSemaphore.Release();
+        }
+    }
+
+    private async Task<bool> ProcessFileCoreAsync(string filePath, CancellationToken cancellationToken)
     {
         try
         {
@@ -192,7 +209,7 @@ public class ComicProcessorService : IComicProcessorService
                     var beforeMetadata = metadata.Clone();
                     var normalizedMetadata = NormalizeMetadata(metadata, filePath);
 
-                    normalizeSuccess = await UpdateMetadataAsync(filePath, normalizedMetadata, cancellationToken);
+                    normalizeSuccess = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, cancellationToken);
                     await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
                     if (normalizeSuccess)
                     {
@@ -242,10 +259,60 @@ public class ComicProcessorService : IComicProcessorService
 
     public Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
     {
+        return QueueBatchJobAsync(
+            filePaths,
+            "ProcessFilesAsync",
+            "processing",
+            ProcessFileAsync,
+            "Processing failed",
+            cancellationToken);
+    }
+
+    public Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    {
+        return QueueBatchJobAsync(
+            filePaths,
+            "RenameFilesAsync",
+            "renaming",
+            RenameFileAsync,
+            "Rename failed",
+            cancellationToken);
+    }
+
+    public Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    {
+        return QueueBatchJobAsync(
+            filePaths,
+            "NormalizeFilesAsync",
+            "normalizing",
+            NormalizeFileAsync,
+            "Normalize failed",
+            cancellationToken);
+    }
+
+    public Task<Guid> UpdateMetadataAsync(IEnumerable<string> filePaths, ComicMetadata metadata, CancellationToken cancellationToken = default)
+    {
+        return QueueBatchJobAsync(
+            filePaths,
+            "UpdateMetadataAsync",
+            "updating metadata for",
+            (file, token) => UpdateMetadataAsync(file, metadata, token),
+            "Update metadata failed",
+            cancellationToken);
+    }
+
+    private Task<Guid> QueueBatchJobAsync(
+        IEnumerable<string> filePaths,
+        string operationName,
+        string actionDescription,
+        Func<string, CancellationToken, Task<bool>> fileOperation,
+        string failureMessage,
+        CancellationToken cancellationToken)
+    {
         var jobId = Guid.NewGuid();
         var fileList = filePaths.ToList();
 
-        _logger.LogDebug("ProcessFilesAsync: Creating new processing job {JobId} for {FileCount} files", jobId, fileList.Count);
+        _logger.LogDebug("{OperationName}: Creating new {ActionDescription} job {JobId} for {FileCount} files", operationName, actionDescription, jobId, fileList.Count);
 
         var job = new ProcessingJob
         {
@@ -262,422 +329,98 @@ public class ComicProcessorService : IComicProcessorService
         var jobCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _jobCancellationTokens[jobId] = jobCts;
 
-        _logger.LogDebug("ProcessFilesAsync: Job {JobId} created and queued with {FileCount} files", jobId, fileList.Count);
+        _logger.LogDebug("{OperationName}: Job {JobId} created and queued with {FileCount} files using up to {MaxWorkers} workers", operationName, jobId, fileList.Count, _maxWorkers);
 
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
+
+        var jobLock = new object();
 
         // Process files asynchronously using LongRunning for potentially long batch operations
         _ = Task.Factory.StartNew(async () =>
         {
             try
             {
-                _logger.LogDebug("ProcessFilesAsync: Job {JobId} starting execution", jobId);
+                _logger.LogDebug("{OperationName}: Job {JobId} starting execution", operationName, jobId);
                 job.Status = JobStatus.Running;
                 await BroadcastJobStatusAsync(job);
 
-                var fileIndex = 0;
-                foreach (var file in fileList)
+                var parallelOptions = new ParallelOptions
                 {
-                    fileIndex++;
-                    _logger.LogDebug("ProcessFilesAsync: Job {JobId} processing file {FileIndex}/{TotalFiles}: {FilePath}", 
-                        jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
-                    
-                    if (jobCts.Token.IsCancellationRequested)
+                    CancellationToken = jobCts.Token,
+                    MaxDegreeOfParallelism = _maxWorkers
+                };
+
+                await Parallel.ForEachAsync(
+                    fileList.Select((file, index) => new { file, index }),
+                    parallelOptions,
+                    async (item, token) =>
                     {
-                        _logger.LogInformation("ProcessFilesAsync: Job {JobId} cancellation requested at file {FileIndex}/{TotalFiles}", 
-                            jobId, fileIndex, fileList.Count);
-                        job.Status = JobStatus.Cancelled;
+                        _logger.LogDebug("{OperationName}: Job {JobId} {ActionDescription} file {FileIndex}/{TotalFiles}: {FilePath}",
+                            operationName,
+                            jobId,
+                            actionDescription,
+                            item.index + 1,
+                            fileList.Count,
+                            LoggingHelper.SanitizePathForLog(item.file));
+
+                        lock (jobLock)
+                        {
+                            job.CurrentFile = item.file;
+                        }
+
+                        var success = await fileOperation(item.file, token);
+
+                        lock (jobLock)
+                        {
+                            if (success)
+                            {
+                                job.ProcessedFiles++;
+                            }
+                            else
+                            {
+                                job.FailedFiles++;
+                                job.Errors[item.file] = failureMessage;
+                            }
+                        }
+
+                        _logger.LogDebug("{OperationName}: Job {JobId} completed file {FileIndex}/{TotalFiles} with success={Success}: {FilePath}",
+                            operationName,
+                            jobId,
+                            item.index + 1,
+                            fileList.Count,
+                            success,
+                            LoggingHelper.SanitizePathForLog(item.file));
+
+                        // Broadcast progress after each file
                         await BroadcastJobStatusAsync(job);
-                        _jobCancellationTokens.TryRemove(jobId, out _);
-                        return;
-                    }
 
-                    job.CurrentFile = file;
-                    var success = await ProcessFileAsync(file, jobCts.Token);
-
-                    if (success)
-                    {
-                        job.ProcessedFiles++;
-                        _logger.LogDebug("ProcessFilesAsync: Job {JobId} successfully processed file {FileIndex}/{TotalFiles}: {FilePath}", 
-                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
-                    }
-                    else
-                    {
-                        job.FailedFiles++;
-                        job.Errors[file] = "Processing failed";
-                        _logger.LogDebug("ProcessFilesAsync: Job {JobId} failed to process file {FileIndex}/{TotalFiles}: {FilePath}", 
-                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
-                    }
-
-                    // Broadcast progress after each file
-                    await BroadcastJobStatusAsync(job);
-                    
-                    // Broadcast individual file processed event
-                    if (_eventBroadcaster != null)
-                    {
-                        await _eventBroadcaster.BroadcastFileProcessedAsync(
-                            Path.GetFileName(file), 
-                            success, 
-                            success ? null : "Processing failed");
-                    }
-                }
+                        // Broadcast individual file processed event
+                        if (_eventBroadcaster != null)
+                        {
+                            await _eventBroadcaster.BroadcastFileProcessedAsync(
+                                Path.GetFileName(item.file),
+                                success,
+                                success ? null : failureMessage);
+                        }
+                    });
 
                 job.Status = JobStatus.Completed;
                 job.EndTime = DateTime.UtcNow;
-                _logger.LogInformation("ProcessFilesAsync: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
-                    jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
+                _logger.LogInformation("{OperationName}: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
+                    operationName, jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
                 await BroadcastJobStatusAsync(job);
             }
             catch (OperationCanceledException)
             {
-                _logger.LogInformation("ProcessFilesAsync: Processing job cancelled: {JobId}", jobId);
+                _logger.LogInformation("{OperationName}: Job cancelled: {JobId}", operationName, jobId);
                 job.Status = JobStatus.Cancelled;
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "ProcessFilesAsync: Error processing batch job: {JobId}", jobId);
-                job.Status = JobStatus.Failed;
-                job.EndTime = DateTime.UtcNow;
-                await BroadcastJobStatusAsync(job);
-            }
-            finally
-            {
-                _jobCancellationTokens.TryRemove(jobId, out _);
-                jobCts.Dispose();
-            }
-        }, jobCts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
-
-        return Task.FromResult(jobId);
-    }
-
-    public Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
-    {
-        var jobId = Guid.NewGuid();
-        var fileList = filePaths.ToList();
-
-        _logger.LogDebug("RenameFilesAsync: Creating new rename job {JobId} for {FileCount} files", jobId, fileList.Count);
-
-        var job = new ProcessingJob
-        {
-            JobId = jobId,
-            Status = JobStatus.Queued,
-            Files = fileList,
-            TotalFiles = fileList.Count,
-            StartTime = DateTime.UtcNow
-        };
-
-        _jobs[jobId] = job;
-        
-        // Create a CancellationTokenSource for this job that can be cancelled independently
-        var jobCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _jobCancellationTokens[jobId] = jobCts;
-
-        _logger.LogDebug("RenameFilesAsync: Job {JobId} created and queued with {FileCount} files", jobId, fileList.Count);
-
-        // Broadcast initial job status
-        _ = BroadcastJobStatusAsync(job);
-
-        // Rename files asynchronously using LongRunning for potentially long batch operations
-        _ = Task.Factory.StartNew(async () =>
-        {
-            try
-            {
-                _logger.LogDebug("RenameFilesAsync: Job {JobId} starting execution", jobId);
-                job.Status = JobStatus.Running;
-                await BroadcastJobStatusAsync(job);
-
-                var fileIndex = 0;
-                foreach (var file in fileList)
-                {
-                    fileIndex++;
-                    _logger.LogDebug("RenameFilesAsync: Job {JobId} renaming file {FileIndex}/{TotalFiles}: {FilePath}", 
-                        jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
-                    
-                    if (jobCts.Token.IsCancellationRequested)
-                    {
-                        _logger.LogInformation("RenameFilesAsync: Job {JobId} cancellation requested at file {FileIndex}/{TotalFiles}", 
-                            jobId, fileIndex, fileList.Count);
-                        job.Status = JobStatus.Cancelled;
-                        await BroadcastJobStatusAsync(job);
-                        _jobCancellationTokens.TryRemove(jobId, out _);
-                        return;
-                    }
-
-                    job.CurrentFile = file;
-                    var success = await RenameFileAsync(file, jobCts.Token);
-
-                    if (success)
-                    {
-                        job.ProcessedFiles++;
-                        _logger.LogDebug("RenameFilesAsync: Job {JobId} successfully renamed file {FileIndex}/{TotalFiles}: {FilePath}", 
-                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
-                    }
-                    else
-                    {
-                        job.FailedFiles++;
-                        job.Errors[file] = "Rename failed";
-                        _logger.LogDebug("RenameFilesAsync: Job {JobId} failed to rename file {FileIndex}/{TotalFiles}: {FilePath}", 
-                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
-                    }
-
-                    // Broadcast progress after each file
-                    await BroadcastJobStatusAsync(job);
-                    
-                    // Broadcast individual file processed event
-                    if (_eventBroadcaster != null)
-                    {
-                        await _eventBroadcaster.BroadcastFileProcessedAsync(
-                            Path.GetFileName(file), 
-                            success, 
-                            success ? null : "Rename failed");
-                    }
-                }
-
-                job.Status = JobStatus.Completed;
-                job.EndTime = DateTime.UtcNow;
-                _logger.LogInformation("RenameFilesAsync: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
-                    jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
-                await BroadcastJobStatusAsync(job);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogInformation("RenameFilesAsync: Rename job cancelled: {JobId}", jobId);
-                job.Status = JobStatus.Cancelled;
-                job.EndTime = DateTime.UtcNow;
-                await BroadcastJobStatusAsync(job);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "RenameFilesAsync: Error processing rename job: {JobId}", jobId);
-                job.Status = JobStatus.Failed;
-                job.EndTime = DateTime.UtcNow;
-                await BroadcastJobStatusAsync(job);
-            }
-            finally
-            {
-                _jobCancellationTokens.TryRemove(jobId, out _);
-                jobCts.Dispose();
-            }
-        }, jobCts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
-
-        return Task.FromResult(jobId);
-    }
-
-    public Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
-    {
-        var jobId = Guid.NewGuid();
-        var fileList = filePaths.ToList();
-
-        _logger.LogDebug("NormalizeFilesAsync: Creating new normalize job {JobId} for {FileCount} files", jobId, fileList.Count);
-
-        var job = new ProcessingJob
-        {
-            JobId = jobId,
-            Status = JobStatus.Queued,
-            Files = fileList,
-            TotalFiles = fileList.Count,
-            StartTime = DateTime.UtcNow
-        };
-
-        _jobs[jobId] = job;
-        
-        // Create a CancellationTokenSource for this job that can be cancelled independently
-        var jobCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _jobCancellationTokens[jobId] = jobCts;
-
-        _logger.LogDebug("NormalizeFilesAsync: Job {JobId} created and queued with {FileCount} files", jobId, fileList.Count);
-
-        // Broadcast initial job status
-        _ = BroadcastJobStatusAsync(job);
-
-        // Normalize files asynchronously using LongRunning for potentially long batch operations
-        _ = Task.Factory.StartNew(async () =>
-        {
-            try
-            {
-                _logger.LogDebug("NormalizeFilesAsync: Job {JobId} starting execution", jobId);
-                job.Status = JobStatus.Running;
-                await BroadcastJobStatusAsync(job);
-
-                var fileIndex = 0;
-                foreach (var file in fileList)
-                {
-                    fileIndex++;
-                    _logger.LogDebug("NormalizeFilesAsync: Job {JobId} normalizing file {FileIndex}/{TotalFiles}: {FilePath}", 
-                        jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
-                    
-                    if (jobCts.Token.IsCancellationRequested)
-                    {
-                        _logger.LogInformation("NormalizeFilesAsync: Job {JobId} cancellation requested at file {FileIndex}/{TotalFiles}", 
-                            jobId, fileIndex, fileList.Count);
-                        job.Status = JobStatus.Cancelled;
-                        await BroadcastJobStatusAsync(job);
-                        _jobCancellationTokens.TryRemove(jobId, out _);
-                        return;
-                    }
-
-                    job.CurrentFile = file;
-                    var success = await NormalizeFileAsync(file, jobCts.Token);
-
-                    if (success)
-                    {
-                        job.ProcessedFiles++;
-                        _logger.LogDebug("NormalizeFilesAsync: Job {JobId} successfully normalized file {FileIndex}/{TotalFiles}: {FilePath}", 
-                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
-                    }
-                    else
-                    {
-                        job.FailedFiles++;
-                        job.Errors[file] = "Normalize failed";
-                        _logger.LogDebug("NormalizeFilesAsync: Job {JobId} failed to normalize file {FileIndex}/{TotalFiles}: {FilePath}", 
-                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
-                    }
-
-                    // Broadcast progress after each file
-                    await BroadcastJobStatusAsync(job);
-                    
-                    // Broadcast individual file processed event
-                    if (_eventBroadcaster != null)
-                    {
-                        await _eventBroadcaster.BroadcastFileProcessedAsync(
-                            Path.GetFileName(file), 
-                            success, 
-                            success ? null : "Normalize failed");
-                    }
-                }
-
-                job.Status = JobStatus.Completed;
-                job.EndTime = DateTime.UtcNow;
-                _logger.LogInformation("NormalizeFilesAsync: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
-                    jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
-                await BroadcastJobStatusAsync(job);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogInformation("NormalizeFilesAsync: Normalize job cancelled: {JobId}", jobId);
-                job.Status = JobStatus.Cancelled;
-                job.EndTime = DateTime.UtcNow;
-                await BroadcastJobStatusAsync(job);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "NormalizeFilesAsync: Error processing normalize job: {JobId}", jobId);
-                job.Status = JobStatus.Failed;
-                job.EndTime = DateTime.UtcNow;
-                await BroadcastJobStatusAsync(job);
-            }
-            finally
-            {
-                _jobCancellationTokens.TryRemove(jobId, out _);
-                jobCts.Dispose();
-            }
-        }, jobCts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
-
-        return Task.FromResult(jobId);
-    }
-
-    public Task<Guid> UpdateMetadataAsync(IEnumerable<string> filePaths, ComicMetadata metadata, CancellationToken cancellationToken = default)
-    {
-        var jobId = Guid.NewGuid();
-        var fileList = filePaths.ToList();
-
-        _logger.LogDebug("UpdateMetadataAsync: Creating new update metadata job {JobId} for {FileCount} files", jobId, fileList.Count);
-
-        var job = new ProcessingJob
-        {
-            JobId = jobId,
-            Status = JobStatus.Queued,
-            Files = fileList,
-            TotalFiles = fileList.Count,
-            StartTime = DateTime.UtcNow
-        };
-
-        _jobs[jobId] = job;
-        
-        // Create a CancellationTokenSource for this job that can be cancelled independently
-        var jobCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _jobCancellationTokens[jobId] = jobCts;
-
-        _logger.LogDebug("UpdateMetadataAsync: Job {JobId} created and queued with {FileCount} files", jobId, fileList.Count);
-
-        // Broadcast initial job status
-        _ = BroadcastJobStatusAsync(job);
-
-        // Update metadata asynchronously using LongRunning for potentially long batch operations
-        _ = Task.Factory.StartNew(async () =>
-        {
-            try
-            {
-                _logger.LogDebug("UpdateMetadataAsync: Job {JobId} starting execution", jobId);
-                job.Status = JobStatus.Running;
-                await BroadcastJobStatusAsync(job);
-
-                var fileIndex = 0;
-                foreach (var file in fileList)
-                {
-                    fileIndex++;
-                    _logger.LogDebug("UpdateMetadataAsync: Job {JobId} updating metadata for file {FileIndex}/{TotalFiles}: {FilePath}", 
-                        jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
-                    
-                    if (jobCts.Token.IsCancellationRequested)
-                    {
-                        _logger.LogInformation("UpdateMetadataAsync: Job {JobId} cancellation requested at file {FileIndex}/{TotalFiles}", 
-                            jobId, fileIndex, fileList.Count);
-                        job.Status = JobStatus.Cancelled;
-                        await BroadcastJobStatusAsync(job);
-                        _jobCancellationTokens.TryRemove(jobId, out _);
-                        return;
-                    }
-
-                    job.CurrentFile = file;
-                    var success = await UpdateMetadataAsync(file, metadata, jobCts.Token);
-
-                    if (success)
-                    {
-                        job.ProcessedFiles++;
-                        _logger.LogDebug("UpdateMetadataAsync: Job {JobId} successfully updated metadata for file {FileIndex}/{TotalFiles}: {FilePath}", 
-                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
-                    }
-                    else
-                    {
-                        job.FailedFiles++;
-                        job.Errors[file] = "Update metadata failed";
-                        _logger.LogDebug("UpdateMetadataAsync: Job {JobId} failed to update metadata for file {FileIndex}/{TotalFiles}: {FilePath}", 
-                            jobId, fileIndex, fileList.Count, LoggingHelper.SanitizePathForLog(file));
-                    }
-
-                    // Broadcast progress after each file
-                    await BroadcastJobStatusAsync(job);
-                    
-                    // Broadcast individual file processed event
-                    if (_eventBroadcaster != null)
-                    {
-                        await _eventBroadcaster.BroadcastFileProcessedAsync(
-                            Path.GetFileName(file), 
-                            success, 
-                            success ? null : "Update metadata failed");
-                    }
-                }
-
-                job.Status = JobStatus.Completed;
-                job.EndTime = DateTime.UtcNow;
-                _logger.LogInformation("UpdateMetadataAsync: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
-                    jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
-                await BroadcastJobStatusAsync(job);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogInformation("UpdateMetadataAsync: Update metadata job cancelled: {JobId}", jobId);
-                job.Status = JobStatus.Cancelled;
-                job.EndTime = DateTime.UtcNow;
-                await BroadcastJobStatusAsync(job);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "UpdateMetadataAsync: Error processing update metadata job: {JobId}", jobId);
+                _logger.LogError(ex, "{OperationName}: Error processing batch job: {JobId}", operationName, jobId);
                 job.Status = JobStatus.Failed;
                 job.EndTime = DateTime.UtcNow;
                 await BroadcastJobStatusAsync(job);
@@ -693,6 +436,19 @@ public class ComicProcessorService : IComicProcessorService
     }
 
     private async Task<bool> RenameFileAsync(string filePath, CancellationToken cancellationToken)
+    {
+        await _processingSemaphore.WaitAsync(cancellationToken);
+        try
+        {
+            return await RenameFileCoreAsync(filePath, cancellationToken);
+        }
+        finally
+        {
+            _processingSemaphore.Release();
+        }
+    }
+
+    private async Task<bool> RenameFileCoreAsync(string filePath, CancellationToken cancellationToken)
     {
         try
         {
@@ -790,6 +546,19 @@ public class ComicProcessorService : IComicProcessorService
 
     private async Task<bool> NormalizeFileAsync(string filePath, CancellationToken cancellationToken)
     {
+        await _processingSemaphore.WaitAsync(cancellationToken);
+        try
+        {
+            return await NormalizeFileCoreAsync(filePath, cancellationToken);
+        }
+        finally
+        {
+            _processingSemaphore.Release();
+        }
+    }
+
+    private async Task<bool> NormalizeFileCoreAsync(string filePath, CancellationToken cancellationToken)
+    {
         try
         {
             _logger.LogInformation("NormalizeFileAsync: Starting normalize for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
@@ -841,7 +610,7 @@ public class ComicProcessorService : IComicProcessorService
             var normalizedMetadata = NormalizeMetadata(metadata, filePath);
 
             // Update metadata (normalize it by re-writing ComicInfo.xml)
-            var success = await UpdateMetadataAsync(filePath, normalizedMetadata, cancellationToken);
+            var success = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, cancellationToken);
             await _fileStore.MarkFileNormalizedAsync(filePath, success, cancellationToken);
             
             if (success)
@@ -954,6 +723,19 @@ public class ComicProcessorService : IComicProcessorService
     }
 
     public async Task<bool> UpdateMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default)
+    {
+        await _processingSemaphore.WaitAsync(cancellationToken);
+        try
+        {
+            return await UpdateMetadataCoreAsync(filePath, metadata, cancellationToken);
+        }
+        finally
+        {
+            _processingSemaphore.Release();
+        }
+    }
+
+    private async Task<bool> UpdateMetadataCoreAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken)
     {
         try
         {

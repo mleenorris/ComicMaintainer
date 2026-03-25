@@ -121,12 +121,15 @@
                         <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
                             ⚙️ Settings
                         </button>
-                        <button class="settings-dropdown-item" onclick="openProcessingHistoryModal(); closeSettingsMenu();">
-                            📜 Processing History
-                        </button>
-                        <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
-                            📋 View Logs
-                        </button>
+                         <button class="settings-dropdown-item" onclick="openProcessingHistoryModal(); closeSettingsMenu();">
+                             📜 Processing History
+                         </button>
+                         <button class="settings-dropdown-item" onclick="openDuplicateReviewModal(); closeSettingsMenu();">
+                             🔁 Review Duplicates
+                         </button>
+                         <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
+                             📋 View Logs
+                         </button>
                         <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
                             🌓 Toggle Theme
                         </button>
@@ -207,11 +210,51 @@
         </div>
     </div>
     
-    <div class="container">
-        <div id="messageContainer"></div>
-        
-        <div class="controls-wrapper">
-            <div class="actions-bar">
+     <div class="container">
+         <div id="messageContainer"></div>
+ 
+         <section class="library-health-dashboard" id="libraryHealthDashboard" aria-labelledby="libraryHealthTitle">
+             <div class="library-health-header">
+                 <div>
+                     <h2 id="libraryHealthTitle">Library Health</h2>
+                     <p id="libraryHealthSummary">Loading library health...</p>
+                 </div>
+                 <div class="library-health-actions">
+                     <button class="btn btn-small" onclick="refreshLibraryHealth()">🔄 Refresh</button>
+                     <button class="btn btn-small btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" disabled>🔁 Review Duplicates</button>
+                 </div>
+             </div>
+             <div class="library-health-grid">
+                 <button class="library-health-card" type="button" onclick="setHeaderFilter('all')">
+                     <span class="library-health-label">Total Files</span>
+                     <strong id="libraryHealthTotal">—</strong>
+                     <small>Entire library</small>
+                 </button>
+                 <button class="library-health-card success" type="button" onclick="setHeaderFilter('marked')">
+                     <span class="library-health-label">Processed</span>
+                     <strong id="libraryHealthProcessed">—</strong>
+                     <small aria-label="Files that have been both renamed and normalized">Renamed &amp; normalized</small>
+                 </button>
+                 <button class="library-health-card warning" type="button" onclick="setHeaderFilter('unmarked')">
+                     <span class="library-health-label">Needs Attention</span>
+                     <strong id="libraryHealthUnprocessed">—</strong>
+                     <small>Still unmarked</small>
+                 </button>
+                 <button class="library-health-card accent" type="button" onclick="openDuplicateReviewModal()">
+                     <span class="library-health-label">Duplicates</span>
+                     <strong id="libraryHealthDuplicates">—</strong>
+                     <small>Ready for review</small>
+                 </button>
+                 <div class="library-health-card neutral">
+                     <span class="library-health-label">Completion</span>
+                     <strong id="libraryHealthCompletion">—</strong>
+                     <small id="libraryHealthCompletionHint">Processed coverage</small>
+                 </div>
+             </div>
+         </section>
+         
+         <div class="controls-wrapper">
+             <div class="actions-bar">
                 <div class="button-group">
                     <!-- Process Dropdown -->
                     <div class="action-dropdown">
@@ -454,14 +497,18 @@
                         <p id="fileInfoNormalized" style="color: var(--text-primary); margin-top: 5px;"></p>
                     </div>
                 </div>
-                <div style="margin-top: 15px;">
-                    <label style="font-weight: 600; color: var(--text-secondary);">Duplicate:</label>
-                    <p id="fileInfoDuplicate" style="color: var(--text-primary); margin-top: 5px;"></p>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-primary" onclick="closeFileInfoModal()">Close</button>
-            </div>
+                 <div style="margin-top: 15px;">
+                     <label style="font-weight: 600; color: var(--text-secondary);">Duplicate:</label>
+                     <p id="fileInfoDuplicate" style="color: var(--text-primary); margin-top: 5px;"></p>
+                 </div>
+                 <div class="duplicate-review-callout" id="fileInfoDuplicateReview" style="display: none;">
+                     <p>This file is currently flagged as a duplicate. Open the duplicate review flow to inspect it and take action.</p>
+                     <button class="btn btn-warning" id="fileInfoDuplicateReviewBtn" onclick="openDuplicateReviewFromFileInfo()">🔁 Review Duplicate</button>
+                 </div>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn btn-primary" onclick="closeFileInfoModal()">Close</button>
+             </div>
         </div>
     </div>
     
@@ -554,21 +601,42 @@
                 <h2 id="progressTitle">Processing Files...</h2>
                 <button class="close-btn" onclick="minimizeProgressModal()" title="Minimize">&minus;</button>
             </div>
-            <div class="modal-body">
-                <div style="margin-bottom: 15px;">
-                    <div class="progress-bar-container">
-                        <div class="progress-bar-fill" id="progressBarFill"></div>
+             <div class="modal-body">
+                 <div style="margin-bottom: 15px;">
+                     <div class="progress-bar-container">
+                         <div class="progress-bar-fill" id="progressBarFill"></div>
                     </div>
                     <div style="display: flex; justify-content: space-between; margin-top: 8px;">
-                        <span id="progressText" style="color: var(--text-secondary); font-size: 14px;">0 / 0 files</span>
-                        <span id="progressPercent" style="color: var(--text-secondary); font-size: 14px;">0%</span>
-                    </div>
-                </div>
-                <div id="progressDetails" style="max-height: 200px; overflow-y: auto; padding: 10px; background: var(--bg-hover); border-radius: 5px; font-size: 13px; color: var(--text-muted);"></div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-danger" id="progressCancelBtn" onclick="cancelCurrentJob()" style="display: none;">Cancel</button>
-                <button class="btn" id="progressCloseBtn" onclick="closeProgressModal()" style="display: none;">Close</button>
+                         <span id="progressText" style="color: var(--text-secondary); font-size: 14px;">0 / 0 files</span>
+                         <span id="progressPercent" style="color: var(--text-secondary); font-size: 14px;">0%</span>
+                     </div>
+                 </div>
+                 <div class="progress-summary-grid">
+                     <div class="progress-summary-card">
+                         <span>Processed</span>
+                         <strong id="progressProcessedCount">0</strong>
+                     </div>
+                     <div class="progress-summary-card success">
+                         <span>Succeeded</span>
+                         <strong id="progressSuccessCount">0</strong>
+                     </div>
+                     <div class="progress-summary-card error">
+                         <span>Failed</span>
+                         <strong id="progressErrorCount">0</strong>
+                     </div>
+                 </div>
+                 <div class="progress-current-file" id="progressCurrentFile">Waiting for the job to start...</div>
+                 <div class="progress-results-header">
+                     <h3>Per-file results</h3>
+                     <span id="progressResultsCount">0 results</span>
+                 </div>
+                 <div id="progressDetails" class="progress-results-list">
+                     <div class="progress-results-empty">Per-file processing updates will appear here as each file completes.</div>
+                 </div>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn btn-danger" id="progressCancelBtn" onclick="cancelCurrentJob()" style="display: none;">Cancel</button>
+                 <button class="btn" id="progressCloseBtn" onclick="closeProgressModal()" style="display: none;">Close</button>
             </div>
         </div>
     </div>
@@ -796,7 +864,7 @@
         </div>
     </div>
     
-    <div class="modal" id="processingHistoryModal">
+     <div class="modal" id="processingHistoryModal">
         <div class="modal-content" style="max-width: 1200px; height: 85vh; display: flex; flex-direction: column;">
             <div class="modal-header">
                 <h2>Processing History</h2>
@@ -822,10 +890,63 @@
                 <button class="btn" onclick="closeProcessingHistoryModal()">Close</button>
             </div>
         </div>
-    </div>
-    
-    <!-- Change Password Modal -->
-    <div class="modal" id="changePasswordModal">
+     </div>
+ 
+     <div class="modal" id="duplicateReviewModal">
+         <div class="modal-content" style="max-width: 760px;">
+             <div class="modal-header">
+                 <h2>Duplicate Review</h2>
+                 <button class="close-btn" onclick="closeDuplicateReviewModal()">&times;</button>
+             </div>
+             <div class="modal-body">
+                 <div class="duplicate-review-toolbar">
+                     <button class="btn btn-small" id="duplicateReviewPrevBtn" onclick="changeDuplicateReviewItem(-1)">← Previous</button>
+                     <span id="duplicateReviewCounter">0 of 0</span>
+                     <button class="btn btn-small" id="duplicateReviewNextBtn" onclick="changeDuplicateReviewItem(1)">Next →</button>
+                 </div>
+                 <div class="duplicate-review-empty" id="duplicateReviewEmptyState" style="display: none;">
+                     No duplicate files are waiting for review.
+                 </div>
+                 <div id="duplicateReviewContent">
+                     <div class="duplicate-review-card">
+                         <span class="duplicate-review-badge">🔁 Duplicate</span>
+                         <h3 id="duplicateReviewName">Loading...</h3>
+                         <p id="duplicateReviewPath"></p>
+                         <div class="duplicate-review-meta">
+                             <div>
+                                 <span>Size</span>
+                                 <strong id="duplicateReviewSize">—</strong>
+                             </div>
+                             <div>
+                                 <span>Modified</span>
+                                 <strong id="duplicateReviewModified">—</strong>
+                             </div>
+                             <div>
+                                 <span>Read Status</span>
+                                 <strong id="duplicateReviewReadStatus">—</strong>
+                             </div>
+                         </div>
+                     </div>
+                     <div class="duplicate-review-actions">
+                         <button class="btn" onclick="openDuplicateInfo()">ℹ️ View Info</button>
+                         <button class="btn" onclick="openDuplicateTags()">👁️ View/Edit Tags</button>
+                         <button class="btn" onclick="openDuplicateReader()">📖 Read Comic</button>
+                         <button class="btn" id="duplicateReviewReadToggleBtn" onclick="toggleDuplicateReadStatus()">✅ Mark Read</button>
+                         <button class="btn btn-danger" onclick="deleteCurrentDuplicate()">🗑️ Delete Duplicate</button>
+                     </div>
+                     <div class="duplicate-review-tip">
+                         Review duplicates one-by-one, inspect their metadata, and delete the copy you do not want to keep.
+                     </div>
+                 </div>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn" onclick="closeDuplicateReviewModal()">Close</button>
+             </div>
+         </div>
+     </div>
+     
+     <!-- Change Password Modal -->
+     <div class="modal" id="changePasswordModal">
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
                 <h2>Change Password</h2>

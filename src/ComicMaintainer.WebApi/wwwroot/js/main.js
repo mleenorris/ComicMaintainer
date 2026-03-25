@@ -200,6 +200,8 @@
         
         // Constants
         const DEFAULT_PER_PAGE = 100; // Default number of items per page
+        const LIBRARY_HEALTH_REFRESH_DELAY = 750;
+        const MAX_PROGRESS_RESULTS = 200;
         
         // Filename truncation constants
         const FILENAME_TRUNCATION_START_LENGTH = 30; // Characters to show at the start
@@ -223,6 +225,14 @@
         let historyCurrentPage = 1;
         let historyPerPage = 50;
         let historyTotal = 0;
+        let libraryHealthRefreshTimer = null;
+        let libraryHealthRequestInFlight = false;
+        let libraryHealthRefreshPending = false;
+        let progressResults = [];
+        let progressResultLookup = new Set();
+        let progressResultElements = new Map();
+        let duplicateReviewFiles = [];
+        let duplicateReviewIndex = 0;
         
         // Server-Sent Events connection for real-time updates
         let eventSource = null;
@@ -474,6 +484,7 @@
             
             // Refresh file list to show updated status
             loadFiles(currentPage, false);
+            scheduleLibraryHealthRefresh();
         }
         
         // Handle file list updated events
@@ -482,6 +493,7 @@
             
             // Refresh file list to show new/removed files
             loadFiles(currentPage, false);
+            scheduleLibraryHealthRefresh();
         }
         
         // Handle job update events (real-time via SSE)
@@ -509,6 +521,7 @@
             // Handle job completion
             if (status === 'completed' || status === 'failed' || status === 'cancelled') {
                 console.log(`SSE: Job ${jobId} finished with status: ${status}`);
+                scheduleLibraryHealthRefresh(250);
                 
                 // Allow a brief moment for final updates, then finalize
                 setTimeout(async () => {
@@ -616,6 +629,82 @@
             } catch (error) {
                 console.error('Error setting preferences:', error);
             }
+        }
+
+        async function loadLibraryHealth() {
+            const summary = document.getElementById('libraryHealthSummary');
+
+            if (libraryHealthRequestInFlight) {
+                libraryHealthRefreshPending = true;
+                return;
+            }
+
+            libraryHealthRequestInFlight = true;
+
+            try {
+                const response = await fetch(apiUrl('/api/files/counts'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const stats = await response.json();
+                const total = stats.total || 0;
+                const processed = stats.processed || 0;
+                const unprocessed = stats.unprocessed || 0;
+                const duplicates = stats.duplicates || 0;
+                const completionRate = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+                document.getElementById('libraryHealthTotal').textContent = total.toLocaleString();
+                document.getElementById('libraryHealthProcessed').textContent = processed.toLocaleString();
+                document.getElementById('libraryHealthUnprocessed').textContent = unprocessed.toLocaleString();
+                document.getElementById('libraryHealthDuplicates').textContent = duplicates.toLocaleString();
+                document.getElementById('libraryHealthCompletion').textContent = `${completionRate}%`;
+                document.getElementById('libraryHealthCompletionHint').textContent = total > 0
+                    ? `${processed.toLocaleString()} of ${total.toLocaleString()} files fully processed`
+                    : 'Add comics to start tracking library health';
+
+                if (summary) {
+                    summary.textContent = total > 0
+                        ? `${processed.toLocaleString()} processed, ${unprocessed.toLocaleString()} still need attention, and ${duplicates.toLocaleString()} duplicate${duplicates === 1 ? '' : 's'} ready for review.`
+                        : 'No files have been indexed yet.';
+                }
+
+                const reviewDuplicatesBtn = document.getElementById('reviewDuplicatesBtn');
+                if (reviewDuplicatesBtn) {
+                    reviewDuplicatesBtn.disabled = duplicates === 0;
+                }
+            } catch (error) {
+                console.error('Failed to load library health:', error);
+                if (summary) {
+                    summary.textContent = 'Unable to load library health right now.';
+                }
+            } finally {
+                libraryHealthRequestInFlight = false;
+                if (libraryHealthRefreshPending) {
+                    libraryHealthRefreshPending = false;
+                    loadLibraryHealth();
+                }
+            }
+        }
+
+        function refreshLibraryHealth() {
+            loadLibraryHealth();
+        }
+
+        // Debounce library health refreshes so bursts of file events trigger only one refresh.
+        // The delay can be overridden for cases like job completion where a faster refresh is useful.
+        function scheduleLibraryHealthRefresh(delay = LIBRARY_HEALTH_REFRESH_DELAY) {
+            if (libraryHealthRefreshTimer) {
+                clearTimeout(libraryHealthRefreshTimer);
+            }
+
+            libraryHealthRefreshTimer = setTimeout(() => {
+                loadLibraryHealth();
+                libraryHealthRefreshTimer = null;
+            }, delay);
         }
         
         async function getActiveJobFromServer() {
@@ -899,6 +988,7 @@
             // This prevents sequential API calls from blocking the file list display
             const prefsPromise = getPreferences();
             const jobCheckPromise = checkAndResumeActiveJob();
+            const libraryHealthPromise = loadLibraryHealth();
             
             // Start loading files immediately without waiting for preferences or job check
             // The file list will use default values (perPage=DEFAULT_PER_DEFAULT) and update when preferences arrive
@@ -947,8 +1037,10 @@
                 }
             });
             
-            // Job check runs in parallel - no need to await
-            // The modal will appear immediately if there's an active job
+            // These run in the background so the file list can render immediately.
+            // Errors are handled here to avoid unhandled promise rejections.
+            jobCheckPromise.catch(error => console.error('Failed to check active job:', error));
+            libraryHealthPromise.catch(error => console.error('Failed to load library health:', error));
         }
         
         // Check if DOM is already loaded (script loaded after DOMContentLoaded fired)
@@ -1015,6 +1107,9 @@
                 renderFileList();
                 updatePagination();
                 updateButtonVisibility();
+                if (refresh) {
+                    loadLibraryHealth();
+                }
             } catch (error) {
                 showMessage('Failed to load files: ' + error.message, 'error');
             }
@@ -1415,6 +1510,12 @@
                                         <button class="dropdown-item" onclick="readComic('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                             📖 Read Comic
                                         </button>
+                                        ${file.duplicate
+                                            ? `<button class="dropdown-item" onclick="openDuplicateReviewModal('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                                🔁 Review Duplicate
+                                            </button>`
+                                            : ''
+                                        }
                                         <div class="dropdown-divider"></div>
                                         ${file.read 
                                             ? `<button class="dropdown-item" onclick="markFileUnread('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
@@ -1508,6 +1609,13 @@
                        .replace(/\n/g, '\\n')
                        .replace(/\r/g, '\\r')
                        .replace(/\t/g, '\\t');
+        }
+
+        // Extract just the filename portion from a relative or absolute path.
+        function extractDisplayName(filepath) {
+            if (!filepath) return '';
+            const parts = filepath.split(/[/\\]/);
+            return parts[parts.length - 1] || filepath;
         }
         
         function truncateFilenameMiddle(filename) {
@@ -1725,12 +1833,25 @@
             
             // Find the file in the files array to get size info
             const file = files.find(f => f.relative_path === filepath);
+            const duplicateReview = document.getElementById('fileInfoDuplicateReview');
+            const duplicateReviewBtn = document.getElementById('fileInfoDuplicateReviewBtn');
             if (file) {
                 document.getElementById('fileInfoSize').textContent = formatFileSize(file.size);
                 document.getElementById('fileInfoProcessed').textContent = file.processed ? '✅ Yes (Renamed & Normalized)' : '⚠️ No';
                 document.getElementById('fileInfoRenamed').textContent = file.renamed ? '🔵 Yes' : 'No';
                 document.getElementById('fileInfoNormalized').textContent = file.normalized ? '🔴 Yes' : 'No';
                 document.getElementById('fileInfoDuplicate').textContent = file.duplicate ? '🔁 Yes' : 'No';
+                if (duplicateReview && duplicateReviewBtn) {
+                    duplicateReview.style.display = file.duplicate ? 'block' : 'none';
+                    if (file.duplicate) {
+                        duplicateReviewBtn.dataset.filepath = filepath;
+                    } else {
+                        delete duplicateReviewBtn.dataset.filepath;
+                    }
+                }
+            } else if (duplicateReview && duplicateReviewBtn) {
+                duplicateReview.style.display = 'none';
+                delete duplicateReviewBtn.dataset.filepath;
             }
             
             document.getElementById('fileInfoModal').classList.add('active');
@@ -1738,6 +1859,162 @@
         
         function closeFileInfoModal() {
             document.getElementById('fileInfoModal').classList.remove('active');
+        }
+
+        function openDuplicateReviewFromFileInfo() {
+            const duplicateReviewBtn = document.getElementById('fileInfoDuplicateReviewBtn');
+            const filepath = duplicateReviewBtn?.dataset.filepath;
+            if (!filepath) {
+                return;
+            }
+
+            closeFileInfoModal();
+            openDuplicateReviewModal(filepath);
+        }
+
+        // Open the duplicate review modal and optionally focus a specific duplicate file when provided.
+        async function openDuplicateReviewModal(initialFilepath = null) {
+            const modal = document.getElementById('duplicateReviewModal');
+            const emptyState = document.getElementById('duplicateReviewEmptyState');
+            const content = document.getElementById('duplicateReviewContent');
+
+            modal.classList.add('active');
+            emptyState.style.display = 'none';
+            emptyState.textContent = 'No duplicate files are waiting for review.';
+            content.style.display = 'block';
+            document.getElementById('duplicateReviewName').textContent = 'Loading duplicates...';
+            document.getElementById('duplicateReviewPath').textContent = '';
+
+            try {
+                const response = await fetch(apiUrl('/api/files?filter=duplicates&per_page=-1&sort=name'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                duplicateReviewFiles = Array.isArray(data.files) ? data.files : [];
+
+                if (duplicateReviewFiles.length === 0) {
+                    emptyState.style.display = 'block';
+                    content.style.display = 'none';
+                    updateDuplicateReviewNavigation();
+                    return;
+                }
+
+                const matchedIndex = initialFilepath
+                    ? duplicateReviewFiles.findIndex(file => file.relative_path === initialFilepath)
+                    : -1;
+                duplicateReviewIndex = matchedIndex >= 0 ? matchedIndex : 0;
+                renderDuplicateReviewItem();
+            } catch (error) {
+                console.error('Failed to load duplicates for review:', error);
+                emptyState.style.display = 'block';
+                emptyState.textContent = `Failed to load duplicates: ${error.message}`;
+                content.style.display = 'none';
+                updateDuplicateReviewNavigation();
+            }
+        }
+
+        function closeDuplicateReviewModal() {
+            document.getElementById('duplicateReviewModal').classList.remove('active');
+        }
+
+        function updateDuplicateReviewNavigation() {
+            const total = duplicateReviewFiles.length;
+            const counter = document.getElementById('duplicateReviewCounter');
+            const prevBtn = document.getElementById('duplicateReviewPrevBtn');
+            const nextBtn = document.getElementById('duplicateReviewNextBtn');
+
+            counter.textContent = total > 0 ? `${duplicateReviewIndex + 1} of ${total}` : '0 of 0';
+            prevBtn.disabled = total === 0 || duplicateReviewIndex <= 0;
+            nextBtn.disabled = total === 0 || duplicateReviewIndex >= total - 1;
+        }
+
+        function renderDuplicateReviewItem() {
+            const emptyState = document.getElementById('duplicateReviewEmptyState');
+            const content = document.getElementById('duplicateReviewContent');
+            const file = duplicateReviewFiles[duplicateReviewIndex];
+
+            if (!file) {
+                emptyState.style.display = 'block';
+                content.style.display = 'none';
+                updateDuplicateReviewNavigation();
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            content.style.display = 'block';
+
+            document.getElementById('duplicateReviewName').textContent = file.name;
+            document.getElementById('duplicateReviewPath').textContent = file.relative_path;
+            document.getElementById('duplicateReviewSize').textContent = formatFileSize(file.size);
+            document.getElementById('duplicateReviewModified').textContent = formatModifiedDate(file.modified);
+            document.getElementById('duplicateReviewReadStatus').textContent = file.read ? '👁️ Read' : '📚 Unread';
+            document.getElementById('duplicateReviewReadToggleBtn').textContent = file.read ? '📚 Mark Unread' : '✅ Mark Read';
+
+            updateDuplicateReviewNavigation();
+        }
+
+        function changeDuplicateReviewItem(direction) {
+            const nextIndex = duplicateReviewIndex + direction;
+            if (nextIndex < 0 || nextIndex >= duplicateReviewFiles.length) {
+                return;
+            }
+
+            duplicateReviewIndex = nextIndex;
+            renderDuplicateReviewItem();
+        }
+
+        function getCurrentDuplicateReviewFile() {
+            return duplicateReviewFiles[duplicateReviewIndex] || null;
+        }
+
+        function openDuplicateInfo() {
+            const file = getCurrentDuplicateReviewFile();
+            if (!file) return;
+
+            closeDuplicateReviewModal();
+            showFileInfo(file.relative_path, file.name);
+        }
+
+        function openDuplicateTags() {
+            const file = getCurrentDuplicateReviewFile();
+            if (!file) return;
+
+            closeDuplicateReviewModal();
+            viewTags(file.relative_path);
+        }
+
+        function openDuplicateReader() {
+            const file = getCurrentDuplicateReviewFile();
+            if (!file) return;
+
+            closeDuplicateReviewModal();
+            readComic(file.relative_path);
+        }
+
+        async function toggleDuplicateReadStatus() {
+            const file = getCurrentDuplicateReviewFile();
+            if (!file) return;
+
+            if (file.read) {
+                await markFileUnread(file.relative_path);
+            } else {
+                await markFileRead(file.relative_path);
+            }
+
+            await openDuplicateReviewModal(file.relative_path);
+        }
+
+        async function deleteCurrentDuplicate() {
+            const file = getCurrentDuplicateReviewFile();
+            if (!file) return;
+
+            await deleteSingleFile(file.relative_path);
+            await openDuplicateReviewModal();
         }
         
         async function viewTags(filepath) {
@@ -2068,6 +2345,7 @@
                 const status = await response.json();
                 const processed = status.processed_items || 0;
                 const total = status.total_items || 0;
+                setProgressCurrentFile(status.current_file);
                 
                 // Count successes and errors from results
                 let successCount = 0;
@@ -3413,7 +3691,14 @@
             document.getElementById('progressBarFill').style.width = '0%';
             document.getElementById('progressText').textContent = '0 / 0 files';
             document.getElementById('progressPercent').textContent = '0%';
-            document.getElementById('progressDetails').innerHTML = '';
+            document.getElementById('progressProcessedCount').textContent = '0';
+            document.getElementById('progressSuccessCount').textContent = '0';
+            document.getElementById('progressErrorCount').textContent = '0';
+            document.getElementById('progressCurrentFile').textContent = 'Waiting for the job to start...';
+            progressResults = [];
+            progressResultLookup = new Set();
+            progressResultElements = new Map();
+            renderProgressDetails();
             document.getElementById('progressCloseBtn').style.display = 'none';
             document.getElementById('progressCancelBtn').style.display = 'inline-block';  // Show cancel button
             
@@ -3444,6 +3729,9 @@
             document.getElementById('progressBarFill').style.width = percent + '%';
             document.getElementById('progressText').textContent = `${current} / ${total} files`;
             document.getElementById('progressPercent').textContent = percent + '%';
+            document.getElementById('progressProcessedCount').textContent = current.toString();
+            document.getElementById('progressSuccessCount').textContent = successCount.toString();
+            document.getElementById('progressErrorCount').textContent = errorCount.toString();
             
             // Update title with success/error counts if any errors, preserving the original job title
             let baseTitle = currentJobTitle || 'Processing Files...';
@@ -3460,27 +3748,112 @@
                 indicatorText.textContent = `⏳ ${current} / ${total} files (${percent}%)`;
             }
         }
-        
-        function addProgressDetail(filename, success, error = null) {
+
+        // Update the progress modal label with the latest file or status message.
+        function setProgressCurrentFile(filepath, prefix = 'Latest update') {
+            const label = document.getElementById('progressCurrentFile');
+            if (!label) {
+                return;
+            }
+
+            if (!filepath) {
+                label.textContent = 'Waiting for the next completed file...';
+                return;
+            }
+
+            label.textContent = `${prefix}: ${extractDisplayName(filepath)}`;
+        }
+
+        // Render the per-file processing results shown inside the progress modal.
+        function renderProgressDetails() {
             const details = document.getElementById('progressDetails');
-            const entry = document.createElement('div');
-            entry.style.marginBottom = '5px';
-            
-            if (success) {
-                entry.innerHTML = `✅ ${filename}`;
-                entry.style.color = '#2ecc71';
-            } else {
-                entry.innerHTML = `❌ ${filename}${error ? ': ' + error : ''}`;
-                entry.style.color = '#e74c3c';
+            const countLabel = document.getElementById('progressResultsCount');
+            countLabel.textContent = `${progressResults.length} result${progressResults.length === 1 ? '' : 's'}`;
+
+            if (progressResults.length === 0) {
+                details.innerHTML = '<div class="progress-results-empty">Per-file processing updates will appear here as each file completes.</div>';
+                return;
             }
             
-            details.appendChild(entry);
-            details.scrollTop = details.scrollHeight;
+            details.innerHTML = '';
+            progressResults.forEach(result => {
+                const entry = document.createElement('div');
+                entry.className = `progress-result-item ${result.success ? 'success' : 'error'}`;
+                entry.innerHTML = `
+                    <div class="progress-result-status">${result.success ? '✅' : '❌'}</div>
+                    <div class="progress-result-text">
+                        <strong>${escapeHtml(result.filename)}</strong>
+                        <span>${result.success ? 'Completed successfully' : escapeHtml(result.error || 'Failed')}</span>
+                    </div>
+                `;
+                details.appendChild(entry);
+                progressResultElements.set(result.key, entry);
+            });
+        }
+        
+        function addProgressDetail(filename, success, error = null) {
+            const resultKey = filename;
+            const nextResult = {
+                key: resultKey,
+                filename: extractDisplayName(filename),
+                success,
+                error
+            };
+
+            const details = document.getElementById('progressDetails');
+            const emptyState = details.querySelector('.progress-results-empty');
+            if (emptyState) {
+                emptyState.remove();
+            }
+
+            if (progressResultLookup.has(resultKey)) {
+                const existingIndex = progressResults.findIndex(item => item.key === resultKey);
+                if (existingIndex >= 0) {
+                    progressResults.splice(existingIndex, 1);
+                }
+
+                const existingElement = progressResultElements.get(resultKey);
+                if (existingElement) {
+                    existingElement.remove();
+                    progressResultElements.delete(resultKey);
+                }
+            }
+
+            progressResults.unshift(nextResult);
+            progressResultLookup.add(resultKey);
+
+            const entry = document.createElement('div');
+            entry.className = `progress-result-item ${success ? 'success' : 'error'}`;
+            entry.innerHTML = `
+                <div class="progress-result-status">${success ? '✅' : '❌'}</div>
+                <div class="progress-result-text">
+                    <strong>${escapeHtml(nextResult.filename)}</strong>
+                    <span>${success ? 'Completed successfully' : escapeHtml(error || 'Failed')}</span>
+                </div>
+            `;
+            details.prepend(entry);
+            progressResultElements.set(resultKey, entry);
+
+            if (progressResults.length > MAX_PROGRESS_RESULTS) {
+                const removedResult = progressResults.pop();
+                if (removedResult) {
+                    progressResultLookup.delete(removedResult.key);
+                    const removedElement = progressResultElements.get(removedResult.key);
+                    if (removedElement) {
+                        removedElement.remove();
+                    }
+                    progressResultElements.delete(removedResult.key);
+                }
+            }
+
+            setProgressCurrentFile(filename, success ? 'Completed' : 'Failed');
+            document.getElementById('progressResultsCount').textContent = `${progressResults.length} result${progressResults.length === 1 ? '' : 's'}`;
         }
         
         function completeProgress() {
             document.getElementById('progressCloseBtn').style.display = 'block';
             document.getElementById('progressCancelBtn').style.display = 'none';  // Hide cancel button when complete
+            setProgressCurrentFile(currentJobTitle || 'Batch job', 'Finished');
             
             // Update indicator to show completion
             const indicator = document.getElementById('progressIndicator');

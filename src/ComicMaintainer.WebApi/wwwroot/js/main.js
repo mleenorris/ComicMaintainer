@@ -200,6 +200,8 @@
         
         // Constants
         const DEFAULT_PER_PAGE = 100; // Default number of items per page
+        const LIBRARY_HEALTH_REFRESH_DELAY = 750;
+        const MAX_PROGRESS_RESULTS = 200;
         
         // Filename truncation constants
         const FILENAME_TRUNCATION_START_LENGTH = 30; // Characters to show at the start
@@ -224,8 +226,11 @@
         let historyPerPage = 50;
         let historyTotal = 0;
         let libraryHealthRefreshTimer = null;
+        let libraryHealthRequestInFlight = false;
+        let libraryHealthRefreshPending = false;
         let progressResults = [];
-        let progressResultLookup = new Map();
+        let progressResultLookup = new Set();
+        let progressResultElements = new Map();
         let duplicateReviewFiles = [];
         let duplicateReviewIndex = 0;
         
@@ -629,6 +634,13 @@
         async function loadLibraryHealth() {
             const summary = document.getElementById('libraryHealthSummary');
 
+            if (libraryHealthRequestInFlight) {
+                libraryHealthRefreshPending = true;
+                return;
+            }
+
+            libraryHealthRequestInFlight = true;
+
             try {
                 const response = await fetch(apiUrl('/api/files/counts'), {
                     headers: getAuthHeaders()
@@ -669,6 +681,12 @@
                 if (summary) {
                     summary.textContent = 'Unable to load library health right now.';
                 }
+            } finally {
+                libraryHealthRequestInFlight = false;
+                if (libraryHealthRefreshPending) {
+                    libraryHealthRefreshPending = false;
+                    loadLibraryHealth();
+                }
             }
         }
 
@@ -676,7 +694,9 @@
             loadLibraryHealth();
         }
 
-        function scheduleLibraryHealthRefresh(delay = 750) {
+        // Debounce library health refreshes so bursts of file events trigger only one refresh.
+        // The delay can be overridden for cases like job completion where a faster refresh is useful.
+        function scheduleLibraryHealthRefresh(delay = LIBRARY_HEALTH_REFRESH_DELAY) {
             if (libraryHealthRefreshTimer) {
                 clearTimeout(libraryHealthRefreshTimer);
             }
@@ -1017,10 +1037,10 @@
                 }
             });
             
-            // Job check runs in parallel - no need to await
-            // The modal will appear immediately if there's an active job
-            void jobCheckPromise;
-            void libraryHealthPromise;
+            // These run in the background so the file list can render immediately.
+            // Errors are handled here to avoid unhandled promise rejections.
+            jobCheckPromise.catch(error => console.error('Failed to check active job:', error));
+            libraryHealthPromise.catch(error => console.error('Failed to load library health:', error));
         }
         
         // Check if DOM is already loaded (script loaded after DOMContentLoaded fired)
@@ -1591,6 +1611,7 @@
                        .replace(/\t/g, '\\t');
         }
 
+        // Extract just the filename portion from a relative or absolute path.
         function extractDisplayName(filepath) {
             if (!filepath) return '';
             const parts = filepath.split(/[/\\]/);
@@ -1851,6 +1872,7 @@
             openDuplicateReviewModal(filepath);
         }
 
+        // Open the duplicate review modal and optionally focus a specific duplicate file when provided.
         async function openDuplicateReviewModal(initialFilepath = null) {
             const modal = document.getElementById('duplicateReviewModal');
             const emptyState = document.getElementById('duplicateReviewEmptyState');
@@ -3674,7 +3696,8 @@
             document.getElementById('progressErrorCount').textContent = '0';
             document.getElementById('progressCurrentFile').textContent = 'Waiting for the job to start...';
             progressResults = [];
-            progressResultLookup = new Map();
+            progressResultLookup = new Set();
+            progressResultElements = new Map();
             renderProgressDetails();
             document.getElementById('progressCloseBtn').style.display = 'none';
             document.getElementById('progressCancelBtn').style.display = 'inline-block';  // Show cancel button
@@ -3726,6 +3749,7 @@
             }
         }
 
+        // Update the progress modal label with the latest file or status message.
         function setProgressCurrentFile(filepath, prefix = 'Latest update') {
             const label = document.getElementById('progressCurrentFile');
             if (!label) {
@@ -3740,6 +3764,7 @@
             label.textContent = `${prefix}: ${extractDisplayName(filepath)}`;
         }
 
+        // Render the per-file processing results shown inside the progress modal.
         function renderProgressDetails() {
             const details = document.getElementById('progressDetails');
             const countLabel = document.getElementById('progressResultsCount');
@@ -3749,16 +3774,21 @@
                 details.innerHTML = '<div class="progress-results-empty">Per-file processing updates will appear here as each file completes.</div>';
                 return;
             }
-
-            details.innerHTML = progressResults.map(result => `
-                <div class="progress-result-item ${result.success ? 'success' : 'error'}">
+            
+            details.innerHTML = '';
+            progressResults.forEach(result => {
+                const entry = document.createElement('div');
+                entry.className = `progress-result-item ${result.success ? 'success' : 'error'}`;
+                entry.innerHTML = `
                     <div class="progress-result-status">${result.success ? '✅' : '❌'}</div>
                     <div class="progress-result-text">
                         <strong>${escapeHtml(result.filename)}</strong>
                         <span>${result.success ? 'Completed successfully' : escapeHtml(result.error || 'Failed')}</span>
                     </div>
-                </div>
-            `).join('');
+                `;
+                details.appendChild(entry);
+                progressResultElements.set(result.key, entry);
+            });
         }
         
         function addProgressDetail(filename, success, error = null) {
@@ -3770,16 +3800,54 @@
                 error
             };
 
+            const details = document.getElementById('progressDetails');
+            const emptyState = details.querySelector('.progress-results-empty');
+            if (emptyState) {
+                emptyState.remove();
+            }
+
             if (progressResultLookup.has(resultKey)) {
-                const existingIndex = progressResultLookup.get(resultKey);
-                progressResults.splice(existingIndex, 1);
+                const existingIndex = progressResults.findIndex(item => item.key === resultKey);
+                if (existingIndex >= 0) {
+                    progressResults.splice(existingIndex, 1);
+                }
+
+                const existingElement = progressResultElements.get(resultKey);
+                if (existingElement) {
+                    existingElement.remove();
+                    progressResultElements.delete(resultKey);
+                }
             }
 
             progressResults.unshift(nextResult);
-            progressResults = progressResults.slice(0, 200);
-            progressResultLookup = new Map(progressResults.map((item, index) => [item.key, index]));
+            progressResultLookup.add(resultKey);
+
+            const entry = document.createElement('div');
+            entry.className = `progress-result-item ${success ? 'success' : 'error'}`;
+            entry.innerHTML = `
+                <div class="progress-result-status">${success ? '✅' : '❌'}</div>
+                <div class="progress-result-text">
+                    <strong>${escapeHtml(nextResult.filename)}</strong>
+                    <span>${success ? 'Completed successfully' : escapeHtml(error || 'Failed')}</span>
+                </div>
+            `;
+            details.prepend(entry);
+            progressResultElements.set(resultKey, entry);
+
+            if (progressResults.length > MAX_PROGRESS_RESULTS) {
+                const removedResult = progressResults.pop();
+                if (removedResult) {
+                    progressResultLookup.delete(removedResult.key);
+                    const removedElement = progressResultElements.get(removedResult.key);
+                    if (removedElement) {
+                        removedElement.remove();
+                    }
+                    progressResultElements.delete(removedResult.key);
+                }
+            }
+
             setProgressCurrentFile(filename, success ? 'Completed' : 'Failed');
-            renderProgressDetails();
+            document.getElementById('progressResultsCount').textContent = `${progressResults.length} result${progressResults.length === 1 ? '' : 's'}`;
         }
         
         function completeProgress() {

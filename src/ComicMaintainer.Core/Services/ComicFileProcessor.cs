@@ -10,6 +10,12 @@ namespace ComicMaintainer.Core.Services;
 /// </summary>
 public class ComicFileProcessor
 {
+    private static readonly char[] CrossPlatformInvalidFileNameChars =
+        Path.GetInvalidFileNameChars()
+            .Concat("<>:\"/\\|?*".ToCharArray())
+            .Distinct()
+            .ToArray();
+
     private static readonly Regex ChapterKeywordPattern = 
         new(@"(?i)ch(?:apter)?[-._\s]*([0-9]+(?:\.[0-9]+)?)", RegexOptions.Compiled);
     
@@ -21,6 +27,12 @@ public class ComicFileProcessor
     
     private static readonly Regex BracketEndPattern = 
         new(@"^[\)\]]", RegexOptions.Compiled);
+
+    private static readonly Regex UnreplacedPlaceholderPattern =
+        new(@"\{[^}]+\}", RegexOptions.Compiled);
+
+    private static readonly Regex ExtraWhitespacePattern =
+        new(@"\s+", RegexOptions.Compiled);
 
     /// <summary>
     /// Parse chapter number from filename
@@ -134,10 +146,10 @@ public class ComicFileProcessor
         }
 
         // Clean up any remaining unreplaced placeholders
-        result = Regex.Replace(result, @"\{[^}]+\}", "");
+        result = UnreplacedPlaceholderPattern.Replace(result, "");
 
         // Clean up extra spaces
-        result = Regex.Replace(result, @"\s+", " ").Trim();
+        result = ExtraWhitespacePattern.Replace(result, " ").Trim();
 
         // Ensure proper extension
         if (!result.EndsWith(".cbz", StringComparison.OrdinalIgnoreCase) && 
@@ -146,7 +158,18 @@ public class ComicFileProcessor
             result += originalExtension;
         }
 
-        return result;
+        return SanitizeFileName(result);
+    }
+
+    public static string SanitizeFileName(string fileName)
+    {
+        var sanitized = fileName;
+        foreach (var invalidChar in CrossPlatformInvalidFileNameChars)
+        {
+            sanitized = sanitized.Replace(invalidChar, '_');
+        }
+
+        return sanitized;
     }
 
     /// <summary>

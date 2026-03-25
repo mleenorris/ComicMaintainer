@@ -188,6 +188,30 @@ public class ComicFileProcessorIntegrationTests : IDisposable
     }
 
     [Fact]
+    public void IsFileAlreadyNormalized_WithSanitizedFilename_ReturnsTrue()
+    {
+        // Arrange
+        var template = "{series} - {title} #{issue}";
+        var comicFolder = Path.Combine(_testDirectory, "Batman");
+        Directory.CreateDirectory(comicFolder);
+
+        var filePath = Path.Combine(comicFolder, "Batman - Zero_Hour__ #0012.cbz");
+        CreateArchiveWithTags(filePath, "Batman", "12", 2023, "Zero/Hour?*");
+
+        // Act
+        var result = ComicFileProcessor.IsFileAlreadyNormalized(
+            filePath,
+            template,
+            fixTitle: false,
+            fixSeries: true,
+            fixFilename: true,
+            comicFolder: comicFolder);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Fact]
     public void IsFileAlreadyNormalized_NonExistentFile_ReturnsFalse()
     {
         // Arrange

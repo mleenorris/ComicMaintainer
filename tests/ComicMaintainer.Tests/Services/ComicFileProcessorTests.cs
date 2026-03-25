@@ -214,6 +214,24 @@ public class ComicFileProcessorTests
     }
 
     [Fact]
+    public void FormatFilename_WithInvalidFileNameCharacters_SanitizesCrossPlatformUnsafeCharacters()
+    {
+        // Arrange
+        var template = "{series} - {title} #{issue}";
+        var tags = new ComicInfo
+        {
+            Series = "Batman: Year One",
+            Title = "Zero/Hour?*"
+        };
+
+        // Act
+        var result = ComicFileProcessor.FormatFilename(template, tags, "10");
+
+        // Assert
+        Assert.Equal("Batman_ Year One - Zero_Hour__ #0010.cbz", result);
+    }
+
+    [Fact]
     public void FormatFilename_WithNullTags_HandlesGracefully()
     {
         // Arrange
@@ -228,4 +246,3 @@ public class ComicFileProcessorTests
         Assert.EndsWith(".cbz", result);
     }
 }
-

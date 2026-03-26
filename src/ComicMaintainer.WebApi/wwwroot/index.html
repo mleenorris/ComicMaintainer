@@ -214,13 +214,14 @@
          <div id="messageContainer"></div>
  
          <div class="mobile-library-view-toggle" id="mobileLibraryViewToggle" hidden>
-             <button class="mobile-library-view-btn" id="mobileOverviewViewBtn" type="button" onclick="setMobileLibraryView('overview')" aria-controls="libraryHealthDashboard" aria-pressed="false">
+             <button class="mobile-library-view-btn" id="mobileOverviewViewBtn" type="button" aria-controls="libraryHealthDashboard" aria-label="Switch to overview view" aria-pressed="false">
                  Overview
              </button>
-             <button class="mobile-library-view-btn active" id="mobileFilesViewBtn" type="button" onclick="setMobileLibraryView('files')" aria-controls="libraryFilesView" aria-pressed="true">
+             <button class="mobile-library-view-btn active" id="mobileFilesViewBtn" type="button" aria-controls="libraryFilesView" aria-label="Switch to files view" aria-pressed="true">
                  Files
              </button>
          </div>
+         <div class="visually-hidden" id="mobileLibraryViewStatus" aria-live="polite"></div>
  
          <section class="library-health-dashboard" id="libraryHealthDashboard" aria-labelledby="libraryHealthTitle">
              <div class="library-health-header">

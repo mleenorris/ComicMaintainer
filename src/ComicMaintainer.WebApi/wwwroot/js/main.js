@@ -228,8 +228,9 @@
         let libraryHealthRefreshTimer = null;
         let libraryHealthRequestInFlight = false;
         let libraryHealthRefreshPending = false;
-        const MOBILE_LIBRARY_VIEW_BREAKPOINT = 768;
-        let currentMobileLibraryView = 'files';
+        const MOBILE_LIBRARY_VIEW_BREAKPOINT = 768; // Matches the existing mobile CSS breakpoint.
+        const DEFAULT_MOBILE_LIBRARY_VIEW = 'files';
+        let currentMobileLibraryView = DEFAULT_MOBILE_LIBRARY_VIEW;
         let progressResults = [];
         let progressResultLookup = new Set();
         let progressResultElements = new Map();
@@ -657,7 +658,6 @@
                 const processed = stats.processed || 0;
                 const unprocessed = stats.unprocessed || 0;
                 const duplicates = stats.duplicates || 0;
-
                 document.getElementById('libraryHealthProcessed').textContent = processed.toLocaleString();
                 document.getElementById('libraryHealthUnprocessed').textContent = unprocessed.toLocaleString();
                 document.getElementById('libraryHealthDuplicates').textContent = duplicates.toLocaleString();
@@ -690,6 +690,29 @@
             loadLibraryHealth();
         }
 
+        function isMobileLibraryViewport() {
+            return window.matchMedia(`(max-width: ${MOBILE_LIBRARY_VIEW_BREAKPOINT}px)`).matches;
+        }
+
+        function initializeMobileLibraryViewToggle() {
+            const overviewButton = document.getElementById('mobileOverviewViewBtn');
+            const filesButton = document.getElementById('mobileFilesViewBtn');
+
+            if (!overviewButton || !filesButton) {
+                return;
+            }
+
+            if (!overviewButton.dataset.bound) {
+                overviewButton.addEventListener('click', () => setMobileLibraryView('overview'));
+                overviewButton.dataset.bound = 'true';
+            }
+
+            if (!filesButton.dataset.bound) {
+                filesButton.addEventListener('click', () => setMobileLibraryView('files'));
+                filesButton.dataset.bound = 'true';
+            }
+        }
+
         function applyMobileLibraryView() {
             const toggle = document.getElementById('mobileLibraryViewToggle');
             const dashboard = document.getElementById('libraryHealthDashboard');
@@ -698,10 +721,17 @@
             const filesButton = document.getElementById('mobileFilesViewBtn');
 
             if (!toggle || !dashboard || !filesView || !overviewButton || !filesButton) {
+                console.warn('Mobile library view controls are missing from the page.', {
+                    toggleMissing: !toggle,
+                    dashboardMissing: !dashboard,
+                    filesViewMissing: !filesView,
+                    overviewButtonMissing: !overviewButton,
+                    filesButtonMissing: !filesButton
+                });
                 return;
             }
 
-            const isMobile = window.innerWidth <= MOBILE_LIBRARY_VIEW_BREAKPOINT;
+            const isMobile = isMobileLibraryViewport();
             const showingOverview = currentMobileLibraryView === 'overview';
 
             toggle.hidden = !isMobile;
@@ -722,6 +752,13 @@
 
             currentMobileLibraryView = view;
             applyMobileLibraryView();
+
+            const status = document.getElementById('mobileLibraryViewStatus');
+            if (status) {
+                status.textContent = view === 'overview'
+                    ? 'Overview view selected.'
+                    : 'Files view selected.';
+            }
         }
 
         window.addEventListener('resize', applyMobileLibraryView);
@@ -990,6 +1027,7 @@
         async function initializeApp() {
             // Initialize non-async operations immediately
             initTheme();
+            initializeMobileLibraryViewToggle();
             applyMobileLibraryView();
             
             // Check authentication FIRST before doing anything else
@@ -1259,7 +1297,9 @@
             // Save filter mode to preferences
             await setPreferences({ filterMode: mode });
 
-            if (window.innerWidth <= MOBILE_LIBRARY_VIEW_BREAKPOINT) {
+            // Dashboard cards also use setHeaderFilter(), so switch back to the files view on mobile
+            // to immediately show the filtered list after a user taps a library health card.
+            if (isMobileLibraryViewport()) {
                 setMobileLibraryView('files');
             }
             

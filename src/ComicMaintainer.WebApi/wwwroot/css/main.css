@@ -414,6 +414,41 @@
             min-height: 0;
             width: 100%;
         }
+
+        #libraryFilesView {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .mobile-library-view-toggle {
+            display: none;
+            margin-bottom: 16px;
+            padding: 4px;
+            background: var(--bg-secondary);
+            border-radius: 999px;
+            box-shadow: var(--shadow-sm);
+            gap: 4px;
+        }
+
+        .mobile-library-view-btn {
+            flex: 1;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            border-radius: 999px;
+            padding: 10px 14px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s ease, color 0.2s ease;
+        }
+
+        .mobile-library-view-btn.active {
+            background: var(--accent-primary);
+            color: #fff;
+        }
         
         .actions-bar {
             background: var(--bg-secondary);
@@ -1101,7 +1136,7 @@
 
         .library-health-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            grid-template-columns: repeat(3, minmax(0, 1fr));
             gap: 12px;
         }
 
@@ -1771,6 +1806,15 @@
                 flex-direction: column;
                 overflow: hidden;
             }
+
+            .mobile-library-view-toggle {
+                display: flex;
+                margin: 12px 12px 0;
+            }
+
+            .library-health-grid {
+                grid-template-columns: 1fr;
+            }
             
             .header {
                 padding: 10px;
@@ -2301,7 +2345,7 @@
             }
 
             .library-health-grid {
-                grid-template-columns: 1fr 1fr;
+                grid-template-columns: 1fr;
             }
             
             .empty-state {

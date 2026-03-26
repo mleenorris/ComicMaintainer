@@ -228,6 +228,8 @@
         let libraryHealthRefreshTimer = null;
         let libraryHealthRequestInFlight = false;
         let libraryHealthRefreshPending = false;
+        const MOBILE_LIBRARY_VIEW_BREAKPOINT = 768;
+        let currentMobileLibraryView = 'files';
         let progressResults = [];
         let progressResultLookup = new Set();
         let progressResultElements = new Map();
@@ -655,16 +657,10 @@
                 const processed = stats.processed || 0;
                 const unprocessed = stats.unprocessed || 0;
                 const duplicates = stats.duplicates || 0;
-                const completionRate = total > 0 ? Math.round((processed / total) * 100) : 0;
 
-                document.getElementById('libraryHealthTotal').textContent = total.toLocaleString();
                 document.getElementById('libraryHealthProcessed').textContent = processed.toLocaleString();
                 document.getElementById('libraryHealthUnprocessed').textContent = unprocessed.toLocaleString();
                 document.getElementById('libraryHealthDuplicates').textContent = duplicates.toLocaleString();
-                document.getElementById('libraryHealthCompletion').textContent = `${completionRate}%`;
-                document.getElementById('libraryHealthCompletionHint').textContent = total > 0
-                    ? `${processed.toLocaleString()} of ${total.toLocaleString()} files fully processed`
-                    : 'Add comics to start tracking library health';
 
                 if (summary) {
                     summary.textContent = total > 0
@@ -693,6 +689,42 @@
         function refreshLibraryHealth() {
             loadLibraryHealth();
         }
+
+        function applyMobileLibraryView() {
+            const toggle = document.getElementById('mobileLibraryViewToggle');
+            const dashboard = document.getElementById('libraryHealthDashboard');
+            const filesView = document.getElementById('libraryFilesView');
+            const overviewButton = document.getElementById('mobileOverviewViewBtn');
+            const filesButton = document.getElementById('mobileFilesViewBtn');
+
+            if (!toggle || !dashboard || !filesView || !overviewButton || !filesButton) {
+                return;
+            }
+
+            const isMobile = window.innerWidth <= MOBILE_LIBRARY_VIEW_BREAKPOINT;
+            const showingOverview = currentMobileLibraryView === 'overview';
+
+            toggle.hidden = !isMobile;
+            dashboard.hidden = isMobile && !showingOverview;
+            filesView.hidden = isMobile && showingOverview;
+
+            overviewButton.classList.toggle('active', showingOverview);
+            overviewButton.setAttribute('aria-pressed', showingOverview ? 'true' : 'false');
+
+            filesButton.classList.toggle('active', !showingOverview);
+            filesButton.setAttribute('aria-pressed', !showingOverview ? 'true' : 'false');
+        }
+
+        function setMobileLibraryView(view) {
+            if (view !== 'overview' && view !== 'files') {
+                return;
+            }
+
+            currentMobileLibraryView = view;
+            applyMobileLibraryView();
+        }
+
+        window.addEventListener('resize', applyMobileLibraryView);
 
         // Debounce library health refreshes so bursts of file events trigger only one refresh.
         // The delay can be overridden for cases like job completion where a faster refresh is useful.
@@ -958,6 +990,7 @@
         async function initializeApp() {
             // Initialize non-async operations immediately
             initTheme();
+            applyMobileLibraryView();
             
             // Check authentication FIRST before doing anything else
             // This prevents race condition where SSE and API calls start before auth is verified
@@ -1225,6 +1258,10 @@
             
             // Save filter mode to preferences
             await setPreferences({ filterMode: mode });
+
+            if (window.innerWidth <= MOBILE_LIBRARY_VIEW_BREAKPOINT) {
+                setMobileLibraryView('files');
+            }
             
             // Reload from page 1 with new filter
             loadFiles(1);

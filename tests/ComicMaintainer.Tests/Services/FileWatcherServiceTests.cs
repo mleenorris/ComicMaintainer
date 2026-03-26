@@ -264,16 +264,11 @@ public class FileWatcherServiceTests : IDisposable
         // Wait for file system events and processing (stability delay + processing time)
         await Task.Delay(2000);
 
-        // Assert - File should be removed from old path and added to new path
+        // Assert - File path should be updated atomically, preserving state
         _mockFileStore.Verify(
-            fs => fs.RemoveFileAsync(tempFile, It.IsAny<CancellationToken>()), 
+            fs => fs.UpdateFilePathAsync(tempFile, renamedFile, It.IsAny<CancellationToken>()), 
             Times.Once, 
-            "Old file path should be removed from file store");
-        
-        _mockFileStore.Verify(
-            fs => fs.AddFileAsync(renamedFile, It.IsAny<CancellationToken>()), 
-            Times.Once, 
-            "New file path should be added to file store");
+            "File path should be updated atomically in the store");
         
         // Verify that processing status was checked
         _mockFileStore.Verify(
@@ -314,11 +309,11 @@ public class FileWatcherServiceTests : IDisposable
         // Wait for file system events
         await Task.Delay(2000);
 
-        // Assert - File should be added to store but NOT processed
+        // Assert - File path should be updated atomically, preserving state
         _mockFileStore.Verify(
-            fs => fs.AddFileAsync(renamedFile, It.IsAny<CancellationToken>()), 
+            fs => fs.UpdateFilePathAsync(tempFile, renamedFile, It.IsAny<CancellationToken>()), 
             Times.Once, 
-            "New file path should be added to file store");
+            "File path should be updated atomically in the store");
         
         _mockFileStore.Verify(
             fs => fs.IsFileProcessedAsync(renamedFile, It.IsAny<CancellationToken>()), 

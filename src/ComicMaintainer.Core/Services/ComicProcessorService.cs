@@ -65,6 +65,15 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         try
         {
             _logger.LogInformation("ProcessFileAsync: Starting processing for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+
+            // Skip files that the database already considers fully processed, preventing
+            // repeated work caused by watcher events fired during or after processing.
+            if (await _fileStore.IsFileProcessedAsync(filePath, cancellationToken))
+            {
+                _logger.LogInformation("ProcessFileAsync: File already fully processed (database), skipping: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                return true;
+            }
+
             _logger.LogDebug("ProcessFileAsync: Checking if file exists: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             if (!File.Exists(filePath))
@@ -143,9 +152,10 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                         
                         File.Move(filePath, newFilePath);
                         
-                        // Update file store with new path
-                        await _fileStore.RemoveFileAsync(oldFilePath, cancellationToken);
-                        await _fileStore.AddFileAsync(newFilePath, cancellationToken);
+                        // Atomically move the database record to the new path, preserving all
+                        // processing state so the FileSystemWatcher rename event sees the entry
+                        // as already tracked and does not re-queue it for processing.
+                        await _fileStore.UpdateFilePathAsync(oldFilePath, newFilePath, cancellationToken);
                         await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
                         
                         await LogHistoryWithChangesAsync(newFilePath, "Rename", true, null, 
@@ -462,6 +472,14 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         try
         {
             _logger.LogInformation("RenameFileAsync: Starting rename for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+
+            // Skip files that are already marked as renamed in the database.
+            if (await _fileStore.IsFileRenamedAsync(filePath, cancellationToken))
+            {
+                _logger.LogInformation("RenameFileAsync: File already renamed (database), skipping: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                return true;
+            }
+
             _logger.LogDebug("RenameFileAsync: Checking if file exists and is a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             if (!File.Exists(filePath) || !IsComicArchive(filePath))
@@ -571,6 +589,14 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         try
         {
             _logger.LogInformation("NormalizeFileAsync: Starting normalize for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+
+            // Skip files that are already marked as normalized in the database.
+            if (await _fileStore.IsFileNormalizedAsync(filePath, cancellationToken))
+            {
+                _logger.LogInformation("NormalizeFileAsync: File already normalized (database), skipping: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                return true;
+            }
+
             _logger.LogDebug("NormalizeFileAsync: Checking if file exists and is a comic archive: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             if (!File.Exists(filePath) || !IsComicArchive(filePath))

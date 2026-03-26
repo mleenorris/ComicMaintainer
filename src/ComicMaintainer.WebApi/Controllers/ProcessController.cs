@@ -29,11 +29,14 @@ public class ProcessController : ControllerBase
     {
         try
         {
-            // Get all files from the file store
+            // Only queue files that have not yet been fully processed (respects database state).
             var allFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
-            var filePaths = allFiles.Select(f => f.FilePath).ToList();
+            var filePaths = allFiles
+                .Where(f => !f.IsProcessed && !f.IsDuplicate)
+                .Select(f => f.FilePath)
+                .ToList();
             
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Process all files requested, processing {Count} files"), filePaths.Count);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Process all files requested, processing {Count} unprocessed files"), filePaths.Count);
             
             // Start processing job
             var jobId = await _processor.ProcessFilesAsync(filePaths, cancellationToken);
@@ -67,11 +70,14 @@ public class ProcessController : ControllerBase
     {
         try
         {
-            // Get all files from the file store
+            // Only queue files that have not yet been renamed (respects database state).
             var allFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
-            var filePaths = allFiles.Select(f => f.FilePath).ToList();
+            var filePaths = allFiles
+                .Where(f => !f.IsRenamed && !f.IsDuplicate)
+                .Select(f => f.FilePath)
+                .ToList();
             
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename all files requested, processing {Count} files"), filePaths.Count);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename all files requested, processing {Count} unrenamed files"), filePaths.Count);
             
             // Start rename job
             var jobId = await _processor.RenameFilesAsync(filePaths, cancellationToken);
@@ -114,11 +120,14 @@ public class ProcessController : ControllerBase
     {
         try
         {
-            // Get all files from the file store
+            // Only queue files that have not yet been normalized (respects database state).
             var allFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
-            var filePaths = allFiles.Select(f => f.FilePath).ToList();
+            var filePaths = allFiles
+                .Where(f => !f.IsNormalized && !f.IsDuplicate)
+                .Select(f => f.FilePath)
+                .ToList();
             
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Normalize all files requested, processing {Count} files"), filePaths.Count);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Normalize all files requested, processing {Count} unnormalized files"), filePaths.Count);
             
             // Start normalize job
             var jobId = await _processor.NormalizeFilesAsync(filePaths, cancellationToken);

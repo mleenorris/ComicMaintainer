@@ -662,6 +662,113 @@ public class FileStoreService : IFileStoreService
         return Task.FromResult(exists);
     }
 
+    public async Task UpdateFilePathAsync(string oldPath, string newPath, CancellationToken cancellationToken = default)
+    {
+        if (!IsPathWithinAllowedDirectories(newPath))
+        {
+            _logger.LogWarning("Attempted to update file path to a location outside allowed directories: {NewPath}", SanitizeForLogging(newPath));
+            return;
+        }
+
+        // Compute file metadata once and reuse in both the in-memory and database updates.
+        var fileInfo = File.Exists(newPath) ? new FileInfo(newPath) : null;
+
+        // Move the in-memory entry, preserving all processing state
+        if (_files.TryRemove(oldPath, out var existingFile))
+        {
+            _duplicateFiles.TryRemove(oldPath, out _);
+
+            var newFile = new ComicFile
+            {
+                FilePath = newPath,
+                FileName = fileInfo?.Name ?? Path.GetFileName(newPath),
+                Directory = fileInfo?.DirectoryName ?? Path.GetDirectoryName(newPath) ?? string.Empty,
+                FileSize = fileInfo?.Length ?? existingFile.FileSize,
+                LastModified = fileInfo?.LastWriteTime ?? existingFile.LastModified,
+                IsRenamed = existingFile.IsRenamed,
+                IsNormalized = existingFile.IsNormalized,
+                IsProcessed = existingFile.IsProcessed,
+                IsDuplicate = existingFile.IsDuplicate,
+                IsRead = existingFile.IsRead,
+                Metadata = existingFile.Metadata
+            };
+            _files[newPath] = newFile;
+            if (newFile.IsDuplicate)
+                _duplicateFiles[newPath] = true;
+
+            _logger.LogDebug("Updated file path in memory store: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
+        }
+        else
+        {
+            // Old path not in memory - ensure the new path is tracked
+            await AddFileAsync(newPath, cancellationToken);
+            return;
+        }
+
+        // Update the database entry, preserving processing state
+        try
+        {
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+            var entity = await dbContext.ComicFiles
+                .FirstOrDefaultAsync(e => e.FilePath == oldPath, cancellationToken);
+
+            if (entity != null)
+            {
+                // Check whether the new path already has a DB row (race with watcher / processor)
+                var newEntity = await dbContext.ComicFiles
+                    .FirstOrDefaultAsync(e => e.FilePath == newPath, cancellationToken);
+
+                if (newEntity == null)
+                {
+                    // Rename the existing row in-place to preserve all columns (including IsRenamed, IsNormalized, etc.)
+                    entity.FilePath = newPath;
+                    entity.FileName = fileInfo?.Name ?? Path.GetFileName(newPath);
+                    entity.Directory = fileInfo?.DirectoryName ?? Path.GetDirectoryName(newPath) ?? string.Empty;
+                    if (fileInfo != null)
+                    {
+                        entity.FileSize = fileInfo.Length;
+                        entity.LastModified = fileInfo.LastWriteTime;
+                    }
+                    entity.UpdatedAt = DateTime.UtcNow;
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    _logger.LogDebug("Updated file path in database: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
+                }
+                else
+                {
+                    // New path already exists - remove the stale old row and keep the newer one
+                    dbContext.ComicFiles.Remove(entity);
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                    _logger.LogDebug("Removed stale old-path entry after duplicate new-path detected: {OldPath}", SanitizeForLogging(oldPath));
+                }
+            }
+            else
+            {
+                // Old path not in DB - ensure new path row exists
+                _logger.LogDebug("Old path not found in database during UpdateFilePathAsync, ensuring new path is persisted: {NewPath}", SanitizeForLogging(newPath));
+                await AddFileAsync(newPath, cancellationToken);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating file path in database: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
+        }
+
+        // Broadcast file list update
+        if (_eventBroadcaster != null)
+        {
+            try
+            {
+                await _eventBroadcaster.BroadcastFileListUpdateAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to broadcast file list update after path update");
+            }
+        }
+    }
+
     public async Task<int> CleanupStaleEntriesAsync(CancellationToken cancellationToken = default)
     {
         try

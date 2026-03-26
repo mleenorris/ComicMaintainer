@@ -957,4 +957,95 @@ public class FileStoreServiceTests
         var files = await service.GetAllFilesAsync();
         Assert.Contains(files, f => f.FilePath == filePath);
     }
+
+    // ---- UpdateFilePathAsync tests ----
+
+    [Fact]
+    public async Task UpdateFilePathAsync_PreservesProcessingState()
+    {
+        // Arrange - add a file and mark it as renamed
+        var oldPath = Path.Combine(_testDirectory, "old_name.cbz");
+        var newPath = Path.Combine(_testDirectory, "new_name.cbz");
+        File.WriteAllText(oldPath, "content");
+        await _service.AddFileAsync(oldPath);
+        await _service.MarkFileRenamedAsync(oldPath, true);
+
+        // Rename the physical file so AddFileAsync/UpdateFilePathAsync can stat it
+        File.Move(oldPath, newPath);
+
+        // Act
+        await _service.UpdateFilePathAsync(oldPath, newPath);
+
+        // Assert - old path gone, new path present with IsRenamed preserved
+        var files = await _service.GetAllFilesAsync();
+        Assert.DoesNotContain(files, f => f.FilePath == oldPath);
+        var updated = files.FirstOrDefault(f => f.FilePath == newPath);
+        Assert.NotNull(updated);
+        Assert.True(updated!.IsRenamed, "IsRenamed should be preserved after UpdateFilePathAsync");
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_OldPathNotInStore_FallsBackToAddFile()
+    {
+        // Arrange - do not add old path, only create physical file at new path
+        var oldPath = Path.Combine(_testDirectory, "ghost_old.cbz");
+        var newPath = Path.Combine(_testDirectory, "ghost_new.cbz");
+        File.WriteAllText(newPath, "content");
+
+        // Act - should not throw even though old path was never tracked
+        await _service.UpdateFilePathAsync(oldPath, newPath);
+
+        // Assert - new path should now be tracked
+        var files = await _service.GetAllFilesAsync();
+        Assert.Contains(files, f => f.FilePath == newPath);
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_UpdatesDatabasePath()
+    {
+        // Arrange
+        var oldPath = Path.Combine(_testDirectory, "db_old.cbz");
+        var newPath = Path.Combine(_testDirectory, "db_new.cbz");
+        File.WriteAllText(oldPath, "content");
+        await _service.AddFileAsync(oldPath);
+
+        File.Move(oldPath, newPath);
+
+        // Act
+        await _service.UpdateFilePathAsync(oldPath, newPath);
+
+        // Assert - verify the database was updated
+        await using var dbContext = await _serviceProvider
+            .GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>()
+            .CreateDbContextAsync();
+
+        Assert.False(await dbContext.ComicFiles.AnyAsync(e => e.FilePath == oldPath));
+        Assert.True(await dbContext.ComicFiles.AnyAsync(e => e.FilePath == newPath));
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_PreservesNormalizedState()
+    {
+        // Arrange
+        var oldPath = Path.Combine(_testDirectory, "norm_old.cbz");
+        var newPath = Path.Combine(_testDirectory, "norm_new.cbz");
+        File.WriteAllText(oldPath, "content");
+        await _service.AddFileAsync(oldPath);
+        await _service.MarkFileRenamedAsync(oldPath, true);
+        await _service.MarkFileNormalizedAsync(oldPath, true);
+
+        File.Move(oldPath, newPath);
+
+        // Act
+        await _service.UpdateFilePathAsync(oldPath, newPath);
+
+        // Assert
+        var files = await _service.GetAllFilesAsync();
+        var updated = files.FirstOrDefault(f => f.FilePath == newPath);
+        Assert.NotNull(updated);
+        Assert.True(updated!.IsRenamed);
+        Assert.True(updated!.IsNormalized);
+        Assert.True(updated!.IsProcessed);
+    }
 }
+

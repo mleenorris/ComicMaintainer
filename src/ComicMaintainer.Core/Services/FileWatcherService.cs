@@ -305,14 +305,17 @@ public class FileWatcherService : IFileWatcherService
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File changed: {Path}"), e.FullPath);
             _ = Task.Run(async () =>
             {
-                // Check if file should be processed based on settings and current state
+                // Wait for file to stabilise before deciding whether to process.
+                // Checking state *after* the delay means any in-flight processor operation
+                // that triggered the change event will have updated the database by now.
+                await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
+
                 var shouldProcess = await ShouldProcessFileAsync(e.FullPath);
                 if (!shouldProcess)
                 {
                     return;
                 }
                 
-                await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
                 await _processor.ProcessFileAsync(e.FullPath);
             });
         }
@@ -335,18 +338,22 @@ public class FileWatcherService : IFileWatcherService
             {
                 try
                 {
-                    await _fileStore.RemoveFileAsync(e.OldFullPath);
-                    await _fileStore.AddFileAsync(e.FullPath);
-                    
-                    // Check if file should be processed based on settings and current state
+                    // Preserve processing state from the old path - avoids re-processing files
+                    // that were renamed by the processor itself.
+                    await _fileStore.UpdateFilePathAsync(e.OldFullPath, e.FullPath);
+
+                    // Wait for stability *before* consulting the database so that any concurrent
+                    // processor operation that triggered this rename has had time to finish and
+                    // update the tracked state.
+                    await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
+
+                    // Check if further processing is required now that the state is settled.
                     var shouldProcess = await ShouldProcessFileAsync(e.FullPath);
                     if (!shouldProcess)
                     {
                         return;
                     }
                     
-                    // Process the renamed file after a delay
-                    await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
                     await _processor.ProcessFileAsync(e.FullPath);
                 }
                 catch (Exception ex)

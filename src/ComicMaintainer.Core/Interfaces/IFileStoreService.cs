@@ -101,6 +101,13 @@ public interface IFileStoreService
     Task<bool> FileExistsAsync(string filePath, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Update the tracked file path from oldPath to newPath, preserving all processing state
+    /// (IsRenamed, IsNormalized, IsDuplicate, IsRead, Metadata).  Used when a file is renamed
+    /// so the database record follows the file without resetting its status.
+    /// </summary>
+    Task UpdateFilePathAsync(string oldPath, string newPath, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Remove stale entries from database where files no longer exist on disk
     /// </summary>
     Task<int> CleanupStaleEntriesAsync(CancellationToken cancellationToken = default);

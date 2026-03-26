@@ -973,8 +973,7 @@ public class ComicProcessorServiceTests : IDisposable
         var expectedPath = Path.Combine(seriesDir, expectedFileName);
         
         // Verify the file was renamed to the correct name
-        _mockFileStore.Verify(f => f.RemoveFileAsync(originalPath, It.IsAny<CancellationToken>()), Times.Once);
-        _mockFileStore.Verify(f => f.AddFileAsync(expectedPath, It.IsAny<CancellationToken>()), Times.Once);
+        _mockFileStore.Verify(f => f.UpdateFilePathAsync(originalPath, expectedPath, It.IsAny<CancellationToken>()), Times.Once);
         _mockFileStore.Verify(f => f.MarkFileRenamedAsync(expectedPath, true, It.IsAny<CancellationToken>()), Times.Once);
     }
 }

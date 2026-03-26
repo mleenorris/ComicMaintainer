@@ -670,12 +670,14 @@ public class FileStoreService : IFileStoreService
             return;
         }
 
+        // Compute file metadata once and reuse in both the in-memory and database updates.
+        var fileInfo = File.Exists(newPath) ? new FileInfo(newPath) : null;
+
         // Move the in-memory entry, preserving all processing state
         if (_files.TryRemove(oldPath, out var existingFile))
         {
             _duplicateFiles.TryRemove(oldPath, out _);
 
-            var fileInfo = File.Exists(newPath) ? new FileInfo(newPath) : null;
             var newFile = new ComicFile
             {
                 FilePath = newPath,
@@ -698,7 +700,7 @@ public class FileStoreService : IFileStoreService
         }
         else
         {
-            // Old path not in memory – ensure the new path is tracked
+            // Old path not in memory - ensure the new path is tracked
             await AddFileAsync(newPath, cancellationToken);
             return;
         }
@@ -720,7 +722,6 @@ public class FileStoreService : IFileStoreService
                 if (newEntity == null)
                 {
                     // Rename the existing row in-place to preserve all columns (including IsRenamed, IsNormalized, etc.)
-                    var fileInfo = File.Exists(newPath) ? new FileInfo(newPath) : null;
                     entity.FilePath = newPath;
                     entity.FileName = fileInfo?.Name ?? Path.GetFileName(newPath);
                     entity.Directory = fileInfo?.DirectoryName ?? Path.GetDirectoryName(newPath) ?? string.Empty;
@@ -735,7 +736,7 @@ public class FileStoreService : IFileStoreService
                 }
                 else
                 {
-                    // New path already exists – remove the stale old row and keep the newer one
+                    // New path already exists - remove the stale old row and keep the newer one
                     dbContext.ComicFiles.Remove(entity);
                     await dbContext.SaveChangesAsync(cancellationToken);
                     _logger.LogDebug("Removed stale old-path entry after duplicate new-path detected: {OldPath}", SanitizeForLogging(oldPath));
@@ -743,7 +744,7 @@ public class FileStoreService : IFileStoreService
             }
             else
             {
-                // Old path not in DB – ensure new path row exists
+                // Old path not in DB - ensure new path row exists
                 _logger.LogDebug("Old path not found in database during UpdateFilePathAsync, ensuring new path is persisted: {NewPath}", SanitizeForLogging(newPath));
                 await AddFileAsync(newPath, cancellationToken);
                 return;

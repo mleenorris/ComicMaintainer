@@ -338,7 +338,7 @@ public class FileWatcherService : IFileWatcherService
             {
                 try
                 {
-                    // Preserve processing state from the old path – avoids re-processing files
+                    // Preserve processing state from the old path - avoids re-processing files
                     // that were renamed by the processor itself.
                     await _fileStore.UpdateFilePathAsync(e.OldFullPath, e.FullPath);
 

@@ -963,7 +963,7 @@ public class FileStoreServiceTests
     [Fact]
     public async Task UpdateFilePathAsync_PreservesProcessingState()
     {
-        // Arrange – add a file and mark it as renamed
+        // Arrange - add a file and mark it as renamed
         var oldPath = Path.Combine(_testDirectory, "old_name.cbz");
         var newPath = Path.Combine(_testDirectory, "new_name.cbz");
         File.WriteAllText(oldPath, "content");
@@ -976,7 +976,7 @@ public class FileStoreServiceTests
         // Act
         await _service.UpdateFilePathAsync(oldPath, newPath);
 
-        // Assert – old path gone, new path present with IsRenamed preserved
+        // Assert - old path gone, new path present with IsRenamed preserved
         var files = await _service.GetAllFilesAsync();
         Assert.DoesNotContain(files, f => f.FilePath == oldPath);
         var updated = files.FirstOrDefault(f => f.FilePath == newPath);
@@ -987,15 +987,15 @@ public class FileStoreServiceTests
     [Fact]
     public async Task UpdateFilePathAsync_OldPathNotInStore_FallsBackToAddFile()
     {
-        // Arrange – do not add old path, only create physical file at new path
+        // Arrange - do not add old path, only create physical file at new path
         var oldPath = Path.Combine(_testDirectory, "ghost_old.cbz");
         var newPath = Path.Combine(_testDirectory, "ghost_new.cbz");
         File.WriteAllText(newPath, "content");
 
-        // Act – should not throw even though old path was never tracked
+        // Act - should not throw even though old path was never tracked
         await _service.UpdateFilePathAsync(oldPath, newPath);
 
-        // Assert – new path should now be tracked
+        // Assert - new path should now be tracked
         var files = await _service.GetAllFilesAsync();
         Assert.Contains(files, f => f.FilePath == newPath);
     }
@@ -1014,7 +1014,7 @@ public class FileStoreServiceTests
         // Act
         await _service.UpdateFilePathAsync(oldPath, newPath);
 
-        // Assert – verify the database was updated
+        // Assert - verify the database was updated
         await using var dbContext = await _serviceProvider
             .GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>()
             .CreateDbContextAsync();

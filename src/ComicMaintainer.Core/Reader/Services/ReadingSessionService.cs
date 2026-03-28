@@ -56,9 +56,10 @@ public class ReadingSessionService : IReadingSessionService
         });
         await db.SaveChangesAsync(cancellationToken);
 
-        _logger.LogDebug("Started {Mode}reading session {SessionId} for user {UserId}, content {ContentId} at page {Page}",
-            incognito ? "incognito " : string.Empty,
-            session.SessionId, userId, contentId, startPage);
+        _logger.LogDebug(incognito
+            ? "Started incognito reading session {SessionId}."
+            : "Started reading session {SessionId}.",
+            session.SessionId);
 
         return session;
     }

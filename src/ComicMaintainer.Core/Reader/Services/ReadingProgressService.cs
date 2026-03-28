@@ -42,8 +42,11 @@ public class ReadingProgressService : IReadingProgressService
         var entity = await db.ReadingProgresses
             .FirstOrDefaultAsync(p => p.UserId == progress.UserId && p.ContentId == progress.ContentId, cancellationToken);
 
+        var isNew = false;
+
         if (entity is null)
         {
+            isNew = true;
             entity = new ReadingProgressEntity
             {
                 UserId = progress.UserId,
@@ -64,8 +67,9 @@ public class ReadingProgressService : IReadingProgressService
 
         await db.SaveChangesAsync(cancellationToken);
 
-        _logger.LogDebug("Saved reading progress for user {UserId}, content {ContentId}: page {Page}/{Total}",
-            progress.UserId, progress.ContentId, progress.CurrentPage, progress.TotalPages);
+        _logger.LogDebug("Saved reading progress record {ReadingProgressId} ({Operation}).",
+            entity.Id,
+            isNew ? "created" : "updated");
     }
 
     private static ReadingProgress MapToModel(ReadingProgressEntity entity) => new()

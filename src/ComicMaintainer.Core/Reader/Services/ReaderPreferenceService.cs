@@ -47,8 +47,11 @@ public class ReaderPreferenceService : IReaderPreferenceService
         var entity = await db.ReaderPreferences
             .FirstOrDefaultAsync(p => p.UserId == preferences.UserId, cancellationToken);
 
+        var isNew = false;
+
         if (entity is null)
         {
+            isNew = true;
             entity = new ReaderPreferencesEntity
             {
                 UserId = preferences.UserId,
@@ -66,7 +69,9 @@ public class ReaderPreferenceService : IReaderPreferenceService
 
         await db.SaveChangesAsync(cancellationToken);
 
-        _logger.LogDebug("Saved reader preferences for user {UserId}", preferences.UserId);
+        _logger.LogDebug("Saved reader preferences record {ReaderPreferencesId} ({Operation}).",
+            entity.Id,
+            isNew ? "created" : "updated");
     }
 
     private static ReaderPreferences MapToModel(ReaderPreferencesEntity entity) => new()

@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Models.Auth;
+using ComicMaintainer.Core.Reader.Models;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
@@ -18,6 +19,9 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<ComicFileEntity> ComicFiles { get; set; } = null!;
     public DbSet<ProcessingHistoryEntity> ProcessingHistory { get; set; } = null!;
     public DbSet<FileReadStatusEntity> FileReadStatuses { get; set; } = null!;
+    public DbSet<ReadingProgressEntity> ReadingProgresses { get; set; } = null!;
+    public DbSet<ReaderPreferencesEntity> ReaderPreferences { get; set; } = null!;
+    public DbSet<ReadingSessionEntity> ReadingSessions { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -91,6 +95,34 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.HasIndex(e => e.IsRead);
             entity.HasIndex(e => e.LastReadDate);
         });
+
+        // Configure ReadingProgressEntity
+        modelBuilder.Entity<ReadingProgressEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.UserId).IsRequired().HasMaxLength(450);
+            entity.Property(e => e.ContentId).IsRequired().HasMaxLength(2048);
+            entity.HasIndex(e => new { e.UserId, e.ContentId }).IsUnique();
+        });
+
+        // Configure ReaderPreferencesEntity
+        modelBuilder.Entity<ReaderPreferencesEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.UserId).IsRequired().HasMaxLength(450);
+            entity.Property(e => e.FitPreference).HasMaxLength(50);
+            entity.HasIndex(e => e.UserId).IsUnique();
+        });
+
+        // Configure ReadingSessionEntity
+        modelBuilder.Entity<ReadingSessionEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.UserId).IsRequired().HasMaxLength(450);
+            entity.Property(e => e.ContentId).IsRequired().HasMaxLength(2048);
+            entity.HasIndex(e => e.SessionId).IsUnique();
+            entity.HasIndex(e => new { e.UserId, e.StartedAt });
+        });
     }
 }
 
@@ -157,4 +189,55 @@ public class FileReadStatusEntity
     public DateTime? LastReadDate { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Database entity for per-user durable reading progress (reader foundation).
+/// </summary>
+public class ReadingProgressEntity
+{
+    public int Id { get; set; }
+    public string UserId { get; set; } = string.Empty;
+    public string ContentId { get; set; } = string.Empty;
+    public int CurrentPage { get; set; }
+    public int TotalPages { get; set; }
+    public double PercentComplete { get; set; }
+    public DateTime LastReadAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public int LastReaderMode { get; set; }
+    public int ReadingDirection { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Database entity for per-user reader preferences (reader foundation).
+/// </summary>
+public class ReaderPreferencesEntity
+{
+    public int Id { get; set; }
+    public string UserId { get; set; } = string.Empty;
+    public int DefaultReaderMode { get; set; }
+    public int ReadingDirection { get; set; }
+    public bool TapZonesEnabled { get; set; } = true;
+    public bool AutoHideChrome { get; set; } = true;
+    public string FitPreference { get; set; } = "width";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Database entity for individual reading sessions (reader foundation).
+/// </summary>
+public class ReadingSessionEntity
+{
+    public int Id { get; set; }
+    public Guid SessionId { get; set; }
+    public string UserId { get; set; } = string.Empty;
+    public string ContentId { get; set; } = string.Empty;
+    public DateTime StartedAt { get; set; }
+    public DateTime? EndedAt { get; set; }
+    public int StartPage { get; set; }
+    public int? EndPage { get; set; }
+    public bool Incognito { get; set; }
 }

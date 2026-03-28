@@ -4,6 +4,8 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models.Auth;
+using ComicMaintainer.Core.Reader.Interfaces;
+using ComicMaintainer.Core.Reader.Services;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Hubs;
@@ -435,6 +437,12 @@ builder.Services.AddSingleton<IFileWatcherService, FileWatcherService>();
 builder.Services.AddSingleton<IProcessingHistoryService, ProcessingHistoryService>();
 builder.Services.AddSingleton<ISettingsService, SettingsService>();
 builder.Services.AddSingleton<IComicReaderService, ComicReaderService>();
+
+// Reader foundation services
+builder.Services.AddSingleton<IReadingProgressService, ReadingProgressService>();
+builder.Services.AddSingleton<IReaderPreferenceService, ReaderPreferenceService>();
+builder.Services.AddSingleton<IReadingSessionService, ReadingSessionService>();
+
 builder.Services.AddScoped<IAuthService, AuthService>();
 
 // Add hosted service for file watcher

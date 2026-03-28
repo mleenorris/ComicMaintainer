@@ -213,6 +213,16 @@
      <div class="container">
          <div id="messageContainer"></div>
  
+         <div class="mobile-library-view-toggle" id="mobileLibraryViewToggle" hidden>
+             <button class="mobile-library-view-btn" id="mobileOverviewViewBtn" type="button" aria-controls="libraryHealthDashboard" aria-label="Switch to overview view" aria-pressed="false">
+                 Overview
+             </button>
+             <button class="mobile-library-view-btn active" id="mobileFilesViewBtn" type="button" aria-controls="libraryFilesView" aria-label="Switch to files view" aria-pressed="true">
+                 Files
+             </button>
+         </div>
+         <div class="visually-hidden" id="mobileLibraryViewStatus" aria-live="polite"></div>
+ 
          <section class="library-health-dashboard" id="libraryHealthDashboard" aria-labelledby="libraryHealthTitle">
              <div class="library-health-header">
                  <div>
@@ -225,11 +235,6 @@
                  </div>
              </div>
              <div class="library-health-grid">
-                 <button class="library-health-card" type="button" onclick="setHeaderFilter('all')">
-                     <span class="library-health-label">Total Files</span>
-                     <strong id="libraryHealthTotal">—</strong>
-                     <small>Entire library</small>
-                 </button>
                  <button class="library-health-card success" type="button" onclick="setHeaderFilter('marked')">
                      <span class="library-health-label">Processed</span>
                      <strong id="libraryHealthProcessed">—</strong>
@@ -245,34 +250,30 @@
                      <strong id="libraryHealthDuplicates">—</strong>
                      <small>Ready for review</small>
                  </button>
-                 <div class="library-health-card neutral">
-                     <span class="library-health-label">Completion</span>
-                     <strong id="libraryHealthCompletion">—</strong>
-                     <small id="libraryHealthCompletionHint">Processed coverage</small>
-                 </div>
              </div>
          </section>
-         
-         <div class="controls-wrapper">
-             <div class="actions-bar">
-                <div class="button-group">
-                    <!-- Process Dropdown -->
-                    <div class="action-dropdown">
-                        <button class="action-dropdown-toggle process" onclick="toggleActionDropdown(event, 'processDropdown')">
-                            🚀<span> Process</span>
-                        </button>
-                        <div class="action-dropdown-menu" id="processDropdown">
-                            <button class="action-dropdown-item" onclick="processAllFilesAsync(); closeAllActionDropdowns();">
-                                🚀 Process All
+
+         <section id="libraryFilesView">
+             <div class="controls-wrapper">
+                 <div class="actions-bar">
+                    <div class="button-group">
+                        <!-- Process Dropdown -->
+                        <div class="action-dropdown">
+                            <button class="action-dropdown-toggle process" onclick="toggleActionDropdown(event, 'processDropdown')">
+                                🚀<span> Process</span>
                             </button>
-                            <button class="action-dropdown-item" onclick="processUnmarkedFiles(); closeAllActionDropdowns();">
-                                ⚠️ Process Unmarked
-                            </button>
-                            <button class="action-dropdown-item" id="processSelectedItem" onclick="processSelectedFilesAsync(); closeAllActionDropdowns();" disabled>
-                                ⚡ Process Selected
-                            </button>
+                            <div class="action-dropdown-menu" id="processDropdown">
+                                <button class="action-dropdown-item" onclick="processAllFilesAsync(); closeAllActionDropdowns();">
+                                    🚀 Process All
+                                </button>
+                                <button class="action-dropdown-item" onclick="processUnmarkedFiles(); closeAllActionDropdowns();">
+                                    ⚠️ Process Unmarked
+                                </button>
+                                <button class="action-dropdown-item" id="processSelectedItem" onclick="processSelectedFilesAsync(); closeAllActionDropdowns();" disabled>
+                                    ⚡ Process Selected
+                                </button>
+                            </div>
                         </div>
-                    </div>
                     
                     <!-- Rename Dropdown -->
                     <div class="action-dropdown">
@@ -336,35 +337,35 @@
                 </div>
                 <span class="select-info" id="selectInfo">No files selected</span>
             </div>
+            </div>
 
-        </div>
-        
-        <div class="content-wrapper">
-            <div class="file-list" id="fileList">
-                <div class="loading">
-                    <div class="spinner"></div>
-                    <p>Loading files...</p>
+            <div class="content-wrapper">
+                <div class="file-list" id="fileList">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading files...</p>
+                    </div>
+                </div>
+                
+                <!-- Pagination Controls -->
+                <div class="pagination" id="pagination" style="display: none;">
+                    <button class="btn btn-small" id="prevBtn" onclick="previousPage()" disabled>← Previous</button>
+                    <span class="page-info" id="pageInfo">Page 1 of 1</span>
+                    <button class="btn btn-small" id="nextBtn" onclick="nextPage()" disabled>Next →</button>
+                    <div style="display: flex; align-items: center; gap: 8px; margin-left: 15px;">
+                        <label for="perPageSelect" style="color: var(--text-secondary); font-size: 14px;">Files per page:</label>
+                        <select id="perPageSelect" name="perPageSelect" onchange="changePerPage()" style="padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer;">
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                            <option value="100" selected>100</option>
+                            <option value="200">200</option>
+                            <option value="500">500</option>
+                            <option value="-1">All</option>
+                        </select>
+                    </div>
                 </div>
             </div>
-            
-            <!-- Pagination Controls -->
-            <div class="pagination" id="pagination" style="display: none;">
-                <button class="btn btn-small" id="prevBtn" onclick="previousPage()" disabled>← Previous</button>
-                <span class="page-info" id="pageInfo">Page 1 of 1</span>
-                <button class="btn btn-small" id="nextBtn" onclick="nextPage()" disabled>Next →</button>
-                <div style="display: flex; align-items: center; gap: 8px; margin-left: 15px;">
-                    <label for="perPageSelect" style="color: var(--text-secondary); font-size: 14px;">Files per page:</label>
-                    <select id="perPageSelect" name="perPageSelect" onchange="changePerPage()" style="padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer;">
-                        <option value="25">25</option>
-                        <option value="50">50</option>
-                        <option value="100" selected>100</option>
-                        <option value="200">200</option>
-                        <option value="500">500</option>
-                        <option value="-1">All</option>
-                    </select>
-                </div>
-            </div>
-        </div>
+        </section>
     </div>
     
     <!-- Tag Editor Modal -->

@@ -29,4 +29,9 @@ public class AppSettings
     
     // Database cleanup settings
     public int DatabaseCleanupIntervalHours { get; set; } = 12;
+
+    // External series metadata / alias enrichment
+    public bool EnableExternalSeriesMetadata { get; set; }
+    public string? ComicVineApiKey { get; set; }
+    public string ComicVineBaseUrl { get; set; } = "https://comicvine.gamespot.com/api";
 }

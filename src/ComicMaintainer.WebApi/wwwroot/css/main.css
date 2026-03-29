@@ -798,6 +798,153 @@
             background: #2980b9;
             transform: scale(1.05);
         }
+
+        .header-view-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
+            border-radius: 999px;
+            padding: 4px;
+        }
+
+        .header-view-btn {
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            border-radius: 999px;
+            padding: 7px 12px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .header-view-btn.active {
+            background: var(--accent-primary);
+            color: white;
+        }
+
+        .series-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 18px;
+            padding: 18px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .series-card {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            border: 1px solid var(--border-primary);
+            border-radius: 12px;
+            background: var(--bg-secondary);
+            box-shadow: var(--shadow-sm);
+            overflow: hidden;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .series-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .series-cover {
+            width: 100%;
+            aspect-ratio: 2 / 3;
+            object-fit: cover;
+            background: var(--bg-hover);
+        }
+
+        .series-card-body {
+            padding: 0 14px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .series-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        .series-meta,
+        .series-aliases,
+        .series-detail-meta {
+            color: var(--text-muted);
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .series-detail {
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .series-detail-header {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-primary);
+        }
+
+        .series-detail-back {
+            align-self: flex-start;
+        }
+
+        .series-issues-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 16px;
+        }
+
+        .series-issue-card {
+            display: flex;
+            gap: 12px;
+            align-items: flex-start;
+            border: 1px solid var(--border-primary);
+            border-radius: 10px;
+            padding: 12px;
+            background: var(--bg-secondary);
+        }
+
+        .series-issue-thumb {
+            width: 72px;
+            aspect-ratio: 2 / 3;
+            object-fit: cover;
+            border-radius: 8px;
+            background: var(--bg-hover);
+            flex-shrink: 0;
+        }
+
+        .series-issue-body {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .series-issue-title {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        .series-issue-subtitle {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin: 0;
+        }
         
         @keyframes pulse {
             0%, 100% {

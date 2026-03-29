@@ -205,6 +205,14 @@
                             </button>
                         </div>
                     </div>
+                    <div class="header-view-toggle" role="group" aria-label="Library view mode">
+                        <button type="button" class="header-view-btn active" id="filesViewModeBtn" onclick="setLibraryViewMode('files')">
+                            📄 Files
+                        </button>
+                        <button type="button" class="header-view-btn" id="seriesViewModeBtn" onclick="setLibraryViewMode('series')">
+                            🖼️ Series
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -759,6 +767,28 @@
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
                         <strong>Note:</strong> This only affects the <code>{issue}</code> placeholder. Use <code>{issue_no_pad}</code> for unpadded issue numbers regardless of this setting.
                     </small>
+                </div>
+
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">External Series Metadata</h3>
+                <div class="form-group">
+                    <label for="enableExternalSeriesMetadata" style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="enableExternalSeriesMetadata" name="enableExternalSeriesMetadata" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <span>Enable ComicVine alias grouping</span>
+                    </label>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        When enabled, ComicMaintainer will look up alternate series titles from ComicVine so variants can be grouped together in the series library view. Changes take effect after restart.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="comicVineApiKey">ComicVine API Key</label>
+                    <input type="password" id="comicVineApiKey" name="comicVineApiKey" placeholder="Enter ComicVine API key" autocomplete="off">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Leave blank to disable external lookups. The key is stored in user settings on this instance.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="comicVineBaseUrl">ComicVine Base URL</label>
+                    <input type="text" id="comicVineBaseUrl" name="comicVineBaseUrl" placeholder="https://comicvine.gamespot.com/api" autocomplete="off">
                 </div>
                 
                 <h3 style="margin-bottom: 10px; margin-top: 35px; color: #e74c3c; border-bottom: 2px solid #e74c3c; padding-bottom: 8px;">⚠️ Danger Zone</h3>

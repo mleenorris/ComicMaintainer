@@ -115,6 +115,18 @@ builder.Services.Configure<AppSettings>(options =>
     var basePath = Environment.GetEnvironmentVariable("BASE_PATH");
     if (!string.IsNullOrEmpty(basePath))
         options.BasePath = basePath;
+
+    var enableExternalSeriesMetadata = Environment.GetEnvironmentVariable("ENABLE_EXTERNAL_SERIES_METADATA");
+    if (!string.IsNullOrEmpty(enableExternalSeriesMetadata))
+        options.EnableExternalSeriesMetadata = enableExternalSeriesMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+    var comicVineApiKey = Environment.GetEnvironmentVariable("COMICVINE_API_KEY");
+    if (!string.IsNullOrEmpty(comicVineApiKey))
+        options.ComicVineApiKey = comicVineApiKey;
+
+    var comicVineBaseUrl = Environment.GetEnvironmentVariable("COMICVINE_BASE_URL");
+    if (!string.IsNullOrEmpty(comicVineBaseUrl))
+        options.ComicVineBaseUrl = comicVineBaseUrl;
 });
 
 // Configure JWT settings
@@ -389,6 +401,7 @@ builder.Services.AddOutputCache(options =>
 
 // Add SignalR
 builder.Services.AddSignalR();
+builder.Services.AddMemoryCache();
 
 // Add health checks
 builder.Services.AddHealthChecks();
@@ -437,6 +450,8 @@ builder.Services.AddSingleton<IFileWatcherService, FileWatcherService>();
 builder.Services.AddSingleton<IProcessingHistoryService, ProcessingHistoryService>();
 builder.Services.AddSingleton<ISettingsService, SettingsService>();
 builder.Services.AddSingleton<IComicReaderService, ComicReaderService>();
+builder.Services.AddSingleton<ISeriesLibraryService, SeriesLibraryService>();
+builder.Services.AddHttpClient<IExternalSeriesMetadataService, ComicVineSeriesMetadataService>();
 
 // Reader foundation services
 builder.Services.AddSingleton<IReadingProgressService, ReadingProgressService>();
@@ -748,6 +763,26 @@ static void LoadUserSettings(string configDir, AppSettings options)
         if (settings.TryGetValue("DatabaseCleanupIntervalHours", out var databaseCleanupIntervalHours) && databaseCleanupIntervalHours.ValueKind == JsonValueKind.Number)
         {
             options.DatabaseCleanupIntervalHours = databaseCleanupIntervalHours.GetInt32();
+        }
+
+        if (settings.TryGetValue("EnableExternalSeriesMetadata", out var enableExternalSeriesMetadata)
+            && (enableExternalSeriesMetadata.ValueKind == JsonValueKind.True || enableExternalSeriesMetadata.ValueKind == JsonValueKind.False))
+        {
+            options.EnableExternalSeriesMetadata = enableExternalSeriesMetadata.GetBoolean();
+        }
+
+        if (settings.TryGetValue("ComicVineApiKey", out var comicVineApiKey) && comicVineApiKey.ValueKind == JsonValueKind.String)
+        {
+            options.ComicVineApiKey = comicVineApiKey.GetString();
+        }
+
+        if (settings.TryGetValue("ComicVineBaseUrl", out var comicVineBaseUrl) && comicVineBaseUrl.ValueKind == JsonValueKind.String)
+        {
+            var baseUrl = comicVineBaseUrl.GetString();
+            if (!string.IsNullOrWhiteSpace(baseUrl))
+            {
+                options.ComicVineBaseUrl = baseUrl;
+            }
         }
     }
     catch

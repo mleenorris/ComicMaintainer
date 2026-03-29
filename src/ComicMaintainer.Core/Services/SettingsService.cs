@@ -117,6 +117,21 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("DatabaseCleanupIntervalHours", hours, cancellationToken);
     }
 
+    public async Task UpdateExternalSeriesMetadataEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("EnableExternalSeriesMetadata", enabled, cancellationToken);
+    }
+
+    public async Task UpdateComicVineApiKeyAsync(string? apiKey, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("ComicVineApiKey", apiKey, cancellationToken);
+    }
+
+    public async Task UpdateComicVineBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("ComicVineBaseUrl", baseUrl, cancellationToken);
+    }
+
     private async Task UpdateSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);

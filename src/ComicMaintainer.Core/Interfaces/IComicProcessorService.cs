@@ -33,6 +33,11 @@ public interface IComicProcessorService
     Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Get series-focused metadata, including alternate/grouping fields when available.
+    /// </summary>
+    Task<SeriesMetadata?> GetSeriesMetadataAsync(string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Update metadata for a comic file
     /// </summary>
     Task<bool> UpdateMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default);

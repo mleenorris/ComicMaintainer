@@ -221,6 +221,9 @@
         let unmarkedCount = 0;
         let perPage = DEFAULT_PER_PAGE; // Will be loaded from server preferences
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
+        let libraryViewMode = 'files';
+        let seriesLibrary = [];
+        let currentSeriesDetailId = null;
         let searchDebounceTimer = null;
         let historyCurrentPage = 1;
         let historyPerPage = 50;
@@ -236,6 +239,8 @@
         let progressResultElements = new Map();
         let duplicateReviewFiles = [];
         let duplicateReviewIndex = 0;
+        let protectedImageUrls = new Map();
+        const MAX_PROTECTED_IMAGE_CACHE_ENTRIES = 150;
         
         // Server-Sent Events connection for real-time updates
         let eventSource = null;
@@ -486,7 +491,7 @@
             }
             
             // Refresh file list to show updated status
-            loadFiles(currentPage, false);
+            loadActiveLibraryView(currentPage, false);
             scheduleLibraryHealthRefresh();
         }
         
@@ -495,7 +500,7 @@
             console.log('SSE: File list updated');
             
             // Refresh file list to show new/removed files
-            loadFiles(currentPage, false);
+            loadActiveLibraryView(currentPage, false);
             scheduleLibraryHealthRefresh();
         }
         
@@ -536,7 +541,7 @@
                         currentJobTitle = null;
                         // Clear selected files and refresh the file list
                         selectedFiles.clear();
-                        await loadFiles(currentPage, true);
+                        await loadActiveLibraryView(currentPage, true);
                         // Close modal after refresh completes
                         setTimeout(closeProgressModal, 1000);
                     } else if (status === 'failed') {
@@ -1063,7 +1068,7 @@
             
             // Start loading files immediately without waiting for preferences or job check
             // The file list will use default values (perPage=DEFAULT_PER_DEFAULT) and update when preferences arrive
-            loadFiles();
+            loadActiveLibraryView();
             
             // Fetch initial watcher status in parallel
             updateWatcherStatus();
@@ -1071,6 +1076,7 @@
             // Apply preferences when they arrive (don't block file loading)
             prefsPromise.then(prefs => {
                 const oldPerPage = perPage;
+                const oldLibraryViewMode = libraryViewMode;
                 perPage = prefs.perPage || DEFAULT_PER_PAGE;
                 
                 // Set the per-page selector to the saved value
@@ -1101,10 +1107,17 @@
                         }
                     });
                 }
+
+                if (prefs.libraryViewMode === 'series') {
+                    libraryViewMode = 'series';
+                }
+
+                updateLibraryViewButtons();
+                updateLibraryViewLayout();
                 
                 // Reload files if perPage changed from default
-                if (perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE) {
-                    loadFiles(1);
+                if (libraryViewMode !== oldLibraryViewMode || (perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE)) {
+                    loadActiveLibraryView(1);
                 }
             });
             
@@ -1141,6 +1154,98 @@
             }
         });
         
+        async function loadActiveLibraryView(page = 1, refresh = false) {
+            if (libraryViewMode === 'series') {
+                return loadSeriesLibrary(page, refresh);
+            }
+
+            return loadFiles(page, refresh);
+        }
+
+        function updateLibraryViewButtons() {
+            document.getElementById('filesViewModeBtn')?.classList.toggle('active', libraryViewMode === 'files');
+            document.getElementById('seriesViewModeBtn')?.classList.toggle('active', libraryViewMode === 'series');
+        }
+
+        function updateLibraryViewLayout() {
+            const controlsWrapper = document.querySelector('#libraryFilesView .controls-wrapper');
+            const pagination = document.getElementById('pagination');
+            const isFileMode = libraryViewMode === 'files';
+
+            if (controlsWrapper) {
+                controlsWrapper.style.display = isFileMode ? '' : 'none';
+            }
+
+            if (!isFileMode && currentSeriesDetailId && pagination) {
+                pagination.style.display = 'none';
+            }
+        }
+
+        async function setLibraryViewMode(mode) {
+            if (libraryViewMode === mode && !(mode === 'series' && currentSeriesDetailId)) {
+                return;
+            }
+
+            libraryViewMode = mode;
+            currentSeriesDetailId = null;
+            updateLibraryViewButtons();
+            updateLibraryViewLayout();
+            await setPreferences({ libraryViewMode: mode });
+            await loadActiveLibraryView(1, true);
+        }
+
+        async function loadSeriesLibrary(page = 1, refresh = false) {
+            try {
+                let url = apiUrl(`/api/files/series?page=${page}&per_page=${perPage}`);
+                if (refresh) {
+                    url += '&refresh=true';
+                }
+                if (searchQuery) {
+                    url += `&search=${encodeURIComponent(searchQuery)}`;
+                }
+                if (filterMode !== 'all') {
+                    url += `&filter=${encodeURIComponent(filterMode)}`;
+                }
+                if (sortMode !== 'name') {
+                    url += `&sort=${encodeURIComponent(sortMode)}`;
+                }
+                if (sortDirection !== 'asc') {
+                    url += `&direction=${encodeURIComponent(sortDirection)}`;
+                }
+
+                const response = await fetch(url, {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                seriesLibrary = data.series || [];
+                currentPage = data.page;
+                totalPages = data.total_pages;
+                totalFiles = data.total_series || 0;
+                unmarkedCount = data.unmarked_count || 0;
+
+                if (currentSeriesDetailId) {
+                    renderSeriesDetail(currentSeriesDetailId);
+                } else {
+                    renderSeriesLibrary();
+                }
+
+                updatePagination();
+                updateButtonVisibility();
+                updateLibraryViewLayout();
+
+                if (refresh) {
+                    loadLibraryHealth();
+                }
+            } catch (error) {
+                showMessage('Failed to load series: ' + error.message, 'error');
+            }
+        }
+
         async function loadFiles(page = 1, refresh = false) {
             try {
                 let url = apiUrl(`/api/files?page=${page}&per_page=${perPage}`);
@@ -1191,10 +1296,16 @@
             const pageInfo = document.getElementById('pageInfo');
             const prevBtn = document.getElementById('prevBtn');
             const nextBtn = document.getElementById('nextBtn');
+
+            if (libraryViewMode === 'series' && currentSeriesDetailId) {
+                paginationDiv.style.display = 'none';
+                return;
+            }
             
             if (totalPages > 1 || totalFiles > 0) {
                 paginationDiv.style.display = 'flex';
-                let pageText = `Page ${currentPage} of ${totalPages} (${totalFiles} file${totalFiles !== 1 ? 's' : ''}`;
+                const itemLabel = libraryViewMode === 'series' ? 'series' : 'file';
+                let pageText = `Page ${currentPage} of ${totalPages} (${totalFiles} ${itemLabel}${totalFiles !== 1 ? 's' : ''}`;
                 if (searchQuery || filterMode !== 'all') {
                     pageText += ' matching';
                 }
@@ -1222,6 +1333,7 @@
             const renameUnmarkedBtn = document.querySelector('button[onclick="renameUnmarkedFiles()"]');
             const normalizeUnmarkedBtn = document.querySelector('button[onclick="normalizeUnmarkedFiles()"]');
             const filterUnmarkedBtn = document.getElementById('filterUnmarked');
+            const controlsWrapper = document.querySelector('#libraryFilesView .controls-wrapper');
             
             // Show or hide buttons based on whether there are unmarked files
             const hasUnmarkedFiles = unmarkedCount > 0;
@@ -1231,6 +1343,7 @@
             if (renameUnmarkedBtn) renameUnmarkedBtn.style.display = displayStyle;
             if (normalizeUnmarkedBtn) normalizeUnmarkedBtn.style.display = displayStyle;
             if (filterUnmarkedBtn) filterUnmarkedBtn.style.display = displayStyle;
+            if (controlsWrapper) controlsWrapper.style.display = libraryViewMode === 'files' ? '' : 'none';
         }
         
         async function changePerPage() {
@@ -1241,25 +1354,26 @@
             await setPreferences({ perPage: perPage });
             
             // Reload files from page 1 with new per-page value
-            loadFiles(1);
+            loadActiveLibraryView(1);
         }
         
         function nextPage() {
             if (currentPage < totalPages) {
-                loadFiles(currentPage + 1);
+                loadActiveLibraryView(currentPage + 1);
             }
         }
         
         function previousPage() {
             if (currentPage > 1) {
-                loadFiles(currentPage - 1);
+                loadActiveLibraryView(currentPage - 1);
             }
         }
         
         function filterFiles() {
             searchQuery = document.getElementById('headerSearchInput').value;
             // Reload from page 1 with new search query
-            loadFiles(1);
+            currentSeriesDetailId = null;
+            loadActiveLibraryView(1);
         }
         
         let sortMode = 'name'; // 'name', 'date', 'size'
@@ -1304,7 +1418,8 @@
             }
             
             // Reload from page 1 with new filter
-            loadFiles(1);
+            currentSeriesDetailId = null;
+            loadActiveLibraryView(1);
         }
         
         function setSort(mode) {
@@ -1339,7 +1454,8 @@
             document.getElementById('headerSortMenu').classList.remove('show');
             
             // Reload from page 1 with new sort order
-            loadFiles(1);
+            currentSeriesDetailId = null;
+            loadActiveLibraryView(1);
         }
         
         function toggleHeaderFilterDropdown(event) {
@@ -1398,6 +1514,138 @@
             } catch (error) {
                 showMessage('Failed to scan files: ' + error.message, 'error');
             }
+        }
+
+        function getSeriesCoverUrl(filePath) {
+            return apiUrl(`/api/comicreader/page?filePath=${encodeURIComponent(filePath)}&page=1`);
+        }
+
+        async function hydrateProtectedImages(container = document) {
+            const images = container.querySelectorAll('[data-protected-image]');
+            const imageQueue = Array.from(images);
+            const batchSize = 8;
+
+            for (let index = 0; index < imageQueue.length; index += batchSize) {
+                const batch = imageQueue.slice(index, index + batchSize);
+                await Promise.all(batch.map(async image => {
+                    const filePath = image.dataset.protectedImage;
+                    if (!filePath) {
+                        return;
+                    }
+
+                    if (protectedImageUrls.has(filePath)) {
+                        image.src = protectedImageUrls.get(filePath);
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch(getSeriesCoverUrl(filePath), {
+                            headers: getAuthHeaders()
+                        });
+                        if (!response.ok) {
+                            return;
+                        }
+
+                        const blob = await response.blob();
+                        const objectUrl = URL.createObjectURL(blob);
+                        if (protectedImageUrls.size >= MAX_PROTECTED_IMAGE_CACHE_ENTRIES) {
+                            const oldestKey = protectedImageUrls.keys().next().value;
+                            if (oldestKey) {
+                                URL.revokeObjectURL(protectedImageUrls.get(oldestKey));
+                                protectedImageUrls.delete(oldestKey);
+                            }
+                        }
+                        protectedImageUrls.set(filePath, objectUrl);
+                        image.src = objectUrl;
+                    } catch (error) {
+                        console.error('Failed to load protected image', error);
+                    }
+                }));
+            }
+        }
+
+        function renderSeriesLibrary() {
+            const fileList = document.getElementById('fileList');
+
+            if (!seriesLibrary.length) {
+                fileList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🖼️</div>
+                        <h2>No series found</h2>
+                        <p>${searchQuery || filterMode !== 'all' ? 'Try a different search term or filter' : 'Process and normalize comics to build your series library view.'}</p>
+                    </div>
+                `;
+                return;
+            }
+
+            fileList.innerHTML = `
+                <div class="series-grid">
+                    ${seriesLibrary.map(series => `
+                        <button class="series-card" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                            <img class="series-cover" data-protected-image="${escapeHtml(series.cover_file_path)}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                            <div class="series-card-body">
+                                <h3 class="series-title">${escapeHtml(series.title)}</h3>
+                                <div class="series-meta">${series.issue_count} issue${series.issue_count === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
+                                ${series.aliases?.length ? `<div class="series-aliases">Aliases: ${escapeHtml(series.aliases.join(', '))}</div>` : ''}
+                                ${series.metadata_source ? `<div class="series-meta">Source: ${escapeHtml(series.metadata_source)}</div>` : ''}
+                            </div>
+                        </button>
+                    `).join('')}
+                </div>
+            `;
+
+            hydrateProtectedImages(fileList);
+        }
+
+        function openSeriesDetail(seriesId) {
+            currentSeriesDetailId = seriesId;
+            renderSeriesDetail(seriesId);
+        }
+
+        function closeSeriesDetail() {
+            currentSeriesDetailId = null;
+            renderSeriesLibrary();
+            updatePagination();
+            updateLibraryViewLayout();
+        }
+
+        function renderSeriesDetail(seriesId) {
+            const fileList = document.getElementById('fileList');
+            const series = seriesLibrary.find(item => item.id === seriesId);
+            if (!series) {
+                closeSeriesDetail();
+                return;
+            }
+
+            fileList.innerHTML = `
+                <div class="series-detail" id="seriesDetailPanel">
+                    <div class="series-detail-header">
+                        <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">← Back to Series</button>
+                        <h2>${escapeHtml(series.title)}</h2>
+                        <div class="series-detail-meta">${series.issue_count} issue${series.issue_count === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
+                        ${series.aliases?.length ? `<div class="series-detail-meta">Aliases: ${escapeHtml(series.aliases.join(', '))}</div>` : ''}
+                        ${series.metadata_source ? `<div class="series-detail-meta">Metadata source: ${escapeHtml(series.metadata_source)}</div>` : ''}
+                    </div>
+                    <div class="series-issues-grid">
+                        ${series.issues.map(issue => `
+                            <div class="series-issue-card">
+                                <img class="series-issue-thumb" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy">
+                                <div class="series-issue-body">
+                                    <h3 class="series-issue-title">${escapeHtml(issue.title || issue.file_name)}</h3>
+                                    <p class="series-issue-subtitle">Issue ${escapeHtml(issue.issue || 'Unknown')}${issue.year ? ` · ${issue.year}` : ''}</p>
+                                    ${issue.volume ? `<p class="series-issue-subtitle">Volume ${escapeHtml(issue.volume)}</p>` : ''}
+                                    <div class="series-detail-meta">${escapeHtml(issue.file_name)}</div>
+                                    <div class="series-detail-meta">${formatFileSize(issue.size)} · ${formatModifiedDate(issue.modified)}</div>
+                                    <button type="button" class="btn btn-small" onclick="readComic('${escapeJs(issue.file_path)}')">📖 Read</button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+
+            updateLibraryViewLayout();
+            hydrateProtectedImages(fileList);
         }
         
         function renderFileList() {
@@ -2608,7 +2856,7 @@
                     showMessage(`Batch processing completed: ${successCount} of ${total} files processed successfully${errorCount > 0 ? `, ${errorCount} failed` : ''}`, successCount > 0 ? 'success' : 'warning');
                     
                     // Refresh file list to show updated status
-                    await loadFiles(1, true);
+                    await loadActiveLibraryView(1, true);
                 } else if (status.status === 'failed') {
                     // Job failed while we were away
                     console.error(`[JOB RESUME] Job ${activeJobId} already failed`);
@@ -3146,7 +3394,7 @@
                 }
                 
                 showMessage('File deleted successfully!', 'success');
-                await loadFiles(currentPage, true);
+                await loadActiveLibraryView(currentPage, true);
             } catch (error) {
                 showMessage('Failed to delete file: ' + error.message, 'error');
             }
@@ -3172,7 +3420,7 @@
                 }
                 
                 showMessage('File marked as read!', 'success');
-                await loadFiles(currentPage, true);
+                await loadActiveLibraryView(currentPage, true);
             } catch (error) {
                 showMessage('Failed to mark file as read: ' + error.message, 'error');
             }
@@ -3198,7 +3446,7 @@
                 }
                 
                 showMessage('File marked as unread!', 'success');
-                await loadFiles(currentPage, true);
+                await loadActiveLibraryView(currentPage, true);
             } catch (error) {
                 showMessage('Failed to mark file as unread: ' + error.message, 'error');
             }
@@ -3228,7 +3476,7 @@
                 }
                 
                 showMessage('All files marked as read!', 'success');
-                await loadFiles(currentPage, true);
+                await loadActiveLibraryView(currentPage, true);
             } catch (error) {
                 showMessage('Failed to mark files as read: ' + error.message, 'error');
             }
@@ -3258,7 +3506,7 @@
                 }
                 
                 showMessage('All files marked as unread!', 'success');
-                await loadFiles(currentPage, true);
+                await loadActiveLibraryView(currentPage, true);
             } catch (error) {
                 showMessage('Failed to mark files as unread: ' + error.message, 'error');
             }
@@ -3289,7 +3537,7 @@
                 }
                 
                 showMessage(`${selectedFiles.size} file(s) marked as read!`, 'success');
-                await loadFiles(currentPage, true);
+                await loadActiveLibraryView(currentPage, true);
             } catch (error) {
                 showMessage('Failed to mark files as read: ' + error.message, 'error');
             }
@@ -3320,7 +3568,7 @@
                 }
                 
                 showMessage(`${selectedFiles.size} file(s) marked as unread!`, 'success');
-                await loadFiles(currentPage, true);
+                await loadActiveLibraryView(currentPage, true);
             } catch (error) {
                 showMessage('Failed to mark files as unread: ' + error.message, 'error');
             }
@@ -3328,7 +3576,7 @@
         
         function refreshFiles() {
             showMessage('Refreshing file list...', 'info');
-            loadFiles(currentPage, true);
+            loadActiveLibraryView(currentPage, true);
         }
         
         function showMessage(message, type = 'info') {
@@ -3391,6 +3639,11 @@
                 
                 // Load database cleanup interval
                 document.getElementById('dbCleanupInterval').value = settingsData.database_cleanup_interval_hours;
+
+                // Load external metadata settings
+                document.getElementById('enableExternalSeriesMetadata').checked = !!settingsData.enable_external_series_metadata;
+                document.getElementById('comicVineApiKey').value = settingsData.comicvine_api_key || '';
+                document.getElementById('comicVineBaseUrl').value = settingsData.comicvine_base_url || 'https://comicvine.gamespot.com/api';
                 
                 console.log('[SETTINGS] All settings loaded successfully, opening modal');
                 document.getElementById('settingsModal').classList.add('active');
@@ -4097,6 +4350,9 @@
             const logMaxSize = parseFloat(document.getElementById('logMaxSize').value);
             const issueNumberPadding = parseInt(document.getElementById('issueNumberPadding').value);
             const dbCleanupInterval = parseInt(document.getElementById('dbCleanupInterval').value);
+            const enableExternalSeriesMetadata = document.getElementById('enableExternalSeriesMetadata').checked;
+            const comicVineApiKey = document.getElementById('comicVineApiKey').value.trim();
+            const comicVineBaseUrl = document.getElementById('comicVineBaseUrl').value.trim();
             
             if (!format) {
                 showMessage('Filename format cannot be empty', 'error');
@@ -4133,7 +4389,7 @@
                 }
                 const formatResult = await formatResponse.json();
                 
-                if (!formatResult.success) {
+                if (formatResult.success === false) {
                     showMessage(formatResult.error || 'Failed to save filename format', 'error');
                     return;
                 }
@@ -4152,7 +4408,7 @@
                 }
                 const logResult = await logResponse.json();
                 
-                if (!logResult.success) {
+                if (logResult.success === false) {
                     showMessage(logResult.error || 'Failed to save log max size', 'error');
                     return;
                 }
@@ -4171,7 +4427,7 @@
                 }
                 const paddingResult = await paddingResponse.json();
                 
-                if (!paddingResult.success) {
+                if (paddingResult.success === false) {
                     showMessage(paddingResult.error || 'Failed to save issue number padding', 'error');
                     return;
                 }
@@ -4190,12 +4446,35 @@
                 }
                 const cleanupResult = await cleanupResponse.json();
                 
-                if (!cleanupResult.success) {
+                if (cleanupResult.success === false) {
                     showMessage(cleanupResult.error || 'Failed to save database cleanup interval', 'error');
                     return;
                 }
+
+                // Save external series metadata settings
+                const metadataResponse = await fetch(apiUrl('/api/settings/external-series-metadata'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        enabled: enableExternalSeriesMetadata,
+                        comicVineApiKey: comicVineApiKey,
+                        comicVineBaseUrl: comicVineBaseUrl || 'https://comicvine.gamespot.com/api'
+                    })
+                });
+
+                if (!metadataResponse.ok) {
+                    throw new Error(`HTTP error! status: ${metadataResponse.status}`);
+                }
+
+                const metadataResult = await metadataResponse.json();
+                if (metadataResult.success === false) {
+                    showMessage(metadataResult.error || 'Failed to save external metadata settings', 'error');
+                    return;
+                }
                 
-                showMessage('Settings saved successfully! Changes to log rotation and database cleanup will take effect on restart.', 'success');
+                showMessage('Settings saved successfully! Changes to log rotation, external metadata, and database cleanup will take effect on restart.', 'success');
                 closeSettings();
             } catch (error) {
                 showMessage('Failed to save settings: ' + error.message, 'error');
@@ -4467,7 +4746,7 @@
             
             // Clear selected files and refresh file list
             selectedFiles.clear();
-            await loadFiles(1, true);
+            await loadActiveLibraryView(1, true);
         }
         
         // Watcher status management - no polling, using SSE events only

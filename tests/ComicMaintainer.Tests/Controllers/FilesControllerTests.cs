@@ -15,6 +15,7 @@ public class FilesControllerTests
     private readonly Mock<IFileStoreService> _mockFileStore;
     private readonly Mock<IComicProcessorService> _mockProcessor;
     private readonly Mock<IProcessingHistoryService> _mockHistoryService;
+    private readonly Mock<ISeriesLibraryService> _mockSeriesLibrary;
     private readonly Mock<ILogger<FilesController>> _mockLogger;
     private readonly Mock<IOptions<AppSettings>> _mockSettings;
     private readonly FilesController _controller;
@@ -24,6 +25,7 @@ public class FilesControllerTests
         _mockFileStore = new Mock<IFileStoreService>();
         _mockProcessor = new Mock<IComicProcessorService>();
         _mockHistoryService = new Mock<IProcessingHistoryService>();
+        _mockSeriesLibrary = new Mock<ISeriesLibraryService>();
         _mockLogger = new Mock<ILogger<FilesController>>();
         _mockSettings = new Mock<IOptions<AppSettings>>();
         
@@ -34,7 +36,7 @@ public class FilesControllerTests
         };
         _mockSettings.Setup(s => s.Value).Returns(settings);
         
-        _controller = new FilesController(_mockFileStore.Object, _mockProcessor.Object, _mockHistoryService.Object, _mockLogger.Object, _mockSettings.Object);
+        _controller = new FilesController(_mockFileStore.Object, _mockProcessor.Object, _mockHistoryService.Object, _mockSeriesLibrary.Object, _mockLogger.Object, _mockSettings.Object);
     }
 
     [Fact]
@@ -106,6 +108,42 @@ public class FilesControllerTests
         // Assert
         var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
         Assert.Equal(500, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetSeries_ReturnsGroupedSeries()
+    {
+        _mockSeriesLibrary.Setup(service => service.GetSeriesAsync("processed", null, 1, 100, "name", "asc", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesLibraryResult
+            {
+                Series = new List<SeriesLibraryDto>
+                {
+                    new()
+                    {
+                        Id = "batman",
+                        Title = "Batman",
+                        CanonicalTitle = "Batman",
+                        IssueCount = 2,
+                        CoverFilePath = "/test/Batman 001.cbz"
+                    }
+                },
+                Page = 1,
+                TotalPages = 1,
+                TotalSeries = 1
+            });
+        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("unprocessed", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        var result = await _controller.GetSeries(filter: "marked");
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var seriesProperty = okResult.Value?.GetType().GetProperty("series");
+        Assert.NotNull(seriesProperty);
+        var returnedSeries = seriesProperty?.GetValue(okResult.Value) as List<SeriesLibraryDto>;
+        Assert.NotNull(returnedSeries);
+        Assert.Single(returnedSeries);
+        Assert.Equal("Batman", returnedSeries[0].Title);
     }
 
     [Fact]

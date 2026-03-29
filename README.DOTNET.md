@@ -15,6 +15,8 @@ ComicMaintainer is a service that automatically watches a directory for new or c
 - **Web Interface**: Full-featured web UI for managing comics
 - **Batch Processing**: Process multiple files at once
 - **Metadata Management**: View and edit comic metadata
+- **Series Library View**: Browse comics as cover-based series cards and drill into issue lists
+- **External Alias Grouping**: Optionally enrich series grouping with ComicVine aliases so alternate titles collapse into one series
 - **Duplicate Detection**: Automatically identifies and handles duplicate files
 - **RESTful API**: Clean API for integration with other tools
 - **Cross-Platform**: Runs on Windows, Linux, macOS
@@ -185,6 +187,9 @@ Configuration can be set via:
 | WebPort | WEB_PORT | 5000 | Web server port |
 | PUID | PUID | 99 | User ID for file permissions |
 | PGID | PGID | 100 | Group ID for file permissions |
+| EnableExternalSeriesMetadata | ENABLE_EXTERNAL_SERIES_METADATA | false | Enable ComicVine alias lookups for series grouping |
+| ComicVineApiKey | COMICVINE_API_KEY | _(empty)_ | ComicVine API key used for external series alias enrichment |
+| ComicVineBaseUrl | COMICVINE_BASE_URL | https://comicvine.gamespot.com/api | Override the ComicVine API base URL if needed |
 
 ## API Endpoints
 
@@ -197,6 +202,7 @@ For a complete, ready-to-use API collection with all endpoints, see:
 - `GET /api/files/counts` - Get file statistics
 - `GET /api/files/metadata?filePath={path}` - Get file metadata
 - `PUT /api/files/metadata?filePath={path}` - Update file metadata
+- `GET /api/files/series` - Get grouped series cards with issue lists for the library view
 - `POST /api/files/process?filePath={path}` - Process a single file
 - `POST /api/files/process-batch` - Process multiple files
 - `POST /api/files/mark-processed?filePath={path}` - Mark file as processed

@@ -16,6 +16,7 @@ public class FilesController : ControllerBase
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly IProcessingHistoryService _historyService;
+    private readonly ISeriesLibraryService _seriesLibrary;
     private readonly ILogger<FilesController> _logger;
     private readonly AppSettings _settings;
 
@@ -23,12 +24,14 @@ public class FilesController : ControllerBase
         IFileStoreService fileStore,
         IComicProcessorService processor,
         IProcessingHistoryService historyService,
+        ISeriesLibraryService seriesLibrary,
         ILogger<FilesController> logger,
         IOptions<AppSettings> settings)
     {
         _fileStore = fileStore;
         _processor = processor;
         _historyService = historyService;
+        _seriesLibrary = seriesLibrary;
         _logger = logger;
         _settings = settings.Value;
     }
@@ -64,18 +67,7 @@ public class FilesController : ControllerBase
             _logger.LogDebug("GetFiles: Request received - Filter: {Filter}, Search: {Search}, Page: {Page}, PerPage: {PerPage}, Sort: {Sort}, Direction: {Direction}", 
                 LoggingHelper.SanitizeForLog(filter), LoggingHelper.SanitizeForLog(search), page, per_page, LoggingHelper.SanitizeForLog(sort), LoggingHelper.SanitizeForLog(direction));
             
-            // Map filter values from frontend format
-            var mappedFilter = filter switch
-            {
-                "marked" => "processed",
-                "unmarked" => "unprocessed",
-                "duplicates" => "duplicates",
-                "renamed" => "renamed",
-                "normalized" => "normalized",
-                "read" => "read",
-                "unread" => "unread",
-                _ => null
-            };
+            var mappedFilter = MapFilter(filter);
 
             _logger.LogDebug("GetFiles: Mapped filter from '{OriginalFilter}' to '{MappedFilter}'", LoggingHelper.SanitizeForLog(filter), LoggingHelper.SanitizeForLog(mappedFilter));
 
@@ -146,6 +138,38 @@ public class FilesController : ControllerBase
         {
             _logger.LogError(ex, "Error getting files");
             return StatusCode(500, "Error retrieving files");
+        }
+    }
+
+    [HttpGet("series")]
+    public async Task<ActionResult<object>> GetSeries(
+        [FromQuery] string? filter = null,
+        [FromQuery] string? search = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int per_page = 100,
+        [FromQuery] string? sort = "name",
+        [FromQuery] string? direction = "asc",
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var mappedFilter = MapFilter(filter);
+            var result = await _seriesLibrary.GetSeriesAsync(mappedFilter, search, page, per_page, sort, direction, cancellationToken);
+            var allUnmarked = await _fileStore.GetFilteredFilesAsync("unprocessed", cancellationToken);
+
+            return Ok(new
+            {
+                series = result.Series,
+                page = result.Page,
+                total_pages = result.TotalPages,
+                total_series = result.TotalSeries,
+                unmarked_count = allUnmarked.Count()
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting series library");
+            return StatusCode(500, "Error retrieving series library");
         }
     }
 
@@ -754,4 +778,16 @@ public class FilesController : ControllerBase
         public List<string> Files { get; set; } = new();
         public bool Read { get; set; }
     }
+
+    private static string? MapFilter(string? filter) => filter switch
+    {
+        "marked" => "processed",
+        "unmarked" => "unprocessed",
+        "duplicates" => "duplicates",
+        "renamed" => "renamed",
+        "normalized" => "normalized",
+        "read" => "read",
+        "unread" => "unread",
+        _ => null
+    };
 }

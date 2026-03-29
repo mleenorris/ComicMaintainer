@@ -56,4 +56,7 @@ public interface ISettingsService
     /// Update the database cleanup interval setting (in hours, 0 = only on startup)
     /// </summary>
     Task UpdateDatabaseCleanupIntervalHoursAsync(int hours, CancellationToken cancellationToken = default);
+    Task UpdateExternalSeriesMetadataEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
+    Task UpdateComicVineApiKeyAsync(string? apiKey, CancellationToken cancellationToken = default);
+    Task UpdateComicVineBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
 }

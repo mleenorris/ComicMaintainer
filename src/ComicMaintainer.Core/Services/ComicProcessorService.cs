@@ -779,9 +779,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
 
             if (comicInfoEntry != null)
             {
-                using var stream = comicInfoEntry.OpenEntryStream();
-                using var reader = new StreamReader(stream);
-                var xmlContent = reader.ReadToEnd();
+                var xmlContent = ReadComicInfoXml(comicInfoEntry);
                 return Task.FromResult(ParseComicInfoXml(xmlContent));
             }
 
@@ -796,6 +794,37 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         {
             _logger.LogError(ex, "Error reading metadata from {FilePath}", filePath);
             return Task.FromResult<ComicMetadata?>(null);
+        }
+    }
+
+    public Task<SeriesMetadata?> GetSeriesMetadataAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            if (!File.Exists(filePath) || !IsComicArchive(filePath))
+                return Task.FromResult<SeriesMetadata?>(null);
+
+            using var archive = ArchiveFactory.Open(filePath);
+            var comicInfoEntry = archive.Entries.FirstOrDefault(e =>
+                e.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) == true);
+
+            if (comicInfoEntry != null)
+            {
+                var xmlContent = ReadComicInfoXml(comicInfoEntry);
+                return Task.FromResult(ParseSeriesMetadataXml(xmlContent));
+            }
+
+            return Task.FromResult<SeriesMetadata?>(new SeriesMetadata
+            {
+                Series = ExtractSeriesFromFilename(filePath),
+                Issue = ParseIssueNumber(Path.GetFileNameWithoutExtension(filePath)),
+                SeriesGroup = Path.GetFileName(Path.GetDirectoryName(filePath))
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reading series metadata from {FilePath}", filePath);
+            return Task.FromResult<SeriesMetadata?>(null);
         }
     }
 
@@ -1174,6 +1203,40 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             _logger.LogError(ex, "Error parsing ComicInfo.xml");
             return null;
         }
+    }
+
+    private SeriesMetadata? ParseSeriesMetadataXml(string xmlContent)
+    {
+        try
+        {
+            var doc = XDocument.Parse(xmlContent);
+            var root = doc.Root;
+            if (root == null) return null;
+
+            return new SeriesMetadata
+            {
+                Series = root.Element("Series")?.Value,
+                AlternateSeries = root.Element("AlternateSeries")?.Value,
+                SeriesGroup = root.Element("SeriesGroup")?.Value,
+                Title = root.Element("Title")?.Value,
+                Issue = root.Element("Number")?.Value,
+                Volume = root.Element("Volume")?.Value,
+                Publisher = root.Element("Publisher")?.Value,
+                Year = int.TryParse(root.Element("Year")?.Value, out var year) ? year : null
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error parsing series metadata from ComicInfo.xml");
+            return null;
+        }
+    }
+
+    private static string ReadComicInfoXml(IArchiveEntry comicInfoEntry)
+    {
+        using var stream = comicInfoEntry.OpenEntryStream();
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     private static string GenerateComicInfoXml(ComicMetadata metadata)

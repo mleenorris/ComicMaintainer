@@ -55,7 +55,10 @@ public class SettingsController : ControllerBase
             watcher_enable_rename = _appSettings.Value.WatcherEnableRename,
             watcher_enable_normalize = _appSettings.Value.WatcherEnableNormalize,
             log_max_bytes = _appSettings.Value.LogMaxBytes,
-            database_cleanup_interval_hours = _appSettings.Value.DatabaseCleanupIntervalHours
+            database_cleanup_interval_hours = _appSettings.Value.DatabaseCleanupIntervalHours,
+            enable_external_series_metadata = _appSettings.Value.EnableExternalSeriesMetadata,
+            comicvine_api_key = _appSettings.Value.ComicVineApiKey,
+            comicvine_base_url = _appSettings.Value.ComicVineBaseUrl
         };
         
         _logger.LogDebug("Returning settings: FilenameFormat={FilenameFormat}, IssueNumberPadding={IssueNumberPadding}, WatcherEnableRename={WatcherEnableRename}, WatcherEnableNormalize={WatcherEnableNormalize}, LogMaxBytes={LogMaxBytes}, DatabaseCleanupIntervalHours={DatabaseCleanupIntervalHours}",
@@ -252,6 +255,37 @@ public class SettingsController : ControllerBase
     public Task<ActionResult> SetDatabaseCleanupIntervalHours([FromBody] DatabaseCleanupIntervalRequest request, CancellationToken cancellationToken = default)
         => UpdateDatabaseCleanupIntervalHours(request, cancellationToken);
 
+    [HttpPut("external-series-metadata")]
+    public async Task<ActionResult> UpdateExternalSeriesMetadata([FromBody] ExternalSeriesMetadataSettingsRequest request, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _settingsService.UpdateExternalSeriesMetadataEnabledAsync(request.Enabled, cancellationToken);
+            var trimmedApiKey = string.IsNullOrWhiteSpace(request.ComicVineApiKey)
+                ? null
+                : request.ComicVineApiKey.Trim();
+
+            await _settingsService.UpdateComicVineApiKeyAsync(trimmedApiKey, cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(request.ComicVineBaseUrl))
+            {
+                await _settingsService.UpdateComicVineBaseUrlAsync(request.ComicVineBaseUrl.Trim(), cancellationToken);
+            }
+
+            return Ok(new { message = "External series metadata settings updated successfully. Restart required for changes to take effect." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update external series metadata settings");
+            return StatusCode(500, new { error = "Failed to update external series metadata settings" });
+        }
+    }
+
+    [HttpPost("external-series-metadata")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public Task<ActionResult> SetExternalSeriesMetadata([FromBody] ExternalSeriesMetadataSettingsRequest request, CancellationToken cancellationToken = default)
+        => UpdateExternalSeriesMetadata(request, cancellationToken);
+
     [HttpPost("cleanup-database")]
     public async Task<ActionResult> CleanupDatabase(CancellationToken cancellationToken = default)
     {
@@ -375,5 +409,12 @@ public class SettingsController : ControllerBase
     public class DatabaseCleanupIntervalRequest
     {
         public int Hours { get; set; }
+    }
+
+    public class ExternalSeriesMetadataSettingsRequest
+    {
+        public bool Enabled { get; set; }
+        public string? ComicVineApiKey { get; set; }
+        public string? ComicVineBaseUrl { get; set; }
     }
 }

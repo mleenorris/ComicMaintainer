@@ -34,4 +34,8 @@ public class AppSettings
     public bool EnableExternalSeriesMetadata { get; set; }
     public string? ComicVineApiKey { get; set; }
     public string ComicVineBaseUrl { get; set; } = "https://comicvine.gamespot.com/api";
+
+    // MangaDex metadata provider (manga and manhwa)
+    public bool EnableMangaDexMetadata { get; set; }
+    public string MangaDexBaseUrl { get; set; } = "https://api.mangadex.org";
 }

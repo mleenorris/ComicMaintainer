@@ -1324,7 +1324,11 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                 }
             }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
         {
             return false;
         }

@@ -1292,7 +1292,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
     }
 
-    private static bool TargetFileExists(string targetPath, string? sourcePath = null)
+    private bool TargetFileExists(string targetPath, string? sourcePath = null)
     {
         if (File.Exists(targetPath))
         {
@@ -1324,12 +1324,16 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                 }
             }
         }
-        catch (IOException)
+        catch (IOException ex)
         {
+            _logger.LogDebug(ex, "Unable to enumerate directory while checking duplicate target path: {TargetPath}",
+                LoggingHelper.SanitizePathForLog(targetPath));
             return false;
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException ex)
         {
+            _logger.LogDebug(ex, "Access denied while checking duplicate target path: {TargetPath}",
+                LoggingHelper.SanitizePathForLog(targetPath));
             return false;
         }
 

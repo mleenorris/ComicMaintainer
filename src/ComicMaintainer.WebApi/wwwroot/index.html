@@ -33,7 +33,8 @@
     <!-- Version-based cache busting script -->
     <script>
         // Fetch version and update asset URLs to include version parameter for cache busting
-        (async function() {
+        // Store the promise so the main.js loader can await it and always load with the correct version
+        window._versionPromise = (async function() {
             try {
                 const response = await fetch('/api/version');
                 const data = await response.json();
@@ -1030,7 +1031,13 @@
         }
         
         // Dynamically load main.js with version for cache busting
-        (function() {
+        // Await the version promise so APP_VERSION is always set before loading the script
+        (async function() {
+            try {
+                await window._versionPromise;
+            } catch (e) {
+                // Version fetch failed; proceed without version parameter as a fallback
+            }
             const script = document.createElement('script');
             script.src = window.APP_VERSION ? `/js/main.js?v=${window.APP_VERSION}` : '/js/main.js';
             document.body.appendChild(script);

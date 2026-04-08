@@ -28,6 +28,9 @@ public class ComicVineSeriesMetadataServiceTests
             """, Encoding.UTF8, "application/json")
         });
 
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient(handler));
+
         var optionsMonitor = new Mock<IOptionsMonitor<AppSettings>>();
         optionsMonitor.Setup(options => options.CurrentValue).Returns(new AppSettings
         {
@@ -37,7 +40,7 @@ public class ComicVineSeriesMetadataServiceTests
         });
 
         var service = new ComicVineSeriesMetadataService(
-            new HttpClient(handler),
+            httpClientFactory.Object,
             optionsMonitor.Object,
             new MemoryCache(new MemoryCacheOptions()),
             Mock.Of<ILogger<ComicVineSeriesMetadataService>>());

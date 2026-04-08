@@ -127,6 +127,14 @@ builder.Services.Configure<AppSettings>(options =>
     var comicVineBaseUrl = Environment.GetEnvironmentVariable("COMICVINE_BASE_URL");
     if (!string.IsNullOrEmpty(comicVineBaseUrl))
         options.ComicVineBaseUrl = comicVineBaseUrl;
+
+    var enableMangaDexMetadata = Environment.GetEnvironmentVariable("ENABLE_MANGADEX_METADATA");
+    if (!string.IsNullOrEmpty(enableMangaDexMetadata))
+        options.EnableMangaDexMetadata = enableMangaDexMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+    var mangaDexBaseUrl = Environment.GetEnvironmentVariable("MANGADEX_BASE_URL");
+    if (!string.IsNullOrEmpty(mangaDexBaseUrl))
+        options.MangaDexBaseUrl = mangaDexBaseUrl;
 });
 
 // Configure JWT settings
@@ -451,7 +459,17 @@ builder.Services.AddSingleton<IProcessingHistoryService, ProcessingHistoryServic
 builder.Services.AddSingleton<ISettingsService, SettingsService>();
 builder.Services.AddSingleton<IComicReaderService, ComicReaderService>();
 builder.Services.AddSingleton<ISeriesLibraryService, SeriesLibraryService>();
-builder.Services.AddHttpClient<IExternalSeriesMetadataService, ComicVineSeriesMetadataService>();
+builder.Services.AddHttpClient(nameof(ComicVineSeriesMetadataService));
+builder.Services.AddHttpClient(nameof(MangaDexSeriesMetadataService));
+builder.Services.AddSingleton<ComicVineSeriesMetadataService>();
+builder.Services.AddSingleton<MangaDexSeriesMetadataService>();
+builder.Services.AddSingleton<IExternalSeriesMetadataService>(sp =>
+    new CompositeExternalSeriesMetadataService(
+        [
+            sp.GetRequiredService<ComicVineSeriesMetadataService>(),
+            sp.GetRequiredService<MangaDexSeriesMetadataService>()
+        ],
+        sp.GetRequiredService<ILogger<CompositeExternalSeriesMetadataService>>()));
 
 // Reader foundation services
 builder.Services.AddSingleton<IReadingProgressService, ReadingProgressService>();
@@ -782,6 +800,21 @@ static void LoadUserSettings(string configDir, AppSettings options)
             if (!string.IsNullOrWhiteSpace(baseUrl))
             {
                 options.ComicVineBaseUrl = baseUrl;
+            }
+        }
+
+        if (settings.TryGetValue("EnableMangaDexMetadata", out var enableMangaDexMetadata)
+            && (enableMangaDexMetadata.ValueKind == JsonValueKind.True || enableMangaDexMetadata.ValueKind == JsonValueKind.False))
+        {
+            options.EnableMangaDexMetadata = enableMangaDexMetadata.GetBoolean();
+        }
+
+        if (settings.TryGetValue("MangaDexBaseUrl", out var mangaDexBaseUrl) && mangaDexBaseUrl.ValueKind == JsonValueKind.String)
+        {
+            var baseUrl = mangaDexBaseUrl.GetString();
+            if (!string.IsNullOrWhiteSpace(baseUrl))
+            {
+                options.MangaDexBaseUrl = baseUrl;
             }
         }
     }

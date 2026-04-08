@@ -132,7 +132,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                         filename, filename, metadata, metadata, cancellationToken);
                     renameSuccess = true;
                 }
-                else if (File.Exists(newFilePath))
+                else if (TargetFileExists(newFilePath, filePath))
                 {
                     // Target file already exists - treat as duplicate
                     _logger.LogInformation("ProcessFileAsync: Duplicate detected - target file already exists: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));
@@ -164,7 +164,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                         filePath = newFilePath;
                         renameSuccess = true;
                     }
-                    catch (IOException ex) when (File.Exists(newFilePath))
+                    catch (IOException ex) when (TargetFileExists(newFilePath, filePath))
                     {
                         // Target file already exists - treat as duplicate
                         _logger.LogInformation(ex, "ProcessFileAsync: Duplicate detected - target file already exists during move: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));
@@ -544,7 +544,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                         beforeFilename, afterFilename, metadata, metadata, cancellationToken);
                     return true;
                 }
-                catch (IOException ex) when (File.Exists(newFilePath))
+                catch (IOException ex) when (TargetFileExists(newFilePath, filePath))
                 {
                     // Target file already exists - treat as duplicate
                     _logger.LogInformation(ex, "RenameFileAsync: Duplicate detected - target file already exists: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));
@@ -1290,6 +1290,54 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             _logger.LogError(ex, "Error generating filename");
             return originalPath;
         }
+    }
+
+    private bool TargetFileExists(string targetPath, string? sourcePath = null)
+    {
+        if (File.Exists(targetPath))
+        {
+            return true;
+        }
+
+        var directory = Path.GetDirectoryName(targetPath);
+        var targetFileName = Path.GetFileName(targetPath);
+        if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(targetFileName) || !Directory.Exists(directory))
+        {
+            return false;
+        }
+
+        var sourceFullPath = sourcePath == null ? null : Path.GetFullPath(sourcePath);
+
+        try
+        {
+            foreach (var existingPath in Directory.EnumerateFiles(directory))
+            {
+                var existingFullPath = Path.GetFullPath(existingPath);
+                if (sourceFullPath != null && string.Equals(existingFullPath, sourceFullPath, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (string.Equals(Path.GetFileName(existingPath), targetFileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (IOException ex)
+        {
+            _logger.LogDebug(ex, "Unable to enumerate directory while checking duplicate target path: {TargetPath}",
+                LoggingHelper.SanitizePathForLog(targetPath));
+            return false;
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogDebug(ex, "Access denied while checking duplicate target path: {TargetPath}",
+                LoggingHelper.SanitizePathForLog(targetPath));
+            return false;
+        }
+
+        return false;
     }
 
     /// <summary>

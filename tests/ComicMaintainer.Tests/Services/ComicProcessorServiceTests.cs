@@ -230,6 +230,27 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessFileAsync_WithCaseOnlyDuplicate_MarksAsDuplicate()
+    {
+        // Arrange
+        var issue = "1";
+
+        CreateTestComicArchiveWithTargetName("Tower Of God", issue);
+        var filePath = CreateTestComicArchive("Tower of God", issue);
+
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var result = await _service.ProcessFileAsync(filePath);
+
+        // Assert
+        Assert.True(result);
+        _mockFileStore.Verify(f => f.MarkFileRenamedAsync(filePath, false, It.IsAny<CancellationToken>()), Times.Once);
+        _mockFileStore.Verify(f => f.MarkFileDuplicateAsync(filePath, true, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task RenameFileAsync_TargetExists_MarksAsDuplicate()
     {
         // Arrange

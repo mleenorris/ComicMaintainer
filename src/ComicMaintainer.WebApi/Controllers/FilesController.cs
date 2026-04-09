@@ -2,9 +2,12 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using System.Text.RegularExpressions;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
@@ -13,12 +16,15 @@ namespace ComicMaintainer.WebApi.Controllers;
 [Authorize]
 public class FilesController : ControllerBase
 {
+    private static readonly Regex FolderCombineKeySanitizer = new("[^a-z0-9]+", RegexOptions.Compiled);
+
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly IProcessingHistoryService _historyService;
     private readonly ISeriesLibraryService _seriesLibrary;
     private readonly ILogger<FilesController> _logger;
     private readonly AppSettings _settings;
+    private readonly IDbContextFactory<ComicMaintainerDbContext>? _dbContextFactory;
 
     public FilesController(
         IFileStoreService fileStore,
@@ -26,7 +32,8 @@ public class FilesController : ControllerBase
         IProcessingHistoryService historyService,
         ISeriesLibraryService seriesLibrary,
         ILogger<FilesController> logger,
-        IOptions<AppSettings> settings)
+        IOptions<AppSettings> settings,
+        IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null)
     {
         _fileStore = fileStore;
         _processor = processor;
@@ -34,6 +41,7 @@ public class FilesController : ControllerBase
         _seriesLibrary = seriesLibrary;
         _logger = logger;
         _settings = settings.Value;
+        _dbContextFactory = dbContextFactory;
     }
 
     /// <summary>
@@ -179,7 +187,8 @@ public class FilesController : ControllerBase
         try
         {
             var (total, processed, unprocessed, duplicates) = await _fileStore.GetFileCountsAsync();
-            return Ok(new { total, processed, unprocessed, duplicates });
+            var combinableFolders = await GetCombinableFolderCountAsync();
+            return Ok(new { total, processed, unprocessed, duplicates, combinableFolders });
         }
         catch (Exception ex)
         {
@@ -187,6 +196,116 @@ public class FilesController : ControllerBase
             return StatusCode(500, "Error retrieving file counts");
         }
     }
+
+    private async Task<int> GetCombinableFolderCountAsync(CancellationToken cancellationToken = default)
+    {
+        var files = ((await _fileStore.GetAllFilesAsync(cancellationToken)) ?? Enumerable.Empty<ComicFile>())
+            .Where(file => !string.IsNullOrWhiteSpace(file.FilePath))
+            .ToList();
+
+        if (files.Count < 2)
+        {
+            return 0;
+        }
+
+        var addedAtLookup = await GetAddedAtLookupAsync(cancellationToken);
+        var sourceDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var entries = new List<(string GroupKey, string Directory, DateTime AddedAt)>(files.Count);
+
+        foreach (var file in files)
+        {
+            var directory = !string.IsNullOrWhiteSpace(file.Directory)
+                ? file.Directory
+                : Path.GetDirectoryName(file.FilePath);
+
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                continue;
+            }
+
+            var metadata = file.Metadata is null
+                ? await _processor.GetSeriesMetadataAsync(file.FilePath, cancellationToken)
+                : new SeriesMetadata
+                {
+                    Series = file.Metadata.Series,
+                    Volume = file.Metadata.Volume
+                };
+
+            var groupKey = BuildFolderCombineGroupKey(metadata);
+            if (string.IsNullOrWhiteSpace(groupKey))
+            {
+                continue;
+            }
+
+            var addedAt = addedAtLookup.TryGetValue(file.FilePath, out var createdAt)
+                ? createdAt
+                : file.LastModified;
+
+            entries.Add((groupKey, directory, addedAt));
+        }
+
+        foreach (var group in entries.GroupBy(entry => entry.GroupKey, StringComparer.OrdinalIgnoreCase))
+        {
+            var directories = group
+                .GroupBy(entry => entry.Directory, StringComparer.OrdinalIgnoreCase)
+                .Select(directoryGroup => new
+                {
+                    Directory = directoryGroup.Key,
+                    LatestAddedAt = directoryGroup.Max(entry => entry.AddedAt)
+                })
+                .OrderByDescending(entry => entry.LatestAddedAt)
+                .ThenBy(entry => entry.Directory, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (directories.Count < 2)
+            {
+                continue;
+            }
+
+            foreach (var directory in directories.Skip(1))
+            {
+                sourceDirectories.Add(directory.Directory);
+            }
+        }
+
+        return sourceDirectories.Count;
+    }
+
+    private async Task<Dictionary<string, DateTime>> GetAddedAtLookupAsync(CancellationToken cancellationToken)
+    {
+        if (_dbContextFactory is null)
+        {
+            return new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        return await dbContext.ComicFiles
+            .AsNoTracking()
+            .ToDictionaryAsync(file => file.FilePath, file => file.CreatedAt, StringComparer.OrdinalIgnoreCase, cancellationToken);
+    }
+
+    private static string? BuildFolderCombineGroupKey(SeriesMetadata? metadata)
+    {
+        var seriesName = FirstNonEmpty(metadata?.SeriesGroup, metadata?.AlternateSeries, metadata?.Series);
+        if (string.IsNullOrWhiteSpace(seriesName))
+        {
+            return null;
+        }
+
+        var normalizedSeries = FolderCombineKeySanitizer.Replace(seriesName.Trim().ToLowerInvariant(), "-").Trim('-');
+        if (string.IsNullOrWhiteSpace(normalizedSeries))
+        {
+            return null;
+        }
+
+        var volume = metadata?.Volume?.Trim();
+        return string.IsNullOrWhiteSpace(volume)
+            ? normalizedSeries
+            : $"{normalizedSeries}|{volume.ToLowerInvariant()}";
+    }
+
+    private static string? FirstNonEmpty(params string?[] values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 
     [HttpGet("metadata")]
     public async Task<ActionResult<ComicMetadata>> GetMetadata([FromQuery] string filePath)

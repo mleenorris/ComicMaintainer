@@ -663,13 +663,15 @@
                 const processed = stats.processed || 0;
                 const unprocessed = stats.unprocessed || 0;
                 const duplicates = stats.duplicates || 0;
+                const combinableFolders = stats.combinableFolders || 0;
                 document.getElementById('libraryHealthProcessed').textContent = processed.toLocaleString();
                 document.getElementById('libraryHealthUnprocessed').textContent = unprocessed.toLocaleString();
                 document.getElementById('libraryHealthDuplicates').textContent = duplicates.toLocaleString();
+                document.getElementById('libraryHealthCombinableFolders').textContent = combinableFolders.toLocaleString();
 
                 if (summary) {
                     summary.textContent = total > 0
-                        ? `${processed.toLocaleString()} processed, ${unprocessed.toLocaleString()} still need attention, and ${duplicates.toLocaleString()} duplicate${duplicates === 1 ? '' : 's'} ready for review.`
+                        ? `${processed.toLocaleString()} processed, ${unprocessed.toLocaleString()} still need attention, ${duplicates.toLocaleString()} duplicate${duplicates === 1 ? '' : 's'} ready for review, and ${combinableFolders.toLocaleString()} folder${combinableFolders === 1 ? '' : 's'} that could be combined by metadata.`
                         : 'No files have been indexed yet.';
                 }
 

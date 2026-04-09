@@ -1,11 +1,15 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Data;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using System.Reflection;
 using System.Text.Json;
 
 namespace ComicMaintainer.Tests.Controllers;
@@ -152,6 +156,8 @@ public class FilesControllerTests
         // Arrange
         _mockFileStore.Setup(fs => fs.GetFileCountsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((100, 60, 40, 5));
+        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
 
         // Act
         var result = await _controller.GetFileCounts();
@@ -159,6 +165,8 @@ public class FilesControllerTests
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.NotNull(okResult.Value);
+        var combinableFolders = okResult.Value?.GetType().GetProperty("combinableFolders")?.GetValue(okResult.Value);
+        Assert.Equal(0, Assert.IsType<int>(combinableFolders));
     }
 
     [Fact]
@@ -174,6 +182,76 @@ public class FilesControllerTests
         // Assert
         var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
         Assert.Equal(500, statusCodeResult.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetFileCounts_WithMatchingMetadataAcrossFolders_ReturnsCombinableFolderCount()
+    {
+        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        await using (var dbContext = new ComicMaintainerDbContext(options))
+        {
+            dbContext.ComicFiles.AddRange(
+                new ComicFileEntity
+                {
+                    FilePath = "/library/older/Batman-001.cbz",
+                    FileName = "Batman-001.cbz",
+                    Directory = "/library/older",
+                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new ComicFileEntity
+                {
+                    FilePath = "/library/newer/Batman-002.cbz",
+                    FileName = "Batman-002.cbz",
+                    Directory = "/library/newer",
+                    CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc)
+                });
+
+            await dbContext.SaveChangesAsync();
+        }
+
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/older/Batman-001.cbz",
+                Directory = "/library/older",
+                LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
+            },
+            new()
+            {
+                FilePath = "/library/newer/Batman-002.cbz",
+                Directory = "/library/newer",
+                LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc)
+            }
+        };
+
+        _mockFileStore.Setup(fs => fs.GetFileCountsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((2, 2, 0, 0));
+        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+        _mockProcessor.Setup(p => p.GetSeriesMetadataAsync("/library/older/Batman-001.cbz", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadata { Series = "Batman" });
+        _mockProcessor.Setup(p => p.GetSeriesMetadataAsync("/library/newer/Batman-002.cbz", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadata { Series = "Batman" });
+
+        var controller = new FilesController(
+            _mockFileStore.Object,
+            _mockProcessor.Object,
+            _mockHistoryService.Object,
+            _mockSeriesLibrary.Object,
+            _mockLogger.Object,
+            _mockSettings.Object,
+            new TestDbContextFactory(options));
+
+        var result = await controller.GetFileCounts();
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var combinableFolders = okResult.Value?.GetType().GetProperty("combinableFolders", BindingFlags.Public | BindingFlags.Instance)?.GetValue(okResult.Value);
+        Assert.Equal(1, Assert.IsType<int>(combinableFolders));
     }
 
     [Fact]
@@ -818,4 +896,20 @@ public class FilesControllerTests
 
     // UpdateProcessedStatus tests removed - processed state is now computed from renamed && normalized
     // Processed status cannot be set directly anymore
+}
+
+internal sealed class TestDbContextFactory : IDbContextFactory<ComicMaintainerDbContext>
+{
+    private readonly DbContextOptions<ComicMaintainerDbContext> _options;
+
+    public TestDbContextFactory(DbContextOptions<ComicMaintainerDbContext> options)
+    {
+        _options = options;
+    }
+
+    public ComicMaintainerDbContext CreateDbContext()
+        => new(_options);
+
+    public Task<ComicMaintainerDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
+        => Task.FromResult(CreateDbContext());
 }

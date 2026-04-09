@@ -19,6 +19,7 @@ namespace ComicMaintainer.Core.Services;
 /// </summary>
 public class ComicProcessorService : IComicProcessorService, IDisposable
 {
+    private const string UnknownSeries = "Unknown Series";
     private readonly AppSettings _settings;
     private readonly ILogger<ComicProcessorService> _logger;
     private readonly IFileStoreService _fileStore;
@@ -1192,12 +1193,12 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
         if (string.IsNullOrEmpty(folderName))
         {
-            return "Unknown Series";
+            return UnknownSeries;
         }
         
         // Apply the same normalization as ComicFileProcessor to convert underscores to colons
         var series = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
-        return string.IsNullOrEmpty(series) ? "Unknown Series" : series;
+        return string.IsNullOrEmpty(series) ? UnknownSeries : series;
     }
 
     private ComicMetadata? ParseComicInfoXml(string xmlContent)
@@ -1454,7 +1455,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             }
         }
 
-        return candidateSeries.FirstOrDefault() ?? "Unknown Series";
+        return candidateSeries.FirstOrDefault() ?? UnknownSeries;
     }
 
     private async Task<ExternalSeriesMetadata?> LookupExternalSeriesMetadataAsync(string seriesName, CancellationToken cancellationToken)

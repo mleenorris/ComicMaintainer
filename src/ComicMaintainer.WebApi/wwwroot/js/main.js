@@ -1184,7 +1184,7 @@
         }
 
         async function setLibraryViewMode(mode) {
-            if (isMobileLibraryViewport()) {
+            if (isMobileLibraryViewport() && currentMobileLibraryView !== 'files') {
                 setMobileLibraryView('files');
             }
 
@@ -1201,7 +1201,7 @@
         }
 
         function promptForForceReprocess(actionDescription, statusDescription) {
-            return confirm(`${actionDescription}\n\nClick OK to force files already marked as ${statusDescription}. Click Cancel to skip files already marked as ${statusDescription}.`);
+            return confirm(`${actionDescription}\n\nClick OK to include files already marked as ${statusDescription}, or Cancel to skip them.`);
         }
 
         async function loadSeriesLibrary(page = 1, refresh = false) {

@@ -13,9 +13,19 @@ public interface IComicProcessorService
     Task<bool> ProcessFileAsync(string filePath, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Process a single comic file, optionally forcing reprocessing even when already marked complete.
+    /// </summary>
+    Task<bool> ProcessFileAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Process multiple comic files as a batch job
     /// </summary>
     Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Process multiple comic files as a batch job, optionally forcing reprocessing.
+    /// </summary>
+    Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, bool forceReprocess, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get job status
@@ -48,9 +58,19 @@ public interface IComicProcessorService
     Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Rename multiple comic files as a batch job, optionally forcing already renamed files to be evaluated again.
+    /// </summary>
+    Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, bool forceReprocess, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Normalize metadata for multiple comic files as a batch job
     /// </summary>
     Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Normalize multiple comic files as a batch job, optionally forcing already normalized files to be updated again.
+    /// </summary>
+    Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, bool forceReprocess, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Update metadata for multiple comic files as a batch job

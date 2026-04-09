@@ -527,7 +527,7 @@ public class FilesController : ControllerBase
 
     // RESTful endpoint: POST /api/files/{encodedFilePath}/process
     [HttpPost("{encodedFilePath}/process")]
-    public async Task<ActionResult> ProcessFileByEncodedPath(string encodedFilePath)
+    public async Task<ActionResult> ProcessFileByEncodedPath(string encodedFilePath, [FromQuery] bool forceReprocess = false)
     {
         try
         {
@@ -535,7 +535,7 @@ public class FilesController : ControllerBase
             if (string.IsNullOrEmpty(filePath))
                 return BadRequest("Invalid file path");
 
-            var success = await _processor.ProcessFileAsync(filePath);
+            var success = await _processor.ProcessFileAsync(filePath, forceReprocess);
             return success ? Ok() : BadRequest("Failed to process file");
         }
         catch (Exception ex)
@@ -549,7 +549,7 @@ public class FilesController : ControllerBase
     // Legacy endpoint for backward compatibility
     [HttpPost("~/api/process-file")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public async Task<ActionResult> ProcessSingleFile([FromQuery] string filePath)
+    public async Task<ActionResult> ProcessSingleFile([FromQuery] string filePath, [FromQuery] bool forceReprocess = false)
     {
         try
         {
@@ -560,7 +560,7 @@ public class FilesController : ControllerBase
                 return BadRequest("File path is outside the allowed directory");
             }
 
-            var success = await _processor.ProcessFileAsync(filePath);
+            var success = await _processor.ProcessFileAsync(filePath, forceReprocess);
             return success ? Ok() : BadRequest("Failed to process file");
         }
         catch (Exception ex)
@@ -573,7 +573,7 @@ public class FilesController : ControllerBase
 
     // RESTful endpoint: POST /api/files/{encodedFilePath}/rename
     [HttpPost("{encodedFilePath}/rename")]
-    public async Task<ActionResult> RenameFileByEncodedPath(string encodedFilePath, CancellationToken cancellationToken = default)
+    public async Task<ActionResult> RenameFileByEncodedPath(string encodedFilePath, [FromQuery] bool forceReprocess = false, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -588,7 +588,7 @@ public class FilesController : ControllerBase
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename requested for file: {FilePath}"), sanitizedPath);
             
             // Use the batch rename method with a single file
-            var jobId = await _processor.RenameFilesAsync(new[] { filePath }, cancellationToken);
+            var jobId = await _processor.RenameFilesAsync(new[] { filePath }, forceReprocess, cancellationToken);
             
             return Ok(new { message = "Rename job started", jobId });
         }
@@ -603,7 +603,7 @@ public class FilesController : ControllerBase
     // Legacy endpoint for backward compatibility
     [HttpPost("~/api/rename-file")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    public async Task<ActionResult> RenameSingleFile([FromQuery] string filePath, CancellationToken cancellationToken = default)
+    public async Task<ActionResult> RenameSingleFile([FromQuery] string filePath, [FromQuery] bool forceReprocess = false, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -614,7 +614,7 @@ public class FilesController : ControllerBase
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename requested for file: {FilePath}"), sanitizedPath);
             
             // Use the batch rename method with a single file
-            var jobId = await _processor.RenameFilesAsync(new[] { filePath }, cancellationToken);
+            var jobId = await _processor.RenameFilesAsync(new[] { filePath }, forceReprocess, cancellationToken);
             
             return Ok(new { jobId });
         }

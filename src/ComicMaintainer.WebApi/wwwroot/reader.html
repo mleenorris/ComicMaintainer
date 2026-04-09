@@ -19,7 +19,7 @@
         // Fetch version and update CSS URL to include version parameter for cache busting
         (async function() {
             try {
-                const response = await fetch('/api/version');
+                const response = await fetch('/api/version', { cache: 'no-store' });
                 const data = await response.json();
                 const version = data.version;
                 

@@ -204,7 +204,6 @@ public class SeriesLibraryService : ISeriesLibraryService
                 metadata.SeriesGroup,
                 metadata.Series,
                 metadata.AlternateSeries,
-                Path.GetFileName(Path.GetDirectoryName(file.FilePath) ?? string.Empty),
                 Path.GetFileNameWithoutExtension(file.FileName))
             ?? "Unknown Series";
     }

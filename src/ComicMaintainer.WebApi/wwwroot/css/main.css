@@ -897,33 +897,70 @@
             border-bottom: 1px solid var(--border-primary);
         }
 
+        .series-detail-summary {
+            display: flex;
+            gap: 18px;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .series-detail-cover {
+            width: 180px;
+            max-width: 100%;
+            aspect-ratio: 2 / 3;
+            object-fit: cover;
+            border-radius: 12px;
+            background: var(--bg-hover);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .series-detail-summary-body {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 0;
+            flex: 1;
+        }
+
         .series-detail-back {
             align-self: flex-start;
         }
 
         .series-issues-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-            gap: 16px;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 18px;
         }
 
         .series-issue-card {
             display: flex;
-            gap: 12px;
-            align-items: flex-start;
+            flex-direction: column;
             border: 1px solid var(--border-primary);
-            border-radius: 10px;
-            padding: 12px;
+            border-radius: 12px;
             background: var(--bg-secondary);
+            overflow: hidden;
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
 
-        .series-issue-thumb {
-            width: 72px;
+        .series-issue-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .series-issue-cover-button {
+            border: 0;
+            padding: 0;
+            background: none;
+            cursor: pointer;
+            display: block;
+        }
+
+        .series-issue-cover {
+            width: 100%;
             aspect-ratio: 2 / 3;
             object-fit: cover;
-            border-radius: 8px;
             background: var(--bg-hover);
-            flex-shrink: 0;
         }
 
         .series-issue-body {
@@ -931,6 +968,7 @@
             flex-direction: column;
             gap: 6px;
             min-width: 0;
+            padding: 12px;
         }
 
         .series-issue-title {

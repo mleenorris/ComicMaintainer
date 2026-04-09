@@ -1638,7 +1638,7 @@
                                     <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy">
                                 </button>
                                 <div class="series-issue-body">
-                                    <h3 class="series-issue-title">${escapeHtml(issue.title || `Issue ${issue.issue || 'Unknown'}`)}</h3>
+                                    <h3 class="series-issue-title">${escapeHtml(issue.title || issue.file_name)}</h3>
                                     <p class="series-issue-subtitle">Issue ${escapeHtml(issue.issue || 'Unknown')}${issue.year ? ` · ${issue.year}` : ''}</p>
                                     ${issue.volume ? `<p class="series-issue-subtitle">Volume ${escapeHtml(issue.volume)}</p>` : ''}
                                     <div class="series-detail-meta">${escapeHtml(issue.file_name)}</div>

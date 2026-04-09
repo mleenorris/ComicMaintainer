@@ -199,6 +199,8 @@ public class SeriesLibraryService : ISeriesLibraryService
 
     private static string ResolveGroupingTitle(SeriesMetadata metadata, ComicFile file)
     {
+        // Prefer the folder-derived title so the series library groups into one card per on-disk series,
+        // matching the library-first browsing model users expect from tools like Kavita.
         return FirstNonEmpty(
                 ResolveFolderTitle(file),
                 metadata.SeriesGroup,

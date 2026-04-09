@@ -193,7 +193,7 @@ public class FilesController : ControllerBase
             {
                 combinableFolders = await GetCombinableFolderCountAsync();
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException)
             {
                 _logger.LogWarning(ex, "Error getting combinable folder count");
             }

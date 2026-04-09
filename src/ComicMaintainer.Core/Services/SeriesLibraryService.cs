@@ -39,17 +39,23 @@ public class SeriesLibraryService : ISeriesLibraryService
         CancellationToken cancellationToken = default)
     {
         var files = (await _fileStore.GetFilteredFilesAsync(filter, cancellationToken)).ToList();
-        var fileEntries = new List<(ComicFile File, SeriesMetadata Metadata, string GroupingTitle, List<string> MetadataAliases)>(files.Count);
+        var fileEntries = new List<(ComicFile File, SeriesMetadata Metadata, string GroupingTitle, List<string> MetadataAliases, List<string> ExternalLookupTitles)>(files.Count);
 
         foreach (var file in files)
         {
             var metadata = await _processor.GetSeriesMetadataAsync(file.FilePath, cancellationToken) ?? new SeriesMetadata();
             var groupingTitle = ResolveGroupingTitle(metadata, file);
             var metadataAliases = ResolveMetadataAliases(metadata, groupingTitle);
-            fileEntries.Add((file, metadata, groupingTitle, metadataAliases));
+            var externalLookupTitles = new[] { groupingTitle }
+                .Concat(metadataAliases)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            fileEntries.Add((file, metadata, groupingTitle, metadataAliases, externalLookupTitles));
         }
 
-        var externalLookupMap = await BuildExternalLookupMapAsync(fileEntries.Select(entry => entry.GroupingTitle), cancellationToken);
+        var externalLookupMap = await BuildExternalLookupMapAsync(
+            fileEntries.SelectMany(entry => entry.ExternalLookupTitles),
+            cancellationToken);
         var groups = new Dictionary<string, SeriesAccumulator>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in fileEntries)
@@ -57,7 +63,7 @@ public class SeriesLibraryService : ISeriesLibraryService
             var file = entry.File;
             var metadata = entry.Metadata;
             var groupingTitle = entry.GroupingTitle;
-            externalLookupMap.TryGetValue(groupingTitle, out var externalMetadata);
+            var externalMetadata = ResolveExternalMetadata(entry.ExternalLookupTitles, externalLookupMap);
 
             var canonicalTitle = string.IsNullOrWhiteSpace(externalMetadata?.CanonicalTitle)
                 ? groupingTitle
@@ -277,6 +283,21 @@ public class SeriesLibraryService : ISeriesLibraryService
 
         await Task.WhenAll(tasks);
         return new Dictionary<string, ExternalSeriesMetadata?>(lookupResults, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static ExternalSeriesMetadata? ResolveExternalMetadata(
+        IEnumerable<string> lookupTitles,
+        IReadOnlyDictionary<string, ExternalSeriesMetadata?> externalLookupMap)
+    {
+        foreach (var title in lookupTitles)
+        {
+            if (externalLookupMap.TryGetValue(title, out var externalMetadata) && externalMetadata is not null)
+            {
+                return externalMetadata;
+            }
+        }
+
+        return null;
     }
 
     private sealed class SeriesAccumulator

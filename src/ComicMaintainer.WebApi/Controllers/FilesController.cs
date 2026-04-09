@@ -281,9 +281,18 @@ public class FilesController : ControllerBase
         }
 
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        return await dbContext.ComicFiles
+        var addedAtEntries = await dbContext.ComicFiles
             .AsNoTracking()
-            .ToDictionaryAsync(file => file.FilePath, file => file.CreatedAt, StringComparer.OrdinalIgnoreCase, cancellationToken);
+            .Select(file => new { file.FilePath, file.CreatedAt })
+            .ToListAsync(cancellationToken);
+
+        return addedAtEntries
+            .Where(file => !string.IsNullOrWhiteSpace(file.FilePath))
+            .GroupBy(file => file.FilePath, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Max(file => file.CreatedAt),
+                StringComparer.OrdinalIgnoreCase);
     }
 
     private static string? BuildFolderCombineGroupKey(ComicFile file)

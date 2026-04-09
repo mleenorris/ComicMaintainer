@@ -255,6 +255,83 @@ public class FilesControllerTests
     }
 
     [Fact]
+    public async Task GetFileCounts_WithDuplicateDatabaseFilePaths_UsesLatestCreatedAtWithoutThrowing()
+    {
+        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        await using (var dbContext = new ComicMaintainerDbContext(options))
+        {
+            dbContext.ComicFiles.AddRange(
+                new ComicFileEntity
+                {
+                    FilePath = "/library/older/Batman-001.cbz",
+                    FileName = "Batman-001.cbz",
+                    Directory = "/library/older",
+                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new ComicFileEntity
+                {
+                    FilePath = "/library/older/Batman-001.cbz",
+                    FileName = "Batman-001.cbz",
+                    Directory = "/library/older",
+                    CreatedAt = new DateTime(2026, 4, 3, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new ComicFileEntity
+                {
+                    FilePath = "/library/newer/Batman-002.cbz",
+                    FileName = "Batman-002.cbz",
+                    Directory = "/library/newer",
+                    CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc)
+                });
+
+            await dbContext.SaveChangesAsync();
+        }
+
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/older/Batman-001.cbz",
+                FileName = "Batman-001.cbz",
+                Directory = "/library/older",
+                LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Batman" }
+            },
+            new()
+            {
+                FilePath = "/library/newer/Batman-002.cbz",
+                FileName = "Batman-002.cbz",
+                Directory = "/library/newer",
+                LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Batman" }
+            }
+        };
+
+        _mockFileStore.Setup(fs => fs.GetFileCountsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((2, 2, 0, 0));
+        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var controller = new FilesController(
+            _mockFileStore.Object,
+            _mockProcessor.Object,
+            _mockHistoryService.Object,
+            _mockSeriesLibrary.Object,
+            _mockLogger.Object,
+            _mockSettings.Object,
+            new TestDbContextFactory(options));
+
+        var result = await controller.GetFileCounts();
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var combinableFolders = okResult.Value?.GetType().GetProperty("combinableFolders", BindingFlags.Public | BindingFlags.Instance)?.GetValue(okResult.Value);
+        Assert.Equal(1, Assert.IsType<int>(combinableFolders));
+    }
+
+    [Fact]
     public async Task GetMetadata_WithValidPath_ReturnsOkWithMetadata()
     {
         // Arrange

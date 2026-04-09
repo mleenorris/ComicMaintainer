@@ -9,7 +9,6 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
-using System.Reflection;
 using System.Text.Json;
 
 namespace ComicMaintainer.Tests.Controllers;
@@ -165,8 +164,7 @@ public class FilesControllerTests
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.NotNull(okResult.Value);
-        var combinableFolders = okResult.Value?.GetType().GetProperty("combinableFolders")?.GetValue(okResult.Value);
-        Assert.Equal(0, Assert.IsType<int>(combinableFolders));
+        Assert.Equal(0, GetIntProperty(okResult.Value, "combinableFolders"));
     }
 
     [Fact]
@@ -250,8 +248,7 @@ public class FilesControllerTests
 
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.NotNull(okResult.Value);
-        var combinableFolders = okResult.Value?.GetType().GetProperty("combinableFolders", BindingFlags.Public | BindingFlags.Instance)?.GetValue(okResult.Value);
-        Assert.Equal(1, Assert.IsType<int>(combinableFolders));
+        Assert.Equal(1, GetIntProperty(okResult.Value, "combinableFolders"));
     }
 
     [Fact]
@@ -327,8 +324,7 @@ public class FilesControllerTests
 
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.NotNull(okResult.Value);
-        var combinableFolders = okResult.Value?.GetType().GetProperty("combinableFolders", BindingFlags.Public | BindingFlags.Instance)?.GetValue(okResult.Value);
-        Assert.Equal(1, Assert.IsType<int>(combinableFolders));
+        Assert.Equal(1, GetIntProperty(okResult.Value, "combinableFolders"));
     }
 
     [Fact]
@@ -347,6 +343,14 @@ public class FilesControllerTests
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
         var returnedMetadata = Assert.IsType<ComicMetadata>(okResult.Value);
         Assert.Equal("Batman", returnedMetadata.Series);
+    }
+
+    private static int GetIntProperty(object? value, string propertyName)
+    {
+        Assert.NotNull(value);
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(value));
+        return document.RootElement.GetProperty(propertyName).GetInt32();
     }
 
     [Fact]

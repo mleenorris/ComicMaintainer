@@ -17,6 +17,9 @@ namespace ComicMaintainer.WebApi.Controllers;
 public class FilesController : ControllerBase
 {
     private static readonly Regex FolderCombineKeySanitizer = new("[^a-z0-9]+", RegexOptions.Compiled);
+    private static readonly Regex FileNameSeriesSuffixSanitizer = new(
+        @"\s*(?:-|_)?\s*(?:ch|chapter|issue|#)?\s*\d+(?:\.\d+)?[a-z]?\s*$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
@@ -332,11 +335,7 @@ public class FilesController : ControllerBase
             return null;
         }
 
-        var candidate = Regex.Replace(
-            name,
-            @"\s*(?:-|_)?\s*(?:ch|chapter|issue|#)?\s*\d+(?:\.\d+)?[a-z]?\s*$",
-            string.Empty,
-            RegexOptions.IgnoreCase)
+        var candidate = FileNameSeriesSuffixSanitizer.Replace(name, string.Empty)
             .Trim(' ', '-', '_', '.', '#');
 
         return string.IsNullOrWhiteSpace(candidate)

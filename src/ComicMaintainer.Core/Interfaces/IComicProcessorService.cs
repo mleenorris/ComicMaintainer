@@ -10,12 +10,12 @@ public interface IComicProcessorService
     /// <summary>
     /// Process a single comic file
     /// </summary>
-    Task<bool> ProcessFileAsync(string filePath, CancellationToken cancellationToken = default);
+    Task<bool> ProcessFileAsync(string filePath, CancellationToken cancellationToken = default, bool forceReprocess = false);
 
     /// <summary>
     /// Process multiple comic files as a batch job
     /// </summary>
-    Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+    Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default, bool forceReprocess = false);
 
     /// <summary>
     /// Get job status
@@ -45,12 +45,12 @@ public interface IComicProcessorService
     /// <summary>
     /// Rename multiple comic files based on metadata as a batch job
     /// </summary>
-    Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+    Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default, bool forceReprocess = false);
 
     /// <summary>
     /// Normalize metadata for multiple comic files as a batch job
     /// </summary>
-    Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+    Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default, bool forceReprocess = false);
 
     /// <summary>
     /// Update metadata for multiple comic files as a batch job

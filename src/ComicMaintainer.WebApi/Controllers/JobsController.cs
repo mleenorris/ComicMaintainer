@@ -117,7 +117,7 @@ public class JobsController : ControllerBase
     }
 
     [HttpPost("process-all")]
-    public async Task<ActionResult<object>> ProcessAll()
+    public async Task<ActionResult<object>> ProcessAll([FromQuery] bool forceReprocess = false)
     {
         try
         {
@@ -136,7 +136,7 @@ public class JobsController : ControllerBase
             }
             
             // Start the process job
-            var jobId = await _processor.ProcessFilesAsync(filePaths);
+            var jobId = await _processor.ProcessFilesAsync(filePaths, forceReprocess: forceReprocess);
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("ProcessAll: Process all files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, filePaths.Count);
             _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessAll: Job created successfully with ID: {JobId}"), jobId);
             
@@ -150,7 +150,7 @@ public class JobsController : ControllerBase
     }
 
     [HttpPost("rename-all")]
-    public async Task<ActionResult<object>> RenameAll()
+    public async Task<ActionResult<object>> RenameAll([FromQuery] bool forceReprocess = false)
     {
         try
         {
@@ -169,7 +169,7 @@ public class JobsController : ControllerBase
             }
             
             // Start the rename job
-            var jobId = await _processor.RenameFilesAsync(filePaths);
+            var jobId = await _processor.RenameFilesAsync(filePaths, forceReprocess: forceReprocess);
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("RenameAll: Rename all files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, filePaths.Count);
             _logger.LogDebug(LoggingHelper.WithWebsitePrefix("RenameAll: Job created successfully with ID: {JobId}"), jobId);
             
@@ -183,7 +183,7 @@ public class JobsController : ControllerBase
     }
 
     [HttpPost("normalize-all")]
-    public async Task<ActionResult<object>> NormalizeAll()
+    public async Task<ActionResult<object>> NormalizeAll([FromQuery] bool forceReprocess = false)
     {
         try
         {
@@ -202,7 +202,7 @@ public class JobsController : ControllerBase
             }
             
             // Start the normalize job
-            var jobId = await _processor.NormalizeFilesAsync(filePaths);
+            var jobId = await _processor.NormalizeFilesAsync(filePaths, forceReprocess: forceReprocess);
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("NormalizeAll: Normalize all files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, filePaths.Count);
             _logger.LogDebug(LoggingHelper.WithWebsitePrefix("NormalizeAll: Job created successfully with ID: {JobId}"), jobId);
             
@@ -230,7 +230,7 @@ public class JobsController : ControllerBase
             
             _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessSelected: Processing {SelectedCount} selected files"), request.Files.Count);
             
-            var jobId = await _processor.ProcessFilesAsync(request.Files);
+            var jobId = await _processor.ProcessFilesAsync(request.Files, forceReprocess: request.ForceReprocess);
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("ProcessSelected: Process selected files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, request.Files.Count);
             _logger.LogDebug(LoggingHelper.WithWebsitePrefix("ProcessSelected: Job created successfully with ID: {JobId}"), jobId);
             
@@ -333,7 +333,7 @@ public class JobsController : ControllerBase
                 return BadRequest(new { error = "No files specified" });
             }
             
-            var jobId = await _processor.RenameFilesAsync(request.Files);
+            var jobId = await _processor.RenameFilesAsync(request.Files, forceReprocess: request.ForceReprocess);
             _logger.LogInformation("Rename selected files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, request.Files.Count);
             
             return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
@@ -355,7 +355,7 @@ public class JobsController : ControllerBase
                 return BadRequest(new { error = "No files specified" });
             }
             
-            var jobId = await _processor.NormalizeFilesAsync(request.Files);
+            var jobId = await _processor.NormalizeFilesAsync(request.Files, forceReprocess: request.ForceReprocess);
             _logger.LogInformation("Normalize selected files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, request.Files.Count);
             
             return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
@@ -492,6 +492,7 @@ public class JobsController : ControllerBase
     public class ProcessSelectedRequest
     {
         public List<string> Files { get; set; } = new();
+        public bool ForceReprocess { get; set; }
     }
 
     public class UpdateMetadataSelectedRequest

@@ -1184,6 +1184,10 @@
         }
 
         async function setLibraryViewMode(mode) {
+            if (isMobileLibraryViewport()) {
+                setMobileLibraryView('files');
+            }
+
             if (libraryViewMode === mode && !(mode === 'series' && currentSeriesDetailId)) {
                 return;
             }
@@ -1194,6 +1198,10 @@
             updateLibraryViewLayout();
             await setPreferences({ libraryViewMode: mode });
             await loadActiveLibraryView(1, true);
+        }
+
+        function promptForForceReprocess(actionDescription, statusDescription) {
+            return confirm(`${actionDescription}\n\nClick OK to force files already marked as ${statusDescription}. Click Cancel to skip files already marked as ${statusDescription}.`);
         }
 
         async function loadSeriesLibrary(page = 1, refresh = false) {
@@ -2529,13 +2537,17 @@
             if (!confirm('This will process all files in the watched directory. Continue?')) {
                 return;
             }
+
+            const forceReprocess = promptForForceReprocess(
+                'This will process all files in the watched directory.',
+                'processed');
             
             showProgressModal('Starting processing...');
             
             try {
                 console.log('[BATCH] Starting process all files request...');
                 // Start the job
-                const response = await fetch(apiUrl('/api/jobs/process-all'), {
+                const response = await fetch(apiUrl(`/api/jobs/process-all?forceReprocess=${forceReprocess}`), {
                     method: 'POST',
                     headers: getAuthHeaders()
                 });
@@ -2570,13 +2582,17 @@
             if (!confirm('This will process all files in the watched directory asynchronously. Continue?')) {
                 return;
             }
+
+            const forceReprocess = promptForForceReprocess(
+                'This will process all files in the watched directory asynchronously.',
+                'processed');
             
             showProgressModal('Starting async processing...');
             
             try {
                 console.log('[BATCH] Starting process all files request...');
                 // Start the job
-                const response = await fetch(apiUrl('/api/jobs/process-all'), {
+                const response = await fetch(apiUrl(`/api/jobs/process-all?forceReprocess=${forceReprocess}`), {
                     method: 'POST',
                     headers: getAuthHeaders()
                 });
@@ -2617,6 +2633,10 @@
                 return;
             }
             
+            const forceReprocess = promptForForceReprocess(
+                `This will process ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''}.`,
+                'processed');
+
             showProgressModal('Starting async processing...');
             
             const files = Array.from(selectedFiles);
@@ -2631,7 +2651,8 @@
                         ...getAuthHeaders()
                     },
                     body: JSON.stringify({
-                        Files: files
+                        Files: files,
+                        ForceReprocess: forceReprocess
                     })
                 });
                 
@@ -2887,13 +2908,17 @@
             if (!confirm('This will rename all files in the watched directory based on metadata. Continue?')) {
                 return;
             }
+
+            const forceReprocess = promptForForceReprocess(
+                'This will rename all files in the watched directory based on metadata.',
+                'renamed');
             
             showProgressModal('Starting rename...');
             
             try {
                 console.log('[BATCH] Starting rename all files request...');
                 // Start the job
-                const response = await fetch(apiUrl('/api/jobs/rename-all'), {
+                const response = await fetch(apiUrl(`/api/jobs/rename-all?forceReprocess=${forceReprocess}`), {
                     method: 'POST',
                     headers: getAuthHeaders()
                 });
@@ -2928,13 +2953,17 @@
             if (!confirm('This will normalize metadata for all files in the watched directory. Continue?')) {
                 return;
             }
+
+            const forceReprocess = promptForForceReprocess(
+                'This will normalize metadata for all files in the watched directory.',
+                'normalized');
             
             showProgressModal('Starting normalize...');
             
             try {
                 console.log('[BATCH] Starting normalize all files request...');
                 // Start the job
-                const response = await fetch(apiUrl('/api/jobs/normalize-all'), {
+                const response = await fetch(apiUrl(`/api/jobs/normalize-all?forceReprocess=${forceReprocess}`), {
                     method: 'POST',
                     headers: getAuthHeaders()
                 });
@@ -3098,6 +3127,10 @@
                 return;
             }
             
+            const forceReprocess = promptForForceReprocess(
+                `This will process ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''}.`,
+                'processed');
+
             showProgressModal('Starting processing...');
             
             const files = Array.from(selectedFiles);
@@ -3111,7 +3144,7 @@
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ Files: files })
+                    body: JSON.stringify({ Files: files, ForceReprocess: forceReprocess })
                 });
                 
                 if (handleAuthError(response)) {
@@ -3150,6 +3183,10 @@
                 return;
             }
             
+            const forceReprocess = promptForForceReprocess(
+                `This will rename ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''} based on metadata.`,
+                'renamed');
+
             showProgressModal('Starting rename...');
             
             const files = Array.from(selectedFiles);
@@ -3163,7 +3200,7 @@
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ Files: files })
+                    body: JSON.stringify({ Files: files, ForceReprocess: forceReprocess })
                 });
                 
                 if (handleAuthError(response)) {
@@ -3202,6 +3239,10 @@
                 return;
             }
             
+            const forceReprocess = promptForForceReprocess(
+                `This will normalize metadata for ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''}.`,
+                'normalized');
+
             showProgressModal('Starting normalize...');
             
             const files = Array.from(selectedFiles);
@@ -3215,7 +3256,7 @@
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ Files: files })
+                    body: JSON.stringify({ Files: files, ForceReprocess: forceReprocess })
                 });
                 
                 if (handleAuthError(response)) {
@@ -3248,6 +3289,10 @@
             if (!confirm(`Process ${filepath}?`)) {
                 return;
             }
+
+            const forceReprocess = promptForForceReprocess(
+                `This will process ${filepath}.`,
+                'processed');
             
             showProgressModal('Starting processing...');
             
@@ -3260,7 +3305,7 @@
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ Files: [filepath] })
+                    body: JSON.stringify({ Files: [filepath], ForceReprocess: forceReprocess })
                 });
                 
                 if (handleAuthError(response)) {
@@ -3292,6 +3337,10 @@
             if (!confirm(`Rename ${filepath} based on metadata?`)) {
                 return;
             }
+
+            const forceReprocess = promptForForceReprocess(
+                `This will rename ${filepath} based on metadata.`,
+                'renamed');
             
             showProgressModal('Starting rename...');
             
@@ -3299,7 +3348,7 @@
                 console.log('[SINGLE FILE] Starting rename file request...');
                 // Start the rename job
                 const encodedPath = encodeFilePathForUrl(filepath);
-                const response = await fetch(apiUrl(`/api/files/${encodedPath}/rename`), {
+                const response = await fetch(apiUrl(`/api/files/${encodedPath}/rename?forceReprocess=${forceReprocess}`), {
                     method: 'POST',
                     headers: getAuthHeaders()
                 });
@@ -3337,6 +3386,10 @@
             if (!confirm(`Normalize metadata for ${filepath}?`)) {
                 return;
             }
+
+            const forceReprocess = promptForForceReprocess(
+                `This will normalize metadata for ${filepath}.`,
+                'normalized');
             
             showProgressModal('Starting normalize...');
             
@@ -3349,7 +3402,7 @@
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ Files: [filepath] })
+                    body: JSON.stringify({ Files: [filepath], ForceReprocess: forceReprocess })
                 });
                 
                 if (handleAuthError(response)) {

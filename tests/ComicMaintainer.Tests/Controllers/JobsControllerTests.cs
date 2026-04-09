@@ -144,6 +144,26 @@ public class JobsControllerTests
     }
 
     [Fact]
+    public async Task ProcessSelected_WithForceReprocess_PassesFlagToProcessor()
+    {
+        var files = new List<string> { "file1.cbz" };
+        var expectedJobId = Guid.NewGuid();
+        var request = new JobsController.ProcessSelectedRequest { Files = files, ForceReprocess = true };
+
+        _mockProcessor
+            .Setup(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), default, true))
+            .ReturnsAsync(expectedJobId);
+
+        var result = await _controller.ProcessSelected(request);
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var (jobId, totalItems) = GetJobResponse(okResult);
+        Assert.Equal(expectedJobId.ToString(), jobId);
+        Assert.Equal(1, totalItems);
+        _mockProcessor.Verify(p => p.ProcessFilesAsync(It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(files)), default, true), Times.Once);
+    }
+
+    [Fact]
     public async Task ProcessAll_WithUnprocessedFiles_ReturnsJobIdAndTotalItems()
     {
         // Arrange

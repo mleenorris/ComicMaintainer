@@ -73,7 +73,7 @@
 
         window._versionPromise = (async function() {
             try {
-                const response = await fetch('/api/version');
+                const response = await fetch('/api/version', { cache: 'no-store' });
                 const data = await response.json();
                 const version = data.version;
                 

@@ -6,7 +6,6 @@
 let CACHE_NAME = 'comic-maintainer-v2'; // Default fallback
 const CACHE_PREFIX = 'comic-maintainer-';
 const urlsToCache = [
-  '/',
   '/manifest.json',
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
@@ -70,10 +69,31 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
+  const acceptsHtml = request.headers.get('Accept')?.includes('text/html');
+  const isNavigationRequest = request.mode === 'navigate' || request.destination === 'document' || acceptsHtml || url.pathname === '/';
   
-  // Never cache the service worker file itself or HTML pages
-  if (url.pathname === '/sw.js' || url.pathname.endsWith('.html')) {
-    event.respondWith(fetch(request));
+  // Never cache the service worker file itself
+  if (url.pathname === '/sw.js') {
+    event.respondWith(fetch(request, { cache: 'no-store' }));
+    return;
+  }
+
+  // Always fetch the app shell from the network first so users do not need a hard refresh
+  if (isNavigationRequest || url.pathname.endsWith('.html')) {
+    event.respondWith(
+      fetch(request, { cache: 'no-store' }).catch(() => {
+        if (request.headers.get('Accept')?.includes('text/html')) {
+          return new Response(
+            '<html><body><h1>Offline</h1><p>Comic Maintainer is unavailable while offline.</p></body></html>',
+            {
+              headers: { 'Content-Type': 'text/html' }
+            }
+          );
+        }
+
+        return new Response('Offline', { status: 503 });
+      })
+    );
     return;
   }
   
@@ -119,7 +139,7 @@ self.addEventListener('fetch', (event) => {
           const responseToCache = response.clone();
           
           // Cache static assets
-          if (url.pathname.startsWith('/icons/') || url.pathname.startsWith('/css/') || url.pathname.startsWith('/js/') || url.pathname === '/') {
+          if (url.pathname.startsWith('/icons/') || url.pathname.startsWith('/css/') || url.pathname.startsWith('/js/')) {
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(request, responseToCache);
             });

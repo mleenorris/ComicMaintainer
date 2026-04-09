@@ -39,26 +39,34 @@ public class SeriesLibraryService : ISeriesLibraryService
         CancellationToken cancellationToken = default)
     {
         var files = (await _fileStore.GetFilteredFilesAsync(filter, cancellationToken)).ToList();
-        var fileEntries = new List<(ComicFile File, SeriesMetadata Metadata, string LocalTitle)>(files.Count);
+        var fileEntries = new List<(ComicFile File, SeriesMetadata Metadata, string GroupingTitle, List<string> MetadataAliases, List<string> ExternalLookupTitles)>(files.Count);
 
         foreach (var file in files)
         {
             var metadata = await _processor.GetSeriesMetadataAsync(file.FilePath, cancellationToken) ?? new SeriesMetadata();
-            fileEntries.Add((file, metadata, ResolveLocalSeriesTitle(metadata, file)));
+            var groupingTitle = ResolveGroupingTitle(metadata, file);
+            var metadataAliases = ResolveMetadataAliases(metadata, groupingTitle);
+            var externalLookupTitles = new[] { groupingTitle }
+                .Concat(metadataAliases)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            fileEntries.Add((file, metadata, groupingTitle, metadataAliases, externalLookupTitles));
         }
 
-        var externalLookupMap = await BuildExternalLookupMapAsync(fileEntries.Select(entry => entry.LocalTitle), cancellationToken);
+        var externalLookupMap = await BuildExternalLookupMapAsync(
+            fileEntries.SelectMany(entry => entry.ExternalLookupTitles),
+            cancellationToken);
         var groups = new Dictionary<string, SeriesAccumulator>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in fileEntries)
         {
             var file = entry.File;
             var metadata = entry.Metadata;
-            var localTitle = entry.LocalTitle;
-            externalLookupMap.TryGetValue(localTitle, out var externalMetadata);
+            var groupingTitle = entry.GroupingTitle;
+            var externalMetadata = ResolveExternalMetadata(entry.ExternalLookupTitles, externalLookupMap);
 
             var canonicalTitle = string.IsNullOrWhiteSpace(externalMetadata?.CanonicalTitle)
-                ? localTitle
+                ? groupingTitle
                 : externalMetadata!.CanonicalTitle;
 
             var groupKey = NormalizeKey(canonicalTitle);
@@ -78,16 +86,19 @@ public class SeriesLibraryService : ISeriesLibraryService
                 groups[groupKey] = accumulator;
             }
 
-            if (!string.Equals(localTitle, canonicalTitle, StringComparison.OrdinalIgnoreCase)
-                && accumulator.Aliases.All(alias => !string.Equals(alias, localTitle, StringComparison.OrdinalIgnoreCase)))
+            if (!string.Equals(groupingTitle, canonicalTitle, StringComparison.OrdinalIgnoreCase)
+                && accumulator.Aliases.All(alias => !string.Equals(alias, groupingTitle, StringComparison.OrdinalIgnoreCase)))
             {
-                accumulator.Aliases.Add(localTitle);
+                accumulator.Aliases.Add(groupingTitle);
             }
 
-            if (!string.IsNullOrWhiteSpace(metadata.AlternateSeries)
-                && accumulator.Aliases.All(alias => !string.Equals(alias, metadata.AlternateSeries, StringComparison.OrdinalIgnoreCase)))
+            foreach (var alias in entry.MetadataAliases)
             {
-                accumulator.Aliases.Add(metadata.AlternateSeries);
+                if (accumulator.Aliases.All(existing => !string.Equals(existing, alias, StringComparison.OrdinalIgnoreCase))
+                    && !string.Equals(alias, canonicalTitle, StringComparison.OrdinalIgnoreCase))
+                {
+                    accumulator.Aliases.Add(alias);
+                }
             }
 
             accumulator.TotalSize += file.FileSize;
@@ -186,16 +197,38 @@ public class SeriesLibraryService : ISeriesLibraryService
         };
     }
 
-    private static string ResolveLocalSeriesTitle(SeriesMetadata metadata, ComicFile file)
+    private static string ResolveGroupingTitle(SeriesMetadata metadata, ComicFile file)
     {
+        // Prefer the folder-derived title so the series library groups into one card per on-disk series,
+        // matching the library-first browsing model users expect from tools like Kavita.
         return FirstNonEmpty(
+                ResolveFolderTitle(file),
                 metadata.SeriesGroup,
-                metadata.AlternateSeries,
                 metadata.Series,
-                Path.GetFileName(Path.GetDirectoryName(file.FilePath) ?? string.Empty),
+                metadata.AlternateSeries,
                 Path.GetFileNameWithoutExtension(file.FileName))
             ?? "Unknown Series";
     }
+
+    private static List<string> ResolveMetadataAliases(SeriesMetadata metadata, string groupingTitle)
+    {
+        return new[]
+            {
+                metadata.SeriesGroup,
+                metadata.Series,
+                metadata.AlternateSeries
+            }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim())
+            .Where(value => !string.Equals(value, groupingTitle, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? ResolveFolderTitle(ComicFile file)
+        => FirstNonEmpty(
+            Path.GetFileName(file.Directory),
+            Path.GetFileName(Path.GetDirectoryName(file.FilePath) ?? string.Empty));
 
     private static string? FirstNonEmpty(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
@@ -251,6 +284,21 @@ public class SeriesLibraryService : ISeriesLibraryService
 
         await Task.WhenAll(tasks);
         return new Dictionary<string, ExternalSeriesMetadata?>(lookupResults, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static ExternalSeriesMetadata? ResolveExternalMetadata(
+        IEnumerable<string> lookupTitles,
+        IReadOnlyDictionary<string, ExternalSeriesMetadata?> externalLookupMap)
+    {
+        foreach (var title in lookupTitles)
+        {
+            if (externalLookupMap.TryGetValue(title, out var externalMetadata) && externalMetadata is not null)
+            {
+                return externalMetadata;
+            }
+        }
+
+        return null;
     }
 
     private sealed class SeriesAccumulator

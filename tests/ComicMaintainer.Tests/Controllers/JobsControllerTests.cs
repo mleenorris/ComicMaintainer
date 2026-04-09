@@ -130,7 +130,7 @@ public class JobsControllerTests
         var request = new JobsController.ProcessSelectedRequest { Files = files };
         
         _mockProcessor
-            .Setup(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), default))
+            .Setup(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), false, default))
             .ReturnsAsync(expectedJobId);
 
         // Act
@@ -151,7 +151,7 @@ public class JobsControllerTests
         var request = new JobsController.ProcessSelectedRequest { Files = files, ForceReprocess = true };
 
         _mockProcessor
-            .Setup(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), default, true))
+            .Setup(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), true, default))
             .ReturnsAsync(expectedJobId);
 
         var result = await _controller.ProcessSelected(request);
@@ -160,7 +160,7 @@ public class JobsControllerTests
         var (jobId, totalItems) = GetJobResponse(okResult);
         Assert.Equal(expectedJobId.ToString(), jobId);
         Assert.Equal(1, totalItems);
-        _mockProcessor.Verify(p => p.ProcessFilesAsync(It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(files)), default, true), Times.Once);
+        _mockProcessor.Verify(p => p.ProcessFilesAsync(It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(files)), true, default), Times.Once);
     }
 
     [Fact]
@@ -179,7 +179,7 @@ public class JobsControllerTests
             .ReturnsAsync(allFiles);
         
         _mockProcessor
-            .Setup(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), default))
+            .Setup(p => p.ProcessFilesAsync(It.IsAny<IEnumerable<string>>(), false, default))
             .ReturnsAsync(expectedJobId);
 
         // Act

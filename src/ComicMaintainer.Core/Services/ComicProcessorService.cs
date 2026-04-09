@@ -50,7 +50,12 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         _processingSemaphore = new SemaphoreSlim(_maxWorkers, _maxWorkers);
     }
 
-    public async Task<bool> ProcessFileAsync(string filePath, CancellationToken cancellationToken = default, bool forceReprocess = false)
+    public Task<bool> ProcessFileAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        return ProcessFileAsync(filePath, false, cancellationToken);
+    }
+
+    public async Task<bool> ProcessFileAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken = default)
     {
         await _processingSemaphore.WaitAsync(cancellationToken);
         try
@@ -272,7 +277,12 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
     }
 
-    public Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default, bool forceReprocess = false)
+    public Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    {
+        return ProcessFilesAsync(filePaths, false, cancellationToken);
+    }
+
+    public Task<Guid> ProcessFilesAsync(IEnumerable<string> filePaths, bool forceReprocess, CancellationToken cancellationToken = default)
     {
         return QueueBatchJobAsync(
             filePaths,
@@ -283,7 +293,12 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             cancellationToken);
     }
 
-    public Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default, bool forceReprocess = false)
+    public Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    {
+        return RenameFilesAsync(filePaths, false, cancellationToken);
+    }
+
+    public Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, bool forceReprocess, CancellationToken cancellationToken = default)
     {
         return QueueBatchJobAsync(
             filePaths,
@@ -294,7 +309,12 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             cancellationToken);
     }
 
-    public Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default, bool forceReprocess = false)
+    public Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    {
+        return NormalizeFilesAsync(filePaths, false, cancellationToken);
+    }
+
+    public Task<Guid> NormalizeFilesAsync(IEnumerable<string> filePaths, bool forceReprocess, CancellationToken cancellationToken = default)
     {
         return QueueBatchJobAsync(
             filePaths,
@@ -1419,7 +1439,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     private async Task<string> ResolveNormalizedSeriesAsync(ComicMetadata metadata, string filePath, CancellationToken cancellationToken)
     {
         var fallbackSeries = ExtractSeriesFromFilename(filePath);
-        var candidateSeries = new[] { metadata.Series, fallbackSeries }
+        var candidateSeries = new[] { fallbackSeries, metadata.Series }
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Select(value => value!.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)

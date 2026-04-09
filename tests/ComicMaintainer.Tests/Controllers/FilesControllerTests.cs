@@ -892,7 +892,7 @@ public class FilesControllerTests
         // Arrange
         var filePath = Path.Combine(Path.GetTempPath(), "test.cbz");
         var encodedPath = EncodeFilePathForUrl(filePath);
-        _mockProcessor.Setup(p => p.ProcessFileAsync(filePath, It.IsAny<CancellationToken>()))
+        _mockProcessor.Setup(p => p.ProcessFileAsync(filePath, false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         // Act
@@ -958,7 +958,7 @@ public class FilesControllerTests
         var encodedPath = EncodeFilePathForUrl(filePath);
         var expectedJobId = Guid.NewGuid();
         
-        _mockProcessor.Setup(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+        _mockProcessor.Setup(p => p.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(expectedJobId);
 
         // Act
@@ -971,6 +971,7 @@ public class FilesControllerTests
         // Verify the rename job was started
         _mockProcessor.Verify(p => p.RenameFilesAsync(
             It.Is<IEnumerable<string>>(files => files.Single() == filePath),
+            false,
             It.IsAny<CancellationToken>()), 
             Times.Once);
     }

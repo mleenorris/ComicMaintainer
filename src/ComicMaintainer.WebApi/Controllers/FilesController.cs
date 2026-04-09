@@ -535,7 +535,7 @@ public class FilesController : ControllerBase
             if (string.IsNullOrEmpty(filePath))
                 return BadRequest("Invalid file path");
 
-            var success = await _processor.ProcessFileAsync(filePath, forceReprocess: forceReprocess);
+            var success = await _processor.ProcessFileAsync(filePath, forceReprocess);
             return success ? Ok() : BadRequest("Failed to process file");
         }
         catch (Exception ex)
@@ -560,7 +560,7 @@ public class FilesController : ControllerBase
                 return BadRequest("File path is outside the allowed directory");
             }
 
-            var success = await _processor.ProcessFileAsync(filePath, forceReprocess: forceReprocess);
+            var success = await _processor.ProcessFileAsync(filePath, forceReprocess);
             return success ? Ok() : BadRequest("Failed to process file");
         }
         catch (Exception ex)
@@ -588,7 +588,7 @@ public class FilesController : ControllerBase
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename requested for file: {FilePath}"), sanitizedPath);
             
             // Use the batch rename method with a single file
-            var jobId = await _processor.RenameFilesAsync(new[] { filePath }, cancellationToken, forceReprocess);
+            var jobId = await _processor.RenameFilesAsync(new[] { filePath }, forceReprocess, cancellationToken);
             
             return Ok(new { message = "Rename job started", jobId });
         }
@@ -614,7 +614,7 @@ public class FilesController : ControllerBase
             _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename requested for file: {FilePath}"), sanitizedPath);
             
             // Use the batch rename method with a single file
-            var jobId = await _processor.RenameFilesAsync(new[] { filePath }, cancellationToken, forceReprocess);
+            var jobId = await _processor.RenameFilesAsync(new[] { filePath }, forceReprocess, cancellationToken);
             
             return Ok(new { jobId });
         }

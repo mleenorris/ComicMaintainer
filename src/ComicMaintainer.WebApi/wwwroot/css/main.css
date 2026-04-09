@@ -1283,8 +1283,8 @@
 
         .library-health-grid {
             display: grid;
-            /* Keep this in sync with the three Library Health cards rendered in index.html. */
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            /* Keep this in sync with the Library Health cards rendered in index.html. */
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 12px;
         }
 

@@ -39,26 +39,28 @@ public class SeriesLibraryService : ISeriesLibraryService
         CancellationToken cancellationToken = default)
     {
         var files = (await _fileStore.GetFilteredFilesAsync(filter, cancellationToken)).ToList();
-        var fileEntries = new List<(ComicFile File, SeriesMetadata Metadata, string LocalTitle)>(files.Count);
+        var fileEntries = new List<(ComicFile File, SeriesMetadata Metadata, string GroupingTitle, List<string> MetadataAliases)>(files.Count);
 
         foreach (var file in files)
         {
             var metadata = await _processor.GetSeriesMetadataAsync(file.FilePath, cancellationToken) ?? new SeriesMetadata();
-            fileEntries.Add((file, metadata, ResolveLocalSeriesTitle(metadata, file)));
+            var groupingTitle = ResolveGroupingTitle(metadata, file);
+            var metadataAliases = ResolveMetadataAliases(metadata, groupingTitle);
+            fileEntries.Add((file, metadata, groupingTitle, metadataAliases));
         }
 
-        var externalLookupMap = await BuildExternalLookupMapAsync(fileEntries.Select(entry => entry.LocalTitle), cancellationToken);
+        var externalLookupMap = await BuildExternalLookupMapAsync(fileEntries.Select(entry => entry.GroupingTitle), cancellationToken);
         var groups = new Dictionary<string, SeriesAccumulator>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in fileEntries)
         {
             var file = entry.File;
             var metadata = entry.Metadata;
-            var localTitle = entry.LocalTitle;
-            externalLookupMap.TryGetValue(localTitle, out var externalMetadata);
+            var groupingTitle = entry.GroupingTitle;
+            externalLookupMap.TryGetValue(groupingTitle, out var externalMetadata);
 
             var canonicalTitle = string.IsNullOrWhiteSpace(externalMetadata?.CanonicalTitle)
-                ? localTitle
+                ? groupingTitle
                 : externalMetadata!.CanonicalTitle;
 
             var groupKey = NormalizeKey(canonicalTitle);
@@ -78,16 +80,19 @@ public class SeriesLibraryService : ISeriesLibraryService
                 groups[groupKey] = accumulator;
             }
 
-            if (!string.Equals(localTitle, canonicalTitle, StringComparison.OrdinalIgnoreCase)
-                && accumulator.Aliases.All(alias => !string.Equals(alias, localTitle, StringComparison.OrdinalIgnoreCase)))
+            if (!string.Equals(groupingTitle, canonicalTitle, StringComparison.OrdinalIgnoreCase)
+                && accumulator.Aliases.All(alias => !string.Equals(alias, groupingTitle, StringComparison.OrdinalIgnoreCase)))
             {
-                accumulator.Aliases.Add(localTitle);
+                accumulator.Aliases.Add(groupingTitle);
             }
 
-            if (!string.IsNullOrWhiteSpace(metadata.AlternateSeries)
-                && accumulator.Aliases.All(alias => !string.Equals(alias, metadata.AlternateSeries, StringComparison.OrdinalIgnoreCase)))
+            foreach (var alias in entry.MetadataAliases)
             {
-                accumulator.Aliases.Add(metadata.AlternateSeries);
+                if (accumulator.Aliases.All(existing => !string.Equals(existing, alias, StringComparison.OrdinalIgnoreCase))
+                    && !string.Equals(alias, canonicalTitle, StringComparison.OrdinalIgnoreCase))
+                {
+                    accumulator.Aliases.Add(alias);
+                }
             }
 
             accumulator.TotalSize += file.FileSize;
@@ -186,16 +191,37 @@ public class SeriesLibraryService : ISeriesLibraryService
         };
     }
 
-    private static string ResolveLocalSeriesTitle(SeriesMetadata metadata, ComicFile file)
+    private static string ResolveGroupingTitle(SeriesMetadata metadata, ComicFile file)
     {
         return FirstNonEmpty(
+                ResolveFolderTitle(file),
                 metadata.SeriesGroup,
-                metadata.AlternateSeries,
                 metadata.Series,
+                metadata.AlternateSeries,
                 Path.GetFileName(Path.GetDirectoryName(file.FilePath) ?? string.Empty),
                 Path.GetFileNameWithoutExtension(file.FileName))
             ?? "Unknown Series";
     }
+
+    private static List<string> ResolveMetadataAliases(SeriesMetadata metadata, string groupingTitle)
+    {
+        return new[]
+            {
+                metadata.SeriesGroup,
+                metadata.Series,
+                metadata.AlternateSeries
+            }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim())
+            .Where(value => !string.Equals(value, groupingTitle, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? ResolveFolderTitle(ComicFile file)
+        => FirstNonEmpty(
+            Path.GetFileName(file.Directory),
+            Path.GetFileName(Path.GetDirectoryName(file.FilePath) ?? string.Empty));
 
     private static string? FirstNonEmpty(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();

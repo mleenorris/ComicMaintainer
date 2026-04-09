@@ -20,7 +20,7 @@
     <meta http-equiv="Expires" content="0">
     
     <!-- PWA Manifest -->
-    <link rel="manifest" href="/manifest.json" id="manifestLink">
+    <link rel="manifest" id="manifestLink">
     
     <!-- Favicons and Icons -->
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
@@ -34,6 +34,43 @@
     <script>
         // Fetch version and update asset URLs to include version parameter for cache busting
         // Store the promise so the main.js loader can await it and always load with the correct version
+        const manifestLink = document.getElementById('manifestLink');
+        const manifestData = {
+            name: 'Comic Maintainer',
+            short_name: 'ComicMaintainer',
+            id: '/',
+            lang: 'en',
+            description: 'Manage and process your comic archive files with ComicTagger',
+            start_url: '/',
+            scope: '/',
+            display: 'standalone',
+            background_color: '#2c3e50',
+            theme_color: '#2c3e50',
+            orientation: 'any',
+            prefer_related_applications: false,
+            icons: [
+                {
+                    src: '/icons/icon-192x192-maskable.png',
+                    sizes: '192x192',
+                    type: 'image/png',
+                    purpose: 'any maskable'
+                },
+                {
+                    src: '/icons/icon-512x512-maskable.png',
+                    sizes: '512x512',
+                    type: 'image/png',
+                    purpose: 'any maskable'
+                }
+            ],
+            categories: ['utilities', 'productivity'],
+            screenshots: []
+        };
+
+        if (manifestLink && window.URL && typeof window.URL.createObjectURL === 'function') {
+            const manifestBlob = new Blob([JSON.stringify(manifestData)], { type: 'application/manifest+json' });
+            manifestLink.href = window.URL.createObjectURL(manifestBlob);
+        }
+
         window._versionPromise = (async function() {
             try {
                 const response = await fetch('/api/version');
@@ -44,12 +81,6 @@
                 const cssLink = document.getElementById('mainCss');
                 if (cssLink) {
                     cssLink.href = `/css/main.css?v=${version}`;
-                }
-                
-                // Update manifest link with version parameter
-                const manifestLink = document.getElementById('manifestLink');
-                if (manifestLink) {
-                    manifestLink.href = `/manifest.json?v=${version}`;
                 }
                 
                 // Store version for JS file to use later

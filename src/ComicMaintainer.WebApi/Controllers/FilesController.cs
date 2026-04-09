@@ -187,7 +187,17 @@ public class FilesController : ControllerBase
         try
         {
             var (total, processed, unprocessed, duplicates) = await _fileStore.GetFileCountsAsync();
-            var combinableFolders = await GetCombinableFolderCountAsync();
+            var combinableFolders = 0;
+
+            try
+            {
+                combinableFolders = await GetCombinableFolderCountAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error getting combinable folder count");
+            }
+
             return Ok(new { total, processed, unprocessed, duplicates, combinableFolders });
         }
         catch (Exception ex)
@@ -223,15 +233,7 @@ public class FilesController : ControllerBase
                 continue;
             }
 
-            var metadata = file.Metadata is null
-                ? await _processor.GetSeriesMetadataAsync(file.FilePath, cancellationToken)
-                : new SeriesMetadata
-                {
-                    Series = file.Metadata.Series,
-                    Volume = file.Metadata.Volume
-                };
-
-            var groupKey = BuildFolderCombineGroupKey(metadata);
+            var groupKey = BuildFolderCombineGroupKey(file);
             if (string.IsNullOrWhiteSpace(groupKey))
             {
                 continue;
@@ -284,9 +286,14 @@ public class FilesController : ControllerBase
             .ToDictionaryAsync(file => file.FilePath, file => file.CreatedAt, StringComparer.OrdinalIgnoreCase, cancellationToken);
     }
 
-    private static string? BuildFolderCombineGroupKey(SeriesMetadata? metadata)
+    private static string? BuildFolderCombineGroupKey(ComicFile file)
     {
-        var seriesName = FirstNonEmpty(metadata?.SeriesGroup, metadata?.AlternateSeries, metadata?.Series);
+        var seriesName = FirstNonEmpty(
+            file.Metadata?.Series,
+            ExtractSeriesNameFromFileName(file),
+            Path.GetFileName(file.Directory),
+            Path.GetFileName(Path.GetDirectoryName(file.FilePath) ?? string.Empty));
+
         if (string.IsNullOrWhiteSpace(seriesName))
         {
             return null;
@@ -298,10 +305,34 @@ public class FilesController : ControllerBase
             return null;
         }
 
-        var volume = metadata?.Volume?.Trim();
+        var volume = file.Metadata?.Volume?.Trim();
         return string.IsNullOrWhiteSpace(volume)
             ? normalizedSeries
             : $"{normalizedSeries}|{volume.ToLowerInvariant()}";
+    }
+
+    private static string? ExtractSeriesNameFromFileName(ComicFile file)
+    {
+        var name = Path.GetFileNameWithoutExtension(
+            !string.IsNullOrWhiteSpace(file.FileName)
+                ? file.FileName
+                : file.FilePath);
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        var candidate = Regex.Replace(
+            name,
+            @"\s*(?:-|_)?\s*(?:ch|chapter|issue|#)?\s*\d+(?:\.\d+)?[a-z]?\s*$",
+            string.Empty,
+            RegexOptions.IgnoreCase)
+            .Trim(' ', '-', '_', '.', '#');
+
+        return string.IsNullOrWhiteSpace(candidate)
+            ? null
+            : candidate.Replace('_', ' ').Trim();
     }
 
     private static string? FirstNonEmpty(params string?[] values)

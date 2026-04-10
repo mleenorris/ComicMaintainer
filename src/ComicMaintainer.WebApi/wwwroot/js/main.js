@@ -1592,12 +1592,14 @@
                 <div class="series-grid">
                     ${seriesLibrary.map(series => `
                         <button class="series-card" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
-                            <img class="series-cover" data-protected-image="${escapeHtml(series.cover_file_path)}" alt="${escapeHtml(series.title)} cover" loading="lazy">
-                            <div class="series-card-body">
-                                <h3 class="series-title">${escapeHtml(series.title)}</h3>
-                                <div class="series-meta">${series.issue_count} issue${series.issue_count === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
-                                ${series.aliases?.length ? `<div class="series-aliases">Aliases: ${escapeHtml(series.aliases.join(', '))}</div>` : ''}
-                                ${series.metadata_source ? `<div class="series-meta">Source: ${escapeHtml(series.metadata_source)}</div>` : ''}
+                            <div class="series-cover-wrapper">
+                                <img class="series-cover" data-protected-image="${escapeHtml(series.cover_file_path)}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                                <div class="series-cover-overlay"></div>
+                                <span class="series-count-badge">${series.issue_count}</span>
+                                <div class="series-card-body">
+                                    <h3 class="series-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
+                                    <div class="series-meta">${formatFileSize(series.total_size)}</div>
+                                </div>
                             </div>
                         </button>
                     `).join('')}
@@ -1636,8 +1638,11 @@
                             <div class="series-detail-summary-body">
                                 <h2>${escapeHtml(series.title)}</h2>
                                 <div class="series-detail-meta">${series.issue_count} issue${series.issue_count === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
-                                ${series.aliases?.length ? `<div class="series-detail-meta">Aliases: ${escapeHtml(series.aliases.join(', '))}</div>` : ''}
-                                ${series.metadata_source ? `<div class="series-detail-meta">Metadata source: ${escapeHtml(series.metadata_source)}</div>` : ''}
+                                ${series.aliases?.length ? `<div class="series-detail-meta">Also known as: ${escapeHtml(series.aliases.join(', '))}</div>` : ''}
+                                ${series.metadata_source ? `<div class="series-detail-meta">Source: ${escapeHtml(series.metadata_source)}</div>` : ''}
+                                <div class="series-detail-actions">
+                                    ${series.issues.length ? `<button type="button" class="btn btn-small" onclick="readComic('${escapeJs(series.issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1646,13 +1651,13 @@
                             <div class="series-issue-card">
                                 <button type="button" class="series-issue-cover-button" aria-label="Read ${escapeHtml(issue.title || issue.file_name)}" onclick="readComic('${escapeJs(issue.file_path)}')">
                                     <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy">
+                                    <div class="series-issue-cover-overlay"></div>
+                                    ${issue.issue ? `<span class="series-issue-badge">#${escapeHtml(issue.issue)}</span>` : ''}
                                 </button>
                                 <div class="series-issue-body">
-                                    <h3 class="series-issue-title">${escapeHtml(issue.title || issue.file_name)}</h3>
-                                    <p class="series-issue-subtitle">Issue ${escapeHtml(issue.issue || 'Unknown')}${issue.year ? ` · ${issue.year}` : ''}</p>
-                                    ${issue.volume ? `<p class="series-issue-subtitle">Volume ${escapeHtml(issue.volume)}</p>` : ''}
-                                    <div class="series-detail-meta">${escapeHtml(issue.file_name)}</div>
-                                    <div class="series-detail-meta">${formatFileSize(issue.size)} · ${formatModifiedDate(issue.modified)}</div>
+                                    <h3 class="series-issue-title" title="${escapeHtml(issue.title || issue.file_name)}">${escapeHtml(issue.title || issue.file_name)}</h3>
+                                    <p class="series-issue-subtitle">${issue.year ? `${issue.year}` : ''}${issue.volume ? `${issue.year ? ' · ' : ''}Vol. ${escapeHtml(issue.volume)}` : ''}</p>
+                                    <div class="series-detail-meta">${formatFileSize(issue.size)}</div>
                                 </div>
                             </div>
                         `).join('')}

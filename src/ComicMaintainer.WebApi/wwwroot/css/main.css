@@ -1715,6 +1715,149 @@
             font-size: 13px;
             line-height: 1.5;
         }
+
+        .combine-folders-summary {
+            margin-bottom: 16px;
+        }
+
+        .combine-folders-summary h3 {
+            color: var(--text-primary);
+            margin-bottom: 6px;
+            word-break: break-word;
+        }
+
+        .combine-folders-meta {
+            color: var(--text-muted);
+            font-size: 13px;
+            margin-bottom: 6px;
+        }
+
+        .combine-folders-suggestion {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .combine-folders-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .combine-folder-card {
+            background: var(--bg-hover);
+            border: 2px solid transparent;
+            border-radius: 10px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            cursor: pointer;
+            position: relative;
+            transition: border-color 0.15s ease, background 0.15s ease;
+        }
+
+        .combine-folder-card:hover {
+            background: var(--bg-secondary);
+        }
+
+        .combine-folder-card.selected {
+            border-color: var(--accent, #3498db);
+            background: var(--bg-secondary);
+        }
+
+        .combine-folder-card.suggested::after {
+            content: "Suggested";
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(39, 174, 96, 0.2);
+            color: var(--text-secondary);
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            letter-spacing: 0.03em;
+        }
+
+        .combine-folder-card-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+
+        .combine-folder-card-header input[type="radio"] {
+            margin-top: 4px;
+        }
+
+        .combine-folder-path {
+            font-weight: 600;
+            color: var(--text-primary);
+            word-break: break-all;
+            font-size: 13px;
+        }
+
+        .combine-folder-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px 12px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .combine-folder-stats strong {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .combine-folder-files {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .combine-folder-files ul {
+            margin: 4px 0 0;
+            padding-left: 18px;
+            list-style: disc;
+        }
+
+        .combine-folder-files li {
+            word-break: break-all;
+        }
+
+        .combine-folders-preview {
+            margin-bottom: 14px;
+            padding: 12px 14px;
+            background: var(--bg-hover);
+            border-radius: 8px;
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        .combine-folders-preview h4 {
+            margin: 0 0 8px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .combine-folders-preview ul {
+            margin: 0;
+            padding-left: 18px;
+            max-height: 180px;
+            overflow-y: auto;
+        }
+
+        .combine-folders-preview li {
+            margin-bottom: 4px;
+            word-break: break-all;
+        }
+
+        .combine-folders-preview .conflict {
+            color: #d35400;
+        }
+
+        .combine-folders-preview .skipped {
+            color: var(--text-muted);
+        }
         
         .file-actions-dropdown {
             position: relative;

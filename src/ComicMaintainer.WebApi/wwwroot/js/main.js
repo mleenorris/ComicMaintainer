@@ -956,24 +956,31 @@
                 })
                     .then((registration) => {
                         console.log('PWA: Service Worker registered successfully:', registration.scope);
-                        
+
                         // Check for updates periodically
                         setInterval(() => {
                             registration.update();
                         }, 60000); // Check every minute
-                        
-                        // Listen for updates
+
+                        // When a new service worker has fully installed, tell it to
+                        // skip waiting so it activates immediately. The actual reload
+                        // is triggered by the 'controllerchange' event below, which
+                        // is the documented signal that the new SW is now in control.
+                        // Reloading earlier (e.g. on 'statechange' => 'installed') is
+                        // racy: the reload would be served by the OLD service worker
+                        // and the user would still see stale assets, forcing a hard refresh.
                         registration.addEventListener('updatefound', () => {
                             const newWorker = registration.installing;
                             console.log('PWA: New service worker installing...');
-                            
+
+                            if (!newWorker) {
+                                return;
+                            }
+
                             newWorker.addEventListener('statechange', () => {
                                 if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                    // New service worker available, notify user
-                                    console.log('PWA: New version available! Reloading page...');
-                                    // Automatically reload to get the new version
-                                    // This ensures users always get the latest version
-                                    window.location.reload();
+                                    console.log('PWA: New version installed, asking it to skipWaiting...');
+                                    newWorker.postMessage({ type: 'SKIP_WAITING' });
                                 }
                             });
                         });
@@ -981,6 +988,19 @@
                     .catch((error) => {
                         console.log('PWA: Service Worker registration failed:', error);
                     });
+
+                // Reload exactly once the new service worker has taken control,
+                // so the reloaded page is served by the NEW worker (and thus the
+                // new cached assets). Guarded to avoid reload loops.
+                let reloading = false;
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (reloading) {
+                        return;
+                    }
+                    reloading = true;
+                    console.log('PWA: New service worker took control, reloading page...');
+                    window.location.reload();
+                });
             });
         }
         

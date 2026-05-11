@@ -237,15 +237,36 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
     }
     
     [Fact]
-    public async Task StaticFiles_NonHtmlArePublicCached()
+    public async Task StaticFiles_CssAndJs_RequireRevalidation()
     {
         // Arrange
         var client = _factory.CreateClient();
 
-        // Act - CSS files should be cached
+        // Act - CSS files are versioned via ?v=<app-version> in the HTML, so
+        // the body of an unversioned CSS URL must never be served stale from
+        // the browser cache. "no-cache, must-revalidate" still permits 304s,
+        // it just refuses to skip the origin entirely.
         var response = await client.GetAsync("/css/main.css");
 
-        // Assert - Non-HTML static files should allow caching
+        // Assert
+        Assert.True(response.Headers.Contains("Cache-Control"));
+        var cacheControl = response.Headers.GetValues("Cache-Control").First();
+        Assert.Contains("no-cache", cacheControl);
+        Assert.Contains("must-revalidate", cacheControl);
+        Assert.DoesNotContain("max-age=3600", cacheControl);
+        Assert.DoesNotContain("no-store", cacheControl);
+    }
+
+    [Fact]
+    public async Task StaticFiles_NonCssNonJsArePublicCached()
+    {
+        // Arrange
+        var client = _factory.CreateClient();
+
+        // Act - Icons / images / other static assets keep the 1-hour cache.
+        var response = await client.GetAsync("/icons/favicon-32x32.png");
+
+        // Assert
         Assert.True(response.Headers.Contains("Cache-Control"));
         var cacheControl = response.Headers.GetValues("Cache-Control").First();
         Assert.Contains("public", cacheControl);

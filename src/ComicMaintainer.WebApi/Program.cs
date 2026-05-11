@@ -614,6 +614,12 @@ app.Use(async (context, next) =>
 // Add path validation middleware for security
 app.UseMiddleware<PathValidationMiddleware>();
 
+// Inject the current assembly version into HTML pages (replaces __APP_VERSION__).
+// This MUST run before UseStaticFiles so that direct requests for *.html
+// (and the root "/") never get served as raw static files containing the
+// unsubstituted placeholder.
+app.UseMiddleware<HtmlVersionInjectionMiddleware>();
+
 // Serve static files from wwwroot with cache control
 // Note: sw.js is served via ServiceWorkerController to prevent redirect issues
 app.UseStaticFiles(new StaticFileOptions
@@ -628,12 +634,25 @@ app.UseStaticFiles(new StaticFileOptions
             return;
         }
         
-        // Don't cache HTML files to ensure users always get the latest version
+        // Don't cache HTML files to ensure users always get the latest version.
+        // (Normally these are served by HtmlVersionInjectionMiddleware above and
+        // never reach the static file handler, but keep this as defense in depth.)
         if (ctx.File.Name.EndsWith(".html", StringComparison.OrdinalIgnoreCase))
         {
             ctx.Context.Response.Headers["Cache-Control"] = "no-store, private";
         }
-        // Cache other static assets (CSS, JS, images) for 1 hour with cache busting via query string
+        // CSS and JS are versioned via ?v=<app-version> query strings emitted in
+        // the HTML. We must not allow them to be served stale from the browser
+        // cache for an hour, otherwise a new HTML referencing a new version may
+        // still pull the old asset body from disk cache (without a query string).
+        // "no-cache" still allows the browser to revalidate (304s), it just
+        // refuses to serve the body without checking with the origin first.
+        else if (ctx.Context.Request.Path.StartsWithSegments("/css") ||
+                 ctx.Context.Request.Path.StartsWithSegments("/js"))
+        {
+            ctx.Context.Response.Headers["Cache-Control"] = "no-cache, must-revalidate";
+        }
+        // Cache other static assets (images, icons, fonts) for 1 hour with cache busting via query string
         else
         {
             ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=3600";
@@ -652,36 +671,45 @@ app.MapHub<ProgressHub>("/hubs/progress");
 app.MapHealthChecks("/health");
 
 // Map default route to serve index.html for non-API routes only
-// This prevents the fallback from catching API requests, ensuring they always return JSON
-app.MapFallbackToFile("index.html").Add(endpointBuilder =>
+// This prevents the fallback from catching API requests, ensuring they always return JSON.
+// Index is served via a custom delegate so that __APP_VERSION__ is substituted
+// (mirroring HtmlVersionInjectionMiddleware) on SPA routes that don't match a real file.
+app.MapFallback(async context =>
 {
-    var originalRequestDelegate = endpointBuilder.RequestDelegate;
-    endpointBuilder.RequestDelegate = async context =>
+    // Don't serve index.html for sw.js - it's handled by ServiceWorkerController
+    if (context.Request.Path.StartsWithSegments("/sw.js"))
     {
-        // Don't serve index.html for sw.js - it's handled by ServiceWorkerController
-        if (context.Request.Path.StartsWithSegments("/sw.js"))
-        {
-            context.Response.StatusCode = 404;
-            context.Response.ContentType = "application/json; charset=utf-8";
-            await context.Response.WriteAsync("{\"error\":\"Not Found\",\"message\":\"Service worker not found\"}");
-            return;
-        }
-        
-        // Only serve index.html for non-API and non-hub routes
-        if (context.Request.Path.StartsWithSegments("/api") || 
-            context.Request.Path.StartsWithSegments("/hubs"))
-        {
-            context.Response.StatusCode = 404;
-            context.Response.ContentType = "application/json; charset=utf-8";
-            await context.Response.WriteAsync("{\"error\":\"Not Found\",\"message\":\"The requested endpoint does not exist\"}");
-            return;
-        }
-        
-        if (originalRequestDelegate != null)
-        {
-            await originalRequestDelegate(context);
-        }
-    };
+        context.Response.StatusCode = 404;
+        context.Response.ContentType = "application/json; charset=utf-8";
+        await context.Response.WriteAsync("{\"error\":\"Not Found\",\"message\":\"Service worker not found\"}");
+        return;
+    }
+
+    // Only serve index.html for non-API and non-hub routes
+    if (context.Request.Path.StartsWithSegments("/api") ||
+        context.Request.Path.StartsWithSegments("/hubs"))
+    {
+        context.Response.StatusCode = 404;
+        context.Response.ContentType = "application/json; charset=utf-8";
+        await context.Response.WriteAsync("{\"error\":\"Not Found\",\"message\":\"The requested endpoint does not exist\"}");
+        return;
+    }
+
+    var env = context.RequestServices.GetRequiredService<IWebHostEnvironment>();
+    var indexPath = Path.Combine(env.WebRootPath ?? string.Empty, "index.html");
+    if (!File.Exists(indexPath))
+    {
+        context.Response.StatusCode = 404;
+        return;
+    }
+
+    var html = await File.ReadAllTextAsync(indexPath);
+    var version = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "1.0.0";
+    html = html.Replace("__APP_VERSION__", version);
+
+    context.Response.Headers["Cache-Control"] = "no-store, private";
+    context.Response.ContentType = "text/html; charset=utf-8";
+    await context.Response.WriteAsync(html);
 });
 
 // Log startup complete

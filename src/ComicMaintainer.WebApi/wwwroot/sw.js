@@ -119,7 +119,32 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
-  // Cache-first strategy for static assets
+  // Cache-first for static images (icons, fonts); stale-while-revalidate for CSS/JS
+  // so that a newer asset is picked up on the next navigation even if a stale
+  // entry slipped into the cache under the same URL.
+  const isCssOrJs = url.pathname.startsWith('/css/') || url.pathname.startsWith('/js/');
+
+  if (isCssOrJs) {
+    event.respondWith(
+      caches.open(CACHE_NAME).then((cache) =>
+        cache.match(request).then((cachedResponse) => {
+          const networkFetch = fetch(request)
+            .then((networkResponse) => {
+              if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+                cache.put(request, networkResponse.clone());
+              }
+              return networkResponse;
+            })
+            .catch(() => cachedResponse);
+          // Return cached immediately if present, otherwise wait for network.
+          return cachedResponse || networkFetch;
+        })
+      )
+    );
+    return;
+  }
+
+  // Cache-first strategy for other static assets (icons, fonts, etc.)
   event.respondWith(
     caches.match(request)
       .then((response) => {
@@ -139,7 +164,7 @@ self.addEventListener('fetch', (event) => {
           const responseToCache = response.clone();
           
           // Cache static assets
-          if (url.pathname.startsWith('/icons/') || url.pathname.startsWith('/css/') || url.pathname.startsWith('/js/')) {
+          if (url.pathname.startsWith('/icons/')) {
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(request, responseToCache);
             });

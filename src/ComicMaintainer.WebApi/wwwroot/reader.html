@@ -12,27 +12,10 @@
     
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
-    <link rel="stylesheet" href="/css/main.css" id="mainCss">
-    
-    <!-- Version-based cache busting script -->
-    <script>
-        // Fetch version and update CSS URL to include version parameter for cache busting
-        (async function() {
-            try {
-                const response = await fetch('/api/version', { cache: 'no-store' });
-                const data = await response.json();
-                const version = data.version;
-                
-                // Update CSS link with version parameter
-                const cssLink = document.getElementById('mainCss');
-                if (cssLink) {
-                    cssLink.href = `/css/main.css?v=${version}`;
-                }
-            } catch (error) {
-                console.error('Failed to fetch version for cache busting:', error);
-            }
-        })();
-    </script>
+    <!-- The __APP_VERSION__ placeholder is replaced server-side by
+         HtmlVersionInjectionMiddleware so the very first request already
+         contains the correct versioned URL. -->
+    <link rel="stylesheet" href="/css/main.css?v=__APP_VERSION__" id="mainCss">
     <style>
         body.reader-mode {
             margin: 0;

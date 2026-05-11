@@ -474,6 +474,8 @@ public class FilesController : ControllerBase
         }
     }
 
+    private const int MaxFileRenameAttempts = 1000;
+
     private async Task<(string? Error, CombineFoldersPlan? Plan)> BuildCombineFoldersPlanAsync(
         CombineFoldersRequest request,
         CancellationToken cancellationToken)
@@ -597,7 +599,7 @@ public class FilesController : ControllerBase
                     {
                         finalName = $"{baseName} ({attempt}){extension}";
                         attempt++;
-                        if (attempt > 1000)
+                        if (attempt > MaxFileRenameAttempts)
                         {
                             break;
                         }

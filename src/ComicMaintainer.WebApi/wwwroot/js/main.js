@@ -239,6 +239,10 @@
         let progressResultElements = new Map();
         let duplicateReviewFiles = [];
         let duplicateReviewIndex = 0;
+        let combineFolderGroups = [];
+        let combineFolderIndex = 0;
+        let combineFolderSelectedDestination = null;
+        let combineFolderActionInFlight = false;
         let protectedImageUrls = new Map();
         const MAX_PROTECTED_IMAGE_CACHE_ENTRIES = 150;
         
@@ -671,13 +675,17 @@
 
                 if (summary) {
                     summary.textContent = total > 0
-                        ? `${processed.toLocaleString()} processed, ${unprocessed.toLocaleString()} still need attention, ${duplicates.toLocaleString()} duplicate${duplicates === 1 ? '' : 's'} ready for review, and ${combinableFolders.toLocaleString()} folder${combinableFolders === 1 ? '' : 's'} that could be combined by metadata.`
+                        ? `${processed.toLocaleString()} processed, ${unprocessed.toLocaleString()} still need attention, ${duplicates.toLocaleString()} duplicate${duplicates === 1 ? '' : 's'} ready for review, and ${combinableFolders.toLocaleString()} folder${combinableFolders === 1 ? '' : 's'} ready to combine.`
                         : 'No files have been indexed yet.';
                 }
 
                 const reviewDuplicatesBtn = document.getElementById('reviewDuplicatesBtn');
                 if (reviewDuplicatesBtn) {
                     reviewDuplicatesBtn.disabled = duplicates === 0;
+                }
+                const combineFoldersBtn = document.getElementById('combineFoldersBtn');
+                if (combineFoldersBtn) {
+                    combineFoldersBtn.disabled = combinableFolders === 0;
                 }
             } catch (error) {
                 console.error('Failed to load library health:', error);
@@ -2361,6 +2369,293 @@
 
             await deleteSingleFile(file.relative_path);
             await openDuplicateReviewModal();
+        }
+
+        async function openCombineFoldersModal() {
+            const modal = document.getElementById('combineFoldersModal');
+            const emptyState = document.getElementById('combineFoldersEmptyState');
+            const content = document.getElementById('combineFoldersContent');
+
+            modal.classList.add('active');
+            emptyState.style.display = 'none';
+            emptyState.textContent = 'No folders look combinable right now.';
+            content.style.display = 'block';
+            document.getElementById('combineFoldersGroupTitle').textContent = 'Loading combinable folders...';
+            document.getElementById('combineFoldersGroupMeta').textContent = '';
+            document.getElementById('combineFoldersSuggestion').textContent = '';
+            document.getElementById('combineFoldersList').innerHTML = '';
+            document.getElementById('combineFoldersPreview').style.display = 'none';
+            document.getElementById('combineFoldersPreview').innerHTML = '';
+            document.getElementById('combineFoldersPreviewBtn').disabled = true;
+            document.getElementById('combineFoldersConfirmBtn').disabled = true;
+
+            try {
+                const response = await fetch(apiUrl('/api/files/combinable-folders'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                combineFolderGroups = Array.isArray(data.groups) ? data.groups : [];
+                combineFolderIndex = 0;
+                combineFolderSelectedDestination = null;
+
+                if (combineFolderGroups.length === 0) {
+                    emptyState.style.display = 'block';
+                    content.style.display = 'none';
+                    updateCombineFoldersNavigation();
+                    return;
+                }
+
+                renderCombineFolderGroup();
+            } catch (error) {
+                console.error('Failed to load combinable folders:', error);
+                emptyState.style.display = 'block';
+                emptyState.textContent = `Failed to load combinable folders: ${error.message}`;
+                content.style.display = 'none';
+                updateCombineFoldersNavigation();
+            }
+        }
+
+        function closeCombineFoldersModal() {
+            document.getElementById('combineFoldersModal').classList.remove('active');
+        }
+
+        function updateCombineFoldersNavigation() {
+            const total = combineFolderGroups.length;
+            const counter = document.getElementById('combineFoldersCounter');
+            const prevBtn = document.getElementById('combineFoldersPrevBtn');
+            const nextBtn = document.getElementById('combineFoldersNextBtn');
+
+            counter.textContent = total > 0 ? `${combineFolderIndex + 1} of ${total}` : '0 of 0';
+            prevBtn.disabled = total === 0 || combineFolderIndex <= 0;
+            nextBtn.disabled = total === 0 || combineFolderIndex >= total - 1;
+        }
+
+        function changeCombineFolderGroup(direction) {
+            const next = combineFolderIndex + direction;
+            if (next < 0 || next >= combineFolderGroups.length) {
+                return;
+            }
+            combineFolderIndex = next;
+            combineFolderSelectedDestination = null;
+            renderCombineFolderGroup();
+        }
+
+        function getCurrentCombineFolderGroup() {
+            return combineFolderGroups[combineFolderIndex] || null;
+        }
+
+        function formatCombineFolderDate(value) {
+            if (!value) return '—';
+            try {
+                const d = new Date(value);
+                if (isNaN(d.getTime())) return '—';
+                return d.toLocaleString();
+            } catch (e) {
+                return '—';
+            }
+        }
+
+        function renderCombineFolderGroup() {
+            const group = getCurrentCombineFolderGroup();
+            const emptyState = document.getElementById('combineFoldersEmptyState');
+            const content = document.getElementById('combineFoldersContent');
+            const previewPanel = document.getElementById('combineFoldersPreview');
+
+            previewPanel.style.display = 'none';
+            previewPanel.innerHTML = '';
+
+            if (!group) {
+                emptyState.style.display = 'block';
+                content.style.display = 'none';
+                document.getElementById('combineFoldersPreviewBtn').disabled = true;
+                document.getElementById('combineFoldersConfirmBtn').disabled = true;
+                updateCombineFoldersNavigation();
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            content.style.display = 'block';
+
+            const title = group.volume
+                ? `${group.seriesName} · Vol. ${group.volume}`
+                : group.seriesName;
+            document.getElementById('combineFoldersGroupTitle').textContent = title || 'Combinable folders';
+            document.getElementById('combineFoldersGroupMeta').textContent =
+                `${group.folders.length} folder${group.folders.length === 1 ? '' : 's'} · ${group.totalFileCount} file${group.totalFileCount === 1 ? '' : 's'}`;
+            document.getElementById('combineFoldersSuggestion').textContent = group.suggestionReason || '';
+
+            if (!combineFolderSelectedDestination) {
+                combineFolderSelectedDestination = group.suggestedDestinationDirectory;
+            }
+            // Ensure selection is part of the group; otherwise reset to suggested.
+            if (!group.folders.some(f => f.directory === combineFolderSelectedDestination)) {
+                combineFolderSelectedDestination = group.suggestedDestinationDirectory;
+            }
+
+            const list = document.getElementById('combineFoldersList');
+            list.innerHTML = '';
+            group.folders.forEach((folder, idx) => {
+                const isSelected = folder.directory === combineFolderSelectedDestination;
+                const isSuggested = folder.directory === group.suggestedDestinationDirectory;
+                const card = document.createElement('div');
+                card.className = 'combine-folder-card'
+                    + (isSelected ? ' selected' : '')
+                    + (isSuggested ? ' suggested' : '');
+                card.setAttribute('role', 'button');
+                card.tabIndex = 0;
+
+                const radioId = `combineFolderRadio_${combineFolderIndex}_${idx}`;
+                const sample = (folder.sampleFileNames || []).slice(0, 5);
+                const sampleHtml = sample.length
+                    ? `<div class="combine-folder-files">Sample files:<ul>${sample.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul></div>`
+                    : '';
+
+                card.innerHTML = `
+                    <div class="combine-folder-card-header">
+                        <input type="radio" name="combineFolderDestination" id="${radioId}" ${isSelected ? 'checked' : ''}>
+                        <label for="${radioId}" class="combine-folder-path">${escapeHtml(folder.directory)}</label>
+                    </div>
+                    <div class="combine-folder-stats">
+                        <div>Files <strong>${folder.fileCount.toLocaleString()}</strong></div>
+                        <div>Total size <strong>${formatFileSize(folder.totalSize)}</strong></div>
+                        <div>Newest file <strong>${formatCombineFolderDate(folder.newestFileAddedAt)}</strong></div>
+                        <div>Oldest file <strong>${formatCombineFolderDate(folder.oldestFileAddedAt)}</strong></div>
+                    </div>
+                    ${sampleHtml}
+                `;
+
+                const selectThis = () => {
+                    combineFolderSelectedDestination = folder.directory;
+                    renderCombineFolderGroup();
+                };
+                card.addEventListener('click', (ev) => {
+                    if (ev.target && ev.target.tagName === 'A') return;
+                    selectThis();
+                });
+                card.addEventListener('keydown', (ev) => {
+                    if (ev.key === 'Enter' || ev.key === ' ') {
+                        ev.preventDefault();
+                        selectThis();
+                    }
+                });
+                list.appendChild(card);
+            });
+
+            const canCombine = group.folders.length >= 2 && !!combineFolderSelectedDestination;
+            document.getElementById('combineFoldersPreviewBtn').disabled = !canCombine || combineFolderActionInFlight;
+            document.getElementById('combineFoldersConfirmBtn').disabled = !canCombine || combineFolderActionInFlight;
+            updateCombineFoldersNavigation();
+        }
+
+        function buildCombineFoldersRequestBody() {
+            const group = getCurrentCombineFolderGroup();
+            if (!group || !combineFolderSelectedDestination) {
+                return null;
+            }
+            const sources = group.folders
+                .map(f => f.directory)
+                .filter(d => d !== combineFolderSelectedDestination);
+            return {
+                groupKey: group.groupKey,
+                destinationDirectory: combineFolderSelectedDestination,
+                sourceDirectories: sources
+            };
+        }
+
+        async function previewCombineFolders() {
+            const body = buildCombineFoldersRequestBody();
+            if (!body) return;
+            const previewPanel = document.getElementById('combineFoldersPreview');
+            previewPanel.style.display = 'block';
+            previewPanel.innerHTML = '<em>Building preview...</em>';
+            combineFolderActionInFlight = true;
+            document.getElementById('combineFoldersPreviewBtn').disabled = true;
+            document.getElementById('combineFoldersConfirmBtn').disabled = true;
+            try {
+                const response = await fetch(apiUrl('/api/files/combine-folders/preview'), {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(body)
+                });
+                if (handleAuthError(response)) return;
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || `HTTP error! status: ${response.status}`);
+                }
+                const moves = Array.isArray(data.moves) ? data.moves : [];
+                if (moves.length === 0) {
+                    previewPanel.innerHTML = '<em>No files will be moved.</em>';
+                } else {
+                    const conflicts = moves.filter(m => m.conflict).length;
+                    const skipped = moves.filter(m => m.skipped).length;
+                    const list = moves.map(m => {
+                        const cls = m.skipped ? 'skipped' : (m.conflict ? 'conflict' : '');
+                        const note = m.skipped ? ' (skipped)' : (m.conflict ? ' (renamed to avoid conflict)' : '');
+                        return `<li class="${cls}">${escapeHtml(m.sourcePath)} → ${escapeHtml(m.destinationPath)}${note}</li>`;
+                    }).join('');
+                    previewPanel.innerHTML = `
+                        <h4>Move plan (${moves.length} file${moves.length === 1 ? '' : 's'}${conflicts ? `, ${conflicts} renamed` : ''}${skipped ? `, ${skipped} skipped` : ''})</h4>
+                        <ul>${list}</ul>
+                    `;
+                }
+            } catch (error) {
+                console.error('Failed to build combine preview:', error);
+                previewPanel.innerHTML = `<span class="conflict">Failed to build preview: ${escapeHtml(error.message)}</span>`;
+            } finally {
+                combineFolderActionInFlight = false;
+                renderCombineFolderGroup();
+            }
+        }
+
+        async function confirmCombineFolders() {
+            const body = buildCombineFoldersRequestBody();
+            if (!body) return;
+            const group = getCurrentCombineFolderGroup();
+            const sourceCount = group ? group.folders.length - 1 : 0;
+            const message = `Combine ${sourceCount} folder${sourceCount === 1 ? '' : 's'} into:\n${combineFolderSelectedDestination}\n\nFiles will be moved on disk. Continue?`;
+            if (!confirm(message)) {
+                return;
+            }
+            combineFolderActionInFlight = true;
+            document.getElementById('combineFoldersPreviewBtn').disabled = true;
+            document.getElementById('combineFoldersConfirmBtn').disabled = true;
+            try {
+                const response = await fetch(apiUrl('/api/files/combine-folders'), {
+                    method: 'POST',
+                    headers: {
+                        ...getAuthHeaders(),
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(body)
+                });
+                if (handleAuthError(response)) return;
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || `HTTP error! status: ${response.status}`);
+                }
+                alert(`Combine complete: ${data.moved} moved, ${data.skipped} skipped, ${data.failed} failed.`);
+                if (typeof loadLibraryHealth === 'function') {
+                    loadLibraryHealth();
+                }
+                if (typeof refreshFiles === 'function') {
+                    refreshFiles();
+                }
+                // Reload groups; the just-combined group should disappear.
+                await openCombineFoldersModal();
+            } catch (error) {
+                console.error('Failed to combine folders:', error);
+                alert(`Failed to combine folders: ${error.message}`);
+            } finally {
+                combineFolderActionInFlight = false;
+                renderCombineFolderGroup();
+            }
         }
         
         async function viewTags(filepath) {

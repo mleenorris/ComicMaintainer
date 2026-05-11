@@ -24,6 +24,7 @@ This service automatically watches a directory for new or changed comic archive 
   - **Filter by processing status**: View all files, only processed files, only unprocessed files, or only duplicates
   - **Scan for unmarked files**: Quickly identify how many files haven't been processed yet
   - **Visual status indicators**: Each file shows ✅ (processed), ⚠️ (unprocessed), or 🔁 (duplicate) icon
+  - **Combine Folders workflow**: Interactively review folders that contain the same series across multiple locations. The Library Health "Combine Folders" tile opens a side-by-side comparison of every folder in a group (path, file count, total size, newest/oldest file dates, sample file names). The folder containing the most recently added file is highlighted as the suggested destination, but any folder in the group can be selected. A "Preview Merge" action shows the exact list of file moves and any name conflicts (collisions are auto-renamed with a numeric suffix) before any changes are written to disk.
   - **Server-side preferences**: Theme and pagination settings persist across browsers and devices
   - **Job resumption**: Batch processing jobs automatically resume after page refresh or browser restart
   - **Robust batch processing**: Three-layer defense system ensures progress updates are never stuck

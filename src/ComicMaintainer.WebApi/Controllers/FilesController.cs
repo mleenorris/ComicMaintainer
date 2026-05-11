@@ -212,18 +212,27 @@ public class FilesController : ControllerBase
 
     private async Task<int> GetCombinableFolderCountAsync(CancellationToken cancellationToken = default)
     {
+        var groups = await BuildCombinableFolderGroupsAsync(cancellationToken);
+        // Mirror the previous behavior: every folder beyond the suggested destination counts as a source.
+        return groups.Sum(g => Math.Max(0, g.Folders.Count - 1));
+    }
+
+    private async Task<List<CombinableFolderGroup>> BuildCombinableFolderGroupsAsync(CancellationToken cancellationToken = default)
+    {
         var files = ((await _fileStore.GetAllFilesAsync(cancellationToken)) ?? Enumerable.Empty<ComicFile>())
             .Where(file => !string.IsNullOrWhiteSpace(file.FilePath))
             .ToList();
 
         if (files.Count < 2)
         {
-            return 0;
+            return new List<CombinableFolderGroup>();
         }
 
         var addedAtLookup = await GetAddedAtLookupAsync(cancellationToken);
-        var sourceDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var entries = new List<(string GroupKey, string Directory, DateTime AddedAt)>(files.Count);
+
+        // Bucket files by (groupKey -> directory -> list of files)
+        var byGroup = new Dictionary<string, Dictionary<string, List<(ComicFile File, DateTime AddedAt)>>>(StringComparer.OrdinalIgnoreCase);
+        var groupDisplay = new Dictionary<string, (string SeriesName, string? Volume)>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var file in files)
         {
@@ -246,34 +255,409 @@ public class FilesController : ControllerBase
                 ? createdAt
                 : file.LastModified;
 
-            entries.Add((groupKey, directory, addedAt));
+            if (!byGroup.TryGetValue(groupKey, out var dirMap))
+            {
+                dirMap = new Dictionary<string, List<(ComicFile, DateTime)>>(StringComparer.OrdinalIgnoreCase);
+                byGroup[groupKey] = dirMap;
+                groupDisplay[groupKey] = (
+                    BuildFolderCombineSeriesDisplayName(file) ?? groupKey,
+                    string.IsNullOrWhiteSpace(file.Metadata?.Volume) ? null : file.Metadata!.Volume!.Trim());
+            }
+
+            if (!dirMap.TryGetValue(directory, out var dirFiles))
+            {
+                dirFiles = new List<(ComicFile, DateTime)>();
+                dirMap[directory] = dirFiles;
+            }
+
+            dirFiles.Add((file, addedAt));
         }
 
-        foreach (var group in entries.GroupBy(entry => entry.GroupKey, StringComparer.OrdinalIgnoreCase))
+        var result = new List<CombinableFolderGroup>();
+        foreach (var (groupKey, dirMap) in byGroup)
         {
-            var directories = group
-                .GroupBy(entry => entry.Directory, StringComparer.OrdinalIgnoreCase)
-                .Select(directoryGroup => new
-                {
-                    Directory = directoryGroup.Key,
-                    LatestAddedAt = directoryGroup.Max(entry => entry.AddedAt)
-                })
-                .OrderByDescending(entry => entry.LatestAddedAt)
-                .ThenBy(entry => entry.Directory, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (directories.Count < 2)
+            if (dirMap.Count < 2)
             {
                 continue;
             }
 
-            foreach (var directory in directories.Skip(1))
+            var folders = dirMap
+                .Select(kvp =>
+                {
+                    var dirFiles = kvp.Value;
+                    var newestAdded = dirFiles.Max(e => e.AddedAt);
+                    var oldestAdded = dirFiles.Min(e => e.AddedAt);
+                    var newestModified = dirFiles.Max(e => e.File.LastModified);
+                    var totalSize = dirFiles.Sum(e => e.File.FileSize);
+                    var sample = dirFiles
+                        .OrderBy(e => e.File.FileName, StringComparer.OrdinalIgnoreCase)
+                        .Take(5)
+                        .Select(e => e.File.FileName)
+                        .ToList();
+                    var allFilePaths = dirFiles
+                        .Select(e => e.File.FilePath)
+                        .ToList();
+                    return new CombinableFolder
+                    {
+                        Directory = kvp.Key,
+                        FileCount = dirFiles.Count,
+                        TotalSize = totalSize,
+                        NewestFileAddedAt = newestAdded,
+                        OldestFileAddedAt = oldestAdded,
+                        NewestFileModifiedAt = newestModified,
+                        SampleFileNames = sample,
+                        FilePaths = allFilePaths
+                    };
+                })
+                .OrderByDescending(f => f.NewestFileAddedAt)
+                .ThenBy(f => f.Directory, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var suggested = folders[0];
+            var display = groupDisplay[groupKey];
+            result.Add(new CombinableFolderGroup
             {
-                sourceDirectories.Add(directory.Directory);
+                GroupKey = groupKey,
+                SeriesName = display.SeriesName,
+                Volume = display.Volume,
+                Folders = folders,
+                SuggestedDestinationDirectory = suggested.Directory,
+                SuggestionReason = $"Contains the most recently added file ({suggested.NewestFileAddedAt:yyyy-MM-dd}).",
+                TotalFileCount = folders.Sum(f => f.FileCount)
+            });
+        }
+
+        return result
+            .OrderByDescending(g => g.Folders.Max(f => f.NewestFileAddedAt))
+            .ThenBy(g => g.SeriesName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    [HttpGet("combinable-folders")]
+    public async Task<ActionResult<object>> GetCombinableFolders(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var groups = await BuildCombinableFolderGroupsAsync(cancellationToken);
+            var dtos = groups.Select(ToCombinableFolderGroupDto).ToList();
+            return Ok(new { groups = dtos });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving combinable folders");
+            return StatusCode(500, "Error retrieving combinable folders");
+        }
+    }
+
+    [HttpPost("combine-folders/preview")]
+    public async Task<ActionResult<object>> PreviewCombineFolders(
+        [FromBody] CombineFoldersRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var (error, plan) = await BuildCombineFoldersPlanAsync(request, cancellationToken);
+            if (error != null)
+            {
+                return BadRequest(new { error });
+            }
+
+            return Ok(new
+            {
+                destination = plan!.Destination,
+                sources = plan.SourceDirectories,
+                moves = plan.Moves.Select(m => new
+                {
+                    sourcePath = m.SourcePath,
+                    destinationPath = m.DestinationPath,
+                    conflict = m.HadConflict,
+                    skipped = m.Skipped,
+                    reason = m.Reason
+                })
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building combine-folders preview");
+            return StatusCode(500, "Error building combine preview");
+        }
+    }
+
+    [HttpPost("combine-folders")]
+    public async Task<ActionResult<object>> CombineFolders(
+        [FromBody] CombineFoldersRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var (error, plan) = await BuildCombineFoldersPlanAsync(request, cancellationToken);
+            if (error != null)
+            {
+                return BadRequest(new { error });
+            }
+
+            var moved = 0;
+            var skipped = 0;
+            var failed = 0;
+            var results = new List<object>(plan!.Moves.Count);
+
+            foreach (var move in plan.Moves)
+            {
+                if (move.Skipped)
+                {
+                    skipped++;
+                    results.Add(new { sourcePath = move.SourcePath, destinationPath = move.DestinationPath, status = "skipped", reason = move.Reason });
+                    continue;
+                }
+
+                try
+                {
+                    var destDir = Path.GetDirectoryName(move.DestinationPath);
+                    if (!string.IsNullOrEmpty(destDir))
+                    {
+                        System.IO.Directory.CreateDirectory(destDir);
+                    }
+
+                    System.IO.File.Move(move.SourcePath, move.DestinationPath);
+                    await _fileStore.UpdateFilePathAsync(move.SourcePath, move.DestinationPath, cancellationToken);
+                    await LogHistoryAsync(move.SourcePath, "Combine Folder", true,
+                        $"Moved to {move.DestinationPath}");
+                    moved++;
+                    results.Add(new { sourcePath = move.SourcePath, destinationPath = move.DestinationPath, status = "moved" });
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    failed++;
+                    _logger.LogWarning(ex, "Failed to move {Source} to {Destination} during folder combine",
+                        LoggingHelper.SanitizePathForLog(move.SourcePath),
+                        LoggingHelper.SanitizePathForLog(move.DestinationPath));
+                    await LogHistoryAsync(move.SourcePath, "Combine Folder", false, ex.Message);
+                    results.Add(new { sourcePath = move.SourcePath, destinationPath = move.DestinationPath, status = "failed", reason = ex.Message });
+                }
+            }
+
+            // Try to remove now-empty source directories
+            var removedDirectories = new List<string>();
+            foreach (var sourceDir in plan.SourceDirectories)
+            {
+                try
+                {
+                    if (System.IO.Directory.Exists(sourceDir) &&
+                        !System.IO.Directory.EnumerateFileSystemEntries(sourceDir).Any())
+                    {
+                        System.IO.Directory.Delete(sourceDir);
+                        removedDirectories.Add(sourceDir);
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogDebug(ex, "Could not remove source directory {Directory} after folder combine",
+                        LoggingHelper.SanitizePathForLog(sourceDir));
+                }
+            }
+
+            return Ok(new
+            {
+                destination = plan.Destination,
+                sources = plan.SourceDirectories,
+                moved,
+                skipped,
+                failed,
+                removedDirectories,
+                results
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error combining folders");
+            return StatusCode(500, "Error combining folders");
+        }
+    }
+
+    private const int MaxFileRenameAttempts = 1000;
+
+    private async Task<(string? Error, CombineFoldersPlan? Plan)> BuildCombineFoldersPlanAsync(
+        CombineFoldersRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request == null)
+        {
+            return ("Request body is required.", null);
+        }
+
+        if (string.IsNullOrWhiteSpace(request.DestinationDirectory))
+        {
+            return ("Destination directory is required.", null);
+        }
+
+        var destination = Path.GetFullPath(request.DestinationDirectory);
+        if (!IsPathSafe(destination))
+        {
+            _logger.LogWarning("Attempt to combine folders into a destination outside watched directory: {Destination}",
+                LoggingHelper.SanitizePathForLog(destination));
+            return ("Destination directory is outside the allowed directory.", null);
+        }
+
+        var groups = await BuildCombinableFolderGroupsAsync(cancellationToken);
+        CombinableFolderGroup? group = null;
+        if (!string.IsNullOrWhiteSpace(request.GroupKey))
+        {
+            group = groups.FirstOrDefault(g => string.Equals(g.GroupKey, request.GroupKey, StringComparison.OrdinalIgnoreCase));
+        }
+        else
+        {
+            // Infer group from destination + sources by finding a group that contains all directories.
+            var allDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { destination };
+            foreach (var src in request.SourceDirectories ?? new List<string>())
+            {
+                allDirs.Add(Path.GetFullPath(src));
+            }
+            group = groups.FirstOrDefault(g => allDirs.All(d => g.Folders.Any(f => string.Equals(f.Directory, d, StringComparison.OrdinalIgnoreCase))));
+        }
+
+        if (group == null)
+        {
+            return ("No combinable folder group matches the request. The library may have changed; please reload.", null);
+        }
+
+        // Determine source folders. If the caller specified them, validate; otherwise use all-but-destination.
+        List<CombinableFolder> sourceFolders;
+        if (request.SourceDirectories != null && request.SourceDirectories.Count > 0)
+        {
+            sourceFolders = new List<CombinableFolder>();
+            foreach (var src in request.SourceDirectories)
+            {
+                var srcFull = Path.GetFullPath(src);
+                if (!IsPathSafe(srcFull))
+                {
+                    _logger.LogWarning("Attempt to combine from source outside watched directory: {Source}",
+                        LoggingHelper.SanitizePathForLog(srcFull));
+                    return ("One or more source directories are outside the allowed directory.", null);
+                }
+                if (string.Equals(srcFull, destination, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                var folder = group.Folders.FirstOrDefault(f => string.Equals(f.Directory, srcFull, StringComparison.OrdinalIgnoreCase));
+                if (folder == null)
+                {
+                    return ($"Source directory '{src}' is not part of this group.", null);
+                }
+                sourceFolders.Add(folder);
+            }
+        }
+        else
+        {
+            sourceFolders = group.Folders
+                .Where(f => !string.Equals(f.Directory, destination, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        if (sourceFolders.Count == 0)
+        {
+            return ("No source folders were selected for the combine operation.", null);
+        }
+
+        // Verify destination belongs to the group.
+        if (!group.Folders.Any(f => string.Equals(f.Directory, destination, StringComparison.OrdinalIgnoreCase)))
+        {
+            return ("Destination directory is not part of this group.", null);
+        }
+
+        // Build the move plan, handling name collisions by appending a numeric suffix.
+        var moves = new List<CombineFoldersMove>();
+        var reservedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (System.IO.Directory.Exists(destination))
+        {
+            foreach (var existing in System.IO.Directory.EnumerateFiles(destination))
+            {
+                reservedNames.Add(Path.GetFileName(existing));
             }
         }
 
-        return sourceDirectories.Count;
+        foreach (var folder in sourceFolders)
+        {
+            foreach (var sourcePath in folder.FilePaths)
+            {
+                if (string.IsNullOrWhiteSpace(sourcePath))
+                {
+                    continue;
+                }
+                var name = Path.GetFileName(sourcePath);
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+                var hadConflict = reservedNames.Contains(name);
+                var finalName = name;
+                if (hadConflict)
+                {
+                    var baseName = Path.GetFileNameWithoutExtension(name);
+                    var extension = Path.GetExtension(name);
+                    var attempt = 1;
+                    while (reservedNames.Contains(finalName))
+                    {
+                        finalName = $"{baseName} ({attempt}){extension}";
+                        attempt++;
+                        if (attempt > MaxFileRenameAttempts)
+                        {
+                            break;
+                        }
+                    }
+                }
+                reservedNames.Add(finalName);
+                var destPath = Path.Combine(destination, finalName);
+                var skipped = string.Equals(sourcePath, destPath, StringComparison.OrdinalIgnoreCase);
+                moves.Add(new CombineFoldersMove
+                {
+                    SourcePath = sourcePath,
+                    DestinationPath = destPath,
+                    HadConflict = hadConflict,
+                    Skipped = skipped,
+                    Reason = skipped ? "Source and destination are the same file." : null
+                });
+            }
+        }
+
+        return (null, new CombineFoldersPlan
+        {
+            Destination = destination,
+            SourceDirectories = sourceFolders.Select(f => f.Directory).ToList(),
+            Moves = moves
+        });
+    }
+
+    private static CombinableFolderGroupDto ToCombinableFolderGroupDto(CombinableFolderGroup group)
+    {
+        return new CombinableFolderGroupDto
+        {
+            GroupKey = group.GroupKey,
+            SeriesName = group.SeriesName,
+            Volume = group.Volume,
+            TotalFileCount = group.TotalFileCount,
+            SuggestedDestinationDirectory = group.SuggestedDestinationDirectory,
+            SuggestionReason = group.SuggestionReason,
+            Folders = group.Folders.Select(f => new CombinableFolderDto
+            {
+                Directory = f.Directory,
+                FileCount = f.FileCount,
+                TotalSize = f.TotalSize,
+                NewestFileAddedAt = f.NewestFileAddedAt,
+                OldestFileAddedAt = f.OldestFileAddedAt,
+                NewestFileModifiedAt = f.NewestFileModifiedAt,
+                SampleFileNames = f.SampleFileNames,
+                IsSuggested = string.Equals(f.Directory, group.SuggestedDestinationDirectory, StringComparison.OrdinalIgnoreCase)
+            }).ToList()
+        };
+    }
+
+    private static string? BuildFolderCombineSeriesDisplayName(ComicFile file)
+    {
+        return FirstNonEmpty(
+            file.Metadata?.Series,
+            ExtractSeriesNameFromFileName(file),
+            Path.GetFileName(file.Directory),
+            Path.GetFileName(Path.GetDirectoryName(file.FilePath) ?? string.Empty));
     }
 
     private async Task<Dictionary<string, DateTime>> GetAddedAtLookupAsync(CancellationToken cancellationToken)
@@ -867,6 +1251,75 @@ public class FilesController : ControllerBase
     public class ProcessedStatusRequest
     {
         public bool Processed { get; set; }
+    }
+
+    public class CombineFoldersRequest
+    {
+        public string? GroupKey { get; set; }
+        public string DestinationDirectory { get; set; } = string.Empty;
+        public List<string>? SourceDirectories { get; set; }
+    }
+
+    private sealed class CombinableFolder
+    {
+        public string Directory { get; set; } = string.Empty;
+        public int FileCount { get; set; }
+        public long TotalSize { get; set; }
+        public DateTime NewestFileAddedAt { get; set; }
+        public DateTime OldestFileAddedAt { get; set; }
+        public DateTime NewestFileModifiedAt { get; set; }
+        public List<string> SampleFileNames { get; set; } = new();
+        public List<string> FilePaths { get; set; } = new();
+    }
+
+    private sealed class CombinableFolderGroup
+    {
+        public string GroupKey { get; set; } = string.Empty;
+        public string SeriesName { get; set; } = string.Empty;
+        public string? Volume { get; set; }
+        public int TotalFileCount { get; set; }
+        public string SuggestedDestinationDirectory { get; set; } = string.Empty;
+        public string SuggestionReason { get; set; } = string.Empty;
+        public List<CombinableFolder> Folders { get; set; } = new();
+    }
+
+    private sealed class CombineFoldersMove
+    {
+        public string SourcePath { get; set; } = string.Empty;
+        public string DestinationPath { get; set; } = string.Empty;
+        public bool HadConflict { get; set; }
+        public bool Skipped { get; set; }
+        public string? Reason { get; set; }
+    }
+
+    private sealed class CombineFoldersPlan
+    {
+        public string Destination { get; set; } = string.Empty;
+        public List<string> SourceDirectories { get; set; } = new();
+        public List<CombineFoldersMove> Moves { get; set; } = new();
+    }
+
+    public class CombinableFolderDto
+    {
+        public string Directory { get; set; } = string.Empty;
+        public int FileCount { get; set; }
+        public long TotalSize { get; set; }
+        public DateTime NewestFileAddedAt { get; set; }
+        public DateTime OldestFileAddedAt { get; set; }
+        public DateTime NewestFileModifiedAt { get; set; }
+        public List<string> SampleFileNames { get; set; } = new();
+        public bool IsSuggested { get; set; }
+    }
+
+    public class CombinableFolderGroupDto
+    {
+        public string GroupKey { get; set; } = string.Empty;
+        public string SeriesName { get; set; } = string.Empty;
+        public string? Volume { get; set; }
+        public int TotalFileCount { get; set; }
+        public string SuggestedDestinationDirectory { get; set; } = string.Empty;
+        public string SuggestionReason { get; set; } = string.Empty;
+        public List<CombinableFolderDto> Folders { get; set; } = new();
     }
 
     /// <summary>

@@ -159,6 +159,9 @@
                          <button class="settings-dropdown-item" onclick="openDuplicateReviewModal(); closeSettingsMenu();">
                              🔁 Review Duplicates
                          </button>
+                         <button class="settings-dropdown-item" onclick="openCombineFoldersModal(); closeSettingsMenu();">
+                             📁 Combine Folders
+                         </button>
                          <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
                              📋 View Logs
                          </button>
@@ -272,6 +275,7 @@
                  <div class="library-health-actions">
                      <button class="btn btn-small" onclick="refreshLibraryHealth()">🔄 Refresh</button>
                      <button class="btn btn-small btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" disabled>🔁 Review Duplicates</button>
+                     <button class="btn btn-small" id="combineFoldersBtn" onclick="openCombineFoldersModal()" disabled>📁 Combine Folders</button>
                  </div>
              </div>
              <div class="library-health-grid">
@@ -290,10 +294,10 @@
                      <strong id="libraryHealthDuplicates">—</strong>
                      <small>Ready for review</small>
                  </button>
-                 <button class="library-health-card neutral" type="button" onclick="setLibraryViewMode('series')">
+                 <button class="library-health-card neutral" type="button" onclick="openCombineFoldersModal()">
                      <span class="library-health-label">Combine Folders</span>
                      <strong id="libraryHealthCombinableFolders">—</strong>
-                     <small>Merge into the newest folder</small>
+                     <small>Review &amp; merge duplicate folders</small>
                  </button>
              </div>
          </section>
@@ -1009,6 +1013,42 @@
              </div>
              <div class="modal-footer">
                  <button class="btn" onclick="closeDuplicateReviewModal()">Close</button>
+             </div>
+         </div>
+     </div>
+
+     <div class="modal" id="combineFoldersModal">
+         <div class="modal-content" style="max-width: 1024px;">
+             <div class="modal-header">
+                 <h2>Combine Folders</h2>
+                 <button class="close-btn" onclick="closeCombineFoldersModal()">&times;</button>
+             </div>
+             <div class="modal-body">
+                 <div class="duplicate-review-toolbar">
+                     <button class="btn btn-small" id="combineFoldersPrevBtn" onclick="changeCombineFolderGroup(-1)">← Previous</button>
+                     <span id="combineFoldersCounter">0 of 0</span>
+                     <button class="btn btn-small" id="combineFoldersNextBtn" onclick="changeCombineFolderGroup(1)">Next →</button>
+                 </div>
+                 <div class="duplicate-review-empty" id="combineFoldersEmptyState" style="display: none;">
+                     No folders look combinable right now.
+                 </div>
+                 <div id="combineFoldersContent">
+                     <div class="combine-folders-summary">
+                         <h3 id="combineFoldersGroupTitle">Loading...</h3>
+                         <p id="combineFoldersGroupMeta" class="combine-folders-meta"></p>
+                         <p id="combineFoldersSuggestion" class="combine-folders-suggestion"></p>
+                     </div>
+                     <div id="combineFoldersList" class="combine-folders-list"></div>
+                     <div id="combineFoldersPreview" class="combine-folders-preview" style="display: none;"></div>
+                     <div class="duplicate-review-tip">
+                         Pick the folder you want to keep as the destination. Files from the other folders will be moved into it. Use “Preview Merge” to see exactly what will move before committing.
+                     </div>
+                 </div>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn" id="combineFoldersPreviewBtn" onclick="previewCombineFolders()" disabled>👀 Preview Merge</button>
+                 <button class="btn btn-warning" id="combineFoldersConfirmBtn" onclick="confirmCombineFolders()" disabled>📁 Combine Folders</button>
+                 <button class="btn" onclick="closeCombineFoldersModal()">Close</button>
              </div>
          </div>
      </div>

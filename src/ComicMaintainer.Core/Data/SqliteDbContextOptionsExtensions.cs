@@ -13,9 +13,9 @@ namespace ComicMaintainer.Core.Data;
 public static class SqliteDbContextOptionsExtensions
 {
     /// <summary>
-    /// Environment variable that, when set to a truthy value ("1", "true", "yes"),
-    /// enables EF Core SQL command logging at Information level. Always-on logging
-    /// is intentionally avoided because it is expensive.
+    /// Environment variable that, when set to a truthy value ("1", "true",
+    /// "yes", "on"), enables EF Core SQL command logging at Information level.
+    /// Always-on logging is intentionally avoided because it is expensive.
     /// </summary>
     public const string QueryLoggingEnvVar = "EFCORE_QUERY_LOGGING";
 

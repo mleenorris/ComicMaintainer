@@ -925,11 +925,19 @@ public class FileStoreService : IFileStoreService
             _logger.LogDebug("Bulk-updated read status for {Updated}/{Total} files", updated, paths.Count);
 
             // If some files didn't exist in DB yet, fall back to per-file insert path
-            // (rare; just call the single-file method which now does a no-op UPDATE
-            // first and then inserts only if still missing).
+            // only for the missing ones to avoid re-updating rows we just touched.
             if (updated < paths.Count)
             {
-                foreach (var filePath in paths)
+                var existingPaths = await dbContext.ComicFiles
+                    .AsNoTracking()
+                    .Where(e => paths.Contains(e.FilePath))
+                    .Select(e => e.FilePath)
+                    .ToListAsync(cancellationToken);
+
+                var missing = new HashSet<string>(paths, StringComparer.Ordinal);
+                missing.ExceptWith(existingPaths);
+
+                foreach (var filePath in missing)
                 {
                     await MarkFileReadAsync(filePath, read, cancellationToken);
                 }

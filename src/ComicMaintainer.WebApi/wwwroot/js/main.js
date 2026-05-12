@@ -1244,6 +1244,19 @@
         }
 
         async function loadSeriesLibrary(page = 1, refresh = false) {
+            // Render an immediate loading state into the file list so that
+            // switching to the series view always gives the user feedback,
+            // even if the underlying API call is slow on large libraries.
+            const fileListEl = document.getElementById('fileList');
+            if (fileListEl && !currentSeriesDetailId) {
+                fileListEl.innerHTML = `
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading series...</p>
+                    </div>
+                `;
+            }
+
             try {
                 let url = apiUrl(`/api/files/series?page=${page}&per_page=${perPage}`);
                 if (refresh) {

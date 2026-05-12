@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 
 namespace ComicMaintainer.Core.Services;
@@ -90,7 +91,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Metadata refresh failed for {SeriesTitle}", title);
+                    _logger.LogWarning(ex, "Metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(title));
                     job.Failures++;
                 }
 

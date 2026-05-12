@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -161,7 +162,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "External metadata refresh failed for {SeriesTitle}", trimmedTitle);
+            _logger.LogWarning(ex, "External metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(trimmedTitle));
             status = "error";
         }
 

@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
 
 namespace ComicMaintainer.Core.Services;
@@ -34,7 +35,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Provider {ProviderType} failed for {SeriesName}", provider.GetType().Name, seriesName);
+                _logger.LogDebug(ex, "Provider {ProviderType} failed for {SeriesName}", provider.GetType().Name, LoggingHelper.SanitizeForLog(seriesName));
             }
         }
 
@@ -60,7 +61,7 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Provider {ProviderType} search failed for {SeriesName}", provider.GetType().Name, query);
+                _logger.LogDebug(ex, "Provider {ProviderType} search failed for {SeriesName}", provider.GetType().Name, LoggingHelper.SanitizeForLog(query));
             }
         }
 

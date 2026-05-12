@@ -92,7 +92,7 @@ public class MetadataController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error refreshing metadata for {SeriesTitle}"), seriesTitle);
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error refreshing metadata for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
             return StatusCode(500, "Error refreshing metadata");
         }
     }
@@ -130,7 +130,7 @@ public class MetadataController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error searching external metadata for {Query}"), query);
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error searching external metadata for {Query}"), LoggingHelper.SanitizeForLog(query));
             return StatusCode(500, "Error searching external metadata");
         }
     }
@@ -180,7 +180,7 @@ public class MetadataController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error updating aliases for {SeriesTitle}"), seriesTitle);
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error updating aliases for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
             return StatusCode(500, "Error updating aliases");
         }
     }

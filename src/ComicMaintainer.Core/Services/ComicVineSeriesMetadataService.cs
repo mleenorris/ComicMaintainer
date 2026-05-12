@@ -3,6 +3,7 @@ using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -91,7 +92,7 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
             using var response = await httpClient.GetAsync(requestUri, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("ComicVine lookup failed for {SeriesName} with status code {StatusCode}", seriesName, response.StatusCode);
+                _logger.LogWarning("ComicVine lookup failed for {SeriesName} with status code {StatusCode}", LoggingHelper.SanitizeForLog(seriesName), response.StatusCode);
                 return Array.Empty<ExternalSeriesMetadata>();
             }
 
@@ -101,7 +102,7 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "ComicVine lookup failed for {SeriesName}", seriesName);
+            _logger.LogWarning(ex, "ComicVine lookup failed for {SeriesName}", LoggingHelper.SanitizeForLog(seriesName));
             return Array.Empty<ExternalSeriesMetadata>();
         }
     }

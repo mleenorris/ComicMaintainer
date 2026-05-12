@@ -105,7 +105,13 @@ public interface IFileStoreService
     /// (IsRenamed, IsNormalized, IsDuplicate, IsRead, Metadata).  Used when a file is renamed
     /// so the database record follows the file without resetting its status.
     /// </summary>
-    Task UpdateFilePathAsync(string oldPath, string newPath, CancellationToken cancellationToken = default);
+    /// <param name="broadcastUpdate">
+    /// When true (default) a file list update event is broadcast after a successful update.
+    /// Callers performing bulk updates (e.g. combining folders containing many files) should
+    /// pass false to avoid flooding clients with one event per file and emit a single
+    /// broadcast at the end of the bulk operation instead.
+    /// </param>
+    Task UpdateFilePathAsync(string oldPath, string newPath, CancellationToken cancellationToken = default, bool broadcastUpdate = true);
 
     /// <summary>
     /// Remove stale entries from database where files no longer exist on disk

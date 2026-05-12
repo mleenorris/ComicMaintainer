@@ -28,6 +28,7 @@ public class FilesController : ControllerBase
     private readonly ILogger<FilesController> _logger;
     private readonly AppSettings _settings;
     private readonly IDbContextFactory<ComicMaintainerDbContext>? _dbContextFactory;
+    private readonly IEventBroadcaster? _eventBroadcaster;
 
     public FilesController(
         IFileStoreService fileStore,
@@ -36,7 +37,8 @@ public class FilesController : ControllerBase
         ISeriesLibraryService seriesLibrary,
         ILogger<FilesController> logger,
         IOptions<AppSettings> settings,
-        IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null)
+        IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null,
+        IEventBroadcaster? eventBroadcaster = null)
     {
         _fileStore = fileStore;
         _processor = processor;
@@ -45,6 +47,7 @@ public class FilesController : ControllerBase
         _logger = logger;
         _settings = settings.Value;
         _dbContextFactory = dbContextFactory;
+        _eventBroadcaster = eventBroadcaster;
     }
 
     /// <summary>
@@ -419,7 +422,10 @@ public class FilesController : ControllerBase
                     }
 
                     System.IO.File.Move(move.SourcePath, move.DestinationPath);
-                    await _fileStore.UpdateFilePathAsync(move.SourcePath, move.DestinationPath, cancellationToken);
+                    // Suppress per-file broadcasts: combining a folder with many files would
+                    // otherwise emit one file_list_updated SSE event per move, flooding the
+                    // browser and hanging the site. We emit a single broadcast after the loop.
+                    await _fileStore.UpdateFilePathAsync(move.SourcePath, move.DestinationPath, cancellationToken, broadcastUpdate: false);
                     await LogHistoryAsync(move.SourcePath, "Combine Folder", true,
                         $"Moved to {move.DestinationPath}");
                     moved++;
@@ -453,6 +459,20 @@ public class FilesController : ControllerBase
                 {
                     _logger.LogDebug(ex, "Could not remove source directory {Directory} after folder combine",
                         LoggingHelper.SanitizePathForLog(sourceDir));
+                }
+            }
+
+            // Emit a single file list update broadcast for the entire combine operation
+            // so that connected clients refresh once instead of once per file.
+            if ((moved > 0 || removedDirectories.Count > 0) && _eventBroadcaster != null)
+            {
+                try
+                {
+                    await _eventBroadcaster.BroadcastFileListUpdateAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to broadcast file list update after folder combine");
                 }
             }
 

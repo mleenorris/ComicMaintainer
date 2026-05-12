@@ -662,7 +662,7 @@ public class FileStoreService : IFileStoreService
         return Task.FromResult(exists);
     }
 
-    public async Task UpdateFilePathAsync(string oldPath, string newPath, CancellationToken cancellationToken = default)
+    public async Task UpdateFilePathAsync(string oldPath, string newPath, CancellationToken cancellationToken = default, bool broadcastUpdate = true)
     {
         if (!IsPathWithinAllowedDirectories(newPath))
         {
@@ -756,7 +756,7 @@ public class FileStoreService : IFileStoreService
         }
 
         // Broadcast file list update
-        if (_eventBroadcaster != null)
+        if (broadcastUpdate && _eventBroadcaster != null)
         {
             try
             {

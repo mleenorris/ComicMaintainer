@@ -1,5 +1,4 @@
 using System.Text.RegularExpressions;
-using System.Collections.Concurrent;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
@@ -9,23 +8,22 @@ namespace ComicMaintainer.Core.Services;
 
 public class SeriesLibraryService : ISeriesLibraryService
 {
-    private const int MaxConcurrentExternalLookups = 5;
     private static readonly Regex SeriesKeySanitizer = new("[^a-z0-9]+", RegexOptions.Compiled);
 
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
-    private readonly IExternalSeriesMetadataService _externalMetadata;
+    private readonly ISeriesMetadataCacheService _metadataCache;
     private readonly ILogger<SeriesLibraryService> _logger;
 
     public SeriesLibraryService(
         IFileStoreService fileStore,
         IComicProcessorService processor,
-        IExternalSeriesMetadataService externalMetadata,
+        ISeriesMetadataCacheService metadataCache,
         ILogger<SeriesLibraryService> logger)
     {
         _fileStore = fileStore;
         _processor = processor;
-        _externalMetadata = externalMetadata;
+        _metadataCache = metadataCache;
         _logger = logger;
     }
 
@@ -39,30 +37,58 @@ public class SeriesLibraryService : ISeriesLibraryService
         CancellationToken cancellationToken = default)
     {
         var files = (await _fileStore.GetFilteredFilesAsync(filter, cancellationToken)).ToList();
-        var fileEntries = new List<(ComicFile File, SeriesMetadata Metadata, string GroupingTitle, List<string> MetadataAliases, List<string> ExternalLookupTitles)>(files.Count);
+        var fileEntries = new List<(ComicFile File, SeriesMetadata Metadata, string GroupingTitle, List<string> MetadataAliases)>(files.Count);
 
         foreach (var file in files)
         {
             // Reuse metadata already loaded from the database when available so we
             // don't have to open every archive on disk just to render the library.
-            // This is what makes the series listing fast enough to be usable for
-            // large libraries; falling back to the archive reader is only needed
-            // for files we have never indexed.
             var metadata = BuildSeriesMetadataFromCache(file)
                 ?? await _processor.GetSeriesMetadataAsync(file.FilePath, cancellationToken)
                 ?? new SeriesMetadata();
             var groupingTitle = ResolveGroupingTitle(metadata, file);
             var metadataAliases = ResolveMetadataAliases(metadata, groupingTitle);
-            var externalLookupTitles = new[] { groupingTitle }
-                .Concat(metadataAliases)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            fileEntries.Add((file, metadata, groupingTitle, metadataAliases, externalLookupTitles));
+            fileEntries.Add((file, metadata, groupingTitle, metadataAliases));
         }
 
-        var externalLookupMap = await BuildExternalLookupMapAsync(
-            fileEntries.SelectMany(entry => entry.ExternalLookupTitles),
-            cancellationToken);
+        // Load the persistent metadata cache (external lookups + user aliases) and
+        // index it by every known alias so we can merge folders without re-querying
+        // external providers on every library load.
+        var cacheRecords = await _metadataCache.GetAllAsync(cancellationToken);
+        var cacheByKey = cacheRecords.ToDictionary(r => r.NormalizedKey, StringComparer.OrdinalIgnoreCase);
+        var aliasIndex = BuildAliasIndex(cacheRecords);
+
+        // Union-find groups: every series-title we encounter (file folder titles +
+        // cached canonical/alias titles) becomes a node, then we union nodes that
+        // share a record id from the cache. The result is that a user-added alias
+        // collapses two folders into a single series card on the next load.
+        var unionFind = new UnionFind<string>(StringComparer.OrdinalIgnoreCase);
+        var groupingKeyByFile = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in fileEntries)
+        {
+            var fileKey = NormalizeKey(entry.GroupingTitle);
+            unionFind.Add(fileKey);
+
+            UnionWithCacheKey(unionFind, fileKey, entry.GroupingTitle, aliasIndex);
+            foreach (var alias in entry.MetadataAliases)
+            {
+                UnionWithCacheKey(unionFind, fileKey, alias, aliasIndex);
+            }
+            groupingKeyByFile[entry.File.FilePath] = fileKey;
+        }
+
+        // Also union together any cached records that themselves share aliases.
+        foreach (var record in cacheRecords)
+        {
+            var recordKey = record.NormalizedKey;
+            unionFind.Add(recordKey);
+            foreach (var alias in EnumerateAllRecordTitles(record))
+            {
+                UnionWithCacheKey(unionFind, recordKey, alias, aliasIndex);
+            }
+        }
+
         var groups = new Dictionary<string, SeriesAccumulator>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in fileEntries)
@@ -70,27 +96,36 @@ public class SeriesLibraryService : ISeriesLibraryService
             var file = entry.File;
             var metadata = entry.Metadata;
             var groupingTitle = entry.GroupingTitle;
-            var externalMetadata = ResolveExternalMetadata(entry.ExternalLookupTitles, externalLookupMap);
+            var fileKey = groupingKeyByFile[file.FilePath];
+            var representative = unionFind.Find(fileKey);
 
-            var canonicalTitle = string.IsNullOrWhiteSpace(externalMetadata?.CanonicalTitle)
+            // Pick the cache record (if any) attached to this representative.
+            var record = ResolveRecordForGroup(representative, cacheRecords, unionFind);
+
+            var canonicalTitle = record is null || string.IsNullOrWhiteSpace(record.CanonicalTitle)
                 ? groupingTitle
-                : externalMetadata!.CanonicalTitle;
+                : record.CanonicalTitle;
 
-            var groupKey = NormalizeKey(canonicalTitle);
-            if (!groups.TryGetValue(groupKey, out var accumulator))
+            if (!groups.TryGetValue(representative, out var accumulator))
             {
                 accumulator = new SeriesAccumulator
                 {
-                    Id = groupKey,
+                    Id = representative,
                     DisplayTitle = canonicalTitle,
                     CanonicalTitle = canonicalTitle,
-                    MetadataSource = externalMetadata?.Source,
-                    Aliases = externalMetadata?.Aliases
-                        .Where(alias => !string.Equals(alias, canonicalTitle, StringComparison.OrdinalIgnoreCase))
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .ToList() ?? new List<string>()
+                    MetadataSource = record?.Source,
+                    Aliases = new List<string>()
                 };
-                groups[groupKey] = accumulator;
+
+                // Seed aliases from the cache record so we surface user-managed
+                // alternative names even when none of the underlying files use them.
+                if (record is not null)
+                {
+                    AddAliasIfNew(accumulator, record.Aliases, canonicalTitle);
+                    AddAliasIfNew(accumulator, record.UserAliases, canonicalTitle);
+                }
+
+                groups[representative] = accumulator;
             }
 
             if (!string.Equals(groupingTitle, canonicalTitle, StringComparison.OrdinalIgnoreCase)
@@ -212,9 +247,6 @@ public class SeriesLibraryService : ISeriesLibraryService
             return null;
         }
 
-        // We only consider the cached metadata "good enough" if it carries at least
-        // one of the grouping-relevant fields. Otherwise fall back to the archive
-        // reader so we don't lose information that may still be present on disk.
         if (string.IsNullOrWhiteSpace(cached.Series)
             && string.IsNullOrWhiteSpace(cached.Title)
             && string.IsNullOrWhiteSpace(cached.Issue)
@@ -238,8 +270,6 @@ public class SeriesLibraryService : ISeriesLibraryService
 
     private static string ResolveGroupingTitle(SeriesMetadata metadata, ComicFile file)
     {
-        // Prefer the folder-derived title so the series library groups into one card per on-disk series,
-        // matching the library-first browsing model users expect from tools like Kavita.
         return FirstNonEmpty(
                 ResolveFolderTitle(file),
                 metadata.SeriesGroup,
@@ -294,49 +324,77 @@ public class SeriesLibraryService : ISeriesLibraryService
     private static string ExtractIssueSortKey(string? issue)
         => string.IsNullOrWhiteSpace(issue) ? "~" : issue;
 
-    private async Task<Dictionary<string, ExternalSeriesMetadata?>> BuildExternalLookupMapAsync(IEnumerable<string> localTitles, CancellationToken cancellationToken)
+    private static void AddAliasIfNew(SeriesAccumulator accumulator, IEnumerable<string> aliases, string canonicalTitle)
     {
-        var uniqueTitles = new HashSet<string>(
-            localTitles.Where(title => !string.IsNullOrWhiteSpace(title)),
-            StringComparer.OrdinalIgnoreCase);
-
-        var lookupResults = new ConcurrentDictionary<string, ExternalSeriesMetadata?>(StringComparer.OrdinalIgnoreCase);
-        using var concurrencyGate = new SemaphoreSlim(MaxConcurrentExternalLookups);
-
-        var tasks = uniqueTitles.Select(async title =>
+        foreach (var alias in aliases)
         {
-            await concurrencyGate.WaitAsync(cancellationToken);
-            try
-            {
-                lookupResults[title] = await _externalMetadata.LookupSeriesAsync(title, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "External metadata lookup failed for {SeriesTitle}", title);
-                lookupResults[title] = null;
-            }
-            finally
-            {
-                concurrencyGate.Release();
-            }
-        });
-
-        await Task.WhenAll(tasks);
-        return new Dictionary<string, ExternalSeriesMetadata?>(lookupResults, StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrWhiteSpace(alias)) continue;
+            if (string.Equals(alias, canonicalTitle, StringComparison.OrdinalIgnoreCase)) continue;
+            if (accumulator.Aliases.Any(existing => string.Equals(existing, alias, StringComparison.OrdinalIgnoreCase))) continue;
+            accumulator.Aliases.Add(alias);
+        }
     }
 
-    private static ExternalSeriesMetadata? ResolveExternalMetadata(
-        IEnumerable<string> lookupTitles,
-        IReadOnlyDictionary<string, ExternalSeriesMetadata?> externalLookupMap)
+    /// <summary>
+    /// Maps every alias (canonical + provider aliases + user aliases) of every
+    /// cache record to the record's normalized key.
+    /// </summary>
+    private static Dictionary<string, string> BuildAliasIndex(IReadOnlyList<SeriesMetadataCacheRecord> records)
     {
-        foreach (var title in lookupTitles)
+        var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var record in records)
         {
-            if (externalLookupMap.TryGetValue(title, out var externalMetadata) && externalMetadata is not null)
+            foreach (var title in EnumerateAllRecordTitles(record))
             {
-                return externalMetadata;
+                var key = NormalizeKey(title);
+                // Last writer wins — that's fine because we union-find afterwards.
+                index[key] = record.NormalizedKey;
+            }
+
+            index[record.NormalizedKey] = record.NormalizedKey;
+        }
+        return index;
+    }
+
+    private static IEnumerable<string> EnumerateAllRecordTitles(SeriesMetadataCacheRecord record)
+    {
+        if (!string.IsNullOrWhiteSpace(record.CanonicalTitle)) yield return record.CanonicalTitle;
+        foreach (var alias in record.Aliases ?? Enumerable.Empty<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
+        }
+        foreach (var alias in record.UserAliases ?? Enumerable.Empty<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
+        }
+    }
+
+    private static void UnionWithCacheKey(UnionFind<string> unionFind, string fileKey, string title, IReadOnlyDictionary<string, string> aliasIndex)
+    {
+        if (string.IsNullOrWhiteSpace(title)) return;
+        var titleKey = NormalizeKey(title);
+        unionFind.Add(titleKey);
+        unionFind.Union(fileKey, titleKey);
+        if (aliasIndex.TryGetValue(titleKey, out var recordKey))
+        {
+            unionFind.Add(recordKey);
+            unionFind.Union(fileKey, recordKey);
+        }
+    }
+
+    private static SeriesMetadataCacheRecord? ResolveRecordForGroup(
+        string representative,
+        IReadOnlyList<SeriesMetadataCacheRecord> records,
+        UnionFind<string> unionFind)
+    {
+        foreach (var record in records)
+        {
+            if (unionFind.Contains(record.NormalizedKey)
+                && string.Equals(unionFind.Find(record.NormalizedKey), representative, StringComparison.OrdinalIgnoreCase))
+            {
+                return record;
             }
         }
-
         return null;
     }
 
@@ -352,3 +410,65 @@ public class SeriesLibraryService : ISeriesLibraryService
         public DateTime LatestModified { get; set; } = DateTime.MinValue;
     }
 }
+
+/// <summary>
+/// Minimal disjoint-set / union-find structure used to merge series-title nodes
+/// across files based on shared aliases.
+/// </summary>
+internal sealed class UnionFind<T> where T : notnull
+{
+    private readonly Dictionary<T, T> _parent;
+
+    public UnionFind(IEqualityComparer<T> comparer)
+    {
+        _parent = new Dictionary<T, T>(comparer);
+    }
+
+    public bool Contains(T value) => _parent.ContainsKey(value);
+
+    public void Add(T value)
+    {
+        if (!_parent.ContainsKey(value))
+        {
+            _parent[value] = value;
+        }
+    }
+
+    public T Find(T value)
+    {
+        if (!_parent.TryGetValue(value, out var parent))
+        {
+            _parent[value] = value;
+            return value;
+        }
+
+        // Path compression (iterative to avoid stack overflows on pathological chains).
+        var root = value;
+        while (!_parent[root].Equals(root))
+        {
+            root = _parent[root];
+        }
+
+        var current = value;
+        while (!_parent[current].Equals(root))
+        {
+            var next = _parent[current];
+            _parent[current] = root;
+            current = next;
+        }
+        return root;
+    }
+
+    public void Union(T a, T b)
+    {
+        Add(a);
+        Add(b);
+        var rootA = Find(a);
+        var rootB = Find(b);
+        if (!rootA.Equals(rootB))
+        {
+            _parent[rootA] = rootB;
+        }
+    }
+}
+

@@ -40,4 +40,30 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
 
         return null;
     }
+
+    public async Task<IReadOnlyList<ExternalSeriesMetadata>> SearchSeriesAsync(
+        string query,
+        int limit = 10,
+        CancellationToken cancellationToken = default)
+    {
+        var aggregated = new List<ExternalSeriesMetadata>();
+        foreach (var provider in _providers)
+        {
+            try
+            {
+                var results = await provider.SearchSeriesAsync(query, limit, cancellationToken);
+                aggregated.AddRange(results);
+                if (aggregated.Count >= limit)
+                {
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Provider {ProviderType} search failed for {SeriesName}", provider.GetType().Name, query);
+            }
+        }
+
+        return aggregated.Take(limit).ToList();
+    }
 }

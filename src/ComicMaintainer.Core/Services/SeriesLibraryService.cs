@@ -43,7 +43,14 @@ public class SeriesLibraryService : ISeriesLibraryService
 
         foreach (var file in files)
         {
-            var metadata = await _processor.GetSeriesMetadataAsync(file.FilePath, cancellationToken) ?? new SeriesMetadata();
+            // Reuse metadata already loaded from the database when available so we
+            // don't have to open every archive on disk just to render the library.
+            // This is what makes the series listing fast enough to be usable for
+            // large libraries; falling back to the archive reader is only needed
+            // for files we have never indexed.
+            var metadata = BuildSeriesMetadataFromCache(file)
+                ?? await _processor.GetSeriesMetadataAsync(file.FilePath, cancellationToken)
+                ?? new SeriesMetadata();
             var groupingTitle = ResolveGroupingTitle(metadata, file);
             var metadataAliases = ResolveMetadataAliases(metadata, groupingTitle);
             var externalLookupTitles = new[] { groupingTitle }
@@ -194,6 +201,38 @@ public class SeriesLibraryService : ISeriesLibraryService
             Page = page,
             TotalPages = totalPages,
             TotalSeries = totalSeries
+        };
+    }
+
+    private static SeriesMetadata? BuildSeriesMetadataFromCache(ComicFile file)
+    {
+        var cached = file.Metadata;
+        if (cached is null)
+        {
+            return null;
+        }
+
+        // We only consider the cached metadata "good enough" if it carries at least
+        // one of the grouping-relevant fields. Otherwise fall back to the archive
+        // reader so we don't lose information that may still be present on disk.
+        if (string.IsNullOrWhiteSpace(cached.Series)
+            && string.IsNullOrWhiteSpace(cached.Title)
+            && string.IsNullOrWhiteSpace(cached.Issue)
+            && string.IsNullOrWhiteSpace(cached.Volume)
+            && string.IsNullOrWhiteSpace(cached.Publisher)
+            && cached.Year is null)
+        {
+            return null;
+        }
+
+        return new SeriesMetadata
+        {
+            Series = cached.Series,
+            Title = cached.Title,
+            Issue = cached.Issue,
+            Volume = cached.Volume,
+            Publisher = cached.Publisher,
+            Year = cached.Year
         };
     }
 

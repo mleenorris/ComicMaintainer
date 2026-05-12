@@ -41,37 +41,40 @@ public class ProcessingHistoryService : IProcessingHistoryService
 
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        var total = await dbContext.ProcessingHistory.CountAsync(cancellationToken);
+        var query = dbContext.ProcessingHistory.AsNoTracking();
 
-        var entities = await dbContext.ProcessingHistory
+        var total = await query.CountAsync(cancellationToken);
+
+        // Project directly into the DTO so EF Core only reads the columns we use
+        // and avoids change-tracker overhead for read-only paged queries.
+        var history = await query
             .OrderByDescending(h => h.Timestamp)
             .Skip(offset)
             .Take(limit)
+            .Select(e => new ProcessingHistoryEntry
+            {
+                Id = e.EntryId,
+                FilePath = e.FilePath,
+                Action = e.Action,
+                Timestamp = e.Timestamp,
+                Success = e.Success,
+                ErrorMessage = e.ErrorMessage,
+                BeforeFilename = e.BeforeFilename,
+                AfterFilename = e.AfterFilename,
+                BeforeTitle = e.BeforeTitle,
+                AfterTitle = e.AfterTitle,
+                BeforeSeries = e.BeforeSeries,
+                AfterSeries = e.AfterSeries,
+                BeforeIssue = e.BeforeIssue,
+                AfterIssue = e.AfterIssue,
+                BeforePublisher = e.BeforePublisher,
+                AfterPublisher = e.AfterPublisher,
+                BeforeYear = e.BeforeYear,
+                AfterYear = e.AfterYear,
+                BeforeVolume = e.BeforeVolume,
+                AfterVolume = e.AfterVolume
+            })
             .ToListAsync(cancellationToken);
-
-        var history = entities.Select(e => new ProcessingHistoryEntry
-        {
-            Id = e.EntryId,
-            FilePath = e.FilePath,
-            Action = e.Action,
-            Timestamp = e.Timestamp,
-            Success = e.Success,
-            ErrorMessage = e.ErrorMessage,
-            BeforeFilename = e.BeforeFilename,
-            AfterFilename = e.AfterFilename,
-            BeforeTitle = e.BeforeTitle,
-            AfterTitle = e.AfterTitle,
-            BeforeSeries = e.BeforeSeries,
-            AfterSeries = e.AfterSeries,
-            BeforeIssue = e.BeforeIssue,
-            AfterIssue = e.AfterIssue,
-            BeforePublisher = e.BeforePublisher,
-            AfterPublisher = e.AfterPublisher,
-            BeforeYear = e.BeforeYear,
-            AfterYear = e.AfterYear,
-            BeforeVolume = e.BeforeVolume,
-            AfterVolume = e.AfterVolume
-        });
 
         return (history, total);
     }

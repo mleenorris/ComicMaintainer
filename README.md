@@ -353,6 +353,34 @@ The service now supports asynchronous file processing with persistent job storag
   
 The version is displayed in the web interface header for easy identification of the running instance.
 
+### External Series Metadata (Manual)
+
+External series metadata lookups (ComicVine / MangaDex) are run manually, and results — together with any aliases you add — are persisted in the database. The library view groups folders into a single series card whenever they share any canonical title, provider alias, or user-defined alias.
+
+- **POST** `/api/metadata/refresh-all` — queue an external lookup for every series in the library.
+  - Returns: `{ "jobId": "...", "totalSeries": N }`
+- **POST** `/api/metadata/refresh-selected` — refresh a specific subset of series titles.
+  - Body: `{ "series": ["Batman", "Superman"] }`
+  - Returns: `{ "jobId": "...", "totalSeries": N }`
+- **POST** `/api/metadata/refresh/{seriesTitle}` — synchronously refresh one series (used by per-card actions). Returns the updated cache record.
+- **GET** `/api/metadata/refresh/job/{jobId}` — poll the status of a refresh job (alongside the regular SSE job-update events).
+- **GET** `/api/metadata/search?query=...&limit=10` — search the configured providers for candidate series matches, useful for finding alternative names.
+  - Returns: `{ "query": "...", "results": [{ "canonical_title": "...", "aliases": [...], "source": "ComicVine" }, ...] }`
+- **GET** `/api/metadata/series/{seriesTitle}` — read the cached record (canonical title, provider aliases, user aliases) for a series.
+- **PUT** `/api/metadata/series/{seriesTitle}/aliases` — replace the user-managed alias list and optionally override the canonical title.
+  - Body: `{ "aliases": ["The Dark Knight"], "canonicalTitle": "Batman" }`
+- **DELETE** `/api/metadata/series/{seriesTitle}/aliases/{alias}` — remove a single user alias.
+
+**Web UI:**
+- The Library toolbar exposes a **Metadata → Refresh All External Metadata** action.
+- Each series card includes a **🏷️ Manage Names** button that opens a modal where you can:
+  - View provider-supplied aliases and edit user-managed aliases,
+  - Search external providers for alternative names,
+  - Adopt a candidate's canonical title or copy its aliases into the user list,
+  - Refresh metadata from the provider on demand.
+
+User-defined aliases drive the library's folder-combination matching: two folders are merged into the same series card as soon as one names the other in its alias list.
+
 ## Smart Processing
 The service intelligently detects files that are already properly formatted to avoid unnecessary processing:
 

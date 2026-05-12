@@ -1694,6 +1694,8 @@
                                 ${series.metadata_source ? `<div class="series-detail-meta">Source: ${escapeHtml(series.metadata_source)}</div>` : ''}
                                 <div class="series-detail-actions">
                                     ${series.issues.length ? `<button type="button" class="btn btn-small" onclick="readComic('${escapeJs(series.issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
+                                    <button type="button" class="btn btn-small" onclick="openManageSeriesNamesModal('${escapeJs(series.title)}')">🏷️ Manage Names</button>
+                                    <button type="button" class="btn btn-small" onclick="refreshSeriesMetadataDirect('${escapeJs(series.title)}')">🌐 Refresh Metadata</button>
                                 </div>
                             </div>
                         </div>
@@ -5201,4 +5203,284 @@
                     statusIndicator.title = 'File watcher is disabled';
                 }
             }
+        }
+
+        // ====================================================================
+        // External Series Metadata (manual refresh + alias management)
+        // ====================================================================
+
+        let manageSeriesState = { seriesTitle: '', record: null };
+
+        async function refreshAllExternalMetadata() {
+            if (!confirm('Queue an external metadata refresh for every series in the library? Lookups happen in the background and progress is reported as a job.')) {
+                return;
+            }
+            try {
+                const response = await fetch(apiUrl('/api/metadata/refresh-all'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    const error = await response.text();
+                    showMessage('Failed to queue metadata refresh: ' + error, 'error');
+                    return;
+                }
+                const data = await response.json();
+                showMessage(`Metadata refresh job queued for ${data.totalSeries || 0} series.`, 'success');
+            } catch (err) {
+                console.error('refreshAllExternalMetadata failed', err);
+                showMessage('Failed to queue metadata refresh', 'error');
+            }
+        }
+
+        async function refreshSeriesMetadataDirect(seriesTitle) {
+            if (!seriesTitle) return;
+            try {
+                const response = await fetch(apiUrl(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}`), {
+                    method: 'POST',
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    showMessage('Failed to refresh metadata for ' + seriesTitle, 'error');
+                    return;
+                }
+                const record = await response.json();
+                const status = record.lookup_status || 'success';
+                if (status === 'not_found') {
+                    showMessage(`No external metadata found for "${seriesTitle}"`, 'info');
+                } else if (status === 'error') {
+                    showMessage(`External lookup failed for "${seriesTitle}"`, 'error');
+                } else {
+                    showMessage(`Metadata refreshed for "${seriesTitle}"`, 'success');
+                }
+                // Refresh the library so any new aliases collapse folders.
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
+            } catch (err) {
+                console.error('refreshSeriesMetadataDirect failed', err);
+                showMessage('Failed to refresh metadata', 'error');
+            }
+        }
+
+        async function openManageSeriesNamesModal(seriesTitle) {
+            manageSeriesState = { seriesTitle, record: null };
+            document.getElementById('manageSeriesTitle').textContent = seriesTitle;
+            document.getElementById('manageSeriesCanonical').value = '';
+            document.getElementById('manageSeriesProviderAliases').textContent = 'Loading...';
+            document.getElementById('manageSeriesProviderSource').textContent = '';
+            document.getElementById('manageSeriesUserAliases').textContent = 'Loading...';
+            document.getElementById('manageSeriesSearchInput').value = seriesTitle;
+            document.getElementById('manageSeriesSearchResults').innerHTML = '';
+            document.getElementById('manageSeriesNamesModal').classList.add('active');
+            await loadManageSeriesRecord();
+        }
+
+        function closeManageSeriesNamesModal() {
+            document.getElementById('manageSeriesNamesModal').classList.remove('active');
+            manageSeriesState = { seriesTitle: '', record: null };
+        }
+
+        async function loadManageSeriesRecord() {
+            const { seriesTitle } = manageSeriesState;
+            if (!seriesTitle) return;
+            try {
+                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}`), {
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    showMessage('Failed to load series metadata', 'error');
+                    return;
+                }
+                const record = await response.json();
+                manageSeriesState.record = record;
+                document.getElementById('manageSeriesCanonical').value = record.is_user_canonical && record.canonical_title ? record.canonical_title : '';
+                renderManageSeriesProviderAliases(record);
+                renderManageSeriesUserAliases(record);
+            } catch (err) {
+                console.error('loadManageSeriesRecord failed', err);
+                showMessage('Failed to load series metadata', 'error');
+            }
+        }
+
+        function renderManageSeriesProviderAliases(record) {
+            const container = document.getElementById('manageSeriesProviderAliases');
+            const aliases = record.aliases || [];
+            if (!aliases.length) {
+                container.textContent = 'None';
+            } else {
+                container.innerHTML = aliases.map(a => `<span class="badge" style="display: inline-block; padding: 4px 8px; margin: 2px; background: var(--bg-secondary); border-radius: 12px; font-size: 13px;">${escapeHtml(a)}</span>`).join('');
+            }
+            const sourceLabel = document.getElementById('manageSeriesProviderSource');
+            if (record.source) {
+                const ts = record.last_lookup_utc ? new Date(record.last_lookup_utc).toLocaleString() : 'never';
+                sourceLabel.textContent = `Source: ${record.source} · Last lookup: ${ts} · Status: ${record.lookup_status || 'unknown'}`;
+            } else {
+                sourceLabel.textContent = 'No external lookup yet — use "Refresh from Provider" to populate.';
+            }
+        }
+
+        function renderManageSeriesUserAliases(record) {
+            const container = document.getElementById('manageSeriesUserAliases');
+            const aliases = record.user_aliases || [];
+            if (!aliases.length) {
+                container.textContent = 'None';
+                return;
+            }
+            container.innerHTML = aliases.map(a => `
+                <span class="badge" style="display: inline-flex; align-items: center; padding: 4px 4px 4px 8px; margin: 2px; background: var(--bg-secondary); border-radius: 12px; font-size: 13px;">
+                    ${escapeHtml(a)}
+                    <button type="button" onclick="removeManageSeriesAlias('${escapeJs(a)}')" style="margin-left: 6px; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px;" title="Remove alias">×</button>
+                </span>
+            `).join('');
+        }
+
+        function addManageSeriesAlias() {
+            const input = document.getElementById('manageSeriesNewAlias');
+            const value = (input.value || '').trim();
+            if (!value) return;
+            if (!manageSeriesState.record) {
+                manageSeriesState.record = { user_aliases: [], aliases: [] };
+            }
+            const current = manageSeriesState.record.user_aliases || [];
+            if (!current.some(a => a.toLowerCase() === value.toLowerCase())) {
+                current.push(value);
+                manageSeriesState.record.user_aliases = current;
+                renderManageSeriesUserAliases(manageSeriesState.record);
+            }
+            input.value = '';
+        }
+
+        function removeManageSeriesAlias(alias) {
+            if (!manageSeriesState.record) return;
+            const current = manageSeriesState.record.user_aliases || [];
+            manageSeriesState.record.user_aliases = current.filter(a => a.toLowerCase() !== alias.toLowerCase());
+            renderManageSeriesUserAliases(manageSeriesState.record);
+        }
+
+        async function saveManageSeriesNames() {
+            const { seriesTitle, record } = manageSeriesState;
+            if (!seriesTitle || !record) return;
+            const canonicalInput = document.getElementById('manageSeriesCanonical').value.trim();
+            const payload = {
+                aliases: record.user_aliases || [],
+                canonicalTitle: canonicalInput || null
+            };
+            try {
+                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/aliases`), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload)
+                });
+                if (!response.ok) {
+                    showMessage('Failed to save series names', 'error');
+                    return;
+                }
+                showMessage('Series names saved', 'success');
+                closeManageSeriesNamesModal();
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
+            } catch (err) {
+                console.error('saveManageSeriesNames failed', err);
+                showMessage('Failed to save series names', 'error');
+            }
+        }
+
+        async function refreshSeriesMetadata() {
+            const { seriesTitle } = manageSeriesState;
+            if (!seriesTitle) return;
+            try {
+                const response = await fetch(apiUrl(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}`), {
+                    method: 'POST',
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    showMessage('Failed to refresh metadata', 'error');
+                    return;
+                }
+                const record = await response.json();
+                manageSeriesState.record = record;
+                renderManageSeriesProviderAliases(record);
+                renderManageSeriesUserAliases(record);
+                showMessage(record.lookup_status === 'success' ? 'Metadata refreshed' : `Lookup status: ${record.lookup_status || 'unknown'}`, record.lookup_status === 'success' ? 'success' : 'info');
+            } catch (err) {
+                console.error('refreshSeriesMetadata failed', err);
+                showMessage('Failed to refresh metadata', 'error');
+            }
+        }
+
+        async function searchExternalSeries() {
+            const query = (document.getElementById('manageSeriesSearchInput').value || '').trim();
+            const container = document.getElementById('manageSeriesSearchResults');
+            if (!query) {
+                container.innerHTML = '<p style="color: var(--text-secondary);">Enter a query above to search.</p>';
+                return;
+            }
+            container.innerHTML = '<p style="color: var(--text-secondary);">Searching...</p>';
+            try {
+                const response = await fetch(apiUrl(`/api/metadata/search?query=${encodeURIComponent(query)}&limit=10`), {
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    container.innerHTML = '<p style="color: var(--text-error);">Search failed.</p>';
+                    return;
+                }
+                const data = await response.json();
+                const results = data.results || [];
+                if (!results.length) {
+                    container.innerHTML = '<p style="color: var(--text-secondary);">No matches found. Check that external metadata providers are enabled in Settings.</p>';
+                    return;
+                }
+                container.innerHTML = results.map((r, idx) => {
+                    const aliases = (r.aliases || []).map(a => escapeHtml(a)).join(', ') || '<em>none</em>';
+                    return `
+                        <div style="border: 1px solid var(--border-primary); border-radius: 5px; padding: 10px; margin-bottom: 8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                                <strong>${escapeHtml(r.canonical_title || '')}</strong>
+                                <span style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(r.source || '')}</span>
+                            </div>
+                            <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Aliases: ${aliases}</div>
+                            <div style="display: flex; gap: 6px; margin-top: 8px;">
+                                <button class="btn btn-small" type="button" onclick="adoptSearchResult(${idx}, 'canonical')">Adopt as Canonical</button>
+                                <button class="btn btn-small" type="button" onclick="adoptSearchResult(${idx}, 'aliases')">Add Aliases</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                window.__manageSeriesSearchResults = results;
+            } catch (err) {
+                console.error('searchExternalSeries failed', err);
+                container.innerHTML = '<p style="color: var(--text-error);">Search failed.</p>';
+            }
+        }
+
+        function adoptSearchResult(index, mode) {
+            const results = window.__manageSeriesSearchResults || [];
+            const result = results[index];
+            if (!result) return;
+            if (!manageSeriesState.record) {
+                manageSeriesState.record = { user_aliases: [], aliases: [] };
+            }
+            const current = manageSeriesState.record.user_aliases || [];
+            const addIfNew = (value) => {
+                if (value && !current.some(a => a.toLowerCase() === value.toLowerCase())) {
+                    current.push(value);
+                }
+            };
+            if (mode === 'canonical') {
+                if (result.canonical_title) {
+                    document.getElementById('manageSeriesCanonical').value = result.canonical_title;
+                }
+                // Keep the previous canonical (the series being managed) as a user alias.
+                addIfNew(manageSeriesState.seriesTitle);
+            }
+            (result.aliases || []).forEach(addIfNew);
+            if (mode === 'aliases' && result.canonical_title) {
+                addIfNew(result.canonical_title);
+            }
+            manageSeriesState.record.user_aliases = current;
+            renderManageSeriesUserAliases(manageSeriesState.record);
         }

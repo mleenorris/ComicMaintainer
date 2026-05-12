@@ -22,6 +22,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<ReadingProgressEntity> ReadingProgresses { get; set; } = null!;
     public DbSet<ReaderPreferencesEntity> ReaderPreferences { get; set; } = null!;
     public DbSet<ReadingSessionEntity> ReadingSessions { get; set; } = null!;
+    public DbSet<SeriesMetadataCacheEntity> SeriesMetadataCache { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -140,6 +141,29 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.HasIndex(e => e.SessionId).IsUnique();
             entity.HasIndex(e => new { e.UserId, e.StartedAt });
         });
+
+        // Configure SeriesMetadataCacheEntity
+        modelBuilder.Entity<SeriesMetadataCacheEntity>(entity =>
+        {
+            entity.HasKey(e => e.NormalizedKey);
+            entity.Property(e => e.NormalizedKey).HasMaxLength(512);
+            entity.Property(e => e.CanonicalTitle).IsRequired().HasMaxLength(512);
+            entity.Property(e => e.Source).HasMaxLength(128);
+            entity.Property(e => e.LookupStatus).HasMaxLength(64);
+            // Aliases and UserAliases are stored as newline-delimited strings to
+            // keep the entity model portable across providers without requiring
+            // additional join tables.
+            entity.Property(e => e.Aliases).HasConversion(
+                v => string.Join('\n', v),
+                v => string.IsNullOrEmpty(v)
+                    ? new List<string>()
+                    : v.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList());
+            entity.Property(e => e.UserAliases).HasConversion(
+                v => string.Join('\n', v),
+                v => string.IsNullOrEmpty(v)
+                    ? new List<string>()
+                    : v.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList());
+        });
     }
 }
 
@@ -257,4 +281,38 @@ public class ReadingSessionEntity
     public int StartPage { get; set; }
     public int? EndPage { get; set; }
     public bool Incognito { get; set; }
+}
+
+/// <summary>
+/// Database entity for cached external series metadata + user-managed aliases.
+/// Keyed on the normalized series key (lowercase alphanumerics joined by '-').
+/// </summary>
+public class SeriesMetadataCacheEntity
+{
+    /// <summary>Normalized series key (lowercase, non-alphanumerics replaced).</summary>
+    public string NormalizedKey { get; set; } = string.Empty;
+
+    /// <summary>Canonical title (provider-supplied unless the user overrides it).</summary>
+    public string CanonicalTitle { get; set; } = string.Empty;
+
+    /// <summary>Aliases reported by the external provider.</summary>
+    public List<string> Aliases { get; set; } = new();
+
+    /// <summary>Aliases manually added by the user.</summary>
+    public List<string> UserAliases { get; set; } = new();
+
+    /// <summary>True when the canonical title was overridden by the user.</summary>
+    public bool IsUserCanonical { get; set; }
+
+    /// <summary>Provider source name (e.g. ComicVine, MangaDex), null when unknown.</summary>
+    public string? Source { get; set; }
+
+    /// <summary>Last successful or attempted external lookup time, null if never.</summary>
+    public DateTime? LastLookupUtc { get; set; }
+
+    /// <summary>Status of the last lookup: success, not_found, error, manual, pending.</summary>
+    public string? LookupStatus { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

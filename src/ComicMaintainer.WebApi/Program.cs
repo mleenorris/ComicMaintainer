@@ -464,6 +464,8 @@ builder.Services.AddSingleton<IProcessingHistoryService, ProcessingHistoryServic
 builder.Services.AddSingleton<ISettingsService, SettingsService>();
 builder.Services.AddSingleton<IComicReaderService, ComicReaderService>();
 builder.Services.AddSingleton<ISeriesLibraryService, SeriesLibraryService>();
+builder.Services.AddSingleton<ISeriesMetadataCacheService, SeriesMetadataCacheService>();
+builder.Services.AddSingleton<ISeriesMetadataRefreshJobService, SeriesMetadataRefreshJobService>();
 builder.Services.AddHttpClient(nameof(ComicVineSeriesMetadataService));
 builder.Services.AddHttpClient(nameof(MangaDexSeriesMetadataService));
 builder.Services.AddSingleton<ComicVineSeriesMetadataService>();

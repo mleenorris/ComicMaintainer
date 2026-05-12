@@ -2,6 +2,7 @@ using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -48,52 +49,78 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
             return cached;
         }
 
+        var results = await SearchInternalAsync(config, seriesName, limit: 10, cancellationToken);
+        var result = PickBestMatch(results, seriesName);
+        if (result != null)
+        {
+            _cache.Set(cacheKey, result, CacheDuration);
+        }
+
+        return result;
+    }
+
+    public async Task<IReadOnlyList<ExternalSeriesMetadata>> SearchSeriesAsync(
+        string query,
+        int limit = 10,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return Array.Empty<ExternalSeriesMetadata>();
+        }
+
+        var config = _settings.CurrentValue;
+        if (!config.EnableMangaDexMetadata)
+        {
+            return Array.Empty<ExternalSeriesMetadata>();
+        }
+
+        return await SearchInternalAsync(config, query, Math.Clamp(limit, 1, 50), cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<ExternalSeriesMetadata>> SearchInternalAsync(
+        AppSettings config,
+        string seriesName,
+        int limit,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            var requestUri = BuildRequestUri(config, seriesName);
+            var requestUri = BuildRequestUri(config, seriesName, limit);
             using var httpClient = _httpClientFactory.CreateClient(nameof(MangaDexSeriesMetadataService));
             using var response = await httpClient.GetAsync(requestUri, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("MangaDex lookup failed for {SeriesName} with status code {StatusCode}", seriesName, response.StatusCode);
-                return null;
+                _logger.LogWarning("MangaDex lookup failed for {SeriesName} with status code {StatusCode}", LoggingHelper.SanitizeForLog(seriesName), response.StatusCode);
+                return Array.Empty<ExternalSeriesMetadata>();
             }
 
             await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var document = await JsonDocument.ParseAsync(responseStream, cancellationToken: cancellationToken);
-            var result = ParseBestMatch(document.RootElement, seriesName);
-            if (result != null)
-            {
-                _cache.Set(cacheKey, result, CacheDuration);
-            }
-
-            return result;
+            return ParseResults(document.RootElement);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "MangaDex lookup failed for {SeriesName}", seriesName);
-            return null;
+            _logger.LogWarning(ex, "MangaDex lookup failed for {SeriesName}", LoggingHelper.SanitizeForLog(seriesName));
+            return Array.Empty<ExternalSeriesMetadata>();
         }
     }
 
-    private static string BuildRequestUri(AppSettings settings, string seriesName)
+    private static string BuildRequestUri(AppSettings settings, string seriesName, int limit)
     {
         var query = Uri.EscapeDataString(seriesName);
         var baseUrl = settings.MangaDexBaseUrl.TrimEnd('/');
-        return $"{baseUrl}/manga?title={query}&limit=10";
+        return $"{baseUrl}/manga?title={query}&limit={limit}";
     }
 
-    private static ExternalSeriesMetadata? ParseBestMatch(JsonElement root, string requestedSeriesName)
+    private static IReadOnlyList<ExternalSeriesMetadata> ParseResults(JsonElement root)
     {
         if (!root.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
         {
-            return null;
+            return Array.Empty<ExternalSeriesMetadata>();
         }
 
-        var requestedNormalized = Normalize(requestedSeriesName);
-        ExternalSeriesMetadata? bestExact = null;
-        ExternalSeriesMetadata? bestAlias = null;
-
+        var output = new List<ExternalSeriesMetadata>();
         foreach (var item in data.EnumerateArray())
         {
             if (!item.TryGetProperty("attributes", out var attributes))
@@ -109,26 +136,38 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
 
             var aliases = ExtractAliases(attributes);
 
-            var metadata = new ExternalSeriesMetadata
+            output.Add(new ExternalSeriesMetadata
             {
                 CanonicalTitle = canonicalTitle,
                 Aliases = aliases,
                 Source = "MangaDex"
-            };
+            });
+        }
 
-            if (Normalize(canonicalTitle) == requestedNormalized)
+        return output;
+    }
+
+    private static ExternalSeriesMetadata? PickBestMatch(IReadOnlyList<ExternalSeriesMetadata> candidates, string requestedSeriesName)
+    {
+        var requestedNormalized = Normalize(requestedSeriesName);
+        ExternalSeriesMetadata? bestExact = null;
+        ExternalSeriesMetadata? bestAlias = null;
+
+        foreach (var metadata in candidates)
+        {
+            if (Normalize(metadata.CanonicalTitle) == requestedNormalized)
             {
                 bestExact ??= metadata;
                 continue;
             }
 
-            if (aliases.Any(alias => Normalize(alias) == requestedNormalized))
+            if (metadata.Aliases.Any(alias => Normalize(alias) == requestedNormalized))
             {
                 bestAlias ??= metadata;
             }
         }
 
-        return bestExact ?? bestAlias;
+        return bestExact ?? bestAlias ?? candidates.FirstOrDefault();
     }
 
     private static string? ExtractCanonicalTitle(JsonElement attributes)

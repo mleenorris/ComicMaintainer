@@ -10,8 +10,17 @@ public class SeriesLibraryServiceTests
 {
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
-    private readonly Mock<IExternalSeriesMetadataService> _externalMetadata = new();
+    private readonly Mock<ISeriesMetadataCacheService> _metadataCache = new();
     private readonly Mock<ILogger<SeriesLibraryService>> _logger = new();
+
+    public SeriesLibraryServiceTests()
+    {
+        // Default: NormalizeKey mirrors the production sanitizer used by the real service.
+        _metadataCache.Setup(m => m.NormalizeKey(It.IsAny<string>()))
+            .Returns<string>(NormalizeKey);
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+    }
 
     [Fact]
     public async Task GetSeriesAsync_GroupsAlternateTitlesUnderCanonicalTitle()
@@ -30,29 +39,28 @@ public class SeriesLibraryServiceTests
         _processor.Setup(processor => processor.GetSeriesMetadataAsync(files[1].FilePath, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadata { Series = "The Dark Knight", AlternateSeries = "Batman", Issue = "2", Title = "Part Two" });
 
-        _externalMetadata.Setup(metadata => metadata.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ExternalSeriesMetadata
+        // Cached external metadata declares Batman with "Dark Knight" as an alias.
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
             {
-                CanonicalTitle = "Batman",
-                Aliases = new List<string> { "The Dark Knight" },
-                Source = "ComicVine"
-            });
-        _externalMetadata.Setup(metadata => metadata.LookupSeriesAsync("The Dark Knight", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ExternalSeriesMetadata
-            {
-                CanonicalTitle = "Batman",
-                Aliases = new List<string> { "The Dark Knight" },
-                Source = "ComicVine"
+                new()
+                {
+                    NormalizedKey = "batman",
+                    CanonicalTitle = "Batman",
+                    Aliases = new List<string> { "Dark Knight", "The Dark Knight" },
+                    UserAliases = new List<string>(),
+                    Source = "ComicVine"
+                }
             });
 
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _externalMetadata.Object, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
 
         var result = await service.GetSeriesAsync(filter: "processed");
 
         Assert.Single(result.Series);
         Assert.Equal("Batman", result.Series[0].Title);
         Assert.Equal(2, result.Series[0].IssueCount);
-        Assert.Contains("The Dark Knight", result.Series[0].Aliases);
+        Assert.Contains(result.Series[0].Aliases, a => a.Equals("Dark Knight", StringComparison.OrdinalIgnoreCase));
         Assert.Equal("ComicVine", result.Series[0].MetadataSource);
     }
 
@@ -73,10 +81,7 @@ public class SeriesLibraryServiceTests
         _processor.Setup(processor => processor.GetSeriesMetadataAsync(files[1].FilePath, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadata { Series = "Batman: Year One", AlternateSeries = "Batman (2011)", Issue = "2", Title = "Year One Part 2" });
 
-        _externalMetadata.Setup(metadata => metadata.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ExternalSeriesMetadata?)null);
-
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _externalMetadata.Object, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -90,9 +95,6 @@ public class SeriesLibraryServiceTests
     [Fact]
     public async Task GetSeriesAsync_UsesCachedMetadataAndSkipsArchiveRead()
     {
-        // Files whose ComicFile.Metadata is already populated (e.g. loaded from the
-        // database) should not trigger an archive-opening fall back, because that is
-        // what made the series listing unusably slow on large libraries.
         var files = new List<ComicFile>
         {
             new()
@@ -109,10 +111,7 @@ public class SeriesLibraryServiceTests
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(files);
 
-        _externalMetadata.Setup(metadata => metadata.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ExternalSeriesMetadata?)null);
-
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _externalMetadata.Object, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -128,9 +127,6 @@ public class SeriesLibraryServiceTests
     [Fact]
     public async Task GetSeriesAsync_FallsBackToArchiveWhenCachedMetadataIsEmpty()
     {
-        // If the cached metadata exists but has no series-relevant fields, we should
-        // still ask the processor for the metadata, otherwise we'd silently lose data
-        // that is still readable from the on-disk archive.
         var files = new List<ComicFile>
         {
             new()
@@ -150,10 +146,7 @@ public class SeriesLibraryServiceTests
         _processor.Setup(processor => processor.GetSeriesMetadataAsync(files[0].FilePath, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadata { Series = "Batman", Issue = "1", Title = "From Archive" });
 
-        _externalMetadata.Setup(metadata => metadata.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ExternalSeriesMetadata?)null);
-
-        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _externalMetadata.Object, _logger.Object);
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
 
         var result = await service.GetSeriesAsync();
 
@@ -162,5 +155,68 @@ public class SeriesLibraryServiceTests
         _processor.Verify(
             p => p.GetSeriesMetadataAsync(files[0].FilePath, It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task GetSeriesAsync_MergesFoldersUsingUserAliases()
+    {
+        // Two folders ("Series A" and "Series B") with unrelated names should be
+        // collapsed into a single series card when the user has added "Series B"
+        // as an alias of "Series A".
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Series A/Series A 001.cbz",
+                FileName = "Series A 001.cbz",
+                Directory = "/library/Series A",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Series A", Issue = "1" }
+            },
+            new()
+            {
+                FilePath = "/library/Series B/Series B 002.cbz",
+                FileName = "Series B 002.cbz",
+                Directory = "/library/Series B",
+                FileSize = 200,
+                LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Series B", Issue = "2" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "series-a",
+                    CanonicalTitle = "Series A",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string> { "Series B" }
+                }
+            });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
+
+        var result = await service.GetSeriesAsync();
+
+        Assert.Single(result.Series);
+        Assert.Equal("Series A", result.Series[0].Title);
+        Assert.Equal(2, result.Series[0].IssueCount);
+        Assert.Contains("Series B", result.Series[0].Aliases);
+    }
+
+    private static string NormalizeKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "unknown-series";
+        }
+        var normalized = System.Text.RegularExpressions.Regex.Replace(value.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
+        return string.IsNullOrWhiteSpace(normalized) ? "unknown-series" : normalized;
     }
 }

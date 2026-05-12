@@ -366,6 +366,18 @@
                             </button>
                         </div>
                     </div>
+
+                    <!-- Metadata Dropdown -->
+                    <div class="action-dropdown">
+                        <button class="action-dropdown-toggle" onclick="toggleActionDropdown(event, 'metadataDropdown')">
+                            🌐<span> Metadata</span>
+                        </button>
+                        <div class="action-dropdown-menu" id="metadataDropdown">
+                            <button class="action-dropdown-item" onclick="refreshAllExternalMetadata(); closeAllActionDropdowns();">
+                                🌐 Refresh All External Metadata
+                            </button>
+                        </div>
+                    </div>
                     
                     <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>✏️<span> Update</span></button>
                     <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteSelectedBtn" disabled>🗑️<span> Delete</span></button>
@@ -803,7 +815,7 @@
                         <span>Enable ComicVine alias grouping</span>
                     </label>
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        When enabled, ComicMaintainer will look up alternate series titles from ComicVine so variants can be grouped together in the series library view. Changes take effect after restart.
+                        When enabled, ComicMaintainer can look up alternate series titles from ComicVine so variants can be grouped together in the series library view. Lookups are <strong>manual</strong> — use the Library page's <em>Metadata → Refresh All External Metadata</em> button or the per-series <em>Manage Names</em> action to populate the cache. Changes take effect after restart.
                     </small>
                 </div>
                 <div class="form-group">
@@ -1035,6 +1047,54 @@
                  <button class="btn" id="combineFoldersPreviewBtn" onclick="previewCombineFolders()" disabled>👀 Preview Merge</button>
                  <button class="btn btn-warning" id="combineFoldersConfirmBtn" onclick="confirmCombineFolders()" disabled>📁 Combine Folders</button>
                  <button class="btn" onclick="closeCombineFoldersModal()">Close</button>
+             </div>
+         </div>
+     </div>
+
+     <!-- Manage Series Names Modal -->
+     <div class="modal" id="manageSeriesNamesModal">
+         <div class="modal-content" style="max-width: 720px;">
+             <div class="modal-header">
+                 <h2>Manage Series Names</h2>
+                 <button class="close-btn" onclick="closeManageSeriesNamesModal()">&times;</button>
+             </div>
+             <div class="modal-body">
+                 <div class="form-group">
+                     <label style="font-weight: 600; color: var(--text-secondary);">Series</label>
+                     <p id="manageSeriesTitle" style="color: var(--text-primary); padding: 10px; background: var(--bg-hover); border-radius: 5px; margin-top: 5px;"></p>
+                 </div>
+                 <div class="form-group">
+                     <label for="manageSeriesCanonical" style="font-weight: 600; color: var(--text-secondary);">Canonical Title</label>
+                     <input type="text" id="manageSeriesCanonical" name="manageSeriesCanonical" autocomplete="off" placeholder="(leave blank to use provider value)" style="width: 100%; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); margin-top: 5px;">
+                 </div>
+                 <div class="form-group">
+                     <label style="font-weight: 600; color: var(--text-secondary);">Provider Aliases</label>
+                     <div id="manageSeriesProviderAliases" style="padding: 10px; background: var(--bg-hover); border-radius: 5px; margin-top: 5px; min-height: 36px;">None</div>
+                     <div id="manageSeriesProviderSource" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;"></div>
+                 </div>
+                 <div class="form-group">
+                     <label style="font-weight: 600; color: var(--text-secondary);">User Aliases</label>
+                     <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Add alternative names so the library will merge folders that share these titles.</p>
+                     <div id="manageSeriesUserAliases" style="padding: 10px; background: var(--bg-hover); border-radius: 5px; margin-top: 5px; min-height: 36px;">None</div>
+                     <div style="display: flex; gap: 8px; margin-top: 8px;">
+                         <input type="text" id="manageSeriesNewAlias" placeholder="Add an alias (e.g. The Dark Knight)" autocomplete="off" style="flex: 1; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary);">
+                         <button class="btn btn-small" type="button" onclick="addManageSeriesAlias()">➕ Add</button>
+                     </div>
+                 </div>
+                 <div class="form-group">
+                     <label style="font-weight: 600; color: var(--text-secondary);">Search Alternative Names</label>
+                     <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Query the configured external providers (ComicVine / MangaDex) for candidate matches and add their canonical title or known aliases.</p>
+                     <div style="display: flex; gap: 8px; margin-top: 8px;">
+                         <input type="text" id="manageSeriesSearchInput" placeholder="Search title..." autocomplete="off" style="flex: 1; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary);">
+                         <button class="btn btn-small" type="button" onclick="searchExternalSeries()">🔍 Search</button>
+                     </div>
+                     <div id="manageSeriesSearchResults" style="margin-top: 10px;"></div>
+                 </div>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn btn-small" type="button" onclick="refreshSeriesMetadata()">🔄 Refresh from Provider</button>
+                 <button class="btn btn-primary" type="button" onclick="saveManageSeriesNames()">💾 Save</button>
+                 <button class="btn" type="button" onclick="closeManageSeriesNamesModal()">Close</button>
              </div>
          </div>
      </div>

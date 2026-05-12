@@ -201,6 +201,7 @@
         // Constants
         const DEFAULT_PER_PAGE = 100; // Default number of items per page
         const LIBRARY_HEALTH_REFRESH_DELAY = 750;
+        const FILE_LIST_REFRESH_DEBOUNCE_DELAY = 500;
         const MAX_PROGRESS_RESULTS = 200;
         
         // Filename truncation constants
@@ -231,6 +232,7 @@
         let libraryHealthRefreshTimer = null;
         let libraryHealthRequestInFlight = false;
         let libraryHealthRefreshPending = false;
+        let fileListRefreshTimer = null;
         const MOBILE_LIBRARY_VIEW_BREAKPOINT = 768; // Matches the existing mobile CSS breakpoint.
         const DEFAULT_MOBILE_LIBRARY_VIEW = 'files';
         let currentMobileLibraryView = DEFAULT_MOBILE_LIBRARY_VIEW;
@@ -502,9 +504,18 @@
         // Handle file list updated events
         function handleFileListUpdatedEvent(data) {
             console.log('SSE: File list updated');
-            
-            // Refresh file list to show new/removed files
-            loadActiveLibraryView(currentPage, false);
+
+            // Debounce: bursts of file_list_updated events (e.g. when combining folders
+            // containing many files) would otherwise trigger a full library reload for
+            // each event, hanging the browser. Coalesce into a single refresh.
+            if (fileListRefreshTimer) {
+                clearTimeout(fileListRefreshTimer);
+            }
+            fileListRefreshTimer = setTimeout(() => {
+                fileListRefreshTimer = null;
+                loadActiveLibraryView(currentPage, false);
+            }, FILE_LIST_REFRESH_DEBOUNCE_DELAY);
+
             scheduleLibraryHealthRefresh();
         }
         

@@ -266,7 +266,7 @@ public class FileWatcherServiceTests : IDisposable
 
         // Assert - File path should be updated atomically, preserving state
         _mockFileStore.Verify(
-            fs => fs.UpdateFilePathAsync(tempFile, renamedFile, It.IsAny<CancellationToken>()), 
+            fs => fs.UpdateFilePathAsync(tempFile, renamedFile, It.IsAny<CancellationToken>(), It.IsAny<bool>()), 
             Times.Once, 
             "File path should be updated atomically in the store");
         
@@ -311,7 +311,7 @@ public class FileWatcherServiceTests : IDisposable
 
         // Assert - File path should be updated atomically, preserving state
         _mockFileStore.Verify(
-            fs => fs.UpdateFilePathAsync(tempFile, renamedFile, It.IsAny<CancellationToken>()), 
+            fs => fs.UpdateFilePathAsync(tempFile, renamedFile, It.IsAny<CancellationToken>(), It.IsAny<bool>()), 
             Times.Once, 
             "File path should be updated atomically in the store");
         

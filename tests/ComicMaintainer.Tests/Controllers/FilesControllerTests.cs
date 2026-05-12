@@ -1175,7 +1175,7 @@ public class FilesControllerTests
             Assert.False(System.IO.Directory.Exists(olderDir));
 
             _mockFileStore.Verify(fs => fs.UpdateFilePathAsync(olderPath,
-                Path.Combine(newerDir, "Batman-001.cbz"), It.IsAny<CancellationToken>()), Times.Once);
+                Path.Combine(newerDir, "Batman-001.cbz"), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Once);
         }
         finally
         {

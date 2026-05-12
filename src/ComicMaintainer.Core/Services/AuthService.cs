@@ -93,8 +93,33 @@ public class AuthService : IAuthService
 
     public async Task<ApplicationUser?> GetUserByApiKeyAsync(string apiKey)
     {
-        return (await _userManager.GetUsersInRoleAsync("User"))
+        if (string.IsNullOrEmpty(apiKey))
+        {
+            return null;
+        }
+
+        // Query directly on the backing IQueryable instead of pulling every user
+        // in the "User" role into memory and filtering client-side. EF Core
+        // translates this into a single indexed SELECT (IX_AspNetUsers_ApiKey).
+        // We use the synchronous LINQ overload so that the call works against
+        // both real EF Core providers and mocked IQueryable<T> instances in
+        // unit tests; for SQLite this is a fast in-process round-trip.
+        var user = _userManager.Users
             .FirstOrDefault(u => u.ApiKey == apiKey && u.IsActive);
+
+        if (user is null)
+        {
+            return null;
+        }
+
+        // Preserve original semantics: API keys are only valid for users in the
+        // "User" role.
+        if (!await _userManager.IsInRoleAsync(user, "User"))
+        {
+            return null;
+        }
+
+        return user;
     }
 
     public async Task<(bool Success, string? ApiKey, string? Error)> GenerateApiKeyAsync(string userId)

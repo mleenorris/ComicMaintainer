@@ -27,6 +27,14 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     {
         base.OnModelCreating(modelBuilder);
 
+        // Index ApiKey for fast lookup in AuthService.GetUserByApiKeyAsync.
+        // ApiKey is nullable, so this is a sparse index on a low-cardinality
+        // column (one entry per user with an API key).
+        modelBuilder.Entity<ApplicationUser>(entity =>
+        {
+            entity.HasIndex(e => e.ApiKey);
+        });
+
         // Configure ComicFileEntity
         modelBuilder.Entity<ComicFileEntity>(entity =>
         {
@@ -40,6 +48,12 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.HasIndex(e => e.IsNormalized);
             entity.HasIndex(e => e.IsDuplicate);
             entity.HasIndex(e => e.IsRead);
+            // Hot filter/sort columns identified during EF query profiling:
+            // - Directory: file-list queries often filter or group by folder
+            // - UpdatedAt / CreatedAt: "recently added/modified" listings and ordering
+            entity.HasIndex(e => e.Directory);
+            entity.HasIndex(e => e.UpdatedAt);
+            entity.HasIndex(e => e.CreatedAt);
             
             // Configure owned type for metadata
             entity.OwnsOne(e => e.Metadata, metadata =>
@@ -69,6 +83,9 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.Action).IsRequired().HasMaxLength(100);
             entity.HasIndex(e => e.Timestamp);
             entity.HasIndex(e => e.Success);
+            // Used for "show history for a file" lookups and lookup-by-GUID API endpoints.
+            entity.HasIndex(e => e.FilePath);
+            entity.HasIndex(e => e.EntryId).IsUnique();
             
             // Configure before/after fields
             entity.Property(e => e.BeforeFilename).HasMaxLength(512);

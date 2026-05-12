@@ -362,7 +362,7 @@ public class FileStoreService : IFileStoreService
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            
+
             var entity = await dbContext.ComicFiles
                 .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
 
@@ -385,7 +385,7 @@ public class FileStoreService : IFileStoreService
                         await dbContext.SaveChangesAsync(cancellationToken);
                         _logger.LogDebug("Created file entity and set duplicate status for {FilePath} to {Status}", SanitizeForLogging(filePath), duplicate);
                     }
-                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx && 
+                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
                                                         sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
                     {
                         // Race condition: entity was created by another thread between our check and insert
@@ -426,7 +426,7 @@ public class FileStoreService : IFileStoreService
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            
+
             var entity = await dbContext.ComicFiles
                 .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
 
@@ -453,7 +453,7 @@ public class FileStoreService : IFileStoreService
                         await dbContext.SaveChangesAsync(cancellationToken);
                         _logger.LogDebug("Created file entity and set renamed status for {FilePath} to {Status}", SanitizeForLogging(filePath), renamed);
                     }
-                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx && 
+                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
                                                         sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
                     {
                         // Race condition: entity was created by another thread between our check and insert
@@ -494,7 +494,7 @@ public class FileStoreService : IFileStoreService
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            
+
             var entity = await dbContext.ComicFiles
                 .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
 
@@ -521,7 +521,7 @@ public class FileStoreService : IFileStoreService
                         await dbContext.SaveChangesAsync(cancellationToken);
                         _logger.LogDebug("Created file entity and set normalized status for {FilePath} to {Status}", SanitizeForLogging(filePath), normalized);
                     }
-                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx && 
+                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
                                                         sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
                     {
                         // Race condition: entity was created by another thread between our check and insert
@@ -840,7 +840,7 @@ public class FileStoreService : IFileStoreService
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            
+
             var entity = await dbContext.ComicFiles
                 .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
 
@@ -864,7 +864,7 @@ public class FileStoreService : IFileStoreService
                         await dbContext.SaveChangesAsync(cancellationToken);
                         _logger.LogDebug("Created file entity and set read status for {FilePath} to {Status}", SanitizeForLogging(filePath), read);
                     }
-                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx && 
+                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
                                                         sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
                     {
                         // Race condition: entity was created by another thread between our check and insert
@@ -893,9 +893,63 @@ public class FileStoreService : IFileStoreService
 
     public async Task MarkFilesReadAsync(IEnumerable<string> filePaths, bool read, CancellationToken cancellationToken = default)
     {
-        foreach (var filePath in filePaths)
+        // Materialize once so we can iterate twice (in-memory update + bulk DB update).
+        var paths = filePaths as IList<string> ?? filePaths.ToList();
+        if (paths.Count == 0)
         {
-            await MarkFileReadAsync(filePath, read, cancellationToken);
+            return;
+        }
+
+        // Update in-memory state up-front
+        foreach (var filePath in paths)
+        {
+            if (_files.TryGetValue(filePath, out var file))
+            {
+                file.IsRead = read;
+            }
+        }
+
+        // Single connection + single bulk UPDATE for all existing rows.
+        try
+        {
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+            var now = DateTime.UtcNow;
+            var updated = await dbContext.ComicFiles
+                .Where(e => paths.Contains(e.FilePath))
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(e => e.IsRead, read)
+                    .SetProperty(e => e.UpdatedAt, now),
+                    cancellationToken);
+
+            _logger.LogDebug("Bulk-updated read status for {Updated}/{Total} files", updated, paths.Count);
+
+            // If some files didn't exist in DB yet, fall back to per-file insert path
+            // only for the missing ones to avoid re-updating rows we just touched.
+            if (updated < paths.Count)
+            {
+                var existingPaths = await dbContext.ComicFiles
+                    .AsNoTracking()
+                    .Where(e => paths.Contains(e.FilePath))
+                    .Select(e => e.FilePath)
+                    .ToListAsync(cancellationToken);
+
+                var missing = new HashSet<string>(paths, StringComparer.Ordinal);
+                missing.ExceptWith(existingPaths);
+
+                foreach (var filePath in missing)
+                {
+                    await MarkFileReadAsync(filePath, read, cancellationToken);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error bulk-updating read status; falling back to per-file updates");
+            foreach (var filePath in paths)
+            {
+                await MarkFileReadAsync(filePath, read, cancellationToken);
+            }
         }
     }
 

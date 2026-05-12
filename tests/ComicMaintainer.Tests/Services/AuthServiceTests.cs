@@ -244,8 +244,10 @@ public class AuthServiceTests
             IsActive = true
         };
 
-        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("User"))
-            .ReturnsAsync(new List<ApplicationUser> { user });
+        _mockUserManager.Setup(x => x.Users)
+            .Returns(new List<ApplicationUser> { user }.AsQueryable());
+        _mockUserManager.Setup(x => x.IsInRoleAsync(user, "User"))
+            .ReturnsAsync(true);
 
         // Act
         var isValid = await _authService.ValidateApiKeyAsync("valid-api-key");
@@ -258,8 +260,8 @@ public class AuthServiceTests
     public async Task ValidateApiKeyAsync_WithInvalidKey_ReturnsFalse()
     {
         // Arrange
-        _mockUserManager.Setup(x => x.GetUsersInRoleAsync("User"))
-            .ReturnsAsync(new List<ApplicationUser>());
+        _mockUserManager.Setup(x => x.Users)
+            .Returns(new List<ApplicationUser>().AsQueryable());
 
         // Act
         var isValid = await _authService.ValidateApiKeyAsync("invalid-api-key");

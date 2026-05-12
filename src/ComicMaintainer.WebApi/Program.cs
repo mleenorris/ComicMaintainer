@@ -173,18 +173,23 @@ builder.Services.Configure<AutheliaSettings>(options =>
 
 // Configure database
 var configDirectory = builder.Configuration["AppSettings:ConfigDirectory"] ?? "/Config";
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") 
+var rawConnectionString = builder.Configuration.GetConnectionString("DefaultConnection")
     ?? $"Data Source={Path.Combine(configDirectory, "comicmaintainer.db")}";
+// Normalize the connection string (pooling, shared cache, default timeout) once so
+// every DbContext instance is built from the same hardened settings.
+var connectionString = SqliteDbContextOptionsExtensions.NormalizeSqliteConnectionString(rawConnectionString);
 
 // Register DbContext for Identity and scoped usage
-builder.Services.AddDbContext<ComicMaintainerDbContext>(options =>
-    options.UseSqlite(connectionString));
+builder.Services.AddDbContext<ComicMaintainerDbContext>((sp, options) =>
+    options.UseComicMaintainerSqlite(
+        connectionString,
+        sp.GetService<ILoggerFactory>()));
 
 // Register DbContextFactory for singleton services that need DbContext access
 // Create a custom factory that creates independent DbContext instances
 builder.Services.AddSingleton<IDbContextFactory<ComicMaintainerDbContext>>(sp =>
 {
-    return new ComicMaintainerDbContextFactory(connectionString);
+    return new ComicMaintainerDbContextFactory(connectionString, sp.GetService<ILoggerFactory>());
 });
 
 // Configure Data Protection to persist keys in Config directory
@@ -859,16 +864,18 @@ public partial class Program { }
 internal class ComicMaintainerDbContextFactory : IDbContextFactory<ComicMaintainerDbContext>
 {
     private readonly string _connectionString;
+    private readonly ILoggerFactory? _loggerFactory;
 
-    public ComicMaintainerDbContextFactory(string connectionString)
+    public ComicMaintainerDbContextFactory(string connectionString, ILoggerFactory? loggerFactory = null)
     {
         _connectionString = connectionString;
+        _loggerFactory = loggerFactory;
     }
 
     public ComicMaintainerDbContext CreateDbContext()
     {
         var optionsBuilder = new DbContextOptionsBuilder<ComicMaintainerDbContext>();
-        optionsBuilder.UseSqlite(_connectionString);
+        optionsBuilder.UseComicMaintainerSqlite(_connectionString, _loggerFactory);
         return new ComicMaintainerDbContext(optionsBuilder.Options);
     }
 }

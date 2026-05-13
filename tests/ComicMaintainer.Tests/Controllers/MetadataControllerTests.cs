@@ -125,4 +125,80 @@ public class MetadataControllerTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Same(record, ok.Value);
     }
+
+    [Fact]
+    public async Task RefreshOne_QueueMode_StartsBackgroundJob()
+    {
+        var jobId = Guid.NewGuid();
+        _refreshJobs.Setup(j => j.StartAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(jobId);
+
+        var result = await _controller.RefreshOne("Batman", queue: true, CancellationToken.None);
+
+        var accepted = Assert.IsType<AcceptedResult>(result.Result);
+        var idProp = accepted.Value!.GetType().GetProperty("jobId");
+        Assert.Equal(jobId, idProp!.GetValue(accepted.Value));
+        _cache.Verify(c => c.RefreshAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefreshFolder_ResolvesSeriesIdToTitlesAndQueuesJob()
+    {
+        _library.Setup(l => l.GetTitlesForSeriesIdAsync("batman", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { "Batman", "Dark Knight" });
+        var jobId = Guid.NewGuid();
+        _refreshJobs.Setup(j => j.StartAsync(It.Is<IEnumerable<string>>(t => t.Contains("Batman") && t.Contains("Dark Knight")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(jobId);
+
+        var result = await _controller.RefreshFolder(
+            new MetadataController.RefreshFolderRequest { SeriesId = "batman" },
+            CancellationToken.None);
+
+        var accepted = Assert.IsType<AcceptedResult>(result.Result);
+        var totalProp = accepted.Value!.GetType().GetProperty("totalSeries");
+        Assert.Equal(2, totalProp!.GetValue(accepted.Value));
+    }
+
+    [Fact]
+    public async Task RefreshFolder_ReturnsNotFound_WhenNothingResolves()
+    {
+        _library.Setup(l => l.GetTitlesForSeriesIdAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<string>());
+
+        var result = await _controller.RefreshFolder(
+            new MetadataController.RefreshFolderRequest { SeriesId = "missing" },
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task RefreshFolder_RejectsEmptyRequest()
+    {
+        var result = await _controller.RefreshFolder(new MetadataController.RefreshFolderRequest(), CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task GetProviders_ReturnsHealthSnapshot()
+    {
+        _external.Setup(e => e.CheckHealthAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProviderHealth
+            {
+                Name = "ComicVine",
+                Enabled = true,
+                Configured = true,
+                Reachable = true,
+                StatusMessage = "Reachable"
+            });
+
+        var result = await _controller.GetProviders(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var providersProp = ok.Value!.GetType().GetProperty("providers")!.GetValue(ok.Value);
+        var providers = Assert.IsAssignableFrom<IEnumerable<ProviderHealth>>(providersProp!);
+        var single = Assert.Single(providers);
+        Assert.Equal("ComicVine", single.Name);
+        Assert.True(single.Reachable);
+    }
 }

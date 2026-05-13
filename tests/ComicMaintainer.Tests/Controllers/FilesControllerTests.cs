@@ -114,12 +114,12 @@ public class FilesControllerTests
     }
 
     [Fact]
-    public async Task GetSeries_ReturnsGroupedSeries()
+    public async Task GetSeries_DefaultMode_ReturnsSummariesWithoutIssues()
     {
-        _mockSeriesLibrary.Setup(service => service.GetSeriesAsync("processed", null, 1, 100, "name", "asc", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SeriesLibraryResult
+        _mockSeriesLibrary.Setup(service => service.GetSeriesSummariesAsync("processed", null, 1, 100, "name", "asc", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesSummaryResult
             {
-                Series = new List<SeriesLibraryDto>
+                Series = new List<SeriesSummaryDto>
                 {
                     new()
                     {
@@ -143,10 +143,81 @@ public class FilesControllerTests
         Assert.NotNull(okResult.Value);
         var seriesProperty = okResult.Value?.GetType().GetProperty("series");
         Assert.NotNull(seriesProperty);
-        var returnedSeries = seriesProperty?.GetValue(okResult.Value) as List<SeriesLibraryDto>;
+        var returnedSeries = seriesProperty?.GetValue(okResult.Value) as List<SeriesSummaryDto>;
         Assert.NotNull(returnedSeries);
         Assert.Single(returnedSeries);
         Assert.Equal("Batman", returnedSeries[0].Title);
+        // GetSeriesAsync (the heavier, issues-included path) must not be called by default.
+        _mockSeriesLibrary.Verify(s => s.GetSeriesAsync(It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetSeries_WithIncludeIssues_ReturnsFullPayloadForBackCompat()
+    {
+        _mockSeriesLibrary.Setup(service => service.GetSeriesAsync("processed", null, 1, 100, "name", "asc", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesLibraryResult
+            {
+                Series = new List<SeriesLibraryDto>
+                {
+                    new()
+                    {
+                        Id = "batman",
+                        Title = "Batman",
+                        CanonicalTitle = "Batman",
+                        IssueCount = 2,
+                        CoverFilePath = "/test/Batman 001.cbz",
+                        Issues = new List<SeriesIssueDto> { new() { FilePath = "/test/Batman 001.cbz", FileName = "Batman 001.cbz" } }
+                    }
+                },
+                Page = 1,
+                TotalPages = 1,
+                TotalSeries = 1
+            });
+        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("unprocessed", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        var result = await _controller.GetSeries(filter: "marked", include_issues: true);
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var seriesProperty = okResult.Value!.GetType().GetProperty("series");
+        var returnedSeries = seriesProperty!.GetValue(okResult.Value) as List<SeriesLibraryDto>;
+        Assert.NotNull(returnedSeries);
+        Assert.Single(returnedSeries);
+        Assert.Single(returnedSeries[0].Issues);
+    }
+
+    [Fact]
+    public async Task GetSeriesIssues_ReturnsPagedIssues()
+    {
+        _mockSeriesLibrary.Setup(s => s.GetSeriesIssuesAsync("batman", It.IsAny<string?>(), 1, 50, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesIssuesResult
+            {
+                Id = "batman",
+                Title = "Batman",
+                CanonicalTitle = "Batman",
+                IssueCount = 1,
+                Issues = new List<SeriesIssueDto> { new() { FilePath = "/test/Batman 001.cbz", FileName = "Batman 001.cbz" } },
+                Page = 1,
+                PerPage = 50,
+                TotalPages = 1
+            });
+
+        var result = await _controller.GetSeriesIssues("batman", page: 1, per_page: 50);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var idProp = ok.Value!.GetType().GetProperty("id");
+        Assert.Equal("batman", idProp!.GetValue(ok.Value));
+    }
+
+    [Fact]
+    public async Task GetSeriesIssues_ReturnsNotFound_WhenServiceReturnsNull()
+    {
+        _mockSeriesLibrary.Setup(s => s.GetSeriesIssuesAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SeriesIssuesResult?)null);
+
+        var result = await _controller.GetSeriesIssues("missing");
+
+        Assert.IsType<NotFoundObjectResult>(result.Result);
     }
 
     [Fact]

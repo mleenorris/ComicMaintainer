@@ -163,14 +163,32 @@ public class FilesController : ControllerBase
         [FromQuery] int per_page = 100,
         [FromQuery] string? sort = "name",
         [FromQuery] string? direction = "asc",
+        [FromQuery] bool include_issues = false,
         CancellationToken cancellationToken = default)
     {
         try
         {
             var mappedFilter = MapFilter(filter);
-            var result = await _seriesLibrary.GetSeriesAsync(mappedFilter, search, page, per_page, sort, direction, cancellationToken);
             var allUnmarked = await _fileStore.GetFilteredFilesAsync("unprocessed", cancellationToken);
 
+            // Default: lightweight summary cards (no per-issue list). Issues are
+            // fetched lazily by the per-series endpoint to keep large libraries
+            // responsive. Older clients can still request the full payload via
+            // ?include_issues=true.
+            if (include_issues)
+            {
+                var fullResult = await _seriesLibrary.GetSeriesAsync(mappedFilter, search, page, per_page, sort, direction, cancellationToken);
+                return Ok(new
+                {
+                    series = fullResult.Series,
+                    page = fullResult.Page,
+                    total_pages = fullResult.TotalPages,
+                    total_series = fullResult.TotalSeries,
+                    unmarked_count = allUnmarked.Count()
+                });
+            }
+
+            var result = await _seriesLibrary.GetSeriesSummariesAsync(mappedFilter, search, page, per_page, sort, direction, cancellationToken);
             return Ok(new
             {
                 series = result.Series,
@@ -184,6 +202,46 @@ public class FilesController : ControllerBase
         {
             _logger.LogError(ex, "Error getting series library");
             return StatusCode(500, "Error retrieving series library");
+        }
+    }
+
+    [HttpGet("series/{seriesId}/issues")]
+    public async Task<ActionResult<object>> GetSeriesIssues(
+        string seriesId,
+        [FromQuery] string? filter = null,
+        [FromQuery] int page = 1,
+        [FromQuery] int per_page = 100,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var mappedFilter = MapFilter(filter);
+            var result = await _seriesLibrary.GetSeriesIssuesAsync(seriesId, mappedFilter, page, per_page, cancellationToken);
+            if (result is null)
+            {
+                return NotFound(new { error = "Series not found" });
+            }
+
+            return Ok(new
+            {
+                id = result.Id,
+                title = result.Title,
+                canonical_title = result.CanonicalTitle,
+                aliases = result.Aliases,
+                metadata_source = result.MetadataSource,
+                cover_file_path = result.CoverFilePath,
+                issue_count = result.IssueCount,
+                total_size = result.TotalSize,
+                issues = result.Issues,
+                page = result.Page,
+                per_page = result.PerPage,
+                total_pages = result.TotalPages
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting issues for series {SeriesId}", LoggingHelper.SanitizeForLog(seriesId));
+            return StatusCode(500, "Error retrieving series issues");
         }
     }
 

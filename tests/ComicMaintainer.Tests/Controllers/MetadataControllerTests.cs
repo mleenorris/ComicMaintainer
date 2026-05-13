@@ -65,7 +65,7 @@ public class MetadataControllerTests
         var record = new SeriesMetadataCacheRecord { NormalizedKey = "batman", CanonicalTitle = "Batman", LookupStatus = "success" };
         _cache.Setup(c => c.RefreshAsync("Batman", It.IsAny<CancellationToken>())).ReturnsAsync(record);
 
-        var result = await _controller.RefreshOne("Batman", CancellationToken.None);
+        var result = await _controller.RefreshOne("Batman", queue: false, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Same(record, ok.Value);

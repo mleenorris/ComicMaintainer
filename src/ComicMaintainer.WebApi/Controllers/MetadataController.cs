@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -76,9 +77,18 @@ public class MetadataController : ControllerBase
         }
     }
 
-    /// <summary>Synchronously refresh a single series (used by per-card action).</summary>
+    /// <summary>
+    /// Refresh metadata for a single series. By default this runs synchronously
+    /// and returns the updated cache record. Pass <c>?queue=true</c> to instead
+    /// queue the lookup as a background job whose progress can be subscribed to
+    /// via the existing job-update event stream — useful when the lookup is
+    /// likely to be slow and the UI wants to render incremental status.
+    /// </summary>
     [HttpPost("refresh/{seriesTitle}")]
-    public async Task<ActionResult<SeriesMetadataCacheRecord>> RefreshOne(string seriesTitle, CancellationToken cancellationToken)
+    public async Task<ActionResult<object>> RefreshOne(
+        string seriesTitle,
+        [FromQuery] bool queue = false,
+        CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
         {
@@ -87,6 +97,12 @@ public class MetadataController : ControllerBase
 
         try
         {
+            if (queue)
+            {
+                var jobId = await _refreshJobs.StartAsync(new[] { seriesTitle }, cancellationToken);
+                return Accepted(new { jobId, totalSeries = 1 });
+            }
+
             var record = await _cache.RefreshAsync(seriesTitle, cancellationToken);
             return Ok(record);
         }
@@ -97,12 +113,91 @@ public class MetadataController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Queue an external metadata refresh for every title that maps to a single
+    /// series-card id (i.e. the series's canonical title plus any folder/alias
+    /// titles that group under it). This implements the per-series-folder
+    /// refresh requested from the UI.
+    /// </summary>
+    [HttpPost("refresh/folder")]
+    public async Task<ActionResult<object>> RefreshFolder(
+        [FromBody] RefreshFolderRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || (string.IsNullOrWhiteSpace(request.SeriesId) && (request.Titles is null || request.Titles.Count == 0)))
+        {
+            return BadRequest("Series id or titles required");
+        }
+
+        try
+        {
+            var titles = new List<string>();
+            if (!string.IsNullOrWhiteSpace(request.SeriesId))
+            {
+                var resolved = await _library.GetTitlesForSeriesIdAsync(request.SeriesId, cancellationToken: cancellationToken);
+                titles.AddRange(resolved);
+            }
+            if (request.Titles is { Count: > 0 })
+            {
+                foreach (var title in request.Titles)
+                {
+                    if (!string.IsNullOrWhiteSpace(title)
+                        && !titles.Contains(title, StringComparer.OrdinalIgnoreCase))
+                    {
+                        titles.Add(title);
+                    }
+                }
+            }
+
+            if (titles.Count == 0)
+            {
+                return NotFound(new { error = "Series not found" });
+            }
+
+            var jobId = await _refreshJobs.StartAsync(titles, cancellationToken);
+            return Accepted(new { jobId, totalSeries = titles.Count, titles });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata refresh for folder"));
+            return StatusCode(500, "Error queuing metadata refresh");
+        }
+    }
+
     /// <summary>Get the status of a refresh job.</summary>
     [HttpGet("refresh/job/{jobId:guid}")]
     public ActionResult<MetadataRefreshJob> GetJob(Guid jobId)
     {
         var job = _refreshJobs.GetJob(jobId);
         return job is null ? NotFound() : Ok(job);
+    }
+
+    /// <summary>
+    /// Returns the configuration + recent runtime status of every external
+    /// metadata provider, so the UI can display a per-provider health
+    /// indicator.
+    /// </summary>
+    [HttpGet("providers")]
+    public async Task<ActionResult<object>> GetProviders(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var providers = new List<ProviderHealth>();
+            if (_externalMetadata is CompositeExternalSeriesMetadataService composite)
+            {
+                providers.AddRange(await composite.CheckAllHealthAsync(cancellationToken));
+            }
+            else
+            {
+                providers.Add(await _externalMetadata.CheckHealthAsync(cancellationToken));
+            }
+            return Ok(new { providers });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error retrieving provider health"));
+            return StatusCode(500, "Error retrieving provider health");
+        }
     }
 
     /// <summary>Search external providers for series candidates by alternative names.</summary>
@@ -205,6 +300,18 @@ public class MetadataController : ControllerBase
     public class RefreshSelectedRequest
     {
         public List<string> Series { get; set; } = new();
+    }
+
+    public class RefreshFolderRequest
+    {
+        /// <summary>The series-card id returned by /api/files/series.</summary>
+        public string? SeriesId { get; set; }
+
+        /// <summary>
+        /// Optional explicit titles to refresh. Combined (deduped) with whatever
+        /// titles the series id resolves to.
+        /// </summary>
+        public List<string>? Titles { get; set; }
     }
 
     public class SetAliasesRequest

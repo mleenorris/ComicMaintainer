@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
@@ -12,11 +13,13 @@ namespace ComicMaintainer.Core.Services;
 public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
 {
     private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(12);
+    private static readonly TimeSpan HealthCacheDuration = TimeSpan.FromSeconds(60);
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly IMemoryCache _cache;
     private readonly ILogger<MangaDexSeriesMetadataService> _logger;
+    private readonly ProviderHealthTracker _health = new("MangaDex");
 
     public MangaDexSeriesMetadataService(
         IHttpClientFactory httpClientFactory,
@@ -29,6 +32,8 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
         _cache = cache;
         _logger = logger;
     }
+
+    public string ProviderName => "MangaDex";
 
     public async Task<ExternalSeriesMetadata?> LookupSeriesAsync(string seriesName, CancellationToken cancellationToken = default)
     {
@@ -92,17 +97,90 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("MangaDex lookup failed for {SeriesName} with status code {StatusCode}", LoggingHelper.SanitizeForLog(seriesName), response.StatusCode);
+                _health.RecordFailure($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
                 return Array.Empty<ExternalSeriesMetadata>();
             }
 
             await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var document = await JsonDocument.ParseAsync(responseStream, cancellationToken: cancellationToken);
-            return ParseResults(document.RootElement);
+            var results = ParseResults(document.RootElement);
+            _health.RecordSuccess();
+            return results;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "MangaDex lookup failed for {SeriesName}", LoggingHelper.SanitizeForLog(seriesName));
+            _health.RecordFailure(ex.Message);
             return Array.Empty<ExternalSeriesMetadata>();
+        }
+    }
+
+    public async Task<ProviderHealth> CheckHealthAsync(CancellationToken cancellationToken = default)
+    {
+        var config = _settings.CurrentValue;
+        var enabled = config.EnableMangaDexMetadata;
+        var configured = enabled && !string.IsNullOrWhiteSpace(config.MangaDexBaseUrl);
+
+        var snapshot = _health.Snapshot();
+        snapshot.Enabled = enabled;
+        snapshot.Configured = configured;
+
+        if (!enabled)
+        {
+            snapshot.Reachable = null;
+            snapshot.StatusMessage = "Disabled in settings";
+            return snapshot;
+        }
+        if (!configured)
+        {
+            snapshot.Reachable = null;
+            snapshot.StatusMessage = "Missing base URL";
+            return snapshot;
+        }
+
+        const string probeCacheKey = "mangadex-health-probe";
+        if (_cache.TryGetValue(probeCacheKey, out (bool Reachable, string Message)? cached) && cached.HasValue)
+        {
+            snapshot.Reachable = cached.Value.Reachable;
+            snapshot.StatusMessage = cached.Value.Message;
+            return snapshot;
+        }
+
+        var (reachable, message) = await ProbeReachabilityAsync(config, cancellationToken);
+        snapshot.Reachable = reachable;
+        snapshot.StatusMessage = message;
+        _cache.Set(probeCacheKey, (reachable, message), HealthCacheDuration);
+        return snapshot;
+    }
+
+    private async Task<(bool reachable, string message)> ProbeReachabilityAsync(AppSettings config, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var requestUri = BuildRequestUri(config, "ping", limit: 1);
+            using var httpClient = _httpClientFactory.CreateClient(nameof(MangaDexSeriesMetadataService));
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            if (response.IsSuccessStatusCode)
+            {
+                return (true, "Reachable");
+            }
+            return (false, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+        }
+        catch (OperationCanceledException)
+        {
+            return (false, "Timed out");
+        }
+        catch (HttpRequestException ex)
+        {
+            return (false, $"Network error: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
         }
     }
 

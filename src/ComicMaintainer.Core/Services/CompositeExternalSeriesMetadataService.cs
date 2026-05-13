@@ -21,6 +21,10 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
         _logger = logger;
     }
 
+    public string ProviderName => "Composite";
+
+    public IReadOnlyList<IExternalSeriesMetadataService> Providers => _providers;
+
     public async Task<ExternalSeriesMetadata?> LookupSeriesAsync(string seriesName, CancellationToken cancellationToken = default)
     {
         foreach (var provider in _providers)
@@ -66,5 +70,31 @@ public class CompositeExternalSeriesMetadataService : IExternalSeriesMetadataSer
         }
 
         return aggregated.Take(limit).ToList();
+    }
+
+    /// <summary>Returns a health snapshot for every chained provider, in order.</summary>
+    public async Task<IReadOnlyList<ProviderHealth>> CheckAllHealthAsync(CancellationToken cancellationToken = default)
+    {
+        var results = new List<ProviderHealth>(_providers.Count);
+        foreach (var provider in _providers)
+        {
+            try
+            {
+                results.Add(await provider.CheckHealthAsync(cancellationToken));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Health check failed for provider {ProviderType}", provider.GetType().Name);
+                results.Add(new ProviderHealth
+                {
+                    Name = provider.ProviderName,
+                    Enabled = false,
+                    Configured = false,
+                    Reachable = false,
+                    StatusMessage = ex.Message
+                });
+            }
+        }
+        return results;
     }
 }

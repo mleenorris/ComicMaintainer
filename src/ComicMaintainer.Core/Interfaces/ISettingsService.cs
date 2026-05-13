@@ -59,4 +59,8 @@ public interface ISettingsService
     Task UpdateExternalSeriesMetadataEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task UpdateComicVineApiKeyAsync(string? apiKey, CancellationToken cancellationToken = default);
     Task UpdateComicVineBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
+    Task UpdateMangaDexEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
+    Task UpdateMangaDexBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
+    Task UpdateAniListManhwaEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
+    Task UpdateAniListBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
 }

@@ -812,22 +812,54 @@
                 <div class="form-group">
                     <label for="enableExternalSeriesMetadata" style="display: flex; align-items: center; cursor: pointer;">
                         <input type="checkbox" id="enableExternalSeriesMetadata" name="enableExternalSeriesMetadata" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                        <span>Enable ComicVine alias grouping</span>
+                        <span>Enable external series metadata (alias grouping)</span>
                     </label>
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        When enabled, ComicMaintainer can look up alternate series titles from ComicVine so variants can be grouped together in the series library view. Lookups are <strong>manual</strong> — use the Library page's <em>Metadata → Refresh All External Metadata</em> button or the per-series <em>Manage Names</em> action to populate the cache. Changes take effect after restart.
+                        Master switch. When enabled, ComicMaintainer can look up alternate series titles from the providers configured below so variants can be grouped together in the series library view. Lookups are <strong>manual</strong> — use the Library page's <em>Metadata → Refresh All External Metadata</em> button or the per-series <em>Manage Names</em> action to populate the cache. Changes take effect after restart.
                     </small>
                 </div>
+
+                <h4 style="margin-bottom: 8px; margin-top: 18px; color: var(--text-secondary);">ComicVine (US comics)</h4>
                 <div class="form-group">
                     <label for="comicVineApiKey">ComicVine API Key</label>
                     <input type="password" id="comicVineApiKey" name="comicVineApiKey" placeholder="Enter ComicVine API key" autocomplete="off">
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Leave blank to disable external lookups. The key is stored in user settings on this instance.
+                        Leave blank to disable ComicVine lookups. The key is stored in user settings on this instance.
                     </small>
                 </div>
                 <div class="form-group">
                     <label for="comicVineBaseUrl">ComicVine Base URL</label>
                     <input type="text" id="comicVineBaseUrl" name="comicVineBaseUrl" placeholder="https://comicvine.gamespot.com/api" autocomplete="off">
+                </div>
+
+                <h4 style="margin-bottom: 8px; margin-top: 18px; color: var(--text-secondary);">MangaDex (manga)</h4>
+                <div class="form-group">
+                    <label for="enableMangaDexMetadata" style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="enableMangaDexMetadata" name="enableMangaDexMetadata" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <span>Enable MangaDex provider</span>
+                    </label>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Looks up canonical titles and alternate localizations from MangaDex. No API key required.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="mangaDexBaseUrl">MangaDex Base URL</label>
+                    <input type="text" id="mangaDexBaseUrl" name="mangaDexBaseUrl" placeholder="https://api.mangadex.org" autocomplete="off">
+                </div>
+
+                <h4 style="margin-bottom: 8px; margin-top: 18px; color: var(--text-secondary);">AniList — Manhwa (Korean origin)</h4>
+                <div class="form-group">
+                    <label for="enableAniListManhwaMetadata" style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="enableAniListManhwaMetadata" name="enableAniListManhwaMetadata" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <span>Enable AniList Manhwa provider</span>
+                    </label>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Queries AniList scoped to manga of Korean origin (manhwa). No API key required.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="aniListBaseUrl">AniList GraphQL Endpoint</label>
+                    <input type="text" id="aniListBaseUrl" name="aniListBaseUrl" placeholder="https://graphql.anilist.co" autocomplete="off">
                 </div>
                 
                 <h3 style="margin-bottom: 10px; margin-top: 35px; color: #e74c3c; border-bottom: 2px solid #e74c3c; padding-bottom: 8px;">⚠️ Danger Zone</h3>

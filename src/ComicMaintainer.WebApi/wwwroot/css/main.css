@@ -2821,3 +2821,111 @@
                 font-size: 13px;
             }
         }
+
+        /* ---------- Series view: lookup status badge ---------- */
+        .series-lookup-badge {
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 5px;
+            border-radius: 9px;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 18px;
+            text-align: center;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.55);
+            pointer-events: auto;
+        }
+        .series-lookup-badge--success { background: #2ea44f; }
+        .series-lookup-badge--warn    { background: #d4a017; }
+        .series-lookup-badge--error   { background: #cb2431; }
+        .series-lookup-badge--none    { background: rgba(0,0,0,0.45); color: rgba(255,255,255,0.6); }
+
+        /* ---------- Provider health widget ---------- */
+        .provider-health-widget { margin: 0 0 12px 0; }
+        .provider-health-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            font-size: 12px;
+        }
+        .provider-health-label { opacity: 0.75; }
+        .provider-health-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 3px 9px;
+            border-radius: 12px;
+            background: var(--bg-secondary, rgba(0,0,0,0.05));
+            border: 1px solid rgba(0,0,0,0.08);
+            white-space: nowrap;
+        }
+        .provider-health-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #888;
+        }
+        .provider-health-pill--ok       .provider-health-dot { background: #2ea44f; }
+        .provider-health-pill--warn     .provider-health-dot { background: #d4a017; }
+        .provider-health-pill--error    .provider-health-dot { background: #cb2431; }
+        .provider-health-pill--disabled .provider-health-dot { background: #999; }
+        .btn-tiny { padding: 1px 6px; font-size: 12px; line-height: 1.2; }
+
+        /* ---------- Metadata refresh job toasts ---------- */
+        .metadata-refresh-toasts {
+            position: fixed;
+            right: 16px;
+            bottom: 16px;
+            z-index: 1500;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-width: 320px;
+        }
+        .metadata-refresh-toast {
+            background: var(--bg-primary, #fff);
+            color: var(--text-primary, #111);
+            border: 1px solid rgba(0,0,0,0.12);
+            border-radius: 6px;
+            padding: 10px 12px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+            font-size: 12px;
+        }
+        .metadata-refresh-toast-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+            gap: 8px;
+        }
+        .metadata-refresh-toast-status {
+            font-size: 10px;
+            text-transform: uppercase;
+            padding: 1px 6px;
+            border-radius: 8px;
+            background: rgba(0,0,0,0.08);
+        }
+        .metadata-refresh-toast-status--running { background: #d4a017; color: #fff; }
+        .metadata-refresh-toast-status--completed { background: #2ea44f; color: #fff; }
+        .metadata-refresh-toast-status--failed,
+        .metadata-refresh-toast-status--cancelled { background: #cb2431; color: #fff; }
+        .metadata-refresh-toast-bar {
+            height: 4px;
+            background: rgba(0,0,0,0.08);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 6px;
+        }
+        .metadata-refresh-toast-bar-fill {
+            height: 100%;
+            background: #2ea44f;
+            transition: width 200ms linear;
+        }
+        .metadata-refresh-toast-meta { opacity: 0.8; }
+        .metadata-refresh-toast--done { opacity: 0.85; }

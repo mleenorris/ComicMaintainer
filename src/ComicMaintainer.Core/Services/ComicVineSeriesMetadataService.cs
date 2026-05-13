@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
@@ -13,11 +14,13 @@ namespace ComicMaintainer.Core.Services;
 public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
 {
     private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(12);
+    private static readonly TimeSpan HealthCacheDuration = TimeSpan.FromSeconds(60);
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly IMemoryCache _cache;
     private readonly ILogger<ComicVineSeriesMetadataService> _logger;
+    private readonly ProviderHealthTracker _health = new("ComicVine");
 
     public ComicVineSeriesMetadataService(
         IHttpClientFactory httpClientFactory,
@@ -30,6 +33,8 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
         _cache = cache;
         _logger = logger;
     }
+
+    public string ProviderName => "ComicVine";
 
     public async Task<ExternalSeriesMetadata?> LookupSeriesAsync(string seriesName, CancellationToken cancellationToken = default)
     {
@@ -79,6 +84,78 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
         return await SearchInternalAsync(config, query, Math.Clamp(limit, 1, 50), cancellationToken);
     }
 
+    public async Task<ProviderHealth> CheckHealthAsync(CancellationToken cancellationToken = default)
+    {
+        var config = _settings.CurrentValue;
+        var enabled = config.EnableExternalSeriesMetadata;
+        var configured = enabled && !string.IsNullOrWhiteSpace(config.ComicVineApiKey)
+            && !string.IsNullOrWhiteSpace(config.ComicVineBaseUrl);
+
+        var snapshot = _health.Snapshot();
+        snapshot.Enabled = enabled;
+        snapshot.Configured = configured;
+
+        if (!enabled)
+        {
+            snapshot.Reachable = null;
+            snapshot.StatusMessage = "Disabled in settings";
+            return snapshot;
+        }
+        if (!configured)
+        {
+            snapshot.Reachable = null;
+            snapshot.StatusMessage = "Missing API key";
+            return snapshot;
+        }
+
+        const string probeCacheKey = "comicvine-health-probe";
+        if (_cache.TryGetValue(probeCacheKey, out (bool Reachable, string Message)? cached) && cached.HasValue)
+        {
+            snapshot.Reachable = cached.Value.Reachable;
+            snapshot.StatusMessage = cached.Value.Message;
+            return snapshot;
+        }
+
+        var (reachable, message) = await ProbeReachabilityAsync(config, cancellationToken);
+        snapshot.Reachable = reachable;
+        snapshot.StatusMessage = message;
+        _cache.Set(probeCacheKey, (reachable, message), HealthCacheDuration);
+        return snapshot;
+    }
+
+    private async Task<(bool reachable, string message)> ProbeReachabilityAsync(AppSettings config, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Use a tiny, well-formed search to verify the endpoint accepts our
+            // credentials without consuming meaningful quota.
+            var requestUri = BuildRequestUri(config, "ping", limit: 1);
+            using var httpClient = _httpClientFactory.CreateClient(nameof(ComicVineSeriesMetadataService));
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+            using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            if (response.IsSuccessStatusCode)
+            {
+                return (true, "Reachable");
+            }
+            return (false, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+        }
+        catch (OperationCanceledException)
+        {
+            return (false, "Timed out");
+        }
+        catch (HttpRequestException ex)
+        {
+            return (false, $"Network error: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     private async Task<IReadOnlyList<ExternalSeriesMetadata>> SearchInternalAsync(
         AppSettings config,
         string seriesName,
@@ -93,16 +170,20 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("ComicVine lookup failed for {SeriesName} with status code {StatusCode}", LoggingHelper.SanitizeForLog(seriesName), response.StatusCode);
+                _health.RecordFailure($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
                 return Array.Empty<ExternalSeriesMetadata>();
             }
 
             await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
             using var document = await JsonDocument.ParseAsync(responseStream, cancellationToken: cancellationToken);
-            return ParseResults(document.RootElement);
+            var results = ParseResults(document.RootElement);
+            _health.RecordSuccess();
+            return results;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "ComicVine lookup failed for {SeriesName}", LoggingHelper.SanitizeForLog(seriesName));
+            _health.RecordFailure(ex.Message);
             return Array.Empty<ExternalSeriesMetadata>();
         }
     }

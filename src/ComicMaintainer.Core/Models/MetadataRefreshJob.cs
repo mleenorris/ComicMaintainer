@@ -13,4 +13,19 @@ public class MetadataRefreshJob
     public string? CurrentSeries { get; set; }
     public DateTime StartTime { get; set; } = DateTime.UtcNow;
     public DateTime? EndTime { get; set; }
+
+    /// <summary>
+    /// Rolling list of the most recent per-series outcomes. Bounded to a small
+    /// number of entries so the UI can render a "live" trail of refresh
+    /// activity without unbounded memory growth.
+    /// </summary>
+    public List<MetadataRefreshOutcome> RecentResults { get; set; } = new();
+}
+
+public class MetadataRefreshOutcome
+{
+    public string SeriesTitle { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? Source { get; set; }
+    public DateTime TimestampUtc { get; set; } = DateTime.UtcNow;
 }

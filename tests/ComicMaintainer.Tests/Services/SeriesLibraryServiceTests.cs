@@ -210,6 +210,115 @@ public class SeriesLibraryServiceTests
         Assert.Contains("Series B", result.Series[0].Aliases);
     }
 
+    [Fact]
+    public async Task GetSeriesSummariesAsync_DoesNotIncludeIssuesAndDoesNotOpenArchives()
+    {
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = "/library/Batman/Batman 001.cbz", FileName = "Batman 001.cbz", Directory = "/library/Batman", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
+            new() { FilePath = "/library/Batman/Batman 002.cbz", FileName = "Batman 002.cbz", Directory = "/library/Batman", FileSize = 200, LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc) }
+        };
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync();
+
+        Assert.Single(result.Series);
+        Assert.Equal("Batman", result.Series[0].Title);
+        Assert.Equal(2, result.Series[0].IssueCount);
+        // Summary mode never opens archives on disk for the listing.
+        _processor.Verify(p => p.GetSeriesMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        // SeriesSummaryDto does not expose an Issues collection at all (compile-time check).
+        Assert.IsType<SeriesSummaryDto>(result.Series[0]);
+    }
+
+    [Fact]
+    public async Task GetSeriesIssuesAsync_ReturnsPagedIssuesForResolvedSeriesId()
+    {
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = "/library/Batman/Batman 001.cbz", FileName = "Batman 001.cbz", Directory = "/library/Batman", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Batman", Issue = "1" } },
+            new() { FilePath = "/library/Batman/Batman 002.cbz", FileName = "Batman 002.cbz", Directory = "/library/Batman", FileSize = 200, LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Batman", Issue = "2" } },
+            new() { FilePath = "/library/Batman/Batman 003.cbz", FileName = "Batman 003.cbz", Directory = "/library/Batman", FileSize = 300, LastModified = new DateTime(2024, 1, 3, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Batman", Issue = "3" } }
+        };
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
+
+        var summaries = await service.GetSeriesSummariesAsync();
+        var seriesId = summaries.Series.Single().Id;
+
+        var page1 = await service.GetSeriesIssuesAsync(seriesId, page: 1, perPage: 2);
+        Assert.NotNull(page1);
+        Assert.Equal(3, page1!.IssueCount);
+        Assert.Equal(2, page1.Issues.Count);
+        Assert.Equal(2, page1.TotalPages);
+        Assert.Equal("Batman", page1.Title);
+        Assert.Equal("1", page1.Issues[0].Issue);
+
+        var page2 = await service.GetSeriesIssuesAsync(seriesId, page: 2, perPage: 2);
+        Assert.NotNull(page2);
+        Assert.Single(page2!.Issues);
+        Assert.Equal("3", page2.Issues[0].Issue);
+    }
+
+    [Fact]
+    public async Task GetSeriesIssuesAsync_ReturnsNullForUnknownId()
+    {
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
+        var result = await service.GetSeriesIssuesAsync("does-not-exist");
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetTitlesForSeriesIdAsync_ReturnsCanonicalAndAliases()
+    {
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = "/library/Batman/Batman 001.cbz", FileName = "Batman 001.cbz", Directory = "/library/Batman", FileSize = 100, LastModified = DateTime.UtcNow, Metadata = new ComicMetadata { Series = "Batman", Issue = "1" } },
+            new() { FilePath = "/library/Dark Knight/DK 001.cbz", FileName = "DK 001.cbz", Directory = "/library/Dark Knight", FileSize = 100, LastModified = DateTime.UtcNow, Metadata = new ComicMetadata { Series = "Dark Knight", Issue = "1" } }
+        };
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(files);
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "batman",
+                    CanonicalTitle = "Batman",
+                    Aliases = new List<string> { "Dark Knight" },
+                    UserAliases = new List<string>(),
+                    Source = "ComicVine"
+                }
+            });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
+        var summaries = await service.GetSeriesSummariesAsync();
+        var seriesId = summaries.Series.Single().Id;
+
+        var titles = await service.GetTitlesForSeriesIdAsync(seriesId);
+
+        Assert.Contains("Batman", titles);
+        Assert.Contains(titles, t => string.Equals(t, "Dark Knight", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task GetTitlesForSeriesIdAsync_ReturnsEmptyForUnknownId()
+    {
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
+        var result = await service.GetTitlesForSeriesIdAsync("nope");
+
+        Assert.Empty(result);
+    }
+
     private static string NormalizeKey(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))

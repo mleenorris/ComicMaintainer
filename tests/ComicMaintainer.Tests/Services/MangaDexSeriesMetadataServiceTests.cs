@@ -192,6 +192,76 @@ public class MangaDexSeriesMetadataServiceTests
         Assert.Equal("MangaDex", result.Source);
     }
 
+    [Fact]
+    public async Task CheckHealthAsync_DisabledProvider_ReportsDisabled()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK));
+        var service = CreateService(handler, new AppSettings { EnableMangaDexMetadata = false });
+
+        var health = await service.CheckHealthAsync();
+
+        Assert.Equal("MangaDex", health.Name);
+        Assert.False(health.Enabled);
+        Assert.Null(health.Reachable);
+        Assert.Equal("Disabled in settings", health.StatusMessage);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_HttpError_ReportsUnreachable()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable) { ReasonPhrase = "Service Unavailable" });
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        var health = await service.CheckHealthAsync();
+
+        Assert.True(health.Enabled);
+        Assert.True(health.Configured);
+        Assert.False(health.Reachable);
+        Assert.Contains("503", health.StatusMessage);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_Reachable_ReportsHealthy()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent("{\"data\":[]}", Encoding.UTF8, "application/json")
+        });
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        var health = await service.CheckHealthAsync();
+
+        Assert.True(health.Enabled);
+        Assert.True(health.Configured);
+        Assert.True(health.Reachable);
+        Assert.Equal("Reachable", health.StatusMessage);
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_RecordsFailureCounters_OnHttpError()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(System.Net.HttpStatusCode.InternalServerError));
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        await service.LookupSeriesAsync("Anything");
+        var health = await service.CheckHealthAsync();
+
+        Assert.True(health.FailureCount >= 1);
+        Assert.NotNull(health.LastFailureUtc);
+    }
+
     private sealed class StubHttpMessageHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _handler;

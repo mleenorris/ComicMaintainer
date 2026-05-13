@@ -8,6 +8,8 @@ namespace ComicMaintainer.Core.Services;
 
 public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
 {
+    private const int MaxRecentResults = 20;
+
     private readonly ISeriesMetadataCacheService _cache;
     private readonly IEventBroadcaster? _eventBroadcaster;
     private readonly ILogger<SeriesMetadataRefreshJobService> _logger;
@@ -68,9 +70,13 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                 }
 
                 job.CurrentSeries = title;
+                string outcomeStatus = "error";
+                string? outcomeSource = null;
                 try
                 {
                     var record = await _cache.RefreshAsync(title, cancellationToken);
+                    outcomeStatus = record.LookupStatus ?? "error";
+                    outcomeSource = record.Source;
                     switch (record.LookupStatus)
                     {
                         case "success":
@@ -93,6 +99,22 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                 {
                     _logger.LogWarning(ex, "Metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(title));
                     job.Failures++;
+                    outcomeStatus = "error";
+                }
+
+                lock (job.RecentResults)
+                {
+                    job.RecentResults.Add(new MetadataRefreshOutcome
+                    {
+                        SeriesTitle = title,
+                        Status = outcomeStatus,
+                        Source = outcomeSource,
+                        TimestampUtc = DateTime.UtcNow
+                    });
+                    while (job.RecentResults.Count > MaxRecentResults)
+                    {
+                        job.RecentResults.RemoveAt(0);
+                    }
                 }
 
                 job.ProcessedSeries++;
@@ -136,18 +158,36 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
         }
     }
 
-    private static MetadataRefreshJob Clone(MetadataRefreshJob job) => new()
+    private static MetadataRefreshJob Clone(MetadataRefreshJob job)
     {
-        JobId = job.JobId,
-        Status = job.Status,
-        Series = job.Series.ToList(),
-        TotalSeries = job.TotalSeries,
-        ProcessedSeries = job.ProcessedSeries,
-        Successes = job.Successes,
-        NotFound = job.NotFound,
-        Failures = job.Failures,
-        CurrentSeries = job.CurrentSeries,
-        StartTime = job.StartTime,
-        EndTime = job.EndTime
-    };
+        List<MetadataRefreshOutcome> recentClone;
+        lock (job.RecentResults)
+        {
+            recentClone = job.RecentResults
+                .Select(r => new MetadataRefreshOutcome
+                {
+                    SeriesTitle = r.SeriesTitle,
+                    Status = r.Status,
+                    Source = r.Source,
+                    TimestampUtc = r.TimestampUtc
+                })
+                .ToList();
+        }
+
+        return new MetadataRefreshJob
+        {
+            JobId = job.JobId,
+            Status = job.Status,
+            Series = job.Series.ToList(),
+            TotalSeries = job.TotalSeries,
+            ProcessedSeries = job.ProcessedSeries,
+            Successes = job.Successes,
+            NotFound = job.NotFound,
+            Failures = job.Failures,
+            CurrentSeries = job.CurrentSeries,
+            StartTime = job.StartTime,
+            EndTime = job.EndTime,
+            RecentResults = recentClone
+        };
+    }
 }

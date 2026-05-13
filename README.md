@@ -357,13 +357,25 @@ The version is displayed in the web interface header for easy identification of 
 
 External series metadata lookups (ComicVine / MangaDex) are run manually, and results — together with any aliases you add — are persisted in the database. The library view groups folders into a single series card whenever they share any canonical title, provider alias, or user-defined alias.
 
+#### Library view (paged & lazy)
+
+- **GET** `/api/files/series` — paged list of **summary cards only** (no per-issue payload). Cheap enough to render very large libraries without timing out.
+  - Query: `page`, `per_page`, `filter`, `search`, `sort`, `direction`.
+  - Response includes `lookup_status` and `last_lookup_utc` per card so the UI can render a per-series status badge.
+  - Pass `?include_issues=true` to opt into the legacy heavyweight payload (kept for older clients/tests; not used by the web UI).
+- **GET** `/api/files/series/{seriesId}/issues` — paged issue list for one series card (`page`, `per_page`, `filter`). Loaded lazily by the web UI when a card is opened.
+
 - **POST** `/api/metadata/refresh-all` — queue an external lookup for every series in the library.
   - Returns: `{ "jobId": "...", "totalSeries": N }`
 - **POST** `/api/metadata/refresh-selected` — refresh a specific subset of series titles.
   - Body: `{ "series": ["Batman", "Superman"] }`
   - Returns: `{ "jobId": "...", "totalSeries": N }`
-- **POST** `/api/metadata/refresh/{seriesTitle}` — synchronously refresh one series (used by per-card actions). Returns the updated cache record.
-- **GET** `/api/metadata/refresh/job/{jobId}` — poll the status of a refresh job (alongside the regular SSE job-update events).
+- **POST** `/api/metadata/refresh/{seriesTitle}` — refresh one series. Synchronous by default (returns the updated cache record). Pass `?queue=true` to instead queue a background job and return `{ jobId, totalSeries }`.
+- **POST** `/api/metadata/refresh/folder` — queue a refresh for every title that maps to one series-card id (i.e. the canonical title plus any folder/alias titles grouped under it).
+  - Body: `{ "seriesId": "batman" }` (or `{ "titles": ["Batman", "Dark Knight"] }`, or both — they're merged).
+  - Returns: `{ "jobId": "...", "totalSeries": N, "titles": [...] }`
+- **GET** `/api/metadata/refresh/job/{jobId}` — poll the status of a refresh job. Includes a rolling `recentResults` ring (last ~20 per-series outcomes) so the UI can show a live "last lookup" trail.
+- **GET** `/api/metadata/providers` — runtime health of every external metadata provider. Returns `{ "providers": [{ "name": "ComicVine", "enabled": true, "configured": true, "reachable": true, "status_message": "Reachable", "last_error": null, "last_success_utc": ..., "last_failure_utc": ..., "success_count": N, "failure_count": N }, ...] }`. Reachability is probed lazily and cached for ~60s.
 - **GET** `/api/metadata/search?query=...&limit=10` — search the configured providers for candidate series matches, useful for finding alternative names.
   - Returns: `{ "query": "...", "results": [{ "canonical_title": "...", "aliases": [...], "source": "ComicVine" }, ...] }`
 - **GET** `/api/metadata/series/{seriesTitle}` — read the cached record (canonical title, provider aliases, user aliases) for a series.

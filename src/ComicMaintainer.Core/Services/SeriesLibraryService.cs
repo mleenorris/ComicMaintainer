@@ -36,6 +36,274 @@ public class SeriesLibraryService : ISeriesLibraryService
         string? direction = "asc",
         CancellationToken cancellationToken = default)
     {
+        var groups = await BuildGroupsAsync(filter, allowDiskRead: true, cancellationToken);
+
+        var groupedSeries = groups.Values
+            .Select(accumulator =>
+            {
+                accumulator.Issues = SortIssues(accumulator.Issues);
+
+                return new SeriesLibraryDto
+                {
+                    Id = accumulator.Id,
+                    Title = accumulator.DisplayTitle,
+                    CanonicalTitle = accumulator.CanonicalTitle,
+                    Aliases = NormalizeAliases(accumulator.Aliases),
+                    MetadataSource = accumulator.MetadataSource,
+                    IssueCount = accumulator.Issues.Count,
+                    TotalSize = accumulator.TotalSize,
+                    LatestModified = ToUnixTime(accumulator.LatestModified),
+                    CoverFilePath = accumulator.Issues.FirstOrDefault()?.FilePath ?? string.Empty,
+                    Issues = accumulator.Issues
+                };
+            })
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            groupedSeries = groupedSeries.Where(series =>
+                    Contains(series.Title, search)
+                    || Contains(series.CanonicalTitle, search)
+                    || series.Aliases.Any(alias => Contains(alias, search))
+                    || series.Issues.Any(issue =>
+                        Contains(issue.Title, search)
+                        || Contains(issue.Issue, search)
+                        || Contains(issue.FileName, search)))
+                .ToList();
+        }
+
+        groupedSeries = SortSeries(groupedSeries, sort, direction,
+            keyTitle: s => s.Title,
+            keyDate: s => s.LatestModified,
+            keySize: s => s.TotalSize);
+
+        var totalSeries = groupedSeries.Count;
+        var totalPages = perPage == -1 ? 1 : (int)Math.Ceiling((double)totalSeries / Math.Max(1, perPage));
+        page = Math.Max(1, Math.Min(page, totalPages == 0 ? 1 : totalPages));
+
+        if (perPage != -1)
+        {
+            groupedSeries = groupedSeries
+                .Skip((page - 1) * perPage)
+                .Take(perPage)
+                .ToList();
+        }
+
+        return new SeriesLibraryResult
+        {
+            Series = groupedSeries,
+            Page = page,
+            TotalPages = totalPages,
+            TotalSeries = totalSeries
+        };
+    }
+
+    public async Task<SeriesSummaryResult> GetSeriesSummariesAsync(
+        string? filter = null,
+        string? search = null,
+        int page = 1,
+        int perPage = 100,
+        string? sort = "name",
+        string? direction = "asc",
+        CancellationToken cancellationToken = default)
+    {
+        // Summary mode never opens an archive on disk, so even huge libraries
+        // stay snappy. Per-issue details are loaded lazily by GetSeriesIssuesAsync.
+        var groups = await BuildGroupsAsync(filter, allowDiskRead: false, cancellationToken);
+
+        var summaries = groups.Values
+            .Select(accumulator =>
+            {
+                var sortedIssues = SortIssues(accumulator.Issues);
+                return new
+                {
+                    Accumulator = accumulator,
+                    Cover = sortedIssues.FirstOrDefault()?.FilePath ?? string.Empty,
+                    SortedIssues = sortedIssues,
+                    IssueTitleSearch = string.Join("\n", sortedIssues.Select(i => $"{i.Title}\n{i.Issue}\n{i.FileName}"))
+                };
+            })
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            summaries = summaries.Where(item =>
+                    Contains(item.Accumulator.DisplayTitle, search)
+                    || Contains(item.Accumulator.CanonicalTitle, search)
+                    || item.Accumulator.Aliases.Any(alias => Contains(alias, search))
+                    || Contains(item.IssueTitleSearch, search))
+                .ToList();
+        }
+
+        summaries = SortSeries(summaries, sort, direction,
+            keyTitle: item => item.Accumulator.DisplayTitle,
+            keyDate: item => ToUnixTime(item.Accumulator.LatestModified),
+            keySize: item => item.Accumulator.TotalSize);
+
+        var totalSeries = summaries.Count;
+        var totalPages = perPage == -1 ? 1 : (int)Math.Ceiling((double)totalSeries / Math.Max(1, perPage));
+        page = Math.Max(1, Math.Min(page, totalPages == 0 ? 1 : totalPages));
+
+        if (perPage != -1)
+        {
+            summaries = summaries
+                .Skip((page - 1) * perPage)
+                .Take(perPage)
+                .ToList();
+        }
+
+        return new SeriesSummaryResult
+        {
+            Series = summaries.Select(item => new SeriesSummaryDto
+            {
+                Id = item.Accumulator.Id,
+                Title = item.Accumulator.DisplayTitle,
+                CanonicalTitle = item.Accumulator.CanonicalTitle,
+                Aliases = NormalizeAliases(item.Accumulator.Aliases),
+                MetadataSource = item.Accumulator.MetadataSource,
+                IssueCount = item.Accumulator.Issues.Count,
+                TotalSize = item.Accumulator.TotalSize,
+                LatestModified = ToUnixTime(item.Accumulator.LatestModified),
+                CoverFilePath = item.Cover,
+                LookupStatus = item.Accumulator.LookupStatus,
+                LastLookupUtc = item.Accumulator.LastLookupUtc
+            }).ToList(),
+            Page = page,
+            TotalPages = totalPages,
+            TotalSeries = totalSeries
+        };
+    }
+
+    public async Task<SeriesIssuesResult?> GetSeriesIssuesAsync(
+        string seriesId,
+        string? filter = null,
+        int page = 1,
+        int perPage = 100,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesId))
+        {
+            return null;
+        }
+
+        // Group cache-only first (cheap). If the requested id matches a group,
+        // optionally upgrade just that group's metadata via disk reads to fill
+        // in per-issue details that may be missing from the DB cache.
+        var groups = await BuildGroupsAsync(filter, allowDiskRead: false, cancellationToken);
+        if (!groups.TryGetValue(seriesId, out var accumulator))
+        {
+            return null;
+        }
+
+        // Best-effort upgrade: for issues with empty title metadata, try the
+        // archive on disk. Bounded to the requested page so we never read more
+        // archives than the user actually sees.
+        var sortedIssues = SortIssues(accumulator.Issues);
+        var totalIssues = sortedIssues.Count;
+        var effectivePerPage = perPage == -1 ? totalIssues : Math.Max(1, perPage);
+        var totalPages = perPage == -1 ? 1 : (int)Math.Ceiling((double)totalIssues / effectivePerPage);
+        page = Math.Max(1, Math.Min(page, totalPages == 0 ? 1 : totalPages));
+        var pageIssues = perPage == -1
+            ? sortedIssues
+            : sortedIssues.Skip((page - 1) * effectivePerPage).Take(effectivePerPage).ToList();
+
+        // Upgrade missing titles by opening just the visible archives.
+        for (var i = 0; i < pageIssues.Count; i++)
+        {
+            var issue = pageIssues[i];
+            if (!string.IsNullOrWhiteSpace(issue.Title) && !string.IsNullOrWhiteSpace(issue.Issue))
+            {
+                continue;
+            }
+
+            try
+            {
+                var meta = await _processor.GetSeriesMetadataAsync(issue.FilePath, cancellationToken);
+                if (meta is null) continue;
+                pageIssues[i] = new SeriesIssueDto
+                {
+                    FilePath = issue.FilePath,
+                    FileName = issue.FileName,
+                    Title = string.IsNullOrWhiteSpace(issue.Title) ? meta.Title : issue.Title,
+                    Issue = string.IsNullOrWhiteSpace(issue.Issue) ? meta.Issue : issue.Issue,
+                    Volume = string.IsNullOrWhiteSpace(issue.Volume) ? meta.Volume : issue.Volume,
+                    Publisher = string.IsNullOrWhiteSpace(issue.Publisher) ? meta.Publisher : issue.Publisher,
+                    Year = issue.Year ?? meta.Year,
+                    Size = issue.Size,
+                    Modified = issue.Modified,
+                    Processed = issue.Processed,
+                    Renamed = issue.Renamed,
+                    Normalized = issue.Normalized,
+                    Duplicate = issue.Duplicate,
+                    Read = issue.Read
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Issue metadata upgrade failed for {FilePath}",
+                    LoggingHelper.SanitizePathForLog(issue.FilePath));
+            }
+        }
+
+        return new SeriesIssuesResult
+        {
+            Id = accumulator.Id,
+            Title = accumulator.DisplayTitle,
+            CanonicalTitle = accumulator.CanonicalTitle,
+            Aliases = NormalizeAliases(accumulator.Aliases),
+            MetadataSource = accumulator.MetadataSource,
+            CoverFilePath = sortedIssues.FirstOrDefault()?.FilePath ?? string.Empty,
+            IssueCount = totalIssues,
+            TotalSize = accumulator.TotalSize,
+            Issues = pageIssues,
+            Page = page,
+            PerPage = effectivePerPage,
+            TotalPages = totalPages
+        };
+    }
+
+    public async Task<IReadOnlyList<string>> GetTitlesForSeriesIdAsync(
+        string seriesId,
+        string? filter = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesId))
+        {
+            return Array.Empty<string>();
+        }
+
+        var groups = await BuildGroupsAsync(filter, allowDiskRead: false, cancellationToken);
+        if (!groups.TryGetValue(seriesId, out var accumulator))
+        {
+            return Array.Empty<string>();
+        }
+
+        var titles = new List<string>();
+        if (!string.IsNullOrWhiteSpace(accumulator.CanonicalTitle))
+        {
+            titles.Add(accumulator.CanonicalTitle);
+        }
+        foreach (var alias in accumulator.Aliases)
+        {
+            if (!string.IsNullOrWhiteSpace(alias) &&
+                !titles.Contains(alias, StringComparer.OrdinalIgnoreCase))
+            {
+                titles.Add(alias);
+            }
+        }
+        return titles;
+    }
+
+    /// <summary>
+    /// Loads the file store, resolves grouping titles and external cache info,
+    /// and returns a dictionary of series accumulators keyed by their union-find
+    /// representative (the series id surfaced to the API).
+    /// </summary>
+    private async Task<Dictionary<string, SeriesAccumulator>> BuildGroupsAsync(
+        string? filter,
+        bool allowDiskRead,
+        CancellationToken cancellationToken)
+    {
         var files = (await _fileStore.GetFilteredFilesAsync(filter, cancellationToken)).ToList();
         var fileEntries = new List<(ComicFile File, SeriesMetadata Metadata, string GroupingTitle, List<string> MetadataAliases)>(files.Count);
 
@@ -43,9 +311,12 @@ public class SeriesLibraryService : ISeriesLibraryService
         {
             // Reuse metadata already loaded from the database when available so we
             // don't have to open every archive on disk just to render the library.
-            var metadata = BuildSeriesMetadataFromCache(file)
-                ?? await _processor.GetSeriesMetadataAsync(file.FilePath, cancellationToken)
-                ?? new SeriesMetadata();
+            var metadata = BuildSeriesMetadataFromCache(file);
+            if (metadata is null && allowDiskRead)
+            {
+                metadata = await _processor.GetSeriesMetadataAsync(file.FilePath, cancellationToken);
+            }
+            metadata ??= BuildSeriesMetadataFromFileName(file);
             var groupingTitle = ResolveGroupingTitle(metadata, file);
             var metadataAliases = ResolveMetadataAliases(metadata, groupingTitle);
             fileEntries.Add((file, metadata, groupingTitle, metadataAliases));
@@ -55,13 +326,8 @@ public class SeriesLibraryService : ISeriesLibraryService
         // index it by every known alias so we can merge folders without re-querying
         // external providers on every library load.
         var cacheRecords = await _metadataCache.GetAllAsync(cancellationToken);
-        var cacheByKey = cacheRecords.ToDictionary(r => r.NormalizedKey, StringComparer.OrdinalIgnoreCase);
         var aliasIndex = BuildAliasIndex(cacheRecords);
 
-        // Union-find groups: every series-title we encounter (file folder titles +
-        // cached canonical/alias titles) becomes a node, then we union nodes that
-        // share a record id from the cache. The result is that a user-added alias
-        // collapses two folders into a single series card on the next load.
         var unionFind = new UnionFind<string>(StringComparer.OrdinalIgnoreCase);
         var groupingKeyByFile = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
@@ -78,7 +344,6 @@ public class SeriesLibraryService : ISeriesLibraryService
             groupingKeyByFile[entry.File.FilePath] = fileKey;
         }
 
-        // Also union together any cached records that themselves share aliases.
         foreach (var record in cacheRecords)
         {
             var recordKey = record.NormalizedKey;
@@ -99,9 +364,7 @@ public class SeriesLibraryService : ISeriesLibraryService
             var fileKey = groupingKeyByFile[file.FilePath];
             var representative = unionFind.Find(fileKey);
 
-            // Pick the cache record (if any) attached to this representative.
             var record = ResolveRecordForGroup(representative, cacheRecords, unionFind);
-
             var canonicalTitle = record is null || string.IsNullOrWhiteSpace(record.CanonicalTitle)
                 ? groupingTitle
                 : record.CanonicalTitle;
@@ -114,11 +377,11 @@ public class SeriesLibraryService : ISeriesLibraryService
                     DisplayTitle = canonicalTitle,
                     CanonicalTitle = canonicalTitle,
                     MetadataSource = record?.Source,
+                    LookupStatus = record?.LookupStatus,
+                    LastLookupUtc = record?.LastLookupUtc,
                     Aliases = new List<string>()
                 };
 
-                // Seed aliases from the cache record so we surface user-managed
-                // alternative names even when none of the underlying files use them.
                 if (record is not null)
                 {
                     AddAliasIfNew(accumulator, record.Aliases, canonicalTitle);
@@ -167,75 +430,56 @@ public class SeriesLibraryService : ISeriesLibraryService
             });
         }
 
-        var groupedSeries = groups.Values
-            .Select(accumulator =>
-            {
-                accumulator.Issues = accumulator.Issues
-                    .OrderBy(issue => ExtractIssueSortKey(issue.Issue), new NaturalStringComparer())
-                    .ThenBy(issue => issue.FileName, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+        return groups;
+    }
 
-                return new SeriesLibraryDto
-                {
-                    Id = accumulator.Id,
-                    Title = accumulator.DisplayTitle,
-                    CanonicalTitle = accumulator.CanonicalTitle,
-                    Aliases = accumulator.Aliases
-                        .Where(alias => !string.IsNullOrWhiteSpace(alias))
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .OrderBy(alias => alias, StringComparer.OrdinalIgnoreCase)
-                        .ToList(),
-                    MetadataSource = accumulator.MetadataSource,
-                    IssueCount = accumulator.Issues.Count,
-                    TotalSize = accumulator.TotalSize,
-                    LatestModified = ToUnixTime(accumulator.LatestModified),
-                    CoverFilePath = accumulator.Issues.FirstOrDefault()?.FilePath ?? string.Empty,
-                    Issues = accumulator.Issues
-                };
-            })
-            .ToList();
-
-        if (!string.IsNullOrWhiteSpace(search))
+    /// <summary>
+    /// Builds a placeholder <see cref="SeriesMetadata"/> from the file name +
+    /// folder when no DB-cached metadata is present and we don't want to open
+    /// the archive on disk.
+    /// </summary>
+    private static SeriesMetadata BuildSeriesMetadataFromFileName(ComicFile file)
+    {
+        return new SeriesMetadata
         {
-            groupedSeries = groupedSeries.Where(series =>
-                    Contains(series.Title, search)
-                    || Contains(series.CanonicalTitle, search)
-                    || series.Aliases.Any(alias => Contains(alias, search))
-                    || series.Issues.Any(issue =>
-                        Contains(issue.Title, search)
-                        || Contains(issue.Issue, search)
-                        || Contains(issue.FileName, search)))
-                .ToList();
-        }
-
-        groupedSeries = (sort?.ToLowerInvariant(), direction?.ToLowerInvariant()) switch
-        {
-            ("date", "desc") => groupedSeries.OrderByDescending(series => series.LatestModified).ToList(),
-            ("date", "asc") => groupedSeries.OrderBy(series => series.LatestModified).ToList(),
-            ("size", "desc") => groupedSeries.OrderByDescending(series => series.TotalSize).ToList(),
-            ("size", "asc") => groupedSeries.OrderBy(series => series.TotalSize).ToList(),
-            ("name", "desc") => groupedSeries.OrderByDescending(series => series.Title, StringComparer.OrdinalIgnoreCase).ToList(),
-            _ => groupedSeries.OrderBy(series => series.Title, StringComparer.OrdinalIgnoreCase).ToList()
+            Series = Path.GetFileName(file.Directory ?? Path.GetDirectoryName(file.FilePath) ?? string.Empty),
+            SeriesGroup = Path.GetFileName(Path.GetDirectoryName(file.FilePath) ?? string.Empty)
         };
+    }
 
-        var totalSeries = groupedSeries.Count;
-        var totalPages = perPage == -1 ? 1 : (int)Math.Ceiling((double)totalSeries / Math.Max(1, perPage));
-        page = Math.Max(1, Math.Min(page, totalPages == 0 ? 1 : totalPages));
+    private static List<SeriesIssueDto> SortIssues(IEnumerable<SeriesIssueDto> issues)
+    {
+        return issues
+            .OrderBy(issue => ExtractIssueSortKey(issue.Issue), new NaturalStringComparer())
+            .ThenBy(issue => issue.FileName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 
-        if (perPage != -1)
+    private static List<string> NormalizeAliases(IEnumerable<string> aliases)
+    {
+        return aliases
+            .Where(alias => !string.IsNullOrWhiteSpace(alias))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(alias => alias, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static List<T> SortSeries<T>(
+        List<T> source,
+        string? sort,
+        string? direction,
+        Func<T, string> keyTitle,
+        Func<T, long> keyDate,
+        Func<T, long> keySize)
+    {
+        return (sort?.ToLowerInvariant(), direction?.ToLowerInvariant()) switch
         {
-            groupedSeries = groupedSeries
-                .Skip((page - 1) * perPage)
-                .Take(perPage)
-                .ToList();
-        }
-
-        return new SeriesLibraryResult
-        {
-            Series = groupedSeries,
-            Page = page,
-            TotalPages = totalPages,
-            TotalSeries = totalSeries
+            ("date", "desc") => source.OrderByDescending(keyDate).ToList(),
+            ("date", "asc") => source.OrderBy(keyDate).ToList(),
+            ("size", "desc") => source.OrderByDescending(keySize).ToList(),
+            ("size", "asc") => source.OrderBy(keySize).ToList(),
+            ("name", "desc") => source.OrderByDescending(keyTitle, StringComparer.OrdinalIgnoreCase).ToList(),
+            _ => source.OrderBy(keyTitle, StringComparer.OrdinalIgnoreCase).ToList()
         };
     }
 
@@ -404,6 +648,8 @@ public class SeriesLibraryService : ISeriesLibraryService
         public string DisplayTitle { get; set; } = string.Empty;
         public string CanonicalTitle { get; set; } = string.Empty;
         public string? MetadataSource { get; set; }
+        public string? LookupStatus { get; set; }
+        public DateTime? LastLookupUtc { get; set; }
         public List<string> Aliases { get; set; } = new();
         public List<SeriesIssueDto> Issues { get; set; } = new();
         public long TotalSize { get; set; }

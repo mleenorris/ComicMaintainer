@@ -225,6 +225,9 @@
         let libraryViewMode = 'files';
         let seriesLibrary = [];
         let currentSeriesDetailId = null;
+        const seriesIssuesCache = new Map();        // seriesId -> { issues: [], total: n }
+        const metadataRefreshJobs = new Map();     // jobId -> { seriesIds, label }
+        let providerHealthRefreshTimer = null;
         let searchDebounceTimer = null;
         let historyCurrentPage = 1;
         let historyPerPage = 50;
@@ -1641,6 +1644,7 @@
             }
 
             fileList.innerHTML = `
+                ${renderProviderHealthWidget()}
                 <div class="series-grid">
                     ${seriesLibrary.map(series => `
                         <button class="series-card" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
@@ -1648,6 +1652,7 @@
                                 <img class="series-cover" data-protected-image="${escapeHtml(series.cover_file_path)}" alt="${escapeHtml(series.title)} cover" loading="lazy">
                                 <div class="series-cover-overlay"></div>
                                 <span class="series-count-badge">${series.issue_count}</span>
+                                ${renderLookupStatusBadge(series)}
                                 <div class="series-card-body">
                                     <h3 class="series-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
                                     <div class="series-meta">${formatFileSize(series.total_size)}</div>
@@ -1659,11 +1664,103 @@
             `;
 
             hydrateProtectedImages(fileList);
+            // Provider health is loaded asynchronously and re-rendered into its container.
+            scheduleProviderHealthLoad();
+        }
+
+        function renderLookupStatusBadge(series) {
+            // Visual indicator for the most recent external metadata lookup.
+            // Helps the user see whether "Refresh metadata" actually did anything.
+            const status = (series.lookup_status || '').toLowerCase();
+            if (!status) {
+                return '<span class="series-lookup-badge series-lookup-badge--none" title="No external metadata lookup yet">·</span>';
+            }
+            const map = {
+                success: { cls: 'success', symbol: '✓', label: 'Last lookup succeeded' },
+                manual: { cls: 'success', symbol: '✓', label: 'Manually managed' },
+                not_found: { cls: 'warn', symbol: '?', label: 'No external match found' },
+                error: { cls: 'error', symbol: '!', label: 'Last lookup failed' }
+            };
+            const info = map[status] || { cls: 'warn', symbol: '?', label: status };
+            const sourceText = series.metadata_source ? ` · ${series.metadata_source}` : '';
+            const lookupText = series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : '';
+            return `<span class="series-lookup-badge series-lookup-badge--${info.cls}" title="${escapeHtml(info.label + sourceText + lookupText)}">${info.symbol}</span>`;
+        }
+
+        function renderProviderHealthWidget() {
+            // Populated asynchronously by loadProviderHealth(); render an empty
+            // placeholder so the layout doesn't shift when results arrive.
+            return '<div id="providerHealthWidget" class="provider-health-widget" data-loaded="false"></div>';
+        }
+
+        function scheduleProviderHealthLoad() {
+            if (providerHealthRefreshTimer) {
+                clearTimeout(providerHealthRefreshTimer);
+            }
+            providerHealthRefreshTimer = setTimeout(() => loadProviderHealth(), 50);
+        }
+
+        async function loadProviderHealth() {
+            const container = document.getElementById('providerHealthWidget');
+            if (!container) return;
+            try {
+                const response = await fetch(apiUrl('/api/metadata/providers'), {
+                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    container.innerHTML = '';
+                    return;
+                }
+                const data = await response.json();
+                const providers = data.providers || [];
+                if (!providers.length) {
+                    container.innerHTML = '';
+                    return;
+                }
+                container.innerHTML = `
+                    <div class="provider-health-row">
+                        <span class="provider-health-label">External providers:</span>
+                        ${providers.map(p => {
+                            const cls = providerHealthClass(p);
+                            const tooltipParts = [
+                                p.enabled ? 'Enabled' : 'Disabled',
+                                p.configured ? 'Configured' : 'Not configured',
+                                p.status_message || '',
+                                p.last_error ? `Last error: ${p.last_error}` : '',
+                                p.last_success_utc ? `Last success: ${new Date(p.last_success_utc).toLocaleString()}` : 'No successful lookups yet',
+                                `Successes: ${p.success_count || 0}, Failures: ${p.failure_count || 0}`
+                            ].filter(Boolean).join('\n');
+                            return `<span class="provider-health-pill provider-health-pill--${cls}" title="${escapeHtml(tooltipParts)}">
+                                <span class="provider-health-dot"></span>${escapeHtml(p.name)}
+                            </span>`;
+                        }).join('')}
+                        <button type="button" class="btn btn-tiny" onclick="loadProviderHealth()" title="Re-check provider status">↻</button>
+                    </div>
+                `;
+                container.dataset.loaded = 'true';
+            } catch (err) {
+                console.warn('Provider health fetch failed', err);
+                container.innerHTML = '';
+            }
+        }
+
+        function providerHealthClass(p) {
+            if (!p.enabled) return 'disabled';
+            if (!p.configured) return 'disabled';
+            if (p.reachable === false) return 'error';
+            if (p.reachable === true && (p.failure_count || 0) === 0) return 'ok';
+            if (p.reachable === true) return 'warn';
+            // Reachable unknown but configured
+            return 'warn';
         }
 
         function openSeriesDetail(seriesId) {
             currentSeriesDetailId = seriesId;
             renderSeriesDetail(seriesId);
+            // Kick off the issues fetch right away so the detail content
+            // appears as soon as it's available.
+            loadSeriesIssues(seriesId);
         }
 
         function closeSeriesDetail() {
@@ -1671,6 +1768,40 @@
             renderSeriesLibrary();
             updatePagination();
             updateLibraryViewLayout();
+        }
+
+        async function loadSeriesIssues(seriesId, force = false) {
+            if (!seriesId) return;
+            if (!force && seriesIssuesCache.has(seriesId)) {
+                renderSeriesDetail(seriesId);
+                return;
+            }
+            try {
+                let url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=-1`);
+                if (filterMode !== 'all') {
+                    url += `&filter=${encodeURIComponent(filterMode)}`;
+                }
+                const response = await fetch(url, {
+                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    seriesIssuesCache.set(seriesId, { issues: [], total: 0, error: true });
+                } else {
+                    const data = await response.json();
+                    seriesIssuesCache.set(seriesId, {
+                        issues: data.issues || [],
+                        total: data.issue_count || (data.issues ? data.issues.length : 0)
+                    });
+                }
+            } catch (err) {
+                console.error('loadSeriesIssues failed', err);
+                seriesIssuesCache.set(seriesId, { issues: [], total: 0, error: true });
+            }
+            // Re-render only if the user is still on this series.
+            if (currentSeriesDetailId === seriesId) {
+                renderSeriesDetail(seriesId);
+            }
         }
 
         function renderSeriesDetail(seriesId) {
@@ -1681,6 +1812,12 @@
                 return;
             }
 
+            const cached = seriesIssuesCache.get(seriesId);
+            const issues = cached ? cached.issues : [];
+            const issueCount = cached ? cached.total : (series.issue_count || 0);
+            const issuesLoading = !cached;
+            const issuesFailed = cached && cached.error;
+
             fileList.innerHTML = `
                 <div class="series-detail" id="seriesDetailPanel">
                     <div class="series-detail-header">
@@ -1688,34 +1825,44 @@
                         <div class="series-detail-summary">
                             <img class="series-detail-cover" data-protected-image="${escapeHtml(series.cover_file_path)}" alt="${escapeHtml(series.title)} cover" loading="lazy">
                             <div class="series-detail-summary-body">
-                                <h2>${escapeHtml(series.title)}</h2>
-                                <div class="series-detail-meta">${series.issue_count} issue${series.issue_count === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
+                                <h2>${escapeHtml(series.title)} ${renderLookupStatusBadge(series)}</h2>
+                                <div class="series-detail-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
                                 ${series.aliases?.length ? `<div class="series-detail-meta">Also known as: ${escapeHtml(series.aliases.join(', '))}</div>` : ''}
-                                ${series.metadata_source ? `<div class="series-detail-meta">Source: ${escapeHtml(series.metadata_source)}</div>` : ''}
+                                ${series.metadata_source ? `<div class="series-detail-meta">Source: ${escapeHtml(series.metadata_source)}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
                                 <div class="series-detail-actions">
-                                    ${series.issues.length ? `<button type="button" class="btn btn-small" onclick="readComic('${escapeJs(series.issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
+                                    ${issues.length ? `<button type="button" class="btn btn-small" onclick="readComic('${escapeJs(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
                                     <button type="button" class="btn btn-small" onclick="openManageSeriesNamesModal('${escapeJs(series.title)}')">🏷️ Manage Names</button>
                                     <button type="button" class="btn btn-small" onclick="refreshSeriesMetadataDirect('${escapeJs(series.title)}')">🌐 Refresh Metadata</button>
+                                    <button type="button" class="btn btn-small" onclick="refreshSeriesFolder('${escapeJs(series.id)}','${escapeJs(series.title)}')" title="Refresh metadata for every folder/alias that groups under this series">📁 Refresh Folder</button>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="series-issues-grid">
-                        ${series.issues.map(issue => `
-                            <div class="series-issue-card">
-                                <button type="button" class="series-issue-cover-button" aria-label="Read ${escapeHtml(issue.title || issue.file_name)}" onclick="readComic('${escapeJs(issue.file_path)}')">
-                                    <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy">
-                                    <div class="series-issue-cover-overlay"></div>
-                                    ${issue.issue ? `<span class="series-issue-badge">#${escapeHtml(issue.issue)}</span>` : ''}
-                                </button>
-                                <div class="series-issue-body">
-                                    <h3 class="series-issue-title" title="${escapeHtml(issue.title || issue.file_name)}">${escapeHtml(issue.title || issue.file_name)}</h3>
-                                    <p class="series-issue-subtitle">${issue.year ? `${issue.year}` : ''}${issue.volume ? `${issue.year ? ' · ' : ''}Vol. ${escapeHtml(issue.volume)}` : ''}</p>
-                                    <div class="series-detail-meta">${formatFileSize(issue.size)}</div>
+                    ${issuesLoading ? `
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading issues...</p>
+                        </div>
+                    ` : issuesFailed ? `
+                        <div class="empty-state"><p>Failed to load issues. <button type="button" class="btn btn-small" onclick="loadSeriesIssues('${escapeJs(seriesId)}', true)">Retry</button></p></div>
+                    ` : `
+                        <div class="series-issues-grid">
+                            ${issues.map(issue => `
+                                <div class="series-issue-card">
+                                    <button type="button" class="series-issue-cover-button" aria-label="Read ${escapeHtml(issue.title || issue.file_name)}" onclick="readComic('${escapeJs(issue.file_path)}')">
+                                        <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy">
+                                        <div class="series-issue-cover-overlay"></div>
+                                        ${issue.issue ? `<span class="series-issue-badge">#${escapeHtml(issue.issue)}</span>` : ''}
+                                    </button>
+                                    <div class="series-issue-body">
+                                        <h3 class="series-issue-title" title="${escapeHtml(issue.title || issue.file_name)}">${escapeHtml(issue.title || issue.file_name)}</h3>
+                                        <p class="series-issue-subtitle">${issue.year ? `${issue.year}` : ''}${issue.volume ? `${issue.year ? ' · ' : ''}Vol. ${escapeHtml(issue.volume)}` : ''}</p>
+                                        <div class="series-detail-meta">${formatFileSize(issue.size)}</div>
+                                    </div>
                                 </div>
-                            </div>
-                        `).join('')}
-                    </div>
+                            `).join('')}
+                        </div>
+                    `}
                 </div>
             `;
 
@@ -5239,6 +5386,7 @@
             try {
                 const response = await fetch(apiUrl(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}`), {
                     method: 'POST',
+                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
@@ -5252,15 +5400,123 @@
                 } else if (status === 'error') {
                     showMessage(`External lookup failed for "${seriesTitle}"`, 'error');
                 } else {
-                    showMessage(`Metadata refreshed for "${seriesTitle}"`, 'success');
+                    showMessage(`Metadata refreshed for "${seriesTitle}"${record.source ? ' from ' + record.source : ''}`, 'success');
                 }
                 // Refresh the library so any new aliases collapse folders.
                 if (typeof loadSeriesLibrary === 'function') {
                     loadSeriesLibrary(1, true);
                 }
+                // Provider counters likely changed too.
+                loadProviderHealth();
             } catch (err) {
                 console.error('refreshSeriesMetadataDirect failed', err);
                 showMessage('Failed to refresh metadata', 'error');
+            }
+        }
+
+        // Queue a metadata refresh for every title that maps to one series card.
+        // Surfaces progress through the same toast/poll flow as the single-title
+        // refresh so the user can see something is happening.
+        async function refreshSeriesFolder(seriesId, seriesTitle) {
+            if (!seriesId) return;
+            try {
+                const response = await fetch(apiUrl('/api/metadata/refresh/folder'), {
+                    method: 'POST',
+                    headers: Object.assign(
+                        { 'Content-Type': 'application/json' },
+                        getAuthHeaders ? getAuthHeaders() : {}),
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ seriesId })
+                });
+                if (response.status === 404) {
+                    showMessage(`Series "${seriesTitle || seriesId}" not found`, 'error');
+                    return;
+                }
+                if (!response.ok) {
+                    showMessage('Failed to queue folder metadata refresh', 'error');
+                    return;
+                }
+                const data = await response.json();
+                showMessage(`Queued metadata refresh for ${data.totalSeries} title(s) in "${seriesTitle || seriesId}"`, 'info');
+                trackMetadataRefreshJob(data.jobId, seriesTitle || seriesId);
+            } catch (err) {
+                console.error('refreshSeriesFolder failed', err);
+                showMessage('Failed to queue folder metadata refresh', 'error');
+            }
+        }
+
+        // Lightweight poller for metadata refresh jobs. We intentionally don't
+        // hook into the SSE current-job slot (which is reserved for the heavy
+        // scan/process pipeline) — these short jobs poll their own status and
+        // render an inline progress toast.
+        function trackMetadataRefreshJob(jobId, label) {
+            if (!jobId || metadataRefreshJobs.has(jobId)) return;
+            metadataRefreshJobs.set(jobId, { label });
+            const intervalMs = 1500;
+            const tick = async () => {
+                try {
+                    const response = await fetch(apiUrl(`/api/metadata/refresh/job/${jobId}`), {
+                        headers: getAuthHeaders ? getAuthHeaders() : undefined,
+                        credentials: 'same-origin'
+                    });
+                    if (!response.ok) {
+                        metadataRefreshJobs.delete(jobId);
+                        return;
+                    }
+                    const job = await response.json();
+                    renderMetadataRefreshToast(jobId, label, job);
+                    const status = (job.status || '').toString().toLowerCase();
+                    if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+                        metadataRefreshJobs.delete(jobId);
+                        // Final library refresh + provider health update.
+                        if (typeof loadSeriesLibrary === 'function') {
+                            loadSeriesLibrary(currentPage || 1, true);
+                        }
+                        loadProviderHealth();
+                        return;
+                    }
+                    setTimeout(tick, intervalMs);
+                } catch (err) {
+                    console.warn('metadata refresh poll failed', err);
+                    metadataRefreshJobs.delete(jobId);
+                }
+            };
+            setTimeout(tick, intervalMs);
+        }
+
+        function renderMetadataRefreshToast(jobId, label, job) {
+            let host = document.getElementById('metadataRefreshToasts');
+            if (!host) {
+                host = document.createElement('div');
+                host.id = 'metadataRefreshToasts';
+                host.className = 'metadata-refresh-toasts';
+                document.body.appendChild(host);
+            }
+            let toast = document.getElementById(`mdrToast-${jobId}`);
+            if (!toast) {
+                toast = document.createElement('div');
+                toast.id = `mdrToast-${jobId}`;
+                toast.className = 'metadata-refresh-toast';
+                host.appendChild(toast);
+            }
+            const total = job.totalSeries || job.TotalSeries || 0;
+            const processed = job.processedSeries || job.ProcessedSeries || 0;
+            const successes = job.successes || job.Successes || 0;
+            const failures = job.failures || job.Failures || 0;
+            const status = (job.status || job.Status || 'queued').toString().toLowerCase();
+            const current = job.currentSeries || job.CurrentSeries || '';
+            const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+            toast.innerHTML = `
+                <div class="metadata-refresh-toast-header">
+                    <strong>Refreshing ${escapeHtml(label)}</strong>
+                    <span class="metadata-refresh-toast-status metadata-refresh-toast-status--${status}">${escapeHtml(status)}</span>
+                </div>
+                <div class="metadata-refresh-toast-bar"><div class="metadata-refresh-toast-bar-fill" style="width:${pct}%"></div></div>
+                <div class="metadata-refresh-toast-meta">${processed}/${total} · ✓ ${successes} · ✗ ${failures}${current ? ` · now: ${escapeHtml(current)}` : ''}</div>
+            `;
+            if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+                toast.classList.add('metadata-refresh-toast--done');
+                setTimeout(() => { toast.remove(); }, 6000);
             }
         }
 

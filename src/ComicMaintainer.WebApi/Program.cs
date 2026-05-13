@@ -135,6 +135,26 @@ builder.Services.Configure<AppSettings>(options =>
     var mangaDexBaseUrl = Environment.GetEnvironmentVariable("MANGADEX_BASE_URL");
     if (!string.IsNullOrEmpty(mangaDexBaseUrl))
         options.MangaDexBaseUrl = mangaDexBaseUrl;
+
+    var enableSuwayomiMetadata = Environment.GetEnvironmentVariable("ENABLE_SUWAYOMI_METADATA");
+    if (!string.IsNullOrEmpty(enableSuwayomiMetadata))
+        options.EnableSuwayomiMetadata = enableSuwayomiMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+    var suwayomiBaseUrl = Environment.GetEnvironmentVariable("SUWAYOMI_BASE_URL");
+    if (!string.IsNullOrEmpty(suwayomiBaseUrl))
+        options.SuwayomiBaseUrl = suwayomiBaseUrl;
+
+    var suwayomiSourceIds = Environment.GetEnvironmentVariable("SUWAYOMI_SOURCE_IDS");
+    if (suwayomiSourceIds != null)
+        options.SuwayomiSourceIds = suwayomiSourceIds;
+
+    var suwayomiUsername = Environment.GetEnvironmentVariable("SUWAYOMI_USERNAME");
+    if (suwayomiUsername != null)
+        options.SuwayomiUsername = suwayomiUsername;
+
+    var suwayomiPassword = Environment.GetEnvironmentVariable("SUWAYOMI_PASSWORD");
+    if (suwayomiPassword != null)
+        options.SuwayomiPassword = suwayomiPassword;
 });
 
 // Configure JWT settings
@@ -468,13 +488,16 @@ builder.Services.AddSingleton<ISeriesMetadataCacheService, SeriesMetadataCacheSe
 builder.Services.AddSingleton<ISeriesMetadataRefreshJobService, SeriesMetadataRefreshJobService>();
 builder.Services.AddHttpClient(nameof(ComicVineSeriesMetadataService));
 builder.Services.AddHttpClient(nameof(MangaDexSeriesMetadataService));
+builder.Services.AddHttpClient(nameof(SuwayomiSeriesMetadataService));
 builder.Services.AddSingleton<ComicVineSeriesMetadataService>();
 builder.Services.AddSingleton<MangaDexSeriesMetadataService>();
+builder.Services.AddSingleton<SuwayomiSeriesMetadataService>();
 builder.Services.AddSingleton<IExternalSeriesMetadataService>(sp =>
     new CompositeExternalSeriesMetadataService(
         [
             sp.GetRequiredService<ComicVineSeriesMetadataService>(),
-            sp.GetRequiredService<MangaDexSeriesMetadataService>()
+            sp.GetRequiredService<MangaDexSeriesMetadataService>(),
+            sp.GetRequiredService<SuwayomiSeriesMetadataService>()
         ],
         sp.GetRequiredService<ILogger<CompositeExternalSeriesMetadataService>>()));
 
@@ -851,6 +874,36 @@ static void LoadUserSettings(string configDir, AppSettings options)
             {
                 options.MangaDexBaseUrl = baseUrl;
             }
+        }
+
+        if (settings.TryGetValue("EnableSuwayomiMetadata", out var enableSuwayomiMetadata)
+            && (enableSuwayomiMetadata.ValueKind == JsonValueKind.True || enableSuwayomiMetadata.ValueKind == JsonValueKind.False))
+        {
+            options.EnableSuwayomiMetadata = enableSuwayomiMetadata.GetBoolean();
+        }
+
+        if (settings.TryGetValue("SuwayomiBaseUrl", out var suwayomiBaseUrl) && suwayomiBaseUrl.ValueKind == JsonValueKind.String)
+        {
+            var baseUrl = suwayomiBaseUrl.GetString();
+            if (!string.IsNullOrWhiteSpace(baseUrl))
+            {
+                options.SuwayomiBaseUrl = baseUrl;
+            }
+        }
+
+        if (settings.TryGetValue("SuwayomiSourceIds", out var suwayomiSourceIds) && suwayomiSourceIds.ValueKind == JsonValueKind.String)
+        {
+            options.SuwayomiSourceIds = suwayomiSourceIds.GetString() ?? string.Empty;
+        }
+
+        if (settings.TryGetValue("SuwayomiUsername", out var suwayomiUsername) && suwayomiUsername.ValueKind == JsonValueKind.String)
+        {
+            options.SuwayomiUsername = suwayomiUsername.GetString();
+        }
+
+        if (settings.TryGetValue("SuwayomiPassword", out var suwayomiPassword) && suwayomiPassword.ValueKind == JsonValueKind.String)
+        {
+            options.SuwayomiPassword = suwayomiPassword.GetString();
         }
     }
     catch

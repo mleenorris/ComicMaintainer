@@ -190,6 +190,47 @@ Configuration can be set via:
 | EnableExternalSeriesMetadata | ENABLE_EXTERNAL_SERIES_METADATA | false | Enable ComicVine alias lookups for series grouping |
 | ComicVineApiKey | COMICVINE_API_KEY | _(empty)_ | ComicVine API key used for external series alias enrichment |
 | ComicVineBaseUrl | COMICVINE_BASE_URL | https://comicvine.gamespot.com/api | Override the ComicVine API base URL if needed |
+| EnableMangaDexMetadata | ENABLE_MANGADEX_METADATA | false | Enable MangaDex lookups for manga/manhwa series aliases |
+| MangaDexBaseUrl | MANGADEX_BASE_URL | https://api.mangadex.org | Override the MangaDex API base URL if needed |
+| EnableSuwayomiMetadata | ENABLE_SUWAYOMI_METADATA | false | Query a Suwayomi-Server sidecar for series matches across community-maintained source extensions |
+| SuwayomiBaseUrl | SUWAYOMI_BASE_URL | http://suwayomi:4567 | Base URL of the Suwayomi sidecar (the GraphQL endpoint is `<base>/api/graphql`) |
+| SuwayomiSourceIds | SUWAYOMI_SOURCE_IDS | _(empty)_ | Comma-separated numeric Suwayomi source IDs to query; empty queries every installed source |
+| SuwayomiUsername | SUWAYOMI_USERNAME | _(empty)_ | Optional Basic-auth username, only required if the Suwayomi sidecar has auth enabled |
+| SuwayomiPassword | SUWAYOMI_PASSWORD | _(empty)_ | Optional Basic-auth password for the Suwayomi sidecar |
+
+### External Metadata Providers
+
+ComicMaintainer can enrich series with canonical titles and aliases from
+external providers. Providers are tried in order: **ComicVine → MangaDex →
+Suwayomi**. Each is independently optional.
+
+#### Suwayomi sidecar
+
+[Suwayomi-Server](https://github.com/Suwayomi/Suwayomi-Server) is a
+Tachiyomi/Mihon-derived self-hosted server that loads community-maintained
+source "extensions" (MangaDex, Comick, Bato, Weebcentral, MangaPlus, and many
+more) and exposes them through a single GraphQL API. ComicMaintainer talks to
+it over HTTP — extensions are NOT loaded in-process.
+
+To enable:
+
+1. Run Suwayomi as a sidecar container. An example service block is included
+   (commented) in `docker-compose.dotnet.yml`. The default image is
+   `ghcr.io/suwayomi/suwayomi-server:stable` listening on port 4567.
+2. Open the Suwayomi web UI (e.g. `http://localhost:4567`), add an extension
+   repository (such as `https://github.com/keiyoushi/extensions-source`), and
+   install the source extensions you want.
+3. Note the numeric source IDs from Suwayomi's Sources screen and set
+   `SUWAYOMI_SOURCE_IDS` to a comma-separated list (recommended). Leaving it
+   blank causes ComicMaintainer to query every installed source, which is
+   slower and noisier.
+4. Set `ENABLE_SUWAYOMI_METADATA=true` and `SUWAYOMI_BASE_URL=http://suwayomi:4567`
+   on the `comicmaintainer-dotnet` service.
+5. If you've enabled Basic auth on Suwayomi, also set `SUWAYOMI_USERNAME` /
+   `SUWAYOMI_PASSWORD`.
+
+The provider's health appears in the standard provider-health UI alongside
+ComicVine and MangaDex.
 
 ## API Endpoints
 

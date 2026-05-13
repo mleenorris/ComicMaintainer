@@ -38,4 +38,25 @@ public class AppSettings
     // MangaDex metadata provider (manga and manhwa)
     public bool EnableMangaDexMetadata { get; set; }
     public string MangaDexBaseUrl { get; set; } = "https://api.mangadex.org";
+
+    // Suwayomi metadata provider (sidecar Tachiyomi/Mihon-derived server exposing
+    // many community-maintained source extensions via GraphQL).
+    public bool EnableSuwayomiMetadata { get; set; }
+    public string SuwayomiBaseUrl { get; set; } = "http://suwayomi:4567";
+
+    /// <summary>
+    /// Optional comma-separated list of Suwayomi source IDs to query. When empty
+    /// the provider will discover and query all installed sources, which is
+    /// usually noisier and slower. Source IDs are 64-bit integers as reported by
+    /// the Suwayomi <c>sources</c> GraphQL query.
+    /// </summary>
+    public string SuwayomiSourceIds { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional Basic-auth username for Suwayomi-Server. Suwayomi only requires
+    /// auth when explicitly enabled; leave both blank for the default open
+    /// configuration on a docker-compose-internal network.
+    /// </summary>
+    public string? SuwayomiUsername { get; set; }
+    public string? SuwayomiPassword { get; set; }
 }

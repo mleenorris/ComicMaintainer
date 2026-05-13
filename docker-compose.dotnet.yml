@@ -21,6 +21,12 @@ services:
       - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@comicmaintainer.local}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-Admin123!}
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-http://localhost:5000,https://localhost:5000}
+      # Optional: enable the Suwayomi sidecar metadata provider (see service block below).
+      # - ENABLE_SUWAYOMI_METADATA=true
+      # - SUWAYOMI_BASE_URL=http://suwayomi:4567
+      # - SUWAYOMI_SOURCE_IDS=  # comma-separated numeric source IDs; leave blank to query all installed sources
+      # - SUWAYOMI_USERNAME=    # only required if the Suwayomi sidecar has Basic auth enabled
+      # - SUWAYOMI_PASSWORD=
     volumes:
       - ./test_comics:/watched_dir
       - ./duplicates:/duplicates
@@ -28,6 +34,32 @@ services:
     restart: unless-stopped
     networks:
       - comicmaintainer
+
+  # Optional: Suwayomi-Server sidecar for series-name metadata enrichment.
+  #
+  # Suwayomi (https://github.com/Suwayomi/Suwayomi-Server) is a Tachiyomi/Mihon-derived
+  # server that loads community-maintained source extensions (MangaDex, Comick,
+  # Bato, Weebcentral, MangaPlus, etc.) and exposes them via a single GraphQL API.
+  # When enabled (ENABLE_SUWAYOMI_METADATA=true on the comicmaintainer-dotnet
+  # service), ComicMaintainer will use it as an additional metadata provider
+  # alongside ComicVine and MangaDex.
+  #
+  # After first start, open http://localhost:4567 to install the source
+  # extensions you want, then take note of their numeric source IDs and pass
+  # them via SUWAYOMI_SOURCE_IDS (comma-separated). Leave SUWAYOMI_SOURCE_IDS
+  # empty to query every installed source (slower / noisier).
+  #
+  # Uncomment the block below to enable.
+  # suwayomi:
+  #   image: ghcr.io/suwayomi/suwayomi-server:stable
+  #   container_name: suwayomi
+  #   ports:
+  #     - "4567:4567"
+  #   volumes:
+  #     - ./suwayomi:/home/suwayomi/.local/share/Tachidesk
+  #   restart: unless-stopped
+  #   networks:
+  #     - comicmaintainer
 
 networks:
   comicmaintainer:

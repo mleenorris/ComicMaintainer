@@ -132,6 +132,26 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("ComicVineBaseUrl", baseUrl, cancellationToken);
     }
 
+    public async Task UpdateMangaDexEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("EnableMangaDexMetadata", enabled, cancellationToken);
+    }
+
+    public async Task UpdateMangaDexBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("MangaDexBaseUrl", baseUrl, cancellationToken);
+    }
+
+    public async Task UpdateAniListManhwaEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("EnableAniListManhwaMetadata", enabled, cancellationToken);
+    }
+
+    public async Task UpdateAniListBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("AniListBaseUrl", baseUrl, cancellationToken);
+    }
+
     private async Task UpdateSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);

@@ -155,6 +155,14 @@ builder.Services.Configure<AppSettings>(options =>
     var suwayomiPassword = Environment.GetEnvironmentVariable("SUWAYOMI_PASSWORD");
     if (suwayomiPassword != null)
         options.SuwayomiPassword = suwayomiPassword;
+
+    var enableAniListManhwaMetadata = Environment.GetEnvironmentVariable("ENABLE_ANILIST_MANHWA_METADATA");
+    if (!string.IsNullOrEmpty(enableAniListManhwaMetadata))
+        options.EnableAniListManhwaMetadata = enableAniListManhwaMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+    var aniListBaseUrl = Environment.GetEnvironmentVariable("ANILIST_BASE_URL");
+    if (!string.IsNullOrEmpty(aniListBaseUrl))
+        options.AniListBaseUrl = aniListBaseUrl;
 });
 
 // Configure JWT settings
@@ -489,15 +497,18 @@ builder.Services.AddSingleton<ISeriesMetadataRefreshJobService, SeriesMetadataRe
 builder.Services.AddHttpClient(nameof(ComicVineSeriesMetadataService));
 builder.Services.AddHttpClient(nameof(MangaDexSeriesMetadataService));
 builder.Services.AddHttpClient(nameof(SuwayomiSeriesMetadataService));
+builder.Services.AddHttpClient(nameof(AniListManhwaSeriesMetadataService));
 builder.Services.AddSingleton<ComicVineSeriesMetadataService>();
 builder.Services.AddSingleton<MangaDexSeriesMetadataService>();
 builder.Services.AddSingleton<SuwayomiSeriesMetadataService>();
+builder.Services.AddSingleton<AniListManhwaSeriesMetadataService>();
 builder.Services.AddSingleton<IExternalSeriesMetadataService>(sp =>
     new CompositeExternalSeriesMetadataService(
         [
             sp.GetRequiredService<ComicVineSeriesMetadataService>(),
             sp.GetRequiredService<MangaDexSeriesMetadataService>(),
-            sp.GetRequiredService<SuwayomiSeriesMetadataService>()
+            sp.GetRequiredService<SuwayomiSeriesMetadataService>(),
+            sp.GetRequiredService<AniListManhwaSeriesMetadataService>()
         ],
         sp.GetRequiredService<ILogger<CompositeExternalSeriesMetadataService>>()));
 
@@ -904,6 +915,21 @@ static void LoadUserSettings(string configDir, AppSettings options)
         if (settings.TryGetValue("SuwayomiPassword", out var suwayomiPassword) && suwayomiPassword.ValueKind == JsonValueKind.String)
         {
             options.SuwayomiPassword = suwayomiPassword.GetString();
+        }
+
+        if (settings.TryGetValue("EnableAniListManhwaMetadata", out var enableAniListManhwaMetadata)
+            && (enableAniListManhwaMetadata.ValueKind == JsonValueKind.True || enableAniListManhwaMetadata.ValueKind == JsonValueKind.False))
+        {
+            options.EnableAniListManhwaMetadata = enableAniListManhwaMetadata.GetBoolean();
+        }
+
+        if (settings.TryGetValue("AniListBaseUrl", out var aniListBaseUrl) && aniListBaseUrl.ValueKind == JsonValueKind.String)
+        {
+            var baseUrl = aniListBaseUrl.GetString();
+            if (!string.IsNullOrWhiteSpace(baseUrl))
+            {
+                options.AniListBaseUrl = baseUrl;
+            }
         }
     }
     catch

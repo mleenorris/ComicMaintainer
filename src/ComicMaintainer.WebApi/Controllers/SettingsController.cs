@@ -58,7 +58,11 @@ public class SettingsController : ControllerBase
             database_cleanup_interval_hours = _appSettings.Value.DatabaseCleanupIntervalHours,
             enable_external_series_metadata = _appSettings.Value.EnableExternalSeriesMetadata,
             comicvine_api_key = _appSettings.Value.ComicVineApiKey,
-            comicvine_base_url = _appSettings.Value.ComicVineBaseUrl
+            comicvine_base_url = _appSettings.Value.ComicVineBaseUrl,
+            enable_mangadex_metadata = _appSettings.Value.EnableMangaDexMetadata,
+            mangadex_base_url = _appSettings.Value.MangaDexBaseUrl,
+            enable_anilist_manhwa_metadata = _appSettings.Value.EnableAniListManhwaMetadata,
+            anilist_base_url = _appSettings.Value.AniListBaseUrl
         };
         
         _logger.LogDebug("Returning settings: FilenameFormat={FilenameFormat}, IssueNumberPadding={IssueNumberPadding}, WatcherEnableRename={WatcherEnableRename}, WatcherEnableNormalize={WatcherEnableNormalize}, LogMaxBytes={LogMaxBytes}, DatabaseCleanupIntervalHours={DatabaseCleanupIntervalHours}",
@@ -272,6 +276,18 @@ public class SettingsController : ControllerBase
                 await _settingsService.UpdateComicVineBaseUrlAsync(request.ComicVineBaseUrl.Trim(), cancellationToken);
             }
 
+            await _settingsService.UpdateMangaDexEnabledAsync(request.EnableMangaDex, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(request.MangaDexBaseUrl))
+            {
+                await _settingsService.UpdateMangaDexBaseUrlAsync(request.MangaDexBaseUrl.Trim(), cancellationToken);
+            }
+
+            await _settingsService.UpdateAniListManhwaEnabledAsync(request.EnableAniListManhwa, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(request.AniListBaseUrl))
+            {
+                await _settingsService.UpdateAniListBaseUrlAsync(request.AniListBaseUrl.Trim(), cancellationToken);
+            }
+
             return Ok(new { message = "External series metadata settings updated successfully. Restart required for changes to take effect." });
         }
         catch (Exception ex)
@@ -416,5 +432,9 @@ public class SettingsController : ControllerBase
         public bool Enabled { get; set; }
         public string? ComicVineApiKey { get; set; }
         public string? ComicVineBaseUrl { get; set; }
+        public bool EnableMangaDex { get; set; }
+        public string? MangaDexBaseUrl { get; set; }
+        public bool EnableAniListManhwa { get; set; }
+        public string? AniListBaseUrl { get; set; }
     }
 }

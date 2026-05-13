@@ -4198,6 +4198,10 @@
                 document.getElementById('enableExternalSeriesMetadata').checked = !!settingsData.enable_external_series_metadata;
                 document.getElementById('comicVineApiKey').value = settingsData.comicvine_api_key || '';
                 document.getElementById('comicVineBaseUrl').value = settingsData.comicvine_base_url || 'https://comicvine.gamespot.com/api';
+                document.getElementById('enableMangaDexMetadata').checked = !!settingsData.enable_mangadex_metadata;
+                document.getElementById('mangaDexBaseUrl').value = settingsData.mangadex_base_url || 'https://api.mangadex.org';
+                document.getElementById('enableAniListManhwaMetadata').checked = !!settingsData.enable_anilist_manhwa_metadata;
+                document.getElementById('aniListBaseUrl').value = settingsData.anilist_base_url || 'https://graphql.anilist.co';
                 
                 console.log('[SETTINGS] All settings loaded successfully, opening modal');
                 document.getElementById('settingsModal').classList.add('active');
@@ -4907,6 +4911,10 @@
             const enableExternalSeriesMetadata = document.getElementById('enableExternalSeriesMetadata').checked;
             const comicVineApiKey = document.getElementById('comicVineApiKey').value.trim();
             const comicVineBaseUrl = document.getElementById('comicVineBaseUrl').value.trim();
+            const enableMangaDexMetadata = document.getElementById('enableMangaDexMetadata').checked;
+            const mangaDexBaseUrl = document.getElementById('mangaDexBaseUrl').value.trim();
+            const enableAniListManhwaMetadata = document.getElementById('enableAniListManhwaMetadata').checked;
+            const aniListBaseUrl = document.getElementById('aniListBaseUrl').value.trim();
             
             if (!format) {
                 showMessage('Filename format cannot be empty', 'error');
@@ -5014,7 +5022,11 @@
                     body: JSON.stringify({
                         enabled: enableExternalSeriesMetadata,
                         comicVineApiKey: comicVineApiKey,
-                        comicVineBaseUrl: comicVineBaseUrl || 'https://comicvine.gamespot.com/api'
+                        comicVineBaseUrl: comicVineBaseUrl || 'https://comicvine.gamespot.com/api',
+                        enableMangaDex: enableMangaDexMetadata,
+                        mangaDexBaseUrl: mangaDexBaseUrl || 'https://api.mangadex.org',
+                        enableAniListManhwa: enableAniListManhwaMetadata,
+                        aniListBaseUrl: aniListBaseUrl || 'https://graphql.anilist.co'
                     })
                 });
 

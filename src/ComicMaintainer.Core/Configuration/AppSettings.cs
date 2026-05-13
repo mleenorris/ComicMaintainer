@@ -38,4 +38,8 @@ public class AppSettings
     // MangaDex metadata provider (manga and manhwa)
     public bool EnableMangaDexMetadata { get; set; }
     public string MangaDexBaseUrl { get; set; } = "https://api.mangadex.org";
+
+    // AniList metadata provider scoped to Manhwa (Korean origin)
+    public bool EnableAniListManhwaMetadata { get; set; }
+    public string AniListBaseUrl { get; set; } = "https://graphql.anilist.co";
 }

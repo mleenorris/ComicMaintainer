@@ -277,13 +277,11 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
             {
                 continue;
             }
-            // Defensive: filename is provider-controlled but should never
-            // contain path separators or parent-directory references. Strip
-            // them and any leading dots to keep the URL well-formed even if
-            // the provider data is hostile.
-            fileName = fileName
-                .Replace("/", string.Empty)
-                .Replace("\\", string.Empty)
+            // Defensive: filename is provider-controlled. Use Path.GetFileName
+            // to robustly strip any directory components (covers the
+            // null-byte, encoded-separator, and parent-directory variants
+            // beyond simple Replace), then drop residual leading dots.
+            fileName = Path.GetFileName(fileName)
                 .Replace("..", string.Empty)
                 .TrimStart('.');
             if (string.IsNullOrWhiteSpace(fileName))

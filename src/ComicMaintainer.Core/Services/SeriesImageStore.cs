@@ -212,8 +212,7 @@ public class SeriesImageStore : ISeriesImageStore
         // Filename: <normalizedKey>-<short-hash><ext>. Use SHA-256 over the
         // payload so identical images always produce the same filename, which
         // simplifies cleanup of replaced files.
-        var hash = Convert.ToHexString(SHA256.HashData(bytes.AsSpan(0, length)))
-            .Substring(0, 16)
+        var hash = Convert.ToHexString(SHA256.HashData(bytes.AsSpan(0, length)))[..16]
             .ToLowerInvariant();
         var safeKey = SanitizeKey(normalizedKey);
         var ext = AllowedContentTypes[contentType];
@@ -269,7 +268,7 @@ public class SeriesImageStore : ISeriesImageStore
         var s = new string(chars).Trim('-');
         if (string.IsNullOrEmpty(s)) s = "series";
         // Cap to keep filenames sensible.
-        if (s.Length > 100) s = s.Substring(0, 100);
+        if (s.Length > 100) s = s[..100];
         return s;
     }
 

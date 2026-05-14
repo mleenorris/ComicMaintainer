@@ -29,6 +29,7 @@ public class FilesController : ControllerBase
     private readonly AppSettings _settings;
     private readonly IDbContextFactory<ComicMaintainerDbContext>? _dbContextFactory;
     private readonly IEventBroadcaster? _eventBroadcaster;
+    private readonly ISeriesMetadataCacheService? _metadataCache;
 
     public FilesController(
         IFileStoreService fileStore,
@@ -38,7 +39,8 @@ public class FilesController : ControllerBase
         ILogger<FilesController> logger,
         IOptions<AppSettings> settings,
         IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null,
-        IEventBroadcaster? eventBroadcaster = null)
+        IEventBroadcaster? eventBroadcaster = null,
+        ISeriesMetadataCacheService? metadataCache = null)
     {
         _fileStore = fileStore;
         _processor = processor;
@@ -48,6 +50,7 @@ public class FilesController : ControllerBase
         _settings = settings.Value;
         _dbContextFactory = dbContextFactory;
         _eventBroadcaster = eventBroadcaster;
+        _metadataCache = metadataCache;
     }
 
     /// <summary>
@@ -291,6 +294,14 @@ public class FilesController : ControllerBase
 
         var addedAtLookup = await GetAddedAtLookupAsync(cancellationToken);
 
+        // Load the persistent series-metadata cache so we can collapse folders
+        // that share canonical/provider/user aliases into a single combinable
+        // group. Without this, two folders that resolve to the same series via
+        // an alias (e.g. "Batman" and "The Dark Knight") would be reported as
+        // distinct groups even though the user has explicitly told us they are
+        // the same series.
+        var aliasIndex = await BuildFolderCombineAliasIndexAsync(cancellationToken);
+
         // Bucket files by (groupKey -> directory -> list of files)
         var byGroup = new Dictionary<string, Dictionary<string, List<(ComicFile File, DateTime AddedAt)>>>(StringComparer.OrdinalIgnoreCase);
         var groupDisplay = new Dictionary<string, (string SeriesName, string? Volume)>(StringComparer.OrdinalIgnoreCase);
@@ -306,7 +317,7 @@ public class FilesController : ControllerBase
                 continue;
             }
 
-            var groupKey = BuildFolderCombineGroupKey(file);
+            var groupKey = BuildFolderCombineGroupKey(file, aliasIndex);
             if (string.IsNullOrWhiteSpace(groupKey))
             {
                 continue;
@@ -321,7 +332,7 @@ public class FilesController : ControllerBase
                 dirMap = new Dictionary<string, List<(ComicFile, DateTime)>>(StringComparer.OrdinalIgnoreCase);
                 byGroup[groupKey] = dirMap;
                 groupDisplay[groupKey] = (
-                    BuildFolderCombineSeriesDisplayName(file) ?? groupKey,
+                    BuildFolderCombineSeriesDisplayName(file, aliasIndex) ?? groupKey,
                     string.IsNullOrWhiteSpace(file.Metadata?.Volume) ? null : file.Metadata!.Volume!.Trim());
             }
 
@@ -729,8 +740,25 @@ public class FilesController : ControllerBase
         };
     }
 
-    private static string? BuildFolderCombineSeriesDisplayName(ComicFile file)
+    private static string? BuildFolderCombineSeriesDisplayName(ComicFile file, IReadOnlyDictionary<string, FolderCombineAliasEntry>? aliasIndex = null)
     {
+        // When the file's series name maps (via alias) to a known cache record,
+        // prefer that record's canonical title so every folder in the group is
+        // labelled consistently.
+        if (aliasIndex is not null)
+        {
+            foreach (var candidate in EnumerateSeriesNameCandidates(file))
+            {
+                var key = NormalizeFolderCombineKey(candidate);
+                if (key is not null
+                    && aliasIndex.TryGetValue(key, out var entry)
+                    && !string.IsNullOrWhiteSpace(entry.DisplayTitle))
+                {
+                    return entry.DisplayTitle;
+                }
+            }
+        }
+
         return FirstNonEmpty(
             file.Metadata?.Series,
             ExtractSeriesNameFromFileName(file),
@@ -760,7 +788,7 @@ public class FilesController : ControllerBase
                 StringComparer.OrdinalIgnoreCase);
     }
 
-    private static string? BuildFolderCombineGroupKey(ComicFile file)
+    private static string? BuildFolderCombineGroupKey(ComicFile file, IReadOnlyDictionary<string, FolderCombineAliasEntry>? aliasIndex = null)
     {
         var seriesName = FirstNonEmpty(
             file.Metadata?.Series,
@@ -773,10 +801,25 @@ public class FilesController : ControllerBase
             return null;
         }
 
-        var normalizedSeries = FolderCombineKeySanitizer.Replace(seriesName.Trim().ToLowerInvariant(), "-").Trim('-');
+        var normalizedSeries = NormalizeFolderCombineKey(seriesName);
         if (string.IsNullOrWhiteSpace(normalizedSeries))
         {
             return null;
+        }
+
+        // Collapse aliases (provider + user) to the canonical record key so two
+        // folders whose names map to the same series via aliases share a key.
+        if (aliasIndex is not null)
+        {
+            foreach (var candidate in EnumerateSeriesNameCandidates(file))
+            {
+                var key = NormalizeFolderCombineKey(candidate);
+                if (key is not null && aliasIndex.TryGetValue(key, out var entry))
+                {
+                    normalizedSeries = entry.CanonicalKey;
+                    break;
+                }
+            }
         }
 
         var volume = file.Metadata?.Volume?.Trim();
@@ -784,6 +827,108 @@ public class FilesController : ControllerBase
             ? normalizedSeries
             : $"{normalizedSeries}|{volume.ToLowerInvariant()}";
     }
+
+    private static string? NormalizeFolderCombineKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var normalized = FolderCombineKeySanitizer.Replace(value.Trim().ToLowerInvariant(), "-").Trim('-');
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private static IEnumerable<string> EnumerateSeriesNameCandidates(ComicFile file)
+    {
+        if (!string.IsNullOrWhiteSpace(file.Metadata?.Series)) yield return file.Metadata!.Series!;
+
+        var fromName = ExtractSeriesNameFromFileName(file);
+        if (!string.IsNullOrWhiteSpace(fromName)) yield return fromName!;
+
+        var folder = Path.GetFileName(file.Directory);
+        if (!string.IsNullOrWhiteSpace(folder)) yield return folder!;
+
+        var parent = Path.GetFileName(Path.GetDirectoryName(file.FilePath) ?? string.Empty);
+        if (!string.IsNullOrWhiteSpace(parent)) yield return parent!;
+    }
+
+    /// <summary>
+    /// Builds a lookup that maps every known title for a series (canonical
+    /// title + provider aliases + user aliases), normalized using the
+    /// folder-combine key normalizer, to a shared canonical key plus a
+    /// preferred display title. Returns an empty dictionary when no metadata
+    /// cache is wired up.
+    /// </summary>
+    private async Task<Dictionary<string, FolderCombineAliasEntry>> BuildFolderCombineAliasIndexAsync(CancellationToken cancellationToken)
+    {
+        var index = new Dictionary<string, FolderCombineAliasEntry>(StringComparer.OrdinalIgnoreCase);
+        if (_metadataCache is null)
+        {
+            return index;
+        }
+
+        IReadOnlyList<SeriesMetadataCacheRecord> records;
+        try
+        {
+            records = await _metadataCache.GetAllAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException)
+        {
+            _logger.LogWarning(ex, "Failed to load series metadata cache for folder-combine alias index");
+            return index;
+        }
+
+        foreach (var record in records)
+        {
+            var titles = EnumerateRecordTitles(record).ToList();
+            if (titles.Count == 0)
+            {
+                continue;
+            }
+
+            var canonicalKey = NormalizeFolderCombineKey(record.CanonicalTitle)
+                ?? NormalizeFolderCombineKey(titles[0])
+                ?? record.NormalizedKey;
+
+            var displayTitle = !string.IsNullOrWhiteSpace(record.CanonicalTitle)
+                ? record.CanonicalTitle!
+                : titles[0];
+
+            var entry = new FolderCombineAliasEntry(canonicalKey, displayTitle);
+
+            foreach (var title in titles)
+            {
+                var key = NormalizeFolderCombineKey(title);
+                if (key is null)
+                {
+                    continue;
+                }
+
+                // Last-writer-wins is fine: a single canonical title should win
+                // over any alias entries for the same key, because we iterate
+                // canonical first.
+                index[key] = entry;
+            }
+        }
+
+        return index;
+    }
+
+    private static IEnumerable<string> EnumerateRecordTitles(SeriesMetadataCacheRecord record)
+    {
+        if (!string.IsNullOrWhiteSpace(record.CanonicalTitle)) yield return record.CanonicalTitle!;
+        foreach (var alias in record.Aliases ?? Enumerable.Empty<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
+        }
+        foreach (var alias in record.UserAliases ?? Enumerable.Empty<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
+        }
+    }
+
+    private sealed record FolderCombineAliasEntry(string CanonicalKey, string DisplayTitle);
 
     private static string? ExtractSeriesNameFromFileName(ComicFile file)
     {

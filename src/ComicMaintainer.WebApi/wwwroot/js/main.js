@@ -5651,6 +5651,12 @@
                 if (typeof loadSeriesLibrary === 'function') {
                     loadSeriesLibrary(1, true);
                 }
+                // Aliases may have collapsed previously-distinct folders into
+                // a single combinable group, so refresh the dashboard count
+                // and re-enable the "Combine Folders" button if needed.
+                if (typeof loadLibraryHealth === 'function') {
+                    loadLibraryHealth();
+                }
             } catch (err) {
                 console.error('saveManageSeriesNames failed', err);
                 showMessage('Failed to save series names', 'error');
@@ -5677,6 +5683,25 @@
             } catch (err) {
                 console.error('refreshSeriesMetadata failed', err);
                 showMessage('Failed to refresh metadata', 'error');
+            }
+        }
+
+        // Manual trigger from the Manage Series Names modal: re-runs the
+        // alias-aware folder-combine scan and opens the Combine Folders modal
+        // so the user can immediately act on any newly-merged groups.
+        async function checkCombinableFoldersFromManageSeries() {
+            try {
+                showMessage('Checking for combinable folders...', 'info');
+                if (typeof loadLibraryHealth === 'function') {
+                    // Refresh the dashboard counter so the badge reflects any
+                    // new groups produced by alias edits.
+                    loadLibraryHealth();
+                }
+                closeManageSeriesNamesModal();
+                await openCombineFoldersModal();
+            } catch (err) {
+                console.error('checkCombinableFoldersFromManageSeries failed', err);
+                showMessage('Failed to check for combinable folders', 'error');
             }
         }
 

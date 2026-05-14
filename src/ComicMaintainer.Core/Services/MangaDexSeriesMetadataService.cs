@@ -278,8 +278,18 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
                 continue;
             }
             // Defensive: filename is provider-controlled but should never
-            // contain path separators. Strip them just in case.
-            fileName = fileName.Replace("/", string.Empty).Replace("\\", string.Empty);
+            // contain path separators or parent-directory references. Strip
+            // them and any leading dots to keep the URL well-formed even if
+            // the provider data is hostile.
+            fileName = fileName
+                .Replace("/", string.Empty)
+                .Replace("\\", string.Empty)
+                .Replace("..", string.Empty)
+                .TrimStart('.');
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                continue;
+            }
             var image = $"{MangaDexCdnBase}/covers/{Uri.EscapeDataString(mangaId)}/{Uri.EscapeDataString(fileName)}";
             // MangaDex supports server-side thumbnails by appending a size token.
             var thumb = $"{image}.256.jpg";

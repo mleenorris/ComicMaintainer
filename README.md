@@ -389,9 +389,34 @@ External series metadata lookups (ComicVine / MangaDex) are run manually, and re
   - View provider-supplied aliases and edit user-managed aliases,
   - Search external providers for alternative names,
   - Adopt a candidate's canonical title or copy its aliases into the user list,
-  - Refresh metadata from the provider on demand.
+  - Refresh metadata from the provider on demand,
+  - Upload a custom series cover image or clear the cached one.
 
 User-defined aliases drive the library's folder-combination matching: two folders are merged into the same series card as soon as one names the other in its alias list.
+
+### External Series Images
+
+When external metadata refreshes succeed, ComicMaintainer also tries to download a series-level cover image from the chosen provider (ComicVine `image.super_url`, MangaDex `cover_art`, AniList `coverImage.extraLarge`) and persist it under `{ConfigDirectory}/series-images/`. The downloaded image is rendered on series cards and the series detail view in place of the first-page-of-first-issue cover, with automatic fallback to the file-based cover when the external image fails to load.
+
+**Configuration:**
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| `DownloadExternalSeriesImages` | `DOWNLOAD_EXTERNAL_SERIES_IMAGES` | `true` | Disable to keep metadata-only refreshes (no image download). |
+| `SeriesImageCacheDirectory` | `SERIES_IMAGE_CACHE_DIR` | `{ConfigDirectory}/series-images` | Directory where cached images are stored. |
+| `SeriesImageMaxBytes` | _(settings only)_ | `5242880` (5 MiB) | Per-image size cap for downloads and uploads. |
+
+**Endpoints:**
+
+- **GET** `/api/series-images/{normalizedKey}` — stream the cached series image (404 when none).
+- **PUT** `/api/series-images/{seriesTitle}` — upload a user-supplied image (multipart form field `file`). User uploads are sticky and never overwritten by future external refreshes. Allowed types: `image/jpeg`, `image/png`, `image/webp`.
+- **DELETE** `/api/series-images/{normalizedKey}` — clear the cached image; the next refresh is then free to re-download from the external provider.
+
+**Security:**
+
+- Remote URLs are restricted to `http`/`https`; hostnames that resolve to private, loopback, link-local, CGNAT or AWS-metadata addresses are rejected to mitigate SSRF.
+- All payloads are validated against the configured content-type allowlist and verified by magic-byte inspection (rejects SVG/HTML/scripts).
+- Filenames in the cache directory are derived from the normalized series key plus a SHA-256 of the payload; provider-supplied paths never influence the on-disk filename.
 
 ## Smart Processing
 The service intelligently detects files that are already properly formatted to avoid unnecessary processing:

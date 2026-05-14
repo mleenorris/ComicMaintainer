@@ -1,3 +1,4 @@
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Services;
@@ -67,7 +68,7 @@ public class FileStoreServiceIntegrationTests : IDisposable
         {
             WatchedDirectory = _testDirectory
         };
-        var options = Options.Create(settings);
+        var options = new TestOptionsMonitor<AppSettings>(settings);
 
         // Setup in-memory database
         var services = new ServiceCollection();
@@ -116,7 +117,7 @@ public class FileStoreServiceIntegrationTests : IDisposable
         {
             WatchedDirectory = _testDirectory
         };
-        var options = Options.Create(settings);
+        var options = new TestOptionsMonitor<AppSettings>(settings);
 
         // Setup in-memory database
         var services = new ServiceCollection();
@@ -162,7 +163,7 @@ public class FileStoreServiceIntegrationTests : IDisposable
         {
             WatchedDirectory = _testDirectory
         };
-        var options = Options.Create(settings);
+        var options = new TestOptionsMonitor<AppSettings>(settings);
 
         // Setup in-memory database
         var services = new ServiceCollection();

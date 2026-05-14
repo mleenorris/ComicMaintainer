@@ -1,3 +1,4 @@
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models;
@@ -27,7 +28,7 @@ public class FileStoreServiceTests
         {
             WatchedDirectory = _testDirectory
         };
-        var options = Options.Create(settings);
+        var options = new TestOptionsMonitor<AppSettings>(settings);
         
         // Setup in-memory database
         var services = new ServiceCollection();
@@ -385,7 +386,7 @@ public class FileStoreServiceTests
         {
             WatchedDirectory = _testDirectory
         };
-        var options = Options.Create(settings);
+        var options = new TestOptionsMonitor<AppSettings>(settings);
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         var newService = new FileStoreService(options, logger, dbContextFactory);
@@ -527,7 +528,7 @@ public class FileStoreServiceTests
         
         // Act - Create a new service instance (simulating restart) and initialize from database
         var settings = new AppSettings { WatchedDirectory = _testDirectory };
-        var options = Options.Create(settings);
+        var options = new TestOptionsMonitor<AppSettings>(settings);
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         var newService = new FileStoreService(options, logger, dbContextFactory);
@@ -897,7 +898,7 @@ public class FileStoreServiceTests
         File.WriteAllText(filePath, "test content");
         
         var settings = new AppSettings { WatchedDirectory = _testDirectory };
-        var options = Options.Create(settings);
+        var options = new TestOptionsMonitor<AppSettings>(settings);
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         var mockBroadcaster = new Mock<Core.Interfaces.IEventBroadcaster>();
@@ -919,7 +920,7 @@ public class FileStoreServiceTests
         File.WriteAllText(filePath, "test content");
         
         var settings = new AppSettings { WatchedDirectory = _testDirectory };
-        var options = Options.Create(settings);
+        var options = new TestOptionsMonitor<AppSettings>(settings);
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         
@@ -946,7 +947,7 @@ public class FileStoreServiceTests
         File.WriteAllText(filePath, "test content");
         
         var settings = new AppSettings { WatchedDirectory = _testDirectory };
-        var options = Options.Create(settings);
+        var options = new TestOptionsMonitor<AppSettings>(settings);
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
         

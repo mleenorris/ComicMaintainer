@@ -15,7 +15,7 @@ public class ComicProcessorServiceTests : IDisposable
     private readonly Mock<IFileStoreService> _mockFileStore;
     private readonly Mock<IProcessingHistoryService> _mockHistoryService;
     private readonly Mock<IExternalSeriesMetadataService> _mockExternalSeriesMetadata;
-    private readonly Mock<IOptions<AppSettings>> _mockOptions;
+    private readonly Mock<IOptionsMonitor<AppSettings>> _mockOptions;
     private readonly AppSettings _settings;
     private readonly string _testDirectory;
     private readonly ComicProcessorService _service;
@@ -26,7 +26,7 @@ public class ComicProcessorServiceTests : IDisposable
         _mockFileStore = new Mock<IFileStoreService>();
         _mockHistoryService = new Mock<IProcessingHistoryService>();
         _mockExternalSeriesMetadata = new Mock<IExternalSeriesMetadataService>();
-        _mockOptions = new Mock<IOptions<AppSettings>>();
+        _mockOptions = new Mock<IOptionsMonitor<AppSettings>>();
         
         _testDirectory = Path.Combine(Path.GetTempPath(), $"comic_tests_{Guid.NewGuid()}");
         Directory.CreateDirectory(_testDirectory);
@@ -40,7 +40,7 @@ public class ComicProcessorServiceTests : IDisposable
             IssueNumberPadding = 4
         };
         
-        _mockOptions.Setup(o => o.Value).Returns(_settings);
+        _mockOptions.Setup(o => o.CurrentValue).Returns(_settings);
         
         _service = new ComicProcessorService(
             _mockOptions.Object,

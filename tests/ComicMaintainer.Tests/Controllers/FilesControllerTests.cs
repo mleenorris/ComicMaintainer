@@ -20,7 +20,7 @@ public class FilesControllerTests
     private readonly Mock<IProcessingHistoryService> _mockHistoryService;
     private readonly Mock<ISeriesLibraryService> _mockSeriesLibrary;
     private readonly Mock<ILogger<FilesController>> _mockLogger;
-    private readonly Mock<IOptions<AppSettings>> _mockSettings;
+    private readonly Mock<IOptionsMonitor<AppSettings>> _mockSettings;
     private readonly FilesController _controller;
 
     public FilesControllerTests()
@@ -30,14 +30,14 @@ public class FilesControllerTests
         _mockHistoryService = new Mock<IProcessingHistoryService>();
         _mockSeriesLibrary = new Mock<ISeriesLibraryService>();
         _mockLogger = new Mock<ILogger<FilesController>>();
-        _mockSettings = new Mock<IOptions<AppSettings>>();
+        _mockSettings = new Mock<IOptionsMonitor<AppSettings>>();
         
         // Setup default settings with temp directory as watched directory for tests
         var settings = new AppSettings
         {
             WatchedDirectory = Path.GetTempPath()
         };
-        _mockSettings.Setup(s => s.Value).Returns(settings);
+        _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
         
         _controller = new FilesController(_mockFileStore.Object, _mockProcessor.Object, _mockHistoryService.Object, _mockSeriesLibrary.Object, _mockLogger.Object, _mockSettings.Object);
     }
@@ -1273,7 +1273,7 @@ public class FilesControllerTests
                 .ReturnsAsync(files);
 
             var settings = new AppSettings { WatchedDirectory = tempDir };
-            _mockSettings.Setup(s => s.Value).Returns(settings);
+            _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
             var controller = new FilesController(
                 _mockFileStore.Object,
@@ -1370,7 +1370,7 @@ public class FilesControllerTests
                 .ReturnsAsync(files);
 
             var settings = new AppSettings { WatchedDirectory = tempDir };
-            _mockSettings.Setup(s => s.Value).Returns(settings);
+            _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
             var controller = new FilesController(
                 _mockFileStore.Object,
@@ -1415,7 +1415,7 @@ public class FilesControllerTests
         try
         {
             var settings = new AppSettings { WatchedDirectory = tempDir };
-            _mockSettings.Setup(s => s.Value).Returns(settings);
+            _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
             _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<ComicFile>());
@@ -1509,7 +1509,7 @@ public class FilesControllerTests
                 .ReturnsAsync(files);
 
             var settings = new AppSettings { WatchedDirectory = tempDir };
-            _mockSettings.Setup(s => s.Value).Returns(settings);
+            _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
             var controller = new FilesController(
                 _mockFileStore.Object,
@@ -1576,7 +1576,7 @@ public class FilesControllerTests
                 .ReturnsAsync(files);
 
             var settings = new AppSettings { WatchedDirectory = tempDir };
-            _mockSettings.Setup(s => s.Value).Returns(settings);
+            _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
             var controller = new FilesController(
                 _mockFileStore.Object,

@@ -9,34 +9,138 @@ namespace ComicMaintainer.Core.Services;
 /// <summary>
 /// Service for watching file system changes in the comic directory
 /// </summary>
-public class FileWatcherService : IFileWatcherService
+public class FileWatcherService : IFileWatcherService, IDisposable
 {
-    private readonly AppSettings _settings;
+    private readonly IOptionsMonitor<AppSettings> _settingsMonitor;
     private readonly ILogger<FileWatcherService> _logger;
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly IEventBroadcaster? _eventBroadcaster;
     private FileSystemWatcher? _watcher;
     private bool _enabled;
+    private string? _activeWatchedDirectory;
     private readonly object _lock = new();
     private bool _initialized = false;
+    private readonly IDisposable? _settingsChangeSubscription;
+    private bool _disposed;
+
+    /// <summary>
+    /// Returns the current AppSettings snapshot. Reading via the monitor on every access ensures
+    /// that watcher decisions (rename/normalize toggles, debounce delays, watched directory)
+    /// pick up the latest configuration without restarting the process.
+    /// </summary>
+    private AppSettings _settings => _settingsMonitor.CurrentValue;
 
     public bool IsRunning => _watcher?.EnableRaisingEvents ?? false;
 
     public FileWatcherService(
-        IOptions<AppSettings> settings,
+        IOptionsMonitor<AppSettings> settings,
         ILogger<FileWatcherService> logger,
         IFileStoreService fileStore,
         IComicProcessorService processor,
         IEventBroadcaster? eventBroadcaster = null)
     {
-        _settings = settings.Value;
+        _settingsMonitor = settings;
         _logger = logger;
         _fileStore = fileStore;
         _processor = processor;
         _eventBroadcaster = eventBroadcaster;
         // Watcher is enabled if either rename or normalize is enabled
         _enabled = _settings.WatcherEnableRename || _settings.WatcherEnableNormalize;
+
+        // Subscribe to settings changes so that toggling WatcherEnableRename / WatcherEnableNormalize
+        // or changing WatchedDirectory at runtime starts/stops/rebinds the FileSystemWatcher.
+        _settingsChangeSubscription = _settingsMonitor.OnChange(HandleSettingsChanged);
+    }
+
+    private void HandleSettingsChanged(AppSettings newSettings)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var newEnabled = newSettings.WatcherEnableRename || newSettings.WatcherEnableNormalize;
+        var newWatchedDirectory = newSettings.WatchedDirectory;
+
+        bool needsStop;
+        bool needsStart;
+        lock (_lock)
+        {
+            var directoryChanged = !string.Equals(_activeWatchedDirectory, newWatchedDirectory, StringComparison.Ordinal)
+                && _watcher != null;
+            var enabledFlipped = _enabled != newEnabled;
+
+            // Stop if currently running and either we should be disabled or the directory changed.
+            needsStop = _watcher != null && (!newEnabled || directoryChanged);
+            // Start if we should be running and either we are not running or the directory changed.
+            needsStart = newEnabled && (_watcher == null || directoryChanged);
+
+            if (enabledFlipped || directoryChanged)
+            {
+                _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
+                    "Detected settings change affecting watcher (enabled: {OldEnabled} -> {NewEnabled}, directoryChanged: {DirectoryChanged}). Reconfiguring..."),
+                    _enabled, newEnabled, directoryChanged);
+            }
+
+            _enabled = newEnabled;
+        }
+
+        if (!needsStop && !needsStart)
+        {
+            return;
+        }
+
+        // Run reconfiguration asynchronously on the thread pool. We intentionally do NOT block
+        // the configuration-change notification thread on async I/O (file enumeration, event
+        // broadcasting), which could deadlock under some synchronization contexts and would
+        // delay subsequent configuration callbacks.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (needsStop)
+                {
+                    await StopAsync();
+                }
+                if (needsStart)
+                {
+                    await StartAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error reconfiguring watcher after settings change"));
+            }
+        });
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _settingsChangeSubscription?.Dispose();
+
+        lock (_lock)
+        {
+            if (_watcher != null)
+            {
+                try
+                {
+                    _watcher.EnableRaisingEvents = false;
+                    _watcher.Dispose();
+                }
+                catch
+                {
+                    // Best-effort disposal
+                }
+                _watcher = null;
+            }
+        }
     }
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -72,6 +176,7 @@ public class FileWatcherService : IFileWatcherService
                 Filter = "*.*",
                 IncludeSubdirectories = true
             };
+            _activeWatchedDirectory = _settings.WatchedDirectory;
 
             _watcher.Created += OnFileCreated;
             _watcher.Changed += OnFileChanged;
@@ -222,6 +327,7 @@ public class FileWatcherService : IFileWatcherService
                 _watcher.EnableRaisingEvents = false;
                 _watcher.Dispose();
                 _watcher = null;
+                _activeWatchedDirectory = null;
                 _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File watcher stopped"));
             }
         }

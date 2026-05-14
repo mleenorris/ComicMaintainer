@@ -20,7 +20,7 @@ namespace ComicMaintainer.Core.Services;
 public class ComicProcessorService : IComicProcessorService, IDisposable
 {
     private const string UnknownSeries = "Unknown Series";
-    private readonly AppSettings _settings;
+    private readonly IOptionsMonitor<AppSettings> _settingsMonitor;
     private readonly ILogger<ComicProcessorService> _logger;
     private readonly IFileStoreService _fileStore;
     private readonly IEventBroadcaster? _eventBroadcaster;
@@ -33,21 +33,30 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     private readonly int _maxWorkers;
     private bool _disposed;
 
+    /// <summary>
+    /// Returns the current AppSettings snapshot. Settings are re-read on each access so that
+    /// changes made via SettingsService take effect on the next operation without restarting
+    /// the process.
+    /// Note: <see cref="AppSettings.MaxWorkers"/> is captured into a fixed-size semaphore at
+    /// construction and therefore still requires a restart to change.
+    /// </summary>
+    private AppSettings _settings => _settingsMonitor.CurrentValue;
+
     public ComicProcessorService(
-        IOptions<AppSettings> settings,
+        IOptionsMonitor<AppSettings> settings,
         ILogger<ComicProcessorService> logger,
         IFileStoreService fileStore,
         IProcessingHistoryService historyService,
         IEventBroadcaster? eventBroadcaster = null,
         IExternalSeriesMetadataService? externalSeriesMetadata = null)
     {
-        _settings = settings.Value;
+        _settingsMonitor = settings;
         _logger = logger;
         _fileStore = fileStore;
         _historyService = historyService;
         _eventBroadcaster = eventBroadcaster;
         _externalSeriesMetadata = externalSeriesMetadata;
-        _maxWorkers = Math.Max(1, _settings.MaxWorkers);
+        _maxWorkers = Math.Max(1, _settingsMonitor.CurrentValue.MaxWorkers);
         _processingSemaphore = new SemaphoreSlim(_maxWorkers, _maxWorkers);
     }
 

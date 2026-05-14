@@ -26,7 +26,7 @@ public class FilesController : ControllerBase
     private readonly IProcessingHistoryService _historyService;
     private readonly ISeriesLibraryService _seriesLibrary;
     private readonly ILogger<FilesController> _logger;
-    private readonly AppSettings _settings;
+    private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly IDbContextFactory<ComicMaintainerDbContext>? _dbContextFactory;
     private readonly IEventBroadcaster? _eventBroadcaster;
     private readonly ISeriesMetadataCacheService? _metadataCache;
@@ -37,7 +37,7 @@ public class FilesController : ControllerBase
         IProcessingHistoryService historyService,
         ISeriesLibraryService seriesLibrary,
         ILogger<FilesController> logger,
-        IOptions<AppSettings> settings,
+        IOptionsMonitor<AppSettings> settings,
         IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null,
         IEventBroadcaster? eventBroadcaster = null,
         ISeriesMetadataCacheService? metadataCache = null)
@@ -47,7 +47,7 @@ public class FilesController : ControllerBase
         _historyService = historyService;
         _seriesLibrary = seriesLibrary;
         _logger = logger;
-        _settings = settings.Value;
+        _settings = settings;
         _dbContextFactory = dbContextFactory;
         _eventBroadcaster = eventBroadcaster;
         _metadataCache = metadataCache;
@@ -61,7 +61,7 @@ public class FilesController : ControllerBase
         try
         {
             var fullPath = Path.GetFullPath(filePath);
-            var watchedDir = Path.GetFullPath(_settings.WatchedDirectory);
+            var watchedDir = Path.GetFullPath(_settings.CurrentValue.WatchedDirectory);
             return fullPath.StartsWith(watchedDir, StringComparison.OrdinalIgnoreCase);
         }
         catch

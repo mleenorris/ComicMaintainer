@@ -16,18 +16,18 @@ public class FileStoreService : IFileStoreService
 {
     private readonly ConcurrentDictionary<string, ComicFile> _files = new();
     private readonly ConcurrentDictionary<string, bool> _duplicateFiles = new();
-    private readonly AppSettings _settings;
+    private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<FileStoreService> _logger;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IEventBroadcaster? _eventBroadcaster;
 
     public FileStoreService(
-        IOptions<AppSettings> settings,
+        IOptionsMonitor<AppSettings> settings,
         ILogger<FileStoreService> logger,
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         IEventBroadcaster? eventBroadcaster = null)
     {
-        _settings = settings.Value;
+        _settings = settings;
         _logger = logger;
         _dbContextFactory = dbContextFactory;
         _eventBroadcaster = eventBroadcaster;
@@ -65,9 +65,9 @@ public class FileStoreService : IFileStoreService
             }
 
             // Ensure path is within allowed directories
-            var watchedDir = Path.GetFullPath(_settings.WatchedDirectory);
-            var duplicateDir = !string.IsNullOrEmpty(_settings.DuplicateDirectory) 
-                ? Path.GetFullPath(_settings.DuplicateDirectory) 
+            var watchedDir = Path.GetFullPath(_settings.CurrentValue.WatchedDirectory);
+            var duplicateDir = !string.IsNullOrEmpty(_settings.CurrentValue.DuplicateDirectory) 
+                ? Path.GetFullPath(_settings.CurrentValue.DuplicateDirectory) 
                 : string.Empty;
 
             var isInWatchedDir = fullPath.StartsWith(watchedDir, StringComparison.OrdinalIgnoreCase);

@@ -193,7 +193,7 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
         var query = Uri.EscapeDataString(seriesName);
         var apiKey = Uri.EscapeDataString(settings.ComicVineApiKey ?? string.Empty);
         var baseUrl = settings.ComicVineBaseUrl.TrimEnd('/');
-        return $"{baseUrl}/search/?api_key={apiKey}&format=json&resources=volume&limit={limit}&field_list=name,aliases&query={query}";
+        return $"{baseUrl}/search/?api_key={apiKey}&format=json&resources=volume&limit={limit}&field_list=name,aliases,image&query={query}";
     }
 
     private static IReadOnlyList<ExternalSeriesMetadata> ParseResults(JsonElement root)
@@ -219,15 +219,53 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
                 ? ParseAliases(aliasesProperty.GetString())
                 : new List<string>();
 
+            var (imageUrl, thumbnailUrl) = ExtractImageUrls(item);
+
             output.Add(new ExternalSeriesMetadata
             {
                 CanonicalTitle = canonicalTitle,
                 Aliases = aliases,
-                Source = "ComicVine"
+                Source = "ComicVine",
+                ImageUrl = imageUrl,
+                ThumbnailUrl = thumbnailUrl
             });
         }
 
         return output;
+    }
+
+    /// <summary>
+    /// Reads the ComicVine "image" object, which contains several pre-sized
+    /// variants. We prefer the larger formats for the main image and the
+    /// thumb/icon for the optional thumbnail.
+    /// </summary>
+    private static (string? Image, string? Thumbnail) ExtractImageUrls(JsonElement item)
+    {
+        if (!item.TryGetProperty("image", out var imageObj) || imageObj.ValueKind != JsonValueKind.Object)
+        {
+            return (null, null);
+        }
+
+        string? PickFirst(params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (imageObj.TryGetProperty(key, out var value)
+                    && value.ValueKind == JsonValueKind.String)
+                {
+                    var str = value.GetString();
+                    if (!string.IsNullOrWhiteSpace(str))
+                    {
+                        return str;
+                    }
+                }
+            }
+            return null;
+        }
+
+        var image = PickFirst("super_url", "medium_url", "original_url", "screen_url", "small_url");
+        var thumb = PickFirst("thumb_url", "icon_url", "small_url");
+        return (image, thumb);
     }
 
     private static ExternalSeriesMetadata? PickBestMatch(IReadOnlyList<ExternalSeriesMetadata> candidates, string requestedSeriesName)

@@ -30,6 +30,32 @@ public class SeriesMetadataCacheRecord
 
     [JsonPropertyName("lookup_status")]
     public string? LookupStatus { get; set; }
+
+    [JsonPropertyName("remote_image_url")]
+    public string? RemoteImageUrl { get; set; }
+
+    [JsonPropertyName("local_image_file")]
+    public string? LocalImageFile { get; set; }
+
+    [JsonPropertyName("image_content_type")]
+    public string? ImageContentType { get; set; }
+
+    [JsonPropertyName("image_downloaded_utc")]
+    public DateTime? ImageDownloadedUtc { get; set; }
+
+    [JsonPropertyName("image_status")]
+    public string? ImageStatus { get; set; }
+
+    /// <summary>True when an image (downloaded or user-uploaded) is available locally.</summary>
+    [JsonPropertyName("has_image")]
+    public bool HasImage =>
+        !string.IsNullOrEmpty(LocalImageFile)
+        && (string.Equals(ImageStatus, "downloaded", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(ImageStatus, "user", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>True when the cached image was uploaded by the user (sticky on refresh).</summary>
+    [JsonPropertyName("is_user_image")]
+    public bool IsUserImage => string.Equals(ImageStatus, "user", StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>

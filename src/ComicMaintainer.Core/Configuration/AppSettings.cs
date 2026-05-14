@@ -42,4 +42,26 @@ public class AppSettings
     // AniList metadata provider scoped to Manhwa (Korean origin)
     public bool EnableAniListManhwaMetadata { get; set; }
     public string AniListBaseUrl { get; set; } = "https://graphql.anilist.co";
+
+    /// <summary>
+    /// When true (the default), external metadata refreshes also try to
+    /// download a series cover image from the chosen provider and persist it
+    /// under <see cref="SeriesImageCacheDirectory"/>. Set to false to keep
+    /// metadata-only refreshes (e.g. for limited-bandwidth deployments).
+    /// </summary>
+    public bool DownloadExternalSeriesImages { get; set; } = true;
+
+    /// <summary>
+    /// Directory where downloaded and user-uploaded series cover images are
+    /// stored. When empty, defaults to <c>{ConfigDirectory}/series-images</c>.
+    /// Filenames inside this directory are derived from the normalized series
+    /// key + a content hash; the directory is created lazily.
+    /// </summary>
+    public string? SeriesImageCacheDirectory { get; set; }
+
+    /// <summary>
+    /// Maximum size in bytes of a downloaded or uploaded series image.
+    /// Defaults to 5 MiB; oversize payloads are rejected.
+    /// </summary>
+    public int SeriesImageMaxBytes { get; set; } = 5 * 1024 * 1024;
 }

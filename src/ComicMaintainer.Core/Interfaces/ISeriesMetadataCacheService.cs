@@ -40,4 +40,22 @@ public interface ISeriesMetadataCacheService
     Task<SeriesMetadataCacheRecord> RefreshAsync(
         string seriesTitle,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Replace the cached series image with a user-supplied upload. The image
+    /// is marked as "user" so future external refreshes won't overwrite it.
+    /// </summary>
+    Task<SeriesMetadataCacheRecord> SetUserImageAsync(
+        string seriesTitle,
+        Stream content,
+        string contentType,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Clear any cached series image (downloaded or user-uploaded). Returns
+    /// null when no record exists for the key.
+    /// </summary>
+    Task<SeriesMetadataCacheRecord?> ClearImageAsync(
+        string normalizedKey,
+        CancellationToken cancellationToken = default);
 }

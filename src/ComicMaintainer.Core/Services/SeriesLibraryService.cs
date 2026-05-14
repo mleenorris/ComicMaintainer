@@ -54,6 +54,8 @@ public class SeriesLibraryService : ISeriesLibraryService
                     TotalSize = accumulator.TotalSize,
                     LatestModified = ToUnixTime(accumulator.LatestModified),
                     CoverFilePath = accumulator.Issues.FirstOrDefault()?.FilePath ?? string.Empty,
+                    HasExternalImage = accumulator.HasExternalImage,
+                    ExternalImageUrl = BuildExternalImageUrl(accumulator),
                     Issues = accumulator.Issues
                 };
             })
@@ -165,6 +167,8 @@ public class SeriesLibraryService : ISeriesLibraryService
                 TotalSize = item.Accumulator.TotalSize,
                 LatestModified = ToUnixTime(item.Accumulator.LatestModified),
                 CoverFilePath = item.Cover,
+                HasExternalImage = item.Accumulator.HasExternalImage,
+                ExternalImageUrl = BuildExternalImageUrl(item.Accumulator),
                 LookupStatus = item.Accumulator.LookupStatus,
                 LastLookupUtc = item.Accumulator.LastLookupUtc
             }).ToList(),
@@ -253,6 +257,8 @@ public class SeriesLibraryService : ISeriesLibraryService
             Aliases = NormalizeAliases(accumulator.Aliases),
             MetadataSource = accumulator.MetadataSource,
             CoverFilePath = sortedIssues.FirstOrDefault()?.FilePath ?? string.Empty,
+            HasExternalImage = accumulator.HasExternalImage,
+            ExternalImageUrl = BuildExternalImageUrl(accumulator),
             IssueCount = totalIssues,
             TotalSize = accumulator.TotalSize,
             Issues = pageIssues,
@@ -379,7 +385,9 @@ public class SeriesLibraryService : ISeriesLibraryService
                     MetadataSource = record?.Source,
                     LookupStatus = record?.LookupStatus,
                     LastLookupUtc = record?.LastLookupUtc,
-                    Aliases = new List<string>()
+                    Aliases = new List<string>(),
+                    HasExternalImage = record is not null && record.HasImage,
+                    ImageNormalizedKey = record?.NormalizedKey
                 };
 
                 if (record is not null)
@@ -654,6 +662,24 @@ public class SeriesLibraryService : ISeriesLibraryService
         public List<SeriesIssueDto> Issues { get; set; } = new();
         public long TotalSize { get; set; }
         public DateTime LatestModified { get; set; } = DateTime.MinValue;
+
+        /// <summary>True when a series-level cover image is cached locally.</summary>
+        public bool HasExternalImage { get; set; }
+
+        /// <summary>Normalized cache key for the cached image (used to build the API URL).</summary>
+        public string? ImageNormalizedKey { get; set; }
+    }
+
+    private static string? BuildExternalImageUrl(SeriesAccumulator accumulator)
+    {
+        if (!accumulator.HasExternalImage || string.IsNullOrEmpty(accumulator.ImageNormalizedKey))
+        {
+            return null;
+        }
+        // Image URL is rendered as a relative path so the front-end can prefix
+        // it with the configured BasePath via apiUrl(), the same way every
+        // other endpoint reference is built.
+        return $"/api/series-images/{Uri.EscapeDataString(accumulator.ImageNormalizedKey)}";
     }
 }
 

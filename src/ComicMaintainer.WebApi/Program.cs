@@ -143,6 +143,14 @@ builder.Services.Configure<AppSettings>(options =>
     var aniListBaseUrl = Environment.GetEnvironmentVariable("ANILIST_BASE_URL");
     if (!string.IsNullOrEmpty(aniListBaseUrl))
         options.AniListBaseUrl = aniListBaseUrl;
+
+    var downloadSeriesImages = Environment.GetEnvironmentVariable("DOWNLOAD_EXTERNAL_SERIES_IMAGES");
+    if (!string.IsNullOrEmpty(downloadSeriesImages))
+        options.DownloadExternalSeriesImages = downloadSeriesImages.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+    var seriesImageDir = Environment.GetEnvironmentVariable("SERIES_IMAGE_CACHE_DIR");
+    if (!string.IsNullOrEmpty(seriesImageDir))
+        options.SeriesImageCacheDirectory = seriesImageDir;
 });
 
 // Configure JWT settings
@@ -474,6 +482,15 @@ builder.Services.AddSingleton<IComicReaderService, ComicReaderService>();
 builder.Services.AddSingleton<ISeriesLibraryService, SeriesLibraryService>();
 builder.Services.AddSingleton<ISeriesMetadataCacheService, SeriesMetadataCacheService>();
 builder.Services.AddSingleton<ISeriesMetadataRefreshJobService, SeriesMetadataRefreshJobService>();
+builder.Services.AddSingleton<ISeriesImageStore, SeriesImageStore>();
+builder.Services.AddHttpClient(SeriesImageStore.HttpClientName)
+    .ConfigureHttpClient(client =>
+    {
+        // Most provider CDNs serve images quickly; the SeriesImageStore also
+        // applies its own per-request timeout. This is the absolute upper
+        // bound for very slow connections.
+        client.Timeout = TimeSpan.FromSeconds(30);
+    });
 builder.Services.AddHttpClient(nameof(ComicVineSeriesMetadataService));
 builder.Services.AddHttpClient(nameof(MangaDexSeriesMetadataService));
 builder.Services.AddHttpClient(nameof(AniListManhwaSeriesMetadataService));
@@ -876,6 +893,21 @@ static void LoadUserSettings(string configDir, AppSettings options)
             if (!string.IsNullOrWhiteSpace(baseUrl))
             {
                 options.AniListBaseUrl = baseUrl;
+            }
+        }
+
+        if (settings.TryGetValue("DownloadExternalSeriesImages", out var downloadSeriesImages)
+            && (downloadSeriesImages.ValueKind == JsonValueKind.True || downloadSeriesImages.ValueKind == JsonValueKind.False))
+        {
+            options.DownloadExternalSeriesImages = downloadSeriesImages.GetBoolean();
+        }
+
+        if (settings.TryGetValue("SeriesImageCacheDirectory", out var seriesImageDir) && seriesImageDir.ValueKind == JsonValueKind.String)
+        {
+            var dir = seriesImageDir.GetString();
+            if (!string.IsNullOrWhiteSpace(dir))
+            {
+                options.SeriesImageCacheDirectory = dir;
             }
         }
     }

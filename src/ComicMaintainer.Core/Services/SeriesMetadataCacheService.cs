@@ -1,10 +1,12 @@
 using System.Text.RegularExpressions;
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -17,15 +19,21 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
 
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IExternalSeriesMetadataService _externalMetadata;
+    private readonly ISeriesImageStore _imageStore;
+    private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesMetadataCacheService> _logger;
 
     public SeriesMetadataCacheService(
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         IExternalSeriesMetadataService externalMetadata,
+        ISeriesImageStore imageStore,
+        IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesMetadataCacheService> logger)
     {
         _dbContextFactory = dbContextFactory;
         _externalMetadata = externalMetadata;
+        _imageStore = imageStore;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -202,6 +210,161 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             entity.UpdatedAt = now;
         }
 
+        // Best-effort series-image download. Failure must NEVER fail the
+        // metadata refresh (the cover-image is a nice-to-have). User-uploaded
+        // images are sticky and never overwritten by an external download.
+        await TryDownloadImageAsync(entity, lookup, cancellationToken);
+
+        await db.SaveChangesAsync(cancellationToken);
+        return ToRecord(entity);
+    }
+
+    private async Task TryDownloadImageAsync(
+        SeriesMetadataCacheEntity entity,
+        ExternalSeriesMetadata? lookup,
+        CancellationToken cancellationToken)
+    {
+        var settings = _settings.CurrentValue;
+        if (!settings.DownloadExternalSeriesImages) return;
+        if (string.Equals(entity.ImageStatus, "user", StringComparison.OrdinalIgnoreCase))
+        {
+            // Respect user-uploaded image: never overwrite from refresh.
+            return;
+        }
+
+        var remoteUrl = lookup?.ImageUrl;
+        if (string.IsNullOrWhiteSpace(remoteUrl))
+        {
+            return;
+        }
+
+        // Skip a re-download when the URL hasn't changed and we already have
+        // the file on disk — providers rotate URLs (e.g. CDN cache busting),
+        // so an exact-match check is the right granularity.
+        if (string.Equals(entity.RemoteImageUrl, remoteUrl, StringComparison.Ordinal)
+            && !string.IsNullOrEmpty(entity.LocalImageFile)
+            && _imageStore.ResolveAbsolutePath(entity.LocalImageFile) is not null
+            && string.Equals(entity.ImageStatus, "downloaded", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _imageStore.DownloadAsync(
+                entity.NormalizedKey,
+                remoteUrl,
+                entity.LocalImageFile,
+                cancellationToken);
+            entity.RemoteImageUrl = remoteUrl;
+            entity.LocalImageFile = result.FileName;
+            entity.ImageContentType = result.ContentType;
+            entity.ImageDownloadedUtc = DateTime.UtcNow;
+            entity.ImageStatus = "downloaded";
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(
+                "Series image download failed for {SeriesKey}: {Message}",
+                LoggingHelper.SanitizeForLog(entity.NormalizedKey),
+                LoggingHelper.SanitizeForLog(ex.Message));
+            entity.ImageStatus = "failed";
+            entity.RemoteImageUrl = remoteUrl;
+            // Leave LocalImageFile/ImageContentType untouched so a previously
+            // good image keeps serving until the next successful refresh.
+        }
+    }
+
+    /// <summary>
+    /// Replace the cached series image with a user-supplied upload. Marks the
+    /// record's image as <c>user</c> so future external refreshes won't
+    /// overwrite it.
+    /// </summary>
+    public async Task<SeriesMetadataCacheRecord> SetUserImageAsync(
+        string seriesTitle,
+        Stream content,
+        string contentType,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            throw new ArgumentException("Series title is required", nameof(seriesTitle));
+        }
+        if (content is null)
+        {
+            throw new ArgumentNullException(nameof(content));
+        }
+
+        var key = NormalizeKey(seriesTitle);
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        var now = DateTime.UtcNow;
+        if (entity is null)
+        {
+            entity = new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = key,
+                CanonicalTitle = seriesTitle.Trim(),
+                Aliases = new List<string>(),
+                UserAliases = new List<string>(),
+                IsUserCanonical = false,
+                LookupStatus = "manual",
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            db.SeriesMetadataCache.Add(entity);
+        }
+
+        var result = await _imageStore.SaveUserImageAsync(
+            key,
+            content,
+            contentType,
+            entity.LocalImageFile,
+            cancellationToken);
+
+        entity.LocalImageFile = result.FileName;
+        entity.ImageContentType = result.ContentType;
+        entity.ImageDownloadedUtc = now;
+        entity.ImageStatus = "user";
+        entity.RemoteImageUrl = "user-upload";
+        entity.UpdatedAt = now;
+
+        await db.SaveChangesAsync(cancellationToken);
+        return ToRecord(entity);
+    }
+
+    /// <summary>
+    /// Clear any cached series image (downloaded or user-uploaded). The next
+    /// metadata refresh will be free to re-download an external image.
+    /// </summary>
+    public async Task<SeriesMetadataCacheRecord?> ClearImageAsync(
+        string normalizedKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            return null;
+        }
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == normalizedKey, cancellationToken);
+        if (entity is null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrEmpty(entity.LocalImageFile))
+        {
+            _imageStore.Delete(entity.LocalImageFile);
+        }
+        entity.LocalImageFile = null;
+        entity.ImageContentType = null;
+        entity.ImageDownloadedUtc = null;
+        entity.ImageStatus = "none";
+        entity.RemoteImageUrl = null;
+        entity.UpdatedAt = DateTime.UtcNow;
+
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -217,7 +380,12 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             IsUserCanonical = entity.IsUserCanonical,
             Source = entity.Source,
             LastLookupUtc = entity.LastLookupUtc,
-            LookupStatus = entity.LookupStatus
+            LookupStatus = entity.LookupStatus,
+            RemoteImageUrl = entity.RemoteImageUrl,
+            LocalImageFile = entity.LocalImageFile,
+            ImageContentType = entity.ImageContentType,
+            ImageDownloadedUtc = entity.ImageDownloadedUtc,
+            ImageStatus = entity.ImageStatus
         };
     }
 }

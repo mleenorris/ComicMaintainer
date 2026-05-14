@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
@@ -5,6 +6,7 @@ using ComicMaintainer.Core.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace ComicMaintainer.Tests.Services;
@@ -14,6 +16,7 @@ public class SeriesMetadataCacheServiceTests
     private readonly SeriesMetadataCacheService _service;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly Mock<IExternalSeriesMetadataService> _external = new();
+    private readonly Mock<ISeriesImageStore> _imageStore = new();
 
     public SeriesMetadataCacheServiceTests()
     {
@@ -23,9 +26,16 @@ public class SeriesMetadataCacheServiceTests
         services.AddDbContextFactory<ComicMaintainerDbContext>(opt => opt.UseInMemoryDatabase(dbName));
         var provider = services.BuildServiceProvider();
         _dbContextFactory = provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        var settingsMonitor = new Mock<IOptionsMonitor<AppSettings>>();
+        settingsMonitor.Setup(s => s.CurrentValue).Returns(new AppSettings
+        {
+            DownloadExternalSeriesImages = true
+        });
         _service = new SeriesMetadataCacheService(
             _dbContextFactory,
             _external.Object,
+            _imageStore.Object,
+            settingsMonitor.Object,
             new Mock<ILogger<SeriesMetadataCacheService>>().Object);
     }
 

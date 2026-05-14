@@ -10,16 +10,16 @@ public class PathValidationMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly ILogger<PathValidationMiddleware> _logger;
-    private readonly AppSettings _settings;
+    private readonly IOptionsMonitor<AppSettings> _settings;
 
     public PathValidationMiddleware(
         RequestDelegate next, 
         ILogger<PathValidationMiddleware> logger,
-        IOptions<AppSettings> settings)
+        IOptionsMonitor<AppSettings> settings)
     {
         _next = next;
         _logger = logger;
-        _settings = settings.Value;
+        _settings = settings;
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -57,9 +57,10 @@ public class PathValidationMiddleware
             }
 
             // Ensure path is within allowed directories
-            var watchedDir = Path.GetFullPath(_settings.WatchedDirectory);
-            var duplicateDir = Path.GetFullPath(_settings.DuplicateDirectory);
-            var configDir = Path.GetFullPath(_settings.ConfigDirectory);
+            var settings = _settings.CurrentValue;
+            var watchedDir = Path.GetFullPath(settings.WatchedDirectory);
+            var duplicateDir = Path.GetFullPath(settings.DuplicateDirectory);
+            var configDir = Path.GetFullPath(settings.ConfigDirectory);
 
             return fullPath.StartsWith(watchedDir, StringComparison.OrdinalIgnoreCase) ||
                    fullPath.StartsWith(duplicateDir, StringComparison.OrdinalIgnoreCase) ||

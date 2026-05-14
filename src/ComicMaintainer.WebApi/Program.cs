@@ -36,10 +36,20 @@ catch (UnauthorizedAccessException)
     Directory.CreateDirectory(configDir);
 }
 
+// Ensure user-settings.json exists and is in the new shape (object root under "AppSettings")
+// so that the configuration provider can register it as a reload-on-change source from startup.
+var userSettingsPath = Path.Combine(configDir, "user-settings.json");
+EnsureUserSettingsFileMigrated(userSettingsPath);
+
 // Load user settings to get LogMaxBytes
-var logMaxBytes = LoadLogMaxBytes(configDir);
+var logMaxBytes = LoadLogMaxBytes(userSettingsPath);
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Register user-settings.json as a live (reload-on-change) configuration source so that
+// SettingsService writes are picked up at runtime by IOptionsMonitor<AppSettings>.
+// The file is intentionally optional (it may have been removed) and is reloaded on change.
+builder.Configuration.AddJsonFile(userSettingsPath, optional: true, reloadOnChange: true);
 
 // Use Serilog for logging - configure with the builder context to ensure proper integration
 builder.Host.UseSerilog((context, services, configuration) => configuration
@@ -91,59 +101,11 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Migrations", LogEventLevel.Warning)
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Model.Validation", LogEventLevel.Error));
 
-// Configure settings from environment variables and appsettings
-builder.Services.Configure<AppSettings>(options =>
-{
-    builder.Configuration.GetSection("AppSettings").Bind(options);
-    
-    // Load user settings from file
-    LoadUserSettings(configDir, options);
-    
-    // Override with environment variables if present (highest priority)
-    var watchedDir = Environment.GetEnvironmentVariable("WATCHED_DIR");
-    if (!string.IsNullOrEmpty(watchedDir))
-        options.WatchedDirectory = watchedDir;
-    
-    var duplicateDir = Environment.GetEnvironmentVariable("DUPLICATE_DIR");
-    if (!string.IsNullOrEmpty(duplicateDir))
-        options.DuplicateDirectory = duplicateDir;
-    
-    var configDirEnv = Environment.GetEnvironmentVariable("CONFIG_DIR");
-    if (!string.IsNullOrEmpty(configDirEnv))
-        options.ConfigDirectory = configDirEnv;
-    
-    var basePath = Environment.GetEnvironmentVariable("BASE_PATH");
-    if (!string.IsNullOrEmpty(basePath))
-        options.BasePath = basePath;
-
-    var enableExternalSeriesMetadata = Environment.GetEnvironmentVariable("ENABLE_EXTERNAL_SERIES_METADATA");
-    if (!string.IsNullOrEmpty(enableExternalSeriesMetadata))
-        options.EnableExternalSeriesMetadata = enableExternalSeriesMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
-
-    var comicVineApiKey = Environment.GetEnvironmentVariable("COMICVINE_API_KEY");
-    if (!string.IsNullOrEmpty(comicVineApiKey))
-        options.ComicVineApiKey = comicVineApiKey;
-
-    var comicVineBaseUrl = Environment.GetEnvironmentVariable("COMICVINE_BASE_URL");
-    if (!string.IsNullOrEmpty(comicVineBaseUrl))
-        options.ComicVineBaseUrl = comicVineBaseUrl;
-
-    var enableMangaDexMetadata = Environment.GetEnvironmentVariable("ENABLE_MANGADEX_METADATA");
-    if (!string.IsNullOrEmpty(enableMangaDexMetadata))
-        options.EnableMangaDexMetadata = enableMangaDexMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
-
-    var mangaDexBaseUrl = Environment.GetEnvironmentVariable("MANGADEX_BASE_URL");
-    if (!string.IsNullOrEmpty(mangaDexBaseUrl))
-        options.MangaDexBaseUrl = mangaDexBaseUrl;
-
-    var enableAniListManhwaMetadata = Environment.GetEnvironmentVariable("ENABLE_ANILIST_MANHWA_METADATA");
-    if (!string.IsNullOrEmpty(enableAniListManhwaMetadata))
-        options.EnableAniListManhwaMetadata = enableAniListManhwaMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
-
-    var aniListBaseUrl = Environment.GetEnvironmentVariable("ANILIST_BASE_URL");
-    if (!string.IsNullOrEmpty(aniListBaseUrl))
-        options.AniListBaseUrl = aniListBaseUrl;
-});
+// Configure settings from appsettings.json + user-settings.json (live-reload) under "AppSettings"
+// section. Environment variable overrides are applied via IPostConfigureOptions so they always
+// win, mirroring the previous precedence: defaults → appsettings.json → user-settings.json → env.
+builder.Services.Configure<AppSettings>(builder.Configuration.GetSection("AppSettings"));
+builder.Services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<AppSettings>, AppSettingsEnvironmentPostConfigure>();
 
 // Configure JWT settings
 builder.Services.Configure<JwtSettings>(options =>
@@ -731,7 +693,7 @@ app.MapFallback(async context =>
 });
 
 // Log startup complete
-var appSettingsValue = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<AppSettings>>().Value;
+var appSettingsValue = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<AppSettings>>().CurrentValue;
 logger.LogInformation("Server started successfully");
 logger.LogInformation("Watched Directory: {WatchedDir}", appSettingsValue.WatchedDirectory);
 var watcherEnabled = appSettingsValue.WatcherEnableRename || appSettingsValue.WatcherEnableNormalize;
@@ -743,27 +705,39 @@ logger.LogInformation("Watcher Status: {Status} (Rename: {Rename}, Normalize: {N
 app.Run();
 
 // Helper functions
-static long LoadLogMaxBytes(string configDir)
+static long LoadLogMaxBytes(string userSettingsPath)
 {
     const long defaultLogMaxBytes = 10_485_760; // 10 MB
     
     try
     {
-        var settingsFilePath = Path.Combine(configDir, "user-settings.json");
-        if (!File.Exists(settingsFilePath))
+        if (!File.Exists(userSettingsPath))
         {
             return defaultLogMaxBytes;
         }
 
-        var json = File.ReadAllText(settingsFilePath);
-        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-        
-        if (settings != null && settings.TryGetValue("LogMaxBytes", out var value))
+        var json = File.ReadAllText(userSettingsPath);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // New shape: { "AppSettings": { "LogMaxBytes": ... } }
+        if (root.ValueKind == JsonValueKind.Object &&
+            root.TryGetProperty("AppSettings", out var appSettingsElement) &&
+            appSettingsElement.ValueKind == JsonValueKind.Object &&
+            appSettingsElement.TryGetProperty("LogMaxBytes", out var newShapeValue) &&
+            newShapeValue.ValueKind == JsonValueKind.Number &&
+            newShapeValue.TryGetInt32(out var newShapeBytes))
         {
-            if (value.ValueKind == JsonValueKind.Number)
-            {
-                return value.GetInt32();
-            }
+            return newShapeBytes;
+        }
+
+        // Legacy flat shape: { "LogMaxBytes": ... }
+        if (root.ValueKind == JsonValueKind.Object &&
+            root.TryGetProperty("LogMaxBytes", out var legacyValue) &&
+            legacyValue.ValueKind == JsonValueKind.Number &&
+            legacyValue.TryGetInt32(out var legacyBytes))
+        {
+            return legacyBytes;
         }
     }
     catch
@@ -774,114 +748,123 @@ static long LoadLogMaxBytes(string configDir)
     return defaultLogMaxBytes;
 }
 
-static void LoadUserSettings(string configDir, AppSettings options)
+/// <summary>
+/// Ensures the user-settings.json file exists and is in the new "AppSettings" object-rooted shape.
+/// Performs a one-time migration from the legacy flat shape (top-level keys like "FilenameFormat")
+/// to the new shape ({ "AppSettings": { ... } }) so the file can be registered as a configuration
+/// source under the AppSettings section with reload-on-change support.
+/// </summary>
+static void EnsureUserSettingsFileMigrated(string userSettingsPath)
 {
     try
     {
-        var settingsFilePath = Path.Combine(configDir, "user-settings.json");
-        if (!File.Exists(settingsFilePath))
+        if (!File.Exists(userSettingsPath))
+        {
+            // Create an empty wrapper so the file watcher in the configuration provider
+            // has a stable file to observe from process start.
+            File.WriteAllText(userSettingsPath, "{\n  \"AppSettings\": {}\n}");
+            return;
+        }
+
+        var json = File.ReadAllText(userSettingsPath);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            File.WriteAllText(userSettingsPath, "{\n  \"AppSettings\": {}\n}");
+            return;
+        }
+
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
         {
             return;
         }
 
-        var json = File.ReadAllText(settingsFilePath);
-        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-        
-        if (settings == null)
+        // Already in the new shape
+        if (root.TryGetProperty("AppSettings", out _))
         {
             return;
         }
 
-        // Load each setting from the user settings file
-        if (settings.TryGetValue("LogMaxBytes", out var logMaxBytes) && logMaxBytes.ValueKind == JsonValueKind.Number)
+        // Migrate flat shape -> object-rooted shape
+        var migrated = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var prop in root.EnumerateObject())
         {
-            options.LogMaxBytes = logMaxBytes.GetInt32();
+            migrated[prop.Name] = prop.Value.Clone();
         }
 
-        if (settings.TryGetValue("FilenameFormat", out var filenameFormat) && filenameFormat.ValueKind == JsonValueKind.String)
+        var newRoot = new Dictionary<string, object?>
         {
-            var format = filenameFormat.GetString();
-            if (!string.IsNullOrWhiteSpace(format))
-            {
-                options.FilenameFormat = format;
-            }
-        }
+            ["AppSettings"] = migrated
+        };
+        var serialized = JsonSerializer.Serialize(newRoot, new JsonSerializerOptions { WriteIndented = true });
 
-        if (settings.TryGetValue("IssueNumberPadding", out var issueNumberPadding) && issueNumberPadding.ValueKind == JsonValueKind.Number)
-        {
-            options.IssueNumberPadding = issueNumberPadding.GetInt32();
-        }
-
-        if (settings.TryGetValue("WatcherEnableRename", out var watcherEnableRename) && 
-            (watcherEnableRename.ValueKind == JsonValueKind.True || watcherEnableRename.ValueKind == JsonValueKind.False))
-        {
-            options.WatcherEnableRename = watcherEnableRename.GetBoolean();
-        }
-
-        if (settings.TryGetValue("WatcherEnableNormalize", out var watcherEnableNormalize) && 
-            (watcherEnableNormalize.ValueKind == JsonValueKind.True || watcherEnableNormalize.ValueKind == JsonValueKind.False))
-        {
-            options.WatcherEnableNormalize = watcherEnableNormalize.GetBoolean();
-        }
-
-        if (settings.TryGetValue("DatabaseCleanupIntervalHours", out var databaseCleanupIntervalHours) && databaseCleanupIntervalHours.ValueKind == JsonValueKind.Number)
-        {
-            options.DatabaseCleanupIntervalHours = databaseCleanupIntervalHours.GetInt32();
-        }
-
-        if (settings.TryGetValue("EnableExternalSeriesMetadata", out var enableExternalSeriesMetadata)
-            && (enableExternalSeriesMetadata.ValueKind == JsonValueKind.True || enableExternalSeriesMetadata.ValueKind == JsonValueKind.False))
-        {
-            options.EnableExternalSeriesMetadata = enableExternalSeriesMetadata.GetBoolean();
-        }
-
-        if (settings.TryGetValue("ComicVineApiKey", out var comicVineApiKey) && comicVineApiKey.ValueKind == JsonValueKind.String)
-        {
-            options.ComicVineApiKey = comicVineApiKey.GetString();
-        }
-
-        if (settings.TryGetValue("ComicVineBaseUrl", out var comicVineBaseUrl) && comicVineBaseUrl.ValueKind == JsonValueKind.String)
-        {
-            var baseUrl = comicVineBaseUrl.GetString();
-            if (!string.IsNullOrWhiteSpace(baseUrl))
-            {
-                options.ComicVineBaseUrl = baseUrl;
-            }
-        }
-
-        if (settings.TryGetValue("EnableMangaDexMetadata", out var enableMangaDexMetadata)
-            && (enableMangaDexMetadata.ValueKind == JsonValueKind.True || enableMangaDexMetadata.ValueKind == JsonValueKind.False))
-        {
-            options.EnableMangaDexMetadata = enableMangaDexMetadata.GetBoolean();
-        }
-
-        if (settings.TryGetValue("MangaDexBaseUrl", out var mangaDexBaseUrl) && mangaDexBaseUrl.ValueKind == JsonValueKind.String)
-        {
-            var baseUrl = mangaDexBaseUrl.GetString();
-            if (!string.IsNullOrWhiteSpace(baseUrl))
-            {
-                options.MangaDexBaseUrl = baseUrl;
-            }
-        }
-
-        if (settings.TryGetValue("EnableAniListManhwaMetadata", out var enableAniListManhwaMetadata)
-            && (enableAniListManhwaMetadata.ValueKind == JsonValueKind.True || enableAniListManhwaMetadata.ValueKind == JsonValueKind.False))
-        {
-            options.EnableAniListManhwaMetadata = enableAniListManhwaMetadata.GetBoolean();
-        }
-
-        if (settings.TryGetValue("AniListBaseUrl", out var aniListBaseUrl) && aniListBaseUrl.ValueKind == JsonValueKind.String)
-        {
-            var baseUrl = aniListBaseUrl.GetString();
-            if (!string.IsNullOrWhiteSpace(baseUrl))
-            {
-                options.AniListBaseUrl = baseUrl;
-            }
-        }
+        // Write atomically (temp file + move) so the configuration file watcher does not
+        // observe a half-written file.
+        var tempPath = userSettingsPath + ".migrating";
+        File.WriteAllText(tempPath, serialized);
+        File.Move(tempPath, userSettingsPath, overwrite: true);
     }
     catch
     {
-        // If any error occurs, just continue with default values
+        // If migration fails, leave the file untouched. The configuration provider will
+        // simply not pick up legacy values until the user re-saves a setting.
+    }
+}
+
+/// <summary>
+/// Applies environment-variable overrides to <see cref="AppSettings"/> so they always win
+/// over values from appsettings.json and user-settings.json. Implemented as
+/// <see cref="Microsoft.Extensions.Options.IPostConfigureOptions{TOptions}"/> so it runs
+/// every time the options instance is (re)built, including after a user-settings.json reload.
+/// </summary>
+internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions.Options.IPostConfigureOptions<AppSettings>
+{
+    public void PostConfigure(string? name, AppSettings options)
+    {
+        var watchedDir = Environment.GetEnvironmentVariable("WATCHED_DIR");
+        if (!string.IsNullOrEmpty(watchedDir))
+            options.WatchedDirectory = watchedDir;
+
+        var duplicateDir = Environment.GetEnvironmentVariable("DUPLICATE_DIR");
+        if (!string.IsNullOrEmpty(duplicateDir))
+            options.DuplicateDirectory = duplicateDir;
+
+        var configDirEnv = Environment.GetEnvironmentVariable("CONFIG_DIR");
+        if (!string.IsNullOrEmpty(configDirEnv))
+            options.ConfigDirectory = configDirEnv;
+
+        var basePath = Environment.GetEnvironmentVariable("BASE_PATH");
+        if (!string.IsNullOrEmpty(basePath))
+            options.BasePath = basePath;
+
+        var enableExternalSeriesMetadata = Environment.GetEnvironmentVariable("ENABLE_EXTERNAL_SERIES_METADATA");
+        if (!string.IsNullOrEmpty(enableExternalSeriesMetadata))
+            options.EnableExternalSeriesMetadata = enableExternalSeriesMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        var comicVineApiKey = Environment.GetEnvironmentVariable("COMICVINE_API_KEY");
+        if (!string.IsNullOrEmpty(comicVineApiKey))
+            options.ComicVineApiKey = comicVineApiKey;
+
+        var comicVineBaseUrl = Environment.GetEnvironmentVariable("COMICVINE_BASE_URL");
+        if (!string.IsNullOrEmpty(comicVineBaseUrl))
+            options.ComicVineBaseUrl = comicVineBaseUrl;
+
+        var enableMangaDexMetadata = Environment.GetEnvironmentVariable("ENABLE_MANGADEX_METADATA");
+        if (!string.IsNullOrEmpty(enableMangaDexMetadata))
+            options.EnableMangaDexMetadata = enableMangaDexMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        var mangaDexBaseUrl = Environment.GetEnvironmentVariable("MANGADEX_BASE_URL");
+        if (!string.IsNullOrEmpty(mangaDexBaseUrl))
+            options.MangaDexBaseUrl = mangaDexBaseUrl;
+
+        var enableAniListManhwaMetadata = Environment.GetEnvironmentVariable("ENABLE_ANILIST_MANHWA_METADATA");
+        if (!string.IsNullOrEmpty(enableAniListManhwaMetadata))
+            options.EnableAniListManhwaMetadata = enableAniListManhwaMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        var aniListBaseUrl = Environment.GetEnvironmentVariable("ANILIST_BASE_URL");
+        if (!string.IsNullOrEmpty(aniListBaseUrl))
+            options.AniListBaseUrl = aniListBaseUrl;
     }
 }
 

@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -38,6 +39,31 @@ public class SettingsServiceTests : IDisposable
         _service = new SettingsService(_loggerMock.Object, _appSettingsMock.Object);
     }
 
+    /// <summary>
+    /// Reads the AppSettings section from user-settings.json. The persisted file is rooted under
+    /// "AppSettings" so it can be registered as a configuration source bound to the AppSettings
+    /// section with reload-on-change support.
+    /// </summary>
+    private static Dictionary<string, JsonElement> ReadAppSettingsSection(string filePath)
+    {
+        var json = File.ReadAllText(filePath);
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        Assert.Equal(JsonValueKind.Object, root.ValueKind);
+
+        Assert.True(
+            root.TryGetProperty("AppSettings", out var appSettingsElement),
+            "user-settings.json should contain an 'AppSettings' object root");
+        Assert.Equal(JsonValueKind.Object, appSettingsElement.ValueKind);
+
+        var result = new Dictionary<string, JsonElement>();
+        foreach (var prop in appSettingsElement.EnumerateObject())
+        {
+            result[prop.Name] = prop.Value.Clone();
+        }
+        return result;
+    }
+
     public void Dispose()
     {
         // Clean up test directory
@@ -60,10 +86,8 @@ public class SettingsServiceTests : IDisposable
         var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
-        var json = await File.ReadAllTextAsync(settingsFilePath);
-        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-        
-        Assert.NotNull(settings);
+        var settings = ReadAppSettingsSection(settingsFilePath);
+
         Assert.True(settings.ContainsKey("LogMaxBytes"));
         Assert.Equal(newMaxBytes, settings["LogMaxBytes"].GetInt32());
     }
@@ -92,10 +116,8 @@ public class SettingsServiceTests : IDisposable
         var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
-        var json = await File.ReadAllTextAsync(settingsFilePath);
-        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-        
-        Assert.NotNull(settings);
+        var settings = ReadAppSettingsSection(settingsFilePath);
+
         Assert.True(settings.ContainsKey("FilenameFormat"));
         Assert.Equal(newFormat, settings["FilenameFormat"].GetString());
     }
@@ -124,10 +146,8 @@ public class SettingsServiceTests : IDisposable
         var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
-        var json = await File.ReadAllTextAsync(settingsFilePath);
-        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-        
-        Assert.NotNull(settings);
+        var settings = ReadAppSettingsSection(settingsFilePath);
+
         Assert.True(settings.ContainsKey("IssueNumberPadding"));
         Assert.Equal(newPadding, settings["IssueNumberPadding"].GetInt32());
     }
@@ -145,10 +165,8 @@ public class SettingsServiceTests : IDisposable
         var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
-        var json = await File.ReadAllTextAsync(settingsFilePath);
-        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-        
-        Assert.NotNull(settings);
+        var settings = ReadAppSettingsSection(settingsFilePath);
+
         Assert.True(settings.ContainsKey("WatcherEnableRename"));
         Assert.Equal(newValue, settings["WatcherEnableRename"].GetBoolean());
     }
@@ -166,10 +184,8 @@ public class SettingsServiceTests : IDisposable
         var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
-        var json = await File.ReadAllTextAsync(settingsFilePath);
-        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-        
-        Assert.NotNull(settings);
+        var settings = ReadAppSettingsSection(settingsFilePath);
+
         Assert.True(settings.ContainsKey("GitHubToken"));
         Assert.Equal(newToken, settings["GitHubToken"].GetString());
     }
@@ -187,10 +203,8 @@ public class SettingsServiceTests : IDisposable
         var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
-        var json = await File.ReadAllTextAsync(settingsFilePath);
-        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-        
-        Assert.NotNull(settings);
+        var settings = ReadAppSettingsSection(settingsFilePath);
+
         Assert.True(settings.ContainsKey("GitHubRepository"));
         Assert.Equal(newRepo, settings["GitHubRepository"].GetString());
     }
@@ -208,10 +222,8 @@ public class SettingsServiceTests : IDisposable
         var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
-        var json = await File.ReadAllTextAsync(settingsFilePath);
-        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-        
-        Assert.NotNull(settings);
+        var settings = ReadAppSettingsSection(settingsFilePath);
+
         Assert.True(settings.ContainsKey("DatabaseCleanupIntervalHours"));
         Assert.Equal(newInterval, settings["DatabaseCleanupIntervalHours"].GetInt32());
     }
@@ -229,10 +241,8 @@ public class SettingsServiceTests : IDisposable
         var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
-        var json = await File.ReadAllTextAsync(settingsFilePath);
-        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-        
-        Assert.NotNull(settings);
+        var settings = ReadAppSettingsSection(settingsFilePath);
+
         Assert.True(settings.ContainsKey("DatabaseCleanupIntervalHours"));
         Assert.Equal(newInterval, settings["DatabaseCleanupIntervalHours"].GetInt32());
     }
@@ -261,10 +271,8 @@ public class SettingsServiceTests : IDisposable
         var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
         Assert.True(File.Exists(settingsFilePath));
 
-        var json = await File.ReadAllTextAsync(settingsFilePath);
-        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
-        
-        Assert.NotNull(settings);
+        var settings = ReadAppSettingsSection(settingsFilePath);
+
         Assert.Equal(4, settings.Count);
         Assert.Equal(20971520, settings["LogMaxBytes"].GetInt32());
         Assert.Equal("{series} v{volume}", settings["FilenameFormat"].GetString());

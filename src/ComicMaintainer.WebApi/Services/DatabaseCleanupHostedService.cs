@@ -15,6 +15,10 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
     private Timer? _timer;
     private readonly SemaphoreSlim _cleanupLock = new(1, 1);
     private CancellationTokenSource? _cancellationTokenSource;
+    private IDisposable? _settingsChangeSubscription;
+    private int _activeIntervalHours = int.MinValue;
+    private readonly object _timerLock = new();
+    private bool _started;
 
     public DatabaseCleanupHostedService(
         IFileStoreService fileStore,
@@ -31,34 +35,79 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
         _logger.LogInformation("Starting Database Cleanup Hosted Service");
         
         _cancellationTokenSource = new CancellationTokenSource();
+        _started = true;
         
         // Run cleanup on startup
         await RunCleanupAsync(cancellationToken);
         
-        // Schedule periodic cleanup based on configuration
-        var intervalHours = _appSettings.CurrentValue.DatabaseCleanupIntervalHours;
-        
-        if (intervalHours > 0)
+        // Schedule periodic cleanup based on configuration and subscribe to changes so the
+        // schedule is updated live without restarting the service.
+        ConfigureTimer(_appSettings.CurrentValue.DatabaseCleanupIntervalHours);
+        _settingsChangeSubscription = _appSettings.OnChange(settings =>
         {
-            var interval = TimeSpan.FromHours(intervalHours);
-            _logger.LogInformation("Database cleanup will run every {Hours} hours", intervalHours);
-            
-            _timer = new Timer(
-                async _ => await RunCleanupAsync(_cancellationTokenSource.Token),
-                null,
-                interval,
-                interval);
-        }
-        else
+            try
+            {
+                ConfigureTimer(settings.DatabaseCleanupIntervalHours);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to reconfigure database cleanup timer after settings change");
+            }
+        });
+    }
+
+    private void ConfigureTimer(int intervalHours)
+    {
+        lock (_timerLock)
         {
-            _logger.LogInformation("Database cleanup is set to run only on startup (interval = 0)");
+            if (!_started)
+            {
+                return;
+            }
+
+            if (intervalHours == _activeIntervalHours)
+            {
+                return;
+            }
+
+            // Tear down any existing timer
+            if (_timer != null)
+            {
+                _timer.Dispose();
+                _timer = null;
+            }
+
+            _activeIntervalHours = intervalHours;
+
+            if (intervalHours > 0)
+            {
+                var interval = TimeSpan.FromHours(intervalHours);
+                _logger.LogInformation("Database cleanup will run every {Hours} hours", intervalHours);
+
+                var token = _cancellationTokenSource?.Token ?? CancellationToken.None;
+                _timer = new Timer(
+                    async _ => await RunCleanupAsync(token),
+                    null,
+                    interval,
+                    interval);
+            }
+            else
+            {
+                _logger.LogInformation("Database cleanup is set to run only on startup (interval = 0)");
+            }
         }
     }
 
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation("Stopping Database Cleanup Hosted Service");
-        _timer?.Change(Timeout.Infinite, 0);
+        _started = false;
+        _settingsChangeSubscription?.Dispose();
+        _settingsChangeSubscription = null;
+        lock (_timerLock)
+        {
+            _timer?.Change(Timeout.Infinite, 0);
+        }
         
         // Cancel only if not already disposed
         if (_cancellationTokenSource != null && !_cancellationTokenSource.IsCancellationRequested)
@@ -107,7 +156,13 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
 
     public void Dispose()
     {
-        _timer?.Dispose();
+        _settingsChangeSubscription?.Dispose();
+        _settingsChangeSubscription = null;
+        lock (_timerLock)
+        {
+            _timer?.Dispose();
+            _timer = null;
+        }
         _cleanupLock.Dispose();
         _cancellationTokenSource?.Dispose();
     }

@@ -17,16 +17,16 @@ public class ServiceWorkerController : ControllerBase
 {
     private readonly IWebHostEnvironment _environment;
     private readonly ILogger<ServiceWorkerController> _logger;
-    private readonly AppSettings _appSettings;
+    private readonly IOptionsMonitor<AppSettings> _appSettings;
 
     public ServiceWorkerController(
         IWebHostEnvironment environment, 
         ILogger<ServiceWorkerController> logger,
-        IOptions<AppSettings> appSettings)
+        IOptionsMonitor<AppSettings> appSettings)
     {
         _environment = environment;
         _logger = logger;
-        _appSettings = appSettings.Value;
+        _appSettings = appSettings;
     }
 
     /// <summary>

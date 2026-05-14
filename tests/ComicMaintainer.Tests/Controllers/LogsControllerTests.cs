@@ -9,7 +9,7 @@ namespace ComicMaintainer.Tests.Controllers;
 
 public class LogsControllerTests : IDisposable
 {
-    private readonly Mock<IOptions<AppSettings>> _mockSettings;
+    private readonly Mock<IOptionsMonitor<AppSettings>> _mockSettings;
     private readonly Mock<ILogger<LogsController>> _mockLogger;
     private readonly LogsController _controller;
     private readonly string _testLogDir;
@@ -23,8 +23,8 @@ public class LogsControllerTests : IDisposable
         {
             ConfigDirectory = _testLogDir
         };
-        _mockSettings = new Mock<IOptions<AppSettings>>();
-        _mockSettings.Setup(s => s.Value).Returns(settings);
+        _mockSettings = new Mock<IOptionsMonitor<AppSettings>>();
+        _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
         _mockLogger = new Mock<ILogger<LogsController>>();
         _controller = new LogsController(_mockSettings.Object, _mockLogger.Object);
@@ -165,7 +165,7 @@ public class LogsControllerTests : IDisposable
         {
             ConfigDirectory = "/nonexistent/directory"
         };
-        _mockSettings.Setup(s => s.Value).Returns(settings);
+        _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
         var controller = new LogsController(_mockSettings.Object, _mockLogger.Object);
 
         // Act
@@ -395,7 +395,7 @@ public class LogsControllerTests : IDisposable
         {
             ConfigDirectory = "/nonexistent/directory"
         };
-        _mockSettings.Setup(s => s.Value).Returns(settings);
+        _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
         var controller = new LogsController(_mockSettings.Object, _mockLogger.Object);
 
         // Act
@@ -485,7 +485,7 @@ public class LogsControllerTests : IDisposable
         {
             ConfigDirectory = null
         };
-        _mockSettings.Setup(s => s.Value).Returns(settings);
+        _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
         var controller = new LogsController(_mockSettings.Object, _mockLogger.Object);
 
         // Act

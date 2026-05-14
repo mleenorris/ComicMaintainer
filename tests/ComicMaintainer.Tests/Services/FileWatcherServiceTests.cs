@@ -10,7 +10,7 @@ namespace ComicMaintainer.Tests.Services;
 public class FileWatcherServiceTests : IDisposable
 {
     private readonly Mock<ILogger<FileWatcherService>> _mockLogger;
-    private readonly Mock<IOptions<AppSettings>> _mockOptions;
+    private readonly Mock<IOptionsMonitor<AppSettings>> _mockOptions;
     private readonly Mock<IFileStoreService> _mockFileStore;
     private readonly Mock<IComicProcessorService> _mockProcessor;
     private readonly AppSettings _settings;
@@ -25,7 +25,7 @@ public class FileWatcherServiceTests : IDisposable
     public FileWatcherServiceTests()
     {
         _mockLogger = new Mock<ILogger<FileWatcherService>>();
-        _mockOptions = new Mock<IOptions<AppSettings>>();
+        _mockOptions = new Mock<IOptionsMonitor<AppSettings>>();
         _mockFileStore = new Mock<IFileStoreService>();
         _mockProcessor = new Mock<IComicProcessorService>();
 
@@ -40,7 +40,7 @@ public class FileWatcherServiceTests : IDisposable
             WatcherFileStabilityDelaySeconds = 1  // Use 1 second for tests
         };
 
-        _mockOptions.Setup(o => o.Value).Returns(_settings);
+        _mockOptions.Setup(o => o.CurrentValue).Returns(_settings);
 
         _service = new FileWatcherService(
             _mockOptions.Object,
@@ -97,8 +97,8 @@ public class FileWatcherServiceTests : IDisposable
             WatcherEnableRename = false,
             WatcherEnableNormalize = false
         };
-        var mockDisabledOptions = new Mock<IOptions<AppSettings>>();
-        mockDisabledOptions.Setup(o => o.Value).Returns(disabledSettings);
+        var mockDisabledOptions = new Mock<IOptionsMonitor<AppSettings>>();
+        mockDisabledOptions.Setup(o => o.CurrentValue).Returns(disabledSettings);
         
         var disabledService = new FileWatcherService(
             mockDisabledOptions.Object,

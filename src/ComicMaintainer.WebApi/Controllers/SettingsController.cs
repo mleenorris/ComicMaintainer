@@ -16,7 +16,7 @@ public class SettingsController : ControllerBase
 {
     private const int BYTES_PER_MB = 1048576;
     
-    private readonly IOptions<AppSettings> _appSettings;
+    private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly ILogger<SettingsController> _logger;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IComicProcessorService _processorService;
@@ -25,7 +25,7 @@ public class SettingsController : ControllerBase
     private readonly IHostApplicationLifetime _applicationLifetime;
 
     public SettingsController(
-        IOptions<AppSettings> appSettings, 
+        IOptionsMonitor<AppSettings> appSettings, 
         ILogger<SettingsController> logger,
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         IComicProcessorService processorService,
@@ -50,19 +50,19 @@ public class SettingsController : ControllerBase
         
         var settings = new
         {
-            filename_format = _appSettings.Value.FilenameFormat,
-            issue_number_padding = _appSettings.Value.IssueNumberPadding,
-            watcher_enable_rename = _appSettings.Value.WatcherEnableRename,
-            watcher_enable_normalize = _appSettings.Value.WatcherEnableNormalize,
-            log_max_bytes = _appSettings.Value.LogMaxBytes,
-            database_cleanup_interval_hours = _appSettings.Value.DatabaseCleanupIntervalHours,
-            enable_external_series_metadata = _appSettings.Value.EnableExternalSeriesMetadata,
-            comicvine_api_key = _appSettings.Value.ComicVineApiKey,
-            comicvine_base_url = _appSettings.Value.ComicVineBaseUrl,
-            enable_mangadex_metadata = _appSettings.Value.EnableMangaDexMetadata,
-            mangadex_base_url = _appSettings.Value.MangaDexBaseUrl,
-            enable_anilist_manhwa_metadata = _appSettings.Value.EnableAniListManhwaMetadata,
-            anilist_base_url = _appSettings.Value.AniListBaseUrl
+            filename_format = _appSettings.CurrentValue.FilenameFormat,
+            issue_number_padding = _appSettings.CurrentValue.IssueNumberPadding,
+            watcher_enable_rename = _appSettings.CurrentValue.WatcherEnableRename,
+            watcher_enable_normalize = _appSettings.CurrentValue.WatcherEnableNormalize,
+            log_max_bytes = _appSettings.CurrentValue.LogMaxBytes,
+            database_cleanup_interval_hours = _appSettings.CurrentValue.DatabaseCleanupIntervalHours,
+            enable_external_series_metadata = _appSettings.CurrentValue.EnableExternalSeriesMetadata,
+            comicvine_api_key = _appSettings.CurrentValue.ComicVineApiKey,
+            comicvine_base_url = _appSettings.CurrentValue.ComicVineBaseUrl,
+            enable_mangadex_metadata = _appSettings.CurrentValue.EnableMangaDexMetadata,
+            mangadex_base_url = _appSettings.CurrentValue.MangaDexBaseUrl,
+            enable_anilist_manhwa_metadata = _appSettings.CurrentValue.EnableAniListManhwaMetadata,
+            anilist_base_url = _appSettings.CurrentValue.AniListBaseUrl
         };
         
         _logger.LogDebug("Returning settings: FilenameFormat={FilenameFormat}, IssueNumberPadding={IssueNumberPadding}, WatcherEnableRename={WatcherEnableRename}, WatcherEnableNormalize={WatcherEnableNormalize}, LogMaxBytes={LogMaxBytes}, DatabaseCleanupIntervalHours={DatabaseCleanupIntervalHours}",
@@ -75,7 +75,7 @@ public class SettingsController : ControllerBase
     [HttpGet("filename-format")]
     public ActionResult<object> GetFilenameFormat()
     {
-        return Ok(new { format = _appSettings.Value.FilenameFormat });
+        return Ok(new { format = _appSettings.CurrentValue.FilenameFormat });
     }
 
     // RESTful endpoint: PUT /api/settings/filename-format
@@ -106,7 +106,7 @@ public class SettingsController : ControllerBase
     [HttpGet("issue-number-padding")]
     public ActionResult<object> GetIssueNumberPadding()
     {
-        return Ok(new { padding = _appSettings.Value.IssueNumberPadding });
+        return Ok(new { padding = _appSettings.CurrentValue.IssueNumberPadding });
     }
 
     // RESTful endpoint: PUT /api/settings/issue-number-padding
@@ -139,7 +139,7 @@ public class SettingsController : ControllerBase
     [HttpGet("log-max-bytes")]
     public ActionResult<object> GetLogMaxBytes()
     {
-        return Ok(new { maxMB = _appSettings.Value.LogMaxBytes / (double)BYTES_PER_MB });
+        return Ok(new { maxMB = _appSettings.CurrentValue.LogMaxBytes / (double)BYTES_PER_MB });
     }
 
     // RESTful endpoint: PUT /api/settings/log-max-bytes
@@ -177,7 +177,7 @@ public class SettingsController : ControllerBase
     [HttpGet("watcher-enable-rename")]
     public ActionResult<object> GetWatcherEnableRename()
     {
-        return Ok(new { enabled = _appSettings.Value.WatcherEnableRename });
+        return Ok(new { enabled = _appSettings.CurrentValue.WatcherEnableRename });
     }
 
     [HttpPut("watcher-enable-rename")]
@@ -205,7 +205,7 @@ public class SettingsController : ControllerBase
     [HttpGet("watcher-enable-normalize")]
     public ActionResult<object> GetWatcherEnableNormalize()
     {
-        return Ok(new { enabled = _appSettings.Value.WatcherEnableNormalize });
+        return Ok(new { enabled = _appSettings.CurrentValue.WatcherEnableNormalize });
     }
 
     [HttpPut("watcher-enable-normalize")]
@@ -233,7 +233,7 @@ public class SettingsController : ControllerBase
     [HttpGet("database-cleanup-interval-hours")]
     public ActionResult<object> GetDatabaseCleanupIntervalHours()
     {
-        return Ok(new { hours = _appSettings.Value.DatabaseCleanupIntervalHours });
+        return Ok(new { hours = _appSettings.CurrentValue.DatabaseCleanupIntervalHours });
     }
 
     [HttpPut("database-cleanup-interval-hours")]
@@ -244,8 +244,7 @@ public class SettingsController : ControllerBase
         try
         {
             await _settingsService.UpdateDatabaseCleanupIntervalHoursAsync(request.Hours, cancellationToken);
-            _logger.LogWarning("Database cleanup interval updated to {Hours} hours. Restart the application for the change to take effect.", request.Hours);
-            return Ok(new { message = "Database cleanup interval updated successfully. Restart required for changes to take effect." });
+            return Ok(new { message = "Database cleanup interval updated successfully" });
         }
         catch (Exception ex)
         {
@@ -288,7 +287,7 @@ public class SettingsController : ControllerBase
                 await _settingsService.UpdateAniListBaseUrlAsync(request.AniListBaseUrl.Trim(), cancellationToken);
             }
 
-            return Ok(new { message = "External series metadata settings updated successfully. Restart required for changes to take effect." });
+            return Ok(new { message = "External series metadata settings updated successfully" });
         }
         catch (Exception ex)
         {

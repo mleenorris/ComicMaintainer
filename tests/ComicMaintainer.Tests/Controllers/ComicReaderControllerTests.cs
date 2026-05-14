@@ -14,7 +14,7 @@ public class ComicReaderControllerTests
     private readonly Mock<IComicReaderService> _readerServiceMock;
     private readonly Mock<IFileStoreService> _fileStoreMock;
     private readonly Mock<ILogger<ComicReaderController>> _loggerMock;
-    private readonly Mock<IOptions<AppSettings>> _settingsMock;
+    private readonly Mock<IOptionsMonitor<AppSettings>> _settingsMock;
     private readonly ComicReaderController _controller;
     private readonly AppSettings _settings;
 
@@ -23,13 +23,13 @@ public class ComicReaderControllerTests
         _readerServiceMock = new Mock<IComicReaderService>();
         _fileStoreMock = new Mock<IFileStoreService>();
         _loggerMock = new Mock<ILogger<ComicReaderController>>();
-        _settingsMock = new Mock<IOptions<AppSettings>>();
+        _settingsMock = new Mock<IOptionsMonitor<AppSettings>>();
         
         _settings = new AppSettings
         {
             WatchedDirectory = "/test/watched"
         };
-        _settingsMock.Setup(s => s.Value).Returns(_settings);
+        _settingsMock.Setup(s => s.CurrentValue).Returns(_settings);
 
         _controller = new ComicReaderController(
             _readerServiceMock.Object,

@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Tests.Helpers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -514,6 +515,82 @@ public class FileWatcherServiceTests : IDisposable
             p => p.ProcessFileAsync(tempFile, It.IsAny<CancellationToken>()), 
             Times.Never, 
             "Temporary files should not be processed even after rename");
+    }
+
+    [Fact]
+    public async Task SettingsChange_DisablesWatcher_StopsRunning()
+    {
+        // Arrange — use a TestOptionsMonitor so we can simulate a live settings change
+        // and verify the watcher stops without restarting the service.
+        var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings
+        {
+            WatchedDirectory = _testDirectory,
+            WatcherEnableRename = true,
+            WatcherEnableNormalize = true,
+            WatcherFileStabilityDelaySeconds = 1
+        });
+
+        using var service = new FileWatcherService(
+            monitor,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockProcessor.Object);
+
+        await service.StartAsync();
+        Assert.True(service.IsRunning);
+
+        // Act — flip both watcher toggles to false at runtime
+        monitor.Set(new AppSettings
+        {
+            WatchedDirectory = _testDirectory,
+            WatcherEnableRename = false,
+            WatcherEnableNormalize = false,
+            WatcherFileStabilityDelaySeconds = 1
+        });
+
+        // Allow async OnChange handler to complete
+        await Task.Delay(WatcherInitDelayMs);
+
+        // Assert — watcher should have stopped without requiring a process restart
+        Assert.False(service.IsRunning);
+    }
+
+    [Fact]
+    public async Task SettingsChange_EnablesWatcher_StartsRunning()
+    {
+        // Arrange — start with watcher disabled, then enable it via settings change.
+        var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings
+        {
+            WatchedDirectory = _testDirectory,
+            WatcherEnableRename = false,
+            WatcherEnableNormalize = false,
+            WatcherFileStabilityDelaySeconds = 1
+        });
+
+        using var service = new FileWatcherService(
+            monitor,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockProcessor.Object);
+
+        await service.StartAsync();
+        Assert.False(service.IsRunning);
+
+        // Act — enable rename via settings change
+        monitor.Set(new AppSettings
+        {
+            WatchedDirectory = _testDirectory,
+            WatcherEnableRename = true,
+            WatcherEnableNormalize = false,
+            WatcherFileStabilityDelaySeconds = 1
+        });
+
+        // Allow async OnChange handler to complete (it calls StartAsync which initializes
+        // the file store on first run; give a bit more time)
+        await Task.Delay(ProcessingDelayMs);
+
+        // Assert — watcher should now be running without a process restart
+        Assert.True(service.IsRunning);
     }
 
     public void Dispose()

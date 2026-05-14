@@ -84,6 +84,9 @@ public class DatabaseCleanupHostedService : IHostedService, IDisposable
                 var interval = TimeSpan.FromHours(intervalHours);
                 _logger.LogInformation("Database cleanup will run every {Hours} hours", intervalHours);
 
+                // _cancellationTokenSource is created in StartAsync before the timer can be
+                // configured (either inline or via OnChange), and the _started guard above
+                // ensures we don't reach here after StopAsync.
                 var token = _cancellationTokenSource?.Token ?? CancellationToken.None;
                 _timer = new Timer(
                     async _ => await RunCleanupAsync(token),

@@ -86,29 +86,33 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             _enabled = newEnabled;
         }
 
-        if (needsStop)
+        if (!needsStop && !needsStart)
         {
-            try
-            {
-                StopAsync().GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error stopping watcher during reconfiguration"));
-            }
+            return;
         }
 
-        if (needsStart)
+        // Run reconfiguration asynchronously on the thread pool. We intentionally do NOT block
+        // the configuration-change notification thread on async I/O (file enumeration, event
+        // broadcasting), which could deadlock under some synchronization contexts and would
+        // delay subsequent configuration callbacks.
+        _ = Task.Run(async () =>
         {
             try
             {
-                StartAsync().GetAwaiter().GetResult();
+                if (needsStop)
+                {
+                    await StopAsync();
+                }
+                if (needsStart)
+                {
+                    await StartAsync();
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error starting watcher during reconfiguration"));
+                _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error reconfiguring watcher after settings change"));
             }
-        }
+        });
     }
 
     public void Dispose()

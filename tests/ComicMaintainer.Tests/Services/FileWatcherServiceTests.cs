@@ -548,8 +548,13 @@ public class FileWatcherServiceTests : IDisposable
             WatcherFileStabilityDelaySeconds = 1
         });
 
-        // Allow async OnChange handler to complete
-        await Task.Delay(WatcherInitDelayMs);
+        // Allow async OnChange handler (which runs reconfiguration on the thread pool) to complete.
+        // Poll for up to 5 seconds rather than relying on a fixed sleep.
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (service.IsRunning && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+        }
 
         // Assert — watcher should have stopped without requiring a process restart
         Assert.False(service.IsRunning);
@@ -585,9 +590,13 @@ public class FileWatcherServiceTests : IDisposable
             WatcherFileStabilityDelaySeconds = 1
         });
 
-        // Allow async OnChange handler to complete (it calls StartAsync which initializes
-        // the file store on first run; give a bit more time)
-        await Task.Delay(ProcessingDelayMs);
+        // Allow async OnChange handler (which runs reconfiguration on the thread pool) to complete.
+        // Poll for up to 5 seconds rather than relying on a fixed sleep.
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (!service.IsRunning && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+        }
 
         // Assert — watcher should now be running without a process restart
         Assert.True(service.IsRunning);

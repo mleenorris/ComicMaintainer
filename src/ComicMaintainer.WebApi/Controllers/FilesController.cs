@@ -472,6 +472,7 @@ public class FilesController : ControllerBase
             var skipped = 0;
             var failed = 0;
             var results = new List<object>(plan!.Moves.Count);
+            var movedDestinationPaths = new List<string>();
 
             foreach (var move in plan.Moves)
             {
@@ -498,6 +499,7 @@ public class FilesController : ControllerBase
                     await LogHistoryAsync(move.SourcePath, "Combine Folder", true,
                         $"Moved to {move.DestinationPath}");
                     moved++;
+                    movedDestinationPaths.Add(move.DestinationPath);
                     results.Add(new { sourcePath = move.SourcePath, destinationPath = move.DestinationPath, status = "moved" });
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -545,6 +547,23 @@ public class FilesController : ControllerBase
                 }
             }
 
+            // Queue a normalize-then-rename batch job for the moved files so that their
+            // ComicInfo.xml series matches the destination folder and the filenames are
+            // updated to use that series name. This runs asynchronously so the request
+            // returns promptly even for large combines.
+            Guid? postProcessJobId = null;
+            if (movedDestinationPaths.Count > 0)
+            {
+                try
+                {
+                    postProcessJobId = await _processor.NormalizeAndRenameFilesAsync(movedDestinationPaths, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to queue normalize-and-rename job after folder combine");
+                }
+            }
+
             return Ok(new
             {
                 destination = plan.Destination,
@@ -553,6 +572,7 @@ public class FilesController : ControllerBase
                 skipped,
                 failed,
                 removedDirectories,
+                postProcessJobId,
                 results
             });
         }

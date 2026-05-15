@@ -351,6 +351,30 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             cancellationToken);
     }
 
+    public Task<Guid> NormalizeAndRenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    {
+        // For each file, normalize first (so ComicInfo.xml has the series name derived
+        // from the current folder) and then rename so the filename uses that fresh
+        // series name. Both steps force reprocessing because files moved by a folder
+        // combine may already be marked normalized/renamed in the database under their
+        // previous (stale) series.
+        return QueueBatchJobAsync(
+            filePaths,
+            "NormalizeAndRenameFilesAsync",
+            "normalizing and renaming",
+            async (filePath, token) =>
+            {
+                var normalizeOk = await NormalizeFileCoreAsync(filePath, true, token);
+                if (!normalizeOk)
+                {
+                    return false;
+                }
+                return await RenameFileCoreAsync(filePath, true, token);
+            },
+            "Normalize and rename failed",
+            cancellationToken);
+    }
+
     private Task<Guid> QueueBatchJobAsync(
         IEnumerable<string> filePaths,
         string operationName,

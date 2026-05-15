@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -292,6 +293,85 @@ public class DatabaseCleanupHostedServiceTests : IDisposable
                 LogLevel.Information,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Starting scheduled database cleanup")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SettingsChange_ToNonZeroInterval_ReschedulesTimerWithoutRestart()
+    {
+        // Arrange — start with cleanup-on-startup-only (interval = 0), then change to 6 hours.
+        var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings
+        {
+            DatabaseCleanupIntervalHours = 0
+        });
+
+        _mockFileStore
+            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+
+        using var service = new DatabaseCleanupHostedService(
+            _mockFileStore.Object,
+            monitor,
+            _mockLogger.Object);
+
+        await service.StartAsync(_cts.Token);
+
+        // Reset call history so we can verify the post-change log
+        _mockLogger.Invocations.Clear();
+
+        // Act — change the cleanup interval at runtime
+        monitor.Set(new AppSettings
+        {
+            DatabaseCleanupIntervalHours = 6
+        });
+
+        // Assert — timer reconfiguration should be logged without restarting the service
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("every 6 hours")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task SettingsChange_ToZeroInterval_StopsPeriodicTimerWithoutRestart()
+    {
+        // Arrange — start with a 6-hour interval, then change to 0 (only-on-startup)
+        var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings
+        {
+            DatabaseCleanupIntervalHours = 6
+        });
+
+        _mockFileStore
+            .Setup(x => x.CleanupStaleEntriesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+
+        using var service = new DatabaseCleanupHostedService(
+            _mockFileStore.Object,
+            monitor,
+            _mockLogger.Object);
+
+        await service.StartAsync(_cts.Token);
+
+        _mockLogger.Invocations.Clear();
+
+        // Act — change interval to 0 at runtime
+        monitor.Set(new AppSettings
+        {
+            DatabaseCleanupIntervalHours = 0
+        });
+
+        // Assert — should log "run only on startup" without restarting
+        _mockLogger.Verify(
+            x => x.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("run only on startup")),
                 It.IsAny<Exception>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);

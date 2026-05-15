@@ -10,14 +10,14 @@ namespace ComicMaintainer.WebApi.Controllers;
 [Authorize]
 public class LogsController : ControllerBase
 {
-    private readonly AppSettings _settings;
+    private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<LogsController> _logger;
 
     public LogsController(
-        IOptions<AppSettings> settings,
+        IOptionsMonitor<AppSettings> settings,
         ILogger<LogsController> logger)
     {
-        _settings = settings.Value;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -26,7 +26,7 @@ public class LogsController : ControllerBase
     {
         try
         {
-            var configDir = _settings.ConfigDirectory ?? "/Config";
+            var configDir = _settings.CurrentValue.ConfigDirectory ?? "/Config";
             
             // Determine log file pattern based on type
             string logFilePattern = type.ToLower() switch
@@ -72,7 +72,7 @@ public class LogsController : ControllerBase
     {
         try
         {
-            var configDir = _settings.ConfigDirectory ?? "/Config";
+            var configDir = _settings.CurrentValue.ConfigDirectory ?? "/Config";
             
             // Determine log file pattern based on type
             string logFilePattern = type.ToLower() switch

@@ -26,7 +26,7 @@ public class FilesController : ControllerBase
     private readonly IProcessingHistoryService _historyService;
     private readonly ISeriesLibraryService _seriesLibrary;
     private readonly ILogger<FilesController> _logger;
-    private readonly AppSettings _settings;
+    private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly IDbContextFactory<ComicMaintainerDbContext>? _dbContextFactory;
     private readonly IEventBroadcaster? _eventBroadcaster;
     private readonly ISeriesMetadataCacheService? _metadataCache;
@@ -37,7 +37,7 @@ public class FilesController : ControllerBase
         IProcessingHistoryService historyService,
         ISeriesLibraryService seriesLibrary,
         ILogger<FilesController> logger,
-        IOptions<AppSettings> settings,
+        IOptionsMonitor<AppSettings> settings,
         IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null,
         IEventBroadcaster? eventBroadcaster = null,
         ISeriesMetadataCacheService? metadataCache = null)
@@ -47,7 +47,7 @@ public class FilesController : ControllerBase
         _historyService = historyService;
         _seriesLibrary = seriesLibrary;
         _logger = logger;
-        _settings = settings.Value;
+        _settings = settings;
         _dbContextFactory = dbContextFactory;
         _eventBroadcaster = eventBroadcaster;
         _metadataCache = metadataCache;
@@ -61,7 +61,7 @@ public class FilesController : ControllerBase
         try
         {
             var fullPath = Path.GetFullPath(filePath);
-            var watchedDir = Path.GetFullPath(_settings.WatchedDirectory);
+            var watchedDir = Path.GetFullPath(_settings.CurrentValue.WatchedDirectory);
             return fullPath.StartsWith(watchedDir, StringComparison.OrdinalIgnoreCase);
         }
         catch
@@ -860,6 +860,16 @@ public class FilesController : ControllerBase
     /// preferred display title. Returns an empty dictionary when no metadata
     /// cache is wired up.
     /// </summary>
+    /// <remarks>
+    /// Uses union-find so that two cache records linked through a shared
+    /// alias collapse into a single group. For example, when record "X" lists
+    /// "Y" as a user alias and a separate cache record exists for "Y" (e.g.
+    /// from an earlier external lookup), every title belonging to either
+    /// record resolves to the same canonical key. Without this, a naive
+    /// last-writer-wins map would let record "Y" overwrite the alias entry
+    /// produced by record "X" and leave the two folders in separate groups,
+    /// even though the user has explicitly told us they are the same series.
+    /// </remarks>
     private async Task<Dictionary<string, FolderCombineAliasEntry>> BuildFolderCombineAliasIndexAsync(CancellationToken cancellationToken)
     {
         var index = new Dictionary<string, FolderCombineAliasEntry>(StringComparer.OrdinalIgnoreCase);
@@ -879,6 +889,13 @@ public class FilesController : ControllerBase
             return index;
         }
 
+        var unionFind = new UnionFind<string>(StringComparer.OrdinalIgnoreCase);
+
+        // First pass: for every record, derive a canonical key and union it
+        // with the normalized form of every title it knows about. Any title
+        // shared between two records causes the two records' canonical keys to
+        // be merged into the same connected component.
+        var recordInfos = new List<(string CanonicalKey, string DisplayTitle, List<string> TitleKeys)>();
         foreach (var record in records)
         {
             var titles = EnumerateRecordTitles(record).ToList();
@@ -895,19 +912,51 @@ public class FilesController : ControllerBase
                 ? record.CanonicalTitle!
                 : titles[0];
 
-            var entry = new FolderCombineAliasEntry(canonicalKey, displayTitle);
+            var titleKeys = titles
+                .Select(NormalizeFolderCombineKey)
+                .Where(k => k is not null)
+                .Select(k => k!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-            foreach (var title in titles)
+            unionFind.Add(canonicalKey);
+            foreach (var key in titleKeys)
             {
-                var key = NormalizeFolderCombineKey(title);
-                if (key is null)
-                {
-                    continue;
-                }
+                unionFind.Union(canonicalKey, key);
+            }
 
-                // Last-writer-wins is fine: a single canonical title should win
-                // over any alias entries for the same key, because we iterate
-                // canonical first.
+            recordInfos.Add((canonicalKey, displayTitle, titleKeys));
+        }
+
+        // Second pass: per connected component, pick a stable display title
+        // (preferring an entry whose own canonical key is the component root,
+        // which corresponds to the record the user most likely wants surfaced).
+        var rootDisplay = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var info in recordInfos)
+        {
+            var root = unionFind.Find(info.CanonicalKey);
+            if (string.Equals(info.CanonicalKey, root, StringComparison.OrdinalIgnoreCase))
+            {
+                rootDisplay[root] = info.DisplayTitle;
+            }
+            else
+            {
+                rootDisplay.TryAdd(root, info.DisplayTitle);
+            }
+        }
+
+        // Third pass: index every known title to the component root + chosen
+        // display title. Also seed the canonical-key entry itself so lookups
+        // by the record's own key resolve cleanly.
+        foreach (var info in recordInfos)
+        {
+            var root = unionFind.Find(info.CanonicalKey);
+            var display = rootDisplay.TryGetValue(root, out var d) ? d : info.DisplayTitle;
+            var entry = new FolderCombineAliasEntry(root, display);
+
+            index[info.CanonicalKey] = entry;
+            foreach (var key in info.TitleKeys)
+            {
                 index[key] = entry;
             }
         }

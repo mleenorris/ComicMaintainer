@@ -20,7 +20,7 @@ public class FilesControllerTests
     private readonly Mock<IProcessingHistoryService> _mockHistoryService;
     private readonly Mock<ISeriesLibraryService> _mockSeriesLibrary;
     private readonly Mock<ILogger<FilesController>> _mockLogger;
-    private readonly Mock<IOptions<AppSettings>> _mockSettings;
+    private readonly Mock<IOptionsMonitor<AppSettings>> _mockSettings;
     private readonly FilesController _controller;
 
     public FilesControllerTests()
@@ -30,14 +30,14 @@ public class FilesControllerTests
         _mockHistoryService = new Mock<IProcessingHistoryService>();
         _mockSeriesLibrary = new Mock<ISeriesLibraryService>();
         _mockLogger = new Mock<ILogger<FilesController>>();
-        _mockSettings = new Mock<IOptions<AppSettings>>();
+        _mockSettings = new Mock<IOptionsMonitor<AppSettings>>();
         
         // Setup default settings with temp directory as watched directory for tests
         var settings = new AppSettings
         {
             WatchedDirectory = Path.GetTempPath()
         };
-        _mockSettings.Setup(s => s.Value).Returns(settings);
+        _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
         
         _controller = new FilesController(_mockFileStore.Object, _mockProcessor.Object, _mockHistoryService.Object, _mockSeriesLibrary.Object, _mockLogger.Object, _mockSettings.Object);
     }
@@ -491,6 +491,115 @@ public class FilesControllerTests
         Assert.Single(groupList);
         Assert.Equal(2, groupList[0].Folders.Count);
         Assert.Equal("Batman", groupList[0].SeriesName);
+    }
+
+    [Fact]
+    public async Task GetCombinableFolders_TreatsAliasesAsSameSeries_WhenAliasHasOwnCacheRecord()
+    {
+        // Regression: when the user adds an alias linking series "X" → "Y" but
+        // a separate cache record already exists for "Y" (e.g. created by an
+        // earlier external metadata refresh), the folder-combine alias index
+        // must still collapse both records into one canonical group. Without
+        // union-find merging, record "Y" would overwrite the alias entry
+        // produced by record "X", leaving the two folders un-combinable even
+        // though the series view tile already merges them.
+        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        await using (var dbContext = new ComicMaintainerDbContext(options))
+        {
+            dbContext.ComicFiles.AddRange(
+                new ComicFileEntity
+                {
+                    FilePath = "/library/canonical/Batman-001.cbz",
+                    FileName = "Batman-001.cbz",
+                    Directory = "/library/canonical",
+                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new ComicFileEntity
+                {
+                    FilePath = "/library/aliasfolder/DarkKnight-002.cbz",
+                    FileName = "DarkKnight-002.cbz",
+                    Directory = "/library/aliasfolder",
+                    CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc)
+                });
+
+            await dbContext.SaveChangesAsync();
+        }
+
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/canonical/Batman-001.cbz",
+                FileName = "Batman-001.cbz",
+                Directory = "/library/canonical",
+                LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Batman" }
+            },
+            new()
+            {
+                FilePath = "/library/aliasfolder/DarkKnight-002.cbz",
+                FileName = "DarkKnight-002.cbz",
+                Directory = "/library/aliasfolder",
+                LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "The Dark Knight" }
+            }
+        };
+
+        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var mockCache = new Mock<ISeriesMetadataCacheService>();
+        mockCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                // User linked "The Dark Knight" as an alias of "Batman".
+                new()
+                {
+                    NormalizedKey = "batman",
+                    CanonicalTitle = "Batman",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string> { "The Dark Knight" }
+                },
+                // A previous external lookup also produced a standalone cache
+                // record for "The Dark Knight". This is the realistic case the
+                // user hit: two records share an alias key but only one of
+                // them carries the user's link.
+                new()
+                {
+                    NormalizedKey = "the-dark-knight",
+                    CanonicalTitle = "The Dark Knight",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>()
+                }
+            });
+
+        var controller = new FilesController(
+            _mockFileStore.Object,
+            _mockProcessor.Object,
+            _mockHistoryService.Object,
+            _mockSeriesLibrary.Object,
+            _mockLogger.Object,
+            _mockSettings.Object,
+            new TestDbContextFactory(options),
+            null,
+            mockCache.Object);
+
+        var result = await controller.GetCombinableFolders();
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+
+        var groupsProperty = okResult.Value!.GetType().GetProperty("groups");
+        Assert.NotNull(groupsProperty);
+        var groups = Assert.IsAssignableFrom<IEnumerable<FilesController.CombinableFolderGroupDto>>(
+            groupsProperty!.GetValue(okResult.Value));
+
+        var groupList = groups.ToList();
+        Assert.Single(groupList);
+        Assert.Equal(2, groupList[0].Folders.Count);
     }
 
     [Fact]
@@ -1273,7 +1382,7 @@ public class FilesControllerTests
                 .ReturnsAsync(files);
 
             var settings = new AppSettings { WatchedDirectory = tempDir };
-            _mockSettings.Setup(s => s.Value).Returns(settings);
+            _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
             var controller = new FilesController(
                 _mockFileStore.Object,
@@ -1370,7 +1479,7 @@ public class FilesControllerTests
                 .ReturnsAsync(files);
 
             var settings = new AppSettings { WatchedDirectory = tempDir };
-            _mockSettings.Setup(s => s.Value).Returns(settings);
+            _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
             var controller = new FilesController(
                 _mockFileStore.Object,
@@ -1415,7 +1524,7 @@ public class FilesControllerTests
         try
         {
             var settings = new AppSettings { WatchedDirectory = tempDir };
-            _mockSettings.Setup(s => s.Value).Returns(settings);
+            _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
             _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new List<ComicFile>());
@@ -1509,7 +1618,7 @@ public class FilesControllerTests
                 .ReturnsAsync(files);
 
             var settings = new AppSettings { WatchedDirectory = tempDir };
-            _mockSettings.Setup(s => s.Value).Returns(settings);
+            _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
             var controller = new FilesController(
                 _mockFileStore.Object,
@@ -1576,7 +1685,7 @@ public class FilesControllerTests
                 .ReturnsAsync(files);
 
             var settings = new AppSettings { WatchedDirectory = tempDir };
-            _mockSettings.Setup(s => s.Value).Returns(settings);
+            _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
             var controller = new FilesController(
                 _mockFileStore.Object,

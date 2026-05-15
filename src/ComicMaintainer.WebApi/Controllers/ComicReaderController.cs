@@ -19,18 +19,18 @@ public class ComicReaderController : ControllerBase
     private readonly IComicReaderService _readerService;
     private readonly IFileStoreService _fileStore;
     private readonly ILogger<ComicReaderController> _logger;
-    private readonly AppSettings _settings;
+    private readonly IOptionsMonitor<AppSettings> _settings;
 
     public ComicReaderController(
         IComicReaderService readerService,
         IFileStoreService fileStore,
         ILogger<ComicReaderController> logger,
-        IOptions<AppSettings> settings)
+        IOptionsMonitor<AppSettings> settings)
     {
         _readerService = readerService;
         _fileStore = fileStore;
         _logger = logger;
-        _settings = settings.Value;
+        _settings = settings;
     }
 
     /// <summary>
@@ -41,7 +41,7 @@ public class ComicReaderController : ControllerBase
         try
         {
             var fullPath = Path.GetFullPath(filePath);
-            var watchedDir = Path.GetFullPath(_settings.WatchedDirectory);
+            var watchedDir = Path.GetFullPath(_settings.CurrentValue.WatchedDirectory);
             return fullPath.StartsWith(watchedDir, StringComparison.OrdinalIgnoreCase);
         }
         catch

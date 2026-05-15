@@ -14,7 +14,7 @@ public class SettingsControllerTests
 {
     private const int BYTES_PER_MB = 1048576;
     
-    private readonly Mock<IOptions<AppSettings>> _appSettingsMock;
+    private readonly Mock<IOptionsMonitor<AppSettings>> _appSettingsMock;
     private readonly Mock<ILogger<SettingsController>> _loggerMock;
     private readonly Mock<IDbContextFactory<ComicMaintainer.Core.Data.ComicMaintainerDbContext>> _dbContextFactoryMock;
     private readonly Mock<IComicProcessorService> _processorServiceMock;
@@ -36,8 +36,8 @@ public class SettingsControllerTests
             DatabaseCleanupIntervalHours = 12
         };
 
-        _appSettingsMock = new Mock<IOptions<AppSettings>>();
-        _appSettingsMock.Setup(x => x.Value).Returns(_appSettings);
+        _appSettingsMock = new Mock<IOptionsMonitor<AppSettings>>();
+        _appSettingsMock.Setup(x => x.CurrentValue).Returns(_appSettings);
         
         _loggerMock = new Mock<ILogger<SettingsController>>();
         _dbContextFactoryMock = new Mock<IDbContextFactory<ComicMaintainer.Core.Data.ComicMaintainerDbContext>>();

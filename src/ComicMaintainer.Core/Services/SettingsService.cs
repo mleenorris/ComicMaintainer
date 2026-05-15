@@ -157,27 +157,34 @@ public class SettingsService : ISettingsService
         await _lock.WaitAsync(cancellationToken);
         try
         {
-            // Read existing settings file or create new dictionary
-            Dictionary<string, object?>? settings;
-            
+            // Read existing user-settings.json which is rooted under "AppSettings" so the
+            // configuration provider can bind it directly to AppSettings via reload-on-change.
+            Dictionary<string, object?> appSettingsSection;
+
             if (File.Exists(_settingsFilePath))
             {
                 var json = await File.ReadAllTextAsync(_settingsFilePath, cancellationToken);
-                settings = JsonSerializer.Deserialize<Dictionary<string, object?>>(json);
+                appSettingsSection = ReadAppSettingsSection(json);
             }
             else
             {
-                settings = new Dictionary<string, object?>();
+                appSettingsSection = new Dictionary<string, object?>(StringComparer.Ordinal);
             }
 
-            settings ??= new Dictionary<string, object?>();
-
             // Update the setting
-            settings[settingName] = value;
+            appSettingsSection[settingName] = value;
 
-            // Write back to file
-            var updatedJson = JsonSerializer.Serialize(settings, _jsonOptions);
-            await File.WriteAllTextAsync(_settingsFilePath, updatedJson, cancellationToken);
+            // Serialize and write atomically (temp file + move) so the configuration provider's
+            // file watcher does not observe a half-written file.
+            var root = new Dictionary<string, object?>
+            {
+                ["AppSettings"] = appSettingsSection
+            };
+            var updatedJson = JsonSerializer.Serialize(root, _jsonOptions);
+
+            var tempPath = _settingsFilePath + ".tmp";
+            await File.WriteAllTextAsync(tempPath, updatedJson, cancellationToken);
+            File.Move(tempPath, _settingsFilePath, overwrite: true);
 
             // Sanitize value for logging to prevent log forging
             var sanitizedValue = value?.ToString() ?? "null";
@@ -196,5 +203,67 @@ public class SettingsService : ISettingsService
         {
             _lock.Release();
         }
+    }
+
+    /// <summary>
+    /// Read the existing user-settings.json content into a mutable dictionary representing
+    /// the AppSettings section. Supports both the new object-rooted shape ({ "AppSettings": {...} })
+    /// and the legacy flat shape (top-level keys) for backward compatibility.
+    /// </summary>
+    private static Dictionary<string, object?> ReadAppSettingsSection(string json)
+    {
+        var result = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return result;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return result;
+            }
+
+            // New shape: { "AppSettings": { ... } }
+            if (root.TryGetProperty("AppSettings", out var appSettingsElement) &&
+                appSettingsElement.ValueKind == JsonValueKind.Object)
+            {
+                foreach (var prop in appSettingsElement.EnumerateObject())
+                {
+                    result[prop.Name] = ConvertJsonElement(prop.Value);
+                }
+                return result;
+            }
+
+            // Legacy flat shape: top-level keys are the setting names
+            foreach (var prop in root.EnumerateObject())
+            {
+                result[prop.Name] = ConvertJsonElement(prop.Value);
+            }
+        }
+        catch (JsonException)
+        {
+            // Corrupt or unreadable file — start with an empty section. The next write
+            // will replace the file with a valid one.
+        }
+
+        return result;
+    }
+
+    private static object? ConvertJsonElement(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString(),
+            JsonValueKind.Number => element.TryGetInt64(out var l) ? (object)l : element.GetDouble(),
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Null => null,
+            // For arrays/objects, round-trip via raw JSON so they are re-serialized verbatim.
+            _ => JsonDocument.Parse(element.GetRawText()).RootElement.Clone(),
+        };
     }
 }

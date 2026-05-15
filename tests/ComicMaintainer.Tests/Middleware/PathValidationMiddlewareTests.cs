@@ -1,3 +1,4 @@
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.WebApi.Middleware;
 using Microsoft.AspNetCore.Http;
@@ -39,7 +40,7 @@ public class PathValidationMiddlewareTests
         var middleware = new PathValidationMiddleware(
             _mockNext.Object,
             _mockLogger.Object,
-            Options.Create(_appSettings));
+            new TestOptionsMonitor<AppSettings>(_appSettings));
 
         var context = new DefaultHttpContext();
         context.Request.QueryString = new QueryString($"?filePath={Uri.EscapeDataString(maliciousPath)}");
@@ -64,7 +65,7 @@ public class PathValidationMiddlewareTests
         var middleware = new PathValidationMiddleware(
             _mockNext.Object,
             _mockLogger.Object,
-            Options.Create(_appSettings));
+            new TestOptionsMonitor<AppSettings>(_appSettings));
 
         var context = new DefaultHttpContext();
         context.Request.QueryString = new QueryString($"?filePath={Uri.EscapeDataString(validPath)}");
@@ -85,7 +86,7 @@ public class PathValidationMiddlewareTests
         var middleware = new PathValidationMiddleware(
             _mockNext.Object,
             _mockLogger.Object,
-            Options.Create(_appSettings));
+            new TestOptionsMonitor<AppSettings>(_appSettings));
 
         var context = new DefaultHttpContext();
         _mockNext.Setup(x => x(It.IsAny<HttpContext>())).Returns(Task.CompletedTask);
@@ -104,7 +105,7 @@ public class PathValidationMiddlewareTests
         var middleware = new PathValidationMiddleware(
             _mockNext.Object,
             _mockLogger.Object,
-            Options.Create(_appSettings));
+            new TestOptionsMonitor<AppSettings>(_appSettings));
 
         var context = new DefaultHttpContext();
         context.Request.QueryString = new QueryString("?filePath=");
@@ -127,7 +128,7 @@ public class PathValidationMiddlewareTests
         var middleware = new PathValidationMiddleware(
             _mockNext.Object,
             _mockLogger.Object,
-            Options.Create(_appSettings));
+            new TestOptionsMonitor<AppSettings>(_appSettings));
 
         var context = new DefaultHttpContext();
         context.Request.QueryString = new QueryString($"?filePath={Uri.EscapeDataString(rootPath)}");
@@ -147,7 +148,7 @@ public class PathValidationMiddlewareTests
         var middleware = new PathValidationMiddleware(
             _mockNext.Object,
             _mockLogger.Object,
-            Options.Create(_appSettings));
+            new TestOptionsMonitor<AppSettings>(_appSettings));
 
         var context = new DefaultHttpContext();
         context.Request.QueryString = new QueryString("?filePath=../../sensitive/data.txt");
@@ -177,7 +178,7 @@ public class PathValidationMiddlewareTests
         var middleware = new PathValidationMiddleware(
             _mockNext.Object,
             _mockLogger.Object,
-            Options.Create(_appSettings));
+            new TestOptionsMonitor<AppSettings>(_appSettings));
 
         var context = new DefaultHttpContext();
         context.Request.QueryString = new QueryString($"?filePath={Uri.EscapeDataString(outsidePath)}");
@@ -197,7 +198,7 @@ public class PathValidationMiddlewareTests
         var middleware = new PathValidationMiddleware(
             _mockNext.Object,
             _mockLogger.Object,
-            Options.Create(_appSettings));
+            new TestOptionsMonitor<AppSettings>(_appSettings));
 
         var context = new DefaultHttpContext();
         // Use null character which may cause exception in path operations
@@ -218,7 +219,7 @@ public class PathValidationMiddlewareTests
         var middleware = new PathValidationMiddleware(
             _mockNext.Object,
             _mockLogger.Object,
-            Options.Create(_appSettings));
+            new TestOptionsMonitor<AppSettings>(_appSettings));
 
         var context = new DefaultHttpContext();
         context.Request.QueryString = new QueryString($"?filePath={Uri.EscapeDataString("/watched_dir/test.cbz")}&filePath=../../etc/passwd");

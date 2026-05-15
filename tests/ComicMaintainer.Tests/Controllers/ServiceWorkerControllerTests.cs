@@ -13,7 +13,7 @@ public class ServiceWorkerControllerTests
 {
     private readonly Mock<IWebHostEnvironment> _mockEnvironment;
     private readonly Mock<ILogger<ServiceWorkerController>> _mockLogger;
-    private readonly Mock<IOptions<AppSettings>> _mockAppSettings;
+    private readonly Mock<IOptionsMonitor<AppSettings>> _mockAppSettings;
     private readonly ServiceWorkerController _controller;
     private readonly string _tempDirectory;
 
@@ -28,8 +28,8 @@ public class ServiceWorkerControllerTests
         _mockLogger = new Mock<ILogger<ServiceWorkerController>>();
 
         var appSettings = new AppSettings();
-        _mockAppSettings = new Mock<IOptions<AppSettings>>();
-        _mockAppSettings.Setup(a => a.Value).Returns(appSettings);
+        _mockAppSettings = new Mock<IOptionsMonitor<AppSettings>>();
+        _mockAppSettings.Setup(a => a.CurrentValue).Returns(appSettings);
 
         _controller = new ServiceWorkerController(
             _mockEnvironment.Object,

@@ -76,6 +76,17 @@ public class SeriesLibraryDto
     [JsonPropertyName("cover_file_path")]
     public string CoverFilePath { get; set; } = string.Empty;
 
+    /// <summary>True when an external/user series image is available.</summary>
+    [JsonPropertyName("has_external_image")]
+    public bool HasExternalImage { get; set; }
+
+    /// <summary>
+    /// API path of the cached series image (when available), suitable for use
+    /// as a protected-image src. Null when no image has been cached.
+    /// </summary>
+    [JsonPropertyName("external_image_url")]
+    public string? ExternalImageUrl { get; set; }
+
     [JsonPropertyName("issues")]
     public List<SeriesIssueDto> Issues { get; set; } = new();
 }
@@ -121,6 +132,14 @@ public class SeriesSummaryDto
     [JsonPropertyName("cover_file_path")]
     public string CoverFilePath { get; set; } = string.Empty;
 
+    /// <summary>True when an external/user series image is available.</summary>
+    [JsonPropertyName("has_external_image")]
+    public bool HasExternalImage { get; set; }
+
+    /// <summary>API path of the cached series image when available.</summary>
+    [JsonPropertyName("external_image_url")]
+    public string? ExternalImageUrl { get; set; }
+
     /// <summary>
     /// Last cached external lookup status: success, not_found, error, manual,
     /// or null when never queried.
@@ -149,6 +168,8 @@ public class SeriesIssuesResult
     public List<string> Aliases { get; set; } = new();
     public string? MetadataSource { get; set; }
     public string CoverFilePath { get; set; } = string.Empty;
+    public bool HasExternalImage { get; set; }
+    public string? ExternalImageUrl { get; set; }
     public int IssueCount { get; set; }
     public long TotalSize { get; set; }
     public List<SeriesIssueDto> Issues { get; set; } = new();

@@ -163,6 +163,10 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
                 v => string.IsNullOrEmpty(v)
                     ? new List<string>()
                     : v.Split('\n', StringSplitOptions.RemoveEmptyEntries).ToList());
+            entity.Property(e => e.RemoteImageUrl).HasMaxLength(2048);
+            entity.Property(e => e.LocalImageFile).HasMaxLength(512);
+            entity.Property(e => e.ImageContentType).HasMaxLength(64);
+            entity.Property(e => e.ImageStatus).HasMaxLength(32);
         });
     }
 }
@@ -312,6 +316,37 @@ public class SeriesMetadataCacheEntity
 
     /// <summary>Status of the last lookup: success, not_found, error, manual, pending.</summary>
     public string? LookupStatus { get; set; }
+
+    /// <summary>
+    /// URL of the series image from the external provider (or "user-upload"
+    /// for user-supplied images). Used to detect when the local cached image
+    /// needs re-downloading on the next refresh.
+    /// </summary>
+    public string? RemoteImageUrl { get; set; }
+
+    /// <summary>
+    /// Filename (relative to <c>AppSettings.SeriesImageCacheDirectory</c>) of
+    /// the locally cached series image, or null when no image is cached.
+    /// Never contains path separators.
+    /// </summary>
+    public string? LocalImageFile { get; set; }
+
+    /// <summary>MIME type of the cached image (image/jpeg, image/png, image/webp).</summary>
+    public string? ImageContentType { get; set; }
+
+    /// <summary>UTC timestamp the image was last downloaded or uploaded.</summary>
+    public DateTime? ImageDownloadedUtc { get; set; }
+
+    /// <summary>
+    /// State of the cached series image:
+    /// <list type="bullet">
+    /// <item><c>none</c> — no image available;</item>
+    /// <item><c>downloaded</c> — cached from external provider;</item>
+    /// <item><c>user</c> — uploaded by the user (sticky; not overwritten by refresh);</item>
+    /// <item><c>failed</c> — last attempt failed and may be retried;</item>
+    /// </list>
+    /// </summary>
+    public string? ImageStatus { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

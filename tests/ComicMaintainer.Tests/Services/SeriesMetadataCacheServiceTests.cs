@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
@@ -5,6 +6,7 @@ using ComicMaintainer.Core.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace ComicMaintainer.Tests.Services;
@@ -14,6 +16,7 @@ public class SeriesMetadataCacheServiceTests
     private readonly SeriesMetadataCacheService _service;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly Mock<IExternalSeriesMetadataService> _external = new();
+    private readonly Mock<ISeriesImageStore> _imageStore = new();
 
     public SeriesMetadataCacheServiceTests()
     {
@@ -23,9 +26,16 @@ public class SeriesMetadataCacheServiceTests
         services.AddDbContextFactory<ComicMaintainerDbContext>(opt => opt.UseInMemoryDatabase(dbName));
         var provider = services.BuildServiceProvider();
         _dbContextFactory = provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        var settingsMonitor = new Mock<IOptionsMonitor<AppSettings>>();
+        settingsMonitor.Setup(s => s.CurrentValue).Returns(new AppSettings
+        {
+            DownloadExternalSeriesImages = true
+        });
         _service = new SeriesMetadataCacheService(
             _dbContextFactory,
             _external.Object,
+            _imageStore.Object,
+            settingsMonitor.Object,
             new Mock<ILogger<SeriesMetadataCacheService>>().Object);
     }
 
@@ -129,5 +139,122 @@ public class SeriesMetadataCacheServiceTests
         Assert.Equal("My Batman", record.CanonicalTitle);
         Assert.True(record.IsUserCanonical);
         Assert.Contains("Dark Knight", record.Aliases);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_DownloadsImage_WhenProviderReturnsImageUrl()
+    {
+        _external.Setup(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Aliases = new List<string>(),
+                Source = "ComicVine",
+                ImageUrl = "https://example.com/batman.jpg"
+            });
+        _imageStore.Setup(s => s.DownloadAsync(
+                It.IsAny<string>(),
+                "https://example.com/batman.jpg",
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("batman-abc.jpg", "image/jpeg", 1234));
+
+        var record = await _service.RefreshAsync("Batman");
+
+        Assert.Equal("downloaded", record.ImageStatus);
+        Assert.Equal("batman-abc.jpg", record.LocalImageFile);
+        Assert.Equal("image/jpeg", record.ImageContentType);
+        Assert.True(record.HasImage);
+        Assert.False(record.IsUserImage);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_RecordsFailedImage_WhenDownloadThrows()
+    {
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Aliases = new List<string>(),
+                Source = "ComicVine",
+                ImageUrl = "https://example.com/batman.jpg"
+            });
+        _imageStore.Setup(s => s.DownloadAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("network down"));
+
+        // Image-download failure must NOT fail the metadata refresh — the
+        // record is still saved with a 'failed' image status so a future
+        // refresh can retry.
+        var record = await _service.RefreshAsync("Batman");
+
+        Assert.Equal("success", record.LookupStatus);
+        Assert.Equal("failed", record.ImageStatus);
+        Assert.False(record.HasImage);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_DoesNotOverwriteUserUploadedImage()
+    {
+        // Seed a record with a user-uploaded image.
+        await using (var content = new MemoryStream(new byte[] { 1, 2, 3 }))
+        {
+            _imageStore.Setup(s => s.SaveUserImageAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<Stream>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SeriesImageStoreResult("user-abc.png", "image/png", 3));
+            await _service.SetUserImageAsync("Batman", content, "image/png");
+        }
+
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Aliases = new List<string>(),
+                Source = "ComicVine",
+                ImageUrl = "https://example.com/batman.jpg"
+            });
+
+        var record = await _service.RefreshAsync("Batman");
+
+        // User image must remain sticky.
+        Assert.Equal("user", record.ImageStatus);
+        Assert.Equal("user-abc.png", record.LocalImageFile);
+        _imageStore.Verify(s => s.DownloadAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ClearImageAsync_RemovesCachedImage()
+    {
+        // Seed a downloaded image.
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Aliases = new List<string>(),
+                Source = "ComicVine",
+                ImageUrl = "https://example.com/batman.jpg"
+            });
+        _imageStore.Setup(s => s.DownloadAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("batman-abc.jpg", "image/jpeg", 100));
+        var refreshed = await _service.RefreshAsync("Batman");
+        Assert.True(refreshed.HasImage);
+
+        var cleared = await _service.ClearImageAsync(refreshed.NormalizedKey);
+
+        Assert.NotNull(cleared);
+        Assert.Equal("none", cleared!.ImageStatus);
+        Assert.Null(cleared.LocalImageFile);
+        Assert.False(cleared.HasImage);
+        _imageStore.Verify(s => s.Delete("batman-abc.jpg"), Times.Once);
     }
 }

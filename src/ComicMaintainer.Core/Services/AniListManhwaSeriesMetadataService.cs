@@ -31,6 +31,7 @@ public class AniListManhwaSeriesMetadataService : IExternalSeriesMetadataService
             media(search: $search, type: MANGA, countryOfOrigin: "KR", sort: SEARCH_MATCH) {
               title { romaji english native }
               synonyms
+              coverImage { extraLarge large medium }
             }
           }
         }
@@ -262,16 +263,50 @@ public class AniListManhwaSeriesMetadataService : IExternalSeriesMetadataService
             }
 
             var aliases = ExtractAliases(item, canonicalTitle);
+            var (imageUrl, thumbnailUrl) = ExtractCoverImage(item);
 
             output.Add(new ExternalSeriesMetadata
             {
                 CanonicalTitle = canonicalTitle,
                 Aliases = aliases,
-                Source = "AniListManhwa"
+                Source = "AniListManhwa",
+                ImageUrl = imageUrl,
+                ThumbnailUrl = thumbnailUrl
             });
         }
 
         return output;
+    }
+
+    /// <summary>
+    /// Pulls the AniList coverImage object: prefers extraLarge / large for the
+    /// poster image and the medium variant for the thumbnail.
+    /// </summary>
+    private static (string? Image, string? Thumbnail) ExtractCoverImage(JsonElement media)
+    {
+        if (!media.TryGetProperty("coverImage", out var cover) || cover.ValueKind != JsonValueKind.Object)
+        {
+            return (null, null);
+        }
+
+        string? PickFirst(params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (cover.TryGetProperty(key, out var value)
+                    && value.ValueKind == JsonValueKind.String)
+                {
+                    var str = value.GetString();
+                    if (!string.IsNullOrWhiteSpace(str))
+                    {
+                        return str;
+                    }
+                }
+            }
+            return null;
+        }
+
+        return (PickFirst("extraLarge", "large", "medium"), PickFirst("medium", "large"));
     }
 
     private static ExternalSeriesMetadata? PickBestMatch(IReadOnlyList<ExternalSeriesMetadata> candidates, string requestedSeriesName)

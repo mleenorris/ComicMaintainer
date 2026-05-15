@@ -188,8 +188,12 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
     {
         var query = Uri.EscapeDataString(seriesName);
         var baseUrl = settings.MangaDexBaseUrl.TrimEnd('/');
-        return $"{baseUrl}/manga?title={query}&limit={limit}";
+        // Include the cover_art relationship so we can build a poster URL for
+        // the local series-image cache without a follow-up request.
+        return $"{baseUrl}/manga?title={query}&limit={limit}&includes[]=cover_art";
     }
+
+    private const string MangaDexCdnBase = "https://uploads.mangadex.org";
 
     private static IReadOnlyList<ExternalSeriesMetadata> ParseResults(JsonElement root)
     {
@@ -213,16 +217,84 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
             }
 
             var aliases = ExtractAliases(attributes);
+            var (imageUrl, thumbnailUrl) = ExtractCoverUrls(item);
 
             output.Add(new ExternalSeriesMetadata
             {
                 CanonicalTitle = canonicalTitle,
                 Aliases = aliases,
-                Source = "MangaDex"
+                Source = "MangaDex",
+                ImageUrl = imageUrl,
+                ThumbnailUrl = thumbnailUrl
             });
         }
 
         return output;
+    }
+
+    /// <summary>
+    /// Locates the cover_art relationship in a MangaDex manga record and
+    /// returns the public CDN URL of the cover (and a smaller thumbnail
+    /// variant). Returns (null, null) when no cover relationship is present.
+    /// </summary>
+    private static (string? Image, string? Thumbnail) ExtractCoverUrls(JsonElement item)
+    {
+        if (!item.TryGetProperty("id", out var idProp) || idProp.ValueKind != JsonValueKind.String)
+        {
+            return (null, null);
+        }
+        var mangaId = idProp.GetString();
+        if (string.IsNullOrWhiteSpace(mangaId))
+        {
+            return (null, null);
+        }
+
+        if (!item.TryGetProperty("relationships", out var rels) || rels.ValueKind != JsonValueKind.Array)
+        {
+            return (null, null);
+        }
+
+        foreach (var rel in rels.EnumerateArray())
+        {
+            if (!rel.TryGetProperty("type", out var typeProp)
+                || typeProp.ValueKind != JsonValueKind.String
+                || !string.Equals(typeProp.GetString(), "cover_art", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (!rel.TryGetProperty("attributes", out var coverAttrs)
+                || coverAttrs.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            if (!coverAttrs.TryGetProperty("fileName", out var fileNameProp)
+                || fileNameProp.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+            var fileName = fileNameProp.GetString();
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                continue;
+            }
+            // Defensive: filename is provider-controlled. Use Path.GetFileName
+            // to robustly strip any directory components (covers the
+            // null-byte, encoded-separator, and parent-directory variants
+            // beyond simple Replace), then drop residual leading dots.
+            fileName = Path.GetFileName(fileName)
+                .Replace("..", string.Empty)
+                .TrimStart('.');
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                continue;
+            }
+            var image = $"{MangaDexCdnBase}/covers/{Uri.EscapeDataString(mangaId)}/{Uri.EscapeDataString(fileName)}";
+            // MangaDex supports server-side thumbnails by appending a size token.
+            var thumb = $"{image}.256.jpg";
+            return (image, thumb);
+        }
+
+        return (null, null);
     }
 
     private static ExternalSeriesMetadata? PickBestMatch(IReadOnlyList<ExternalSeriesMetadata> candidates, string requestedSeriesName)

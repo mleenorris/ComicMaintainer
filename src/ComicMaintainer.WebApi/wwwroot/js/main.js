@@ -1585,6 +1585,20 @@
             return apiUrl(`/api/comicreader/page?filePath=${encodeURIComponent(filePath)}&page=1`);
         }
 
+        /**
+         * Resolve a `data-protected-image` token to a fetchable URL. Tokens
+         * that look like API paths (start with "/api/") are passed through to
+         * apiUrl(); anything else is treated as a comic file path and routed
+         * through the comicreader page endpoint.
+         */
+        function resolveProtectedImageUrl(token) {
+            if (!token) return null;
+            if (token.startsWith('/api/')) {
+                return apiUrl(token);
+            }
+            return getSeriesCoverUrl(token);
+        }
+
         async function hydrateProtectedImages(container = document) {
             const images = container.querySelectorAll('[data-protected-image]');
             const imageQueue = Array.from(images);
@@ -1593,37 +1607,46 @@
             for (let index = 0; index < imageQueue.length; index += batchSize) {
                 const batch = imageQueue.slice(index, index + batchSize);
                 await Promise.all(batch.map(async image => {
-                    const filePath = image.dataset.protectedImage;
-                    if (!filePath) {
+                    const primary = image.dataset.protectedImage;
+                    const fallback = image.dataset.protectedImageFallback;
+                    if (!primary) {
                         return;
                     }
 
-                    if (protectedImageUrls.has(filePath)) {
-                        image.src = protectedImageUrls.get(filePath);
-                        return;
-                    }
-
-                    try {
-                        const response = await fetch(getSeriesCoverUrl(filePath), {
-                            headers: getAuthHeaders()
-                        });
-                        if (!response.ok) {
-                            return;
+                    const tryLoad = async (token) => {
+                        if (!token) return false;
+                        if (protectedImageUrls.has(token)) {
+                            image.src = protectedImageUrls.get(token);
+                            return true;
                         }
-
-                        const blob = await response.blob();
-                        const objectUrl = URL.createObjectURL(blob);
-                        if (protectedImageUrls.size >= MAX_PROTECTED_IMAGE_CACHE_ENTRIES) {
-                            const oldestKey = protectedImageUrls.keys().next().value;
-                            if (oldestKey) {
-                                URL.revokeObjectURL(protectedImageUrls.get(oldestKey));
-                                protectedImageUrls.delete(oldestKey);
+                        const url = resolveProtectedImageUrl(token);
+                        if (!url) return false;
+                        try {
+                            const response = await fetch(url, { headers: getAuthHeaders() });
+                            if (!response.ok) return false;
+                            const blob = await response.blob();
+                            const objectUrl = URL.createObjectURL(blob);
+                            if (protectedImageUrls.size >= MAX_PROTECTED_IMAGE_CACHE_ENTRIES) {
+                                const oldestKey = protectedImageUrls.keys().next().value;
+                                if (oldestKey) {
+                                    URL.revokeObjectURL(protectedImageUrls.get(oldestKey));
+                                    protectedImageUrls.delete(oldestKey);
+                                }
                             }
+                            protectedImageUrls.set(token, objectUrl);
+                            image.src = objectUrl;
+                            return true;
+                        } catch (error) {
+                            console.error('Failed to load protected image', error);
+                            return false;
                         }
-                        protectedImageUrls.set(filePath, objectUrl);
-                        image.src = objectUrl;
-                    } catch (error) {
-                        console.error('Failed to load protected image', error);
+                    };
+
+                    // Try the primary (e.g. external series image); on any
+                    // failure fall back to the file-based cover so users
+                    // never see a broken image when one source is unavailable.
+                    if (!(await tryLoad(primary)) && fallback && fallback !== primary) {
+                        await tryLoad(fallback);
                     }
                 }));
             }
@@ -1649,7 +1672,7 @@
                     ${seriesLibrary.map(series => `
                         <button class="series-card" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
                             <div class="series-cover-wrapper">
-                                <img class="series-cover" data-protected-image="${escapeHtml(series.cover_file_path)}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
                                 <div class="series-cover-overlay"></div>
                                 <span class="series-count-badge">${series.issue_count}</span>
                                 ${renderLookupStatusBadge(series)}
@@ -1823,7 +1846,7 @@
                     <div class="series-detail-header">
                         <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">← Back to Series</button>
                         <div class="series-detail-summary">
-                            <img class="series-detail-cover" data-protected-image="${escapeHtml(series.cover_file_path)}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                            <img class="series-detail-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
                             <div class="series-detail-summary-body">
                                 <h2>${escapeHtml(series.title)} ${renderLookupStatusBadge(series)}</h2>
                                 <div class="series-detail-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
@@ -5566,9 +5589,112 @@
                 document.getElementById('manageSeriesCanonical').value = record.is_user_canonical && record.canonical_title ? record.canonical_title : '';
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
+                renderManageSeriesImage(record);
             } catch (err) {
                 console.error('loadManageSeriesRecord failed', err);
                 showMessage('Failed to load series metadata', 'error');
+            }
+        }
+
+        function renderManageSeriesImage(record) {
+            const preview = document.getElementById('manageSeriesImagePreview');
+            const status = document.getElementById('manageSeriesImageStatus');
+            if (!preview || !status) return;
+            // Reset preview before fetching the new one to avoid showing a
+            // stale image when switching series.
+            preview.removeAttribute('src');
+            const key = record && record.series_id;
+            if (record && record.has_image && key) {
+                const isUser = !!record.is_user_image;
+                const downloadedAt = record.image_downloaded_utc ? new Date(record.image_downloaded_utc).toLocaleString() : 'unknown';
+                status.textContent = `${isUser ? 'User-uploaded' : 'Downloaded from provider'} · ${downloadedAt}`;
+                fetchProtectedImageInto(preview, `/api/series-images/${encodeURIComponent(key)}`);
+            } else {
+                status.textContent = 'No image cached. Refresh metadata or upload one below.';
+            }
+        }
+
+        async function fetchProtectedImageInto(imgElement, apiPath) {
+            try {
+                const response = await fetch(apiUrl(apiPath), { headers: getAuthHeaders() });
+                if (!response.ok) return;
+                const blob = await response.blob();
+                imgElement.src = URL.createObjectURL(blob);
+            } catch (err) {
+                console.error('fetchProtectedImageInto failed', err);
+            }
+        }
+
+        async function uploadManageSeriesImage() {
+            const { seriesTitle } = manageSeriesState;
+            if (!seriesTitle) return;
+            const input = document.getElementById('manageSeriesImageInput');
+            const file = input && input.files && input.files[0];
+            if (!file) return;
+            // Allow only image content-types client-side; the server enforces
+            // the same allowlist + magic-byte validation.
+            if (!/^image\/(jpeg|png|webp)$/i.test(file.type)) {
+                showMessage('Only JPEG, PNG, or WEBP images are supported', 'error');
+                input.value = '';
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', file);
+            try {
+                const response = await fetch(apiUrl(`/api/series-images/${encodeURIComponent(seriesTitle)}`), {
+                    method: 'PUT',
+                    headers: getAuthHeaders(),
+                    body: formData
+                });
+                if (!response.ok) {
+                    let msg = 'Failed to upload series image';
+                    try { const j = await response.json(); if (j && j.error) msg = j.error; } catch {}
+                    showMessage(msg, 'error');
+                    return;
+                }
+                const record = await response.json();
+                manageSeriesState.record = record;
+                renderManageSeriesImage(record);
+                showMessage('Series image updated', 'success');
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
+            } catch (err) {
+                console.error('uploadManageSeriesImage failed', err);
+                showMessage('Failed to upload series image', 'error');
+            } finally {
+                input.value = '';
+            }
+        }
+
+        async function clearManageSeriesImage() {
+            const record = manageSeriesState.record;
+            const key = record && record.series_id;
+            if (!key) {
+                showMessage('No image to clear', 'info');
+                return;
+            }
+            try {
+                const response = await fetch(apiUrl(`/api/series-images/${encodeURIComponent(key)}`), {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                if (!response.ok && response.status !== 404) {
+                    showMessage('Failed to clear series image', 'error');
+                    return;
+                }
+                if (response.ok) {
+                    const updated = await response.json();
+                    manageSeriesState.record = updated;
+                    renderManageSeriesImage(updated);
+                }
+                showMessage('Series image cleared', 'success');
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
+            } catch (err) {
+                console.error('clearManageSeriesImage failed', err);
+                showMessage('Failed to clear series image', 'error');
             }
         }
 

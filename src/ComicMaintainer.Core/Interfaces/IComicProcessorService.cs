@@ -78,6 +78,15 @@ public interface IComicProcessorService
     Task<Guid> UpdateMetadataAsync(IEnumerable<string> filePaths, ComicMetadata metadata, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Normalize metadata and then rename multiple comic files as a single batch job.
+    /// For each file, normalization is performed first (so the series name reflects the
+    /// containing folder) and the rename step uses the freshly normalized metadata.
+    /// Both phases force reprocessing so files whose state is already marked complete
+    /// in the database are still updated to match the new folder.
+    /// </summary>
+    Task<Guid> NormalizeAndRenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Get all jobs
     /// </summary>
     IEnumerable<ProcessingJob> GetAllJobs();

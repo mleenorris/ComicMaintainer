@@ -354,9 +354,29 @@ public class SeriesLibraryService : ISeriesLibraryService
         {
             var recordKey = record.NormalizedKey;
             unionFind.Add(recordKey);
-            foreach (var alias in EnumerateAllRecordTitles(record))
+            // Link this record only to its OWN title keys. We deliberately do NOT
+            // follow the alias index back into other records here — that would
+            // transitively merge unrelated series whenever their alias lists
+            // overlap (e.g. a provider returning a long list of "also known as"
+            // titles, or the alias-adopt UI dumping every external-result alias
+            // into the user's record). Cross-record merges should only happen
+            // through the file-side loop, where a file's grouping title points
+            // (via aliasIndex) at a specific record — that's the user-intent
+            // path.
+            foreach (var title in EnumerateAllRecordTitles(record))
             {
-                UnionWithCacheKey(unionFind, recordKey, alias, aliasIndex);
+                if (string.IsNullOrWhiteSpace(title)) continue;
+                var titleKey = NormalizeKey(title);
+                unionFind.Add(titleKey);
+                // Only union when the alias index agrees that this title belongs
+                // to this record. If another record has a stronger claim on the
+                // title (its canonical or user alias), we skip — that other
+                // record's own loop iteration will own the title key.
+                if (aliasIndex.TryGetValue(titleKey, out var ownerKey)
+                    && string.Equals(ownerKey, recordKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    unionFind.Union(recordKey, titleKey);
+                }
             }
         }
 
@@ -588,34 +608,64 @@ public class SeriesLibraryService : ISeriesLibraryService
     }
 
     /// <summary>
-    /// Maps every alias (canonical + provider aliases + user aliases) of every
-    /// cache record to the record's normalized key.
+    /// Maps every alias (canonical + user aliases + provider aliases) of every
+    /// cache record to the record's normalized key. Population is intent-prioritized
+    /// in three passes so a weaker signal cannot overwrite a stronger one:
+    ///   1. Canonical titles (and the record's own normalized key) — strongest claim.
+    ///   2. User-supplied aliases — explicit user intent.
+    ///   3. Provider-supplied aliases — weakest, often noisy/incorrect.
+    /// Within each pass we use TryAdd so the first-seen record wins. This prevents
+    /// e.g. record A's provider alias from hijacking record B's canonical title and
+    /// causing the two unrelated series to be merged downstream.
     /// </summary>
     private static Dictionary<string, string> BuildAliasIndex(IReadOnlyList<SeriesMetadataCacheRecord> records)
     {
         var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        // Pass 1: canonical titles and record keys.
         foreach (var record in records)
         {
-            foreach (var title in EnumerateAllRecordTitles(record))
+            index.TryAdd(record.NormalizedKey, record.NormalizedKey);
+            if (!string.IsNullOrWhiteSpace(record.CanonicalTitle))
             {
-                var key = NormalizeKey(title);
-                // Last writer wins — that's fine because we union-find afterwards.
-                index[key] = record.NormalizedKey;
+                index.TryAdd(NormalizeKey(record.CanonicalTitle), record.NormalizedKey);
             }
-
-            index[record.NormalizedKey] = record.NormalizedKey;
         }
+
+        // Pass 2: user aliases (TryAdd — never overwrite a canonical claim from pass 1).
+        foreach (var record in records)
+        {
+            foreach (var alias in record.UserAliases ?? Enumerable.Empty<string>())
+            {
+                if (string.IsNullOrWhiteSpace(alias)) continue;
+                index.TryAdd(NormalizeKey(alias), record.NormalizedKey);
+            }
+        }
+
+        // Pass 3: provider aliases (TryAdd — weakest signal, must not overwrite anything).
+        foreach (var record in records)
+        {
+            foreach (var alias in record.Aliases ?? Enumerable.Empty<string>())
+            {
+                if (string.IsNullOrWhiteSpace(alias)) continue;
+                index.TryAdd(NormalizeKey(alias), record.NormalizedKey);
+            }
+        }
+
         return index;
     }
 
     private static IEnumerable<string> EnumerateAllRecordTitles(SeriesMetadataCacheRecord record)
     {
+        // Yield canonical first, then user aliases, then provider aliases. Combined
+        // with TryAdd-based BuildAliasIndex, this preserves intent priority anywhere
+        // we iterate titles in declaration order.
         if (!string.IsNullOrWhiteSpace(record.CanonicalTitle)) yield return record.CanonicalTitle;
-        foreach (var alias in record.Aliases ?? Enumerable.Empty<string>())
+        foreach (var alias in record.UserAliases ?? Enumerable.Empty<string>())
         {
             if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
         }
-        foreach (var alias in record.UserAliases ?? Enumerable.Empty<string>())
+        foreach (var alias in record.Aliases ?? Enumerable.Empty<string>())
         {
             if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
         }

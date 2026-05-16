@@ -983,6 +983,91 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task NormalizeFileAsync_UserCanonicalRecord_ShortCircuitsExternalLookup()
+    {
+        var seriesFolder = Path.Combine(_testDirectory, "Batman");
+        Directory.CreateDirectory(seriesFolder);
+
+        var filePath = Path.Combine(seriesFolder, "Chapter 7.cbz");
+        // Existing metadata has a stale series name from a previous folder; the
+        // file lives under a folder named "Batman" which the user has set as
+        // the canonical title via folder-combine.
+        var comicInfoXml = @"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>The Dark Knight</Series>
+    <Number>7</Number>
+    <Title>Chapter 7</Title>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy");
+            }
+        }
+
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+
+        // External lookup would steer us to a different canonical title, but
+        // the user-canonical cache record should win and short-circuit it.
+        _mockExternalSeriesMetadata
+            .Setup(service => service.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Some External Canonical Title",
+                Aliases = new List<string>(),
+                Source = "Test"
+            });
+
+        var mockSeriesMetadataCache = new Mock<ISeriesMetadataCacheService>();
+        mockSeriesMetadataCache.Setup(c => c.NormalizeKey(It.IsAny<string>()))
+            .Returns<string>(s => (s ?? string.Empty).ToLowerInvariant());
+        mockSeriesMetadataCache
+            .Setup(c => c.GetAsync(It.Is<string>(k => k == "batman"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord
+            {
+                NormalizedKey = "batman",
+                CanonicalTitle = "Batman",
+                IsUserCanonical = true,
+                UserAliases = new List<string> { "The Dark Knight" }
+            });
+        mockSeriesMetadataCache
+            .Setup(c => c.GetAsync(It.Is<string>(k => k != "batman"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+
+        // Construct a service with the cache wired in so the user-canonical
+        // path is exercised.
+        using var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            seriesMetadataCache: mockSeriesMetadataCache.Object);
+
+        var result = await service.ProcessFileAsync(filePath);
+        Assert.True(result);
+
+        var updatedMetadata = await service.GetMetadataAsync(filePath);
+        Assert.NotNull(updatedMetadata);
+        Assert.Equal("Batman", updatedMetadata.Series);
+
+        // The external lookup must NOT have been consulted because the user
+        // already declared the canonical title.
+        _mockExternalSeriesMetadata.Verify(
+            service => service.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task RenameFilesAsync_WhenForceReprocessIsTrue_RenamesAlreadyRenamedFile()
     {
         var filePath = CreateTestComicArchive("Force Series", "3");

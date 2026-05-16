@@ -25,6 +25,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     private readonly IFileStoreService _fileStore;
     private readonly IEventBroadcaster? _eventBroadcaster;
     private readonly IExternalSeriesMetadataService? _externalSeriesMetadata;
+    private readonly ISeriesMetadataCacheService? _seriesMetadataCache;
     private readonly IProcessingHistoryService _historyService;
     private readonly ConcurrentDictionary<Guid, ProcessingJob> _jobs = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _jobCancellationTokens = new();
@@ -48,7 +49,8 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         IFileStoreService fileStore,
         IProcessingHistoryService historyService,
         IEventBroadcaster? eventBroadcaster = null,
-        IExternalSeriesMetadataService? externalSeriesMetadata = null)
+        IExternalSeriesMetadataService? externalSeriesMetadata = null,
+        ISeriesMetadataCacheService? seriesMetadataCache = null)
     {
         _settingsMonitor = settings;
         _logger = logger;
@@ -56,6 +58,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         _historyService = historyService;
         _eventBroadcaster = eventBroadcaster;
         _externalSeriesMetadata = externalSeriesMetadata;
+        _seriesMetadataCache = seriesMetadataCache;
         _maxWorkers = Math.Max(1, _settingsMonitor.CurrentValue.MaxWorkers);
         _processingSemaphore = new SemaphoreSlim(_maxWorkers, _maxWorkers);
     }
@@ -1497,6 +1500,19 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        // First pass: if any candidate has a user-canonical cache record, honor it
+        // immediately without falling through to external lookups. This guarantees
+        // that a user's explicit canonical choice (e.g. set via folder-combine)
+        // wins over whatever an external provider returns.
+        foreach (var candidate in candidateSeries)
+        {
+            var userCanonical = await LookupUserCanonicalSeriesAsync(candidate, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(userCanonical))
+            {
+                return userCanonical!.Trim();
+            }
+        }
+
         foreach (var candidate in candidateSeries)
         {
             var externalMetadata = await LookupExternalSeriesMetadataAsync(candidate, cancellationToken);
@@ -1507,6 +1523,36 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
 
         return candidateSeries.FirstOrDefault() ?? UnknownSeries;
+    }
+
+    private async Task<string?> LookupUserCanonicalSeriesAsync(string seriesName, CancellationToken cancellationToken)
+    {
+        if (_seriesMetadataCache is null || string.IsNullOrWhiteSpace(seriesName))
+        {
+            return null;
+        }
+
+        try
+        {
+            var key = _seriesMetadataCache.NormalizeKey(seriesName);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return null;
+            }
+
+            var record = await _seriesMetadataCache.GetAsync(key, cancellationToken);
+            if (record is { IsUserCanonical: true } && !string.IsNullOrWhiteSpace(record.CanonicalTitle))
+            {
+                return record.CanonicalTitle;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to consult series metadata cache for user-canonical title {SeriesName}",
+                LoggingHelper.SanitizeForLog(seriesName));
+        }
+
+        return null;
     }
 
     private async Task<ExternalSeriesMetadata?> LookupExternalSeriesMetadataAsync(string seriesName, CancellationToken cancellationToken)

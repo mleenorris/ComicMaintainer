@@ -25,6 +25,8 @@ public interface ISeriesLibraryService
         int perPage = 100,
         string? sort = "name",
         string? direction = "asc",
+        int? offset = null,
+        int? limit = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

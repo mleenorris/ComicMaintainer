@@ -117,4 +117,18 @@ public interface IFileStoreService
     /// Remove stale entries from database where files no longer exist on disk
     /// </summary>
     Task<int> CleanupStaleEntriesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns aggregate folder summaries (one entry per directory) used by the
+    /// incremental library view. Folders are sorted and paged using
+    /// offset/limit semantics.
+    /// </summary>
+    Task<FolderSummariesResult> GetFolderSummariesAsync(
+        string? filter = null,
+        string? search = null,
+        string? sort = "name",
+        string? direction = "asc",
+        int offset = 0,
+        int limit = 100,
+        CancellationToken cancellationToken = default);
 }

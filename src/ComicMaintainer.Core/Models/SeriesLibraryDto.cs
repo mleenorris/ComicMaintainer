@@ -158,6 +158,7 @@ public class SeriesSummaryResult
     public int Page { get; set; }
     public int TotalPages { get; set; }
     public int TotalSeries { get; set; }
+    public int Offset { get; set; }
 }
 
 public class SeriesIssuesResult

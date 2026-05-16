@@ -215,7 +215,7 @@
         let currentEditFile = null;
         let collapsedDirectories = new Set();
         let searchQuery = '';
-        let allFoldersExpanded = true;
+        let allFoldersExpanded = false;
         let currentPage = 1;
         let totalPages = 1;
         let totalFiles = 0;
@@ -224,6 +224,18 @@
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
         let libraryViewMode = 'files';
         let seriesLibrary = [];
+        // Incremental library view state
+        const FOLDER_PAGE_SIZE = 100;
+        const SERIES_PAGE_SIZE = 60;
+        let folderList = [];
+        let folderTotal = 0;
+        let folderOffset = 0;
+        let folderLoading = false;
+        const folderFiles = new Map(); // path -> { status: 'loading'|'loaded'|'error', files: [] }
+        let seriesOffset = 0;
+        let seriesTotal = 0;
+        let seriesLoading = false;
+        let scrollObserver = null;
         let currentSeriesDetailId = null;
         const seriesIssuesCache = new Map();        // seriesId -> { issues: [], total: n }
         const metadataRefreshJobs = new Map();     // jobId -> { seriesIds, label }
@@ -499,8 +511,14 @@
                 addProgressDetail(data.filename, data.success, data.error);
             }
             
-            // Refresh file list to show updated status
-            loadActiveLibraryView(currentPage, false);
+            // Invalidate just the affected folder cache so the next render/expand
+            // shows fresh state. Aggregate summaries are refreshed via the
+            // debounced file_list_updated handler.
+            if (libraryViewMode !== 'series' && data && data.filename) {
+                invalidateFolderForFile(data.filename);
+            } else if (libraryViewMode === 'series') {
+                loadActiveLibraryView(1, false);
+            }
             scheduleLibraryHealthRefresh();
         }
         
@@ -516,7 +534,7 @@
             }
             fileListRefreshTimer = setTimeout(() => {
                 fileListRefreshTimer = null;
-                loadActiveLibraryView(currentPage, false);
+                loadActiveLibraryView(1, false);
             }, FILE_LIST_REFRESH_DEBOUNCE_DELAY);
 
             scheduleLibraryHealthRefresh();
@@ -559,7 +577,7 @@
                         currentJobTitle = null;
                         // Clear selected files and refresh the file list
                         selectedFiles.clear();
-                        await loadActiveLibraryView(currentPage, true);
+                        await loadActiveLibraryView(1, true);
                         // Close modal after refresh completes
                         setTimeout(closeProgressModal, 1000);
                     } else if (status === 'failed') {
@@ -1198,12 +1216,12 @@
             }
         });
         
-        async function loadActiveLibraryView(page = 1, refresh = false) {
+        async function loadActiveLibraryView(_page = 1, refresh = false) {
             if (libraryViewMode === 'series') {
-                return loadSeriesLibrary(page, refresh);
+                return loadSeriesLibrary({ refresh });
             }
 
-            return loadFiles(page, refresh);
+            return loadFolders({ refresh });
         }
 
         function updateLibraryViewButtons() {
@@ -1246,12 +1264,30 @@
             return confirm(`${actionDescription}\n\nClick OK to include files already marked as ${statusDescription}, or Cancel to skip them.`);
         }
 
-        async function loadSeriesLibrary(page = 1, refresh = false) {
+        async function loadSeriesLibrary(opts) {
+            // Backwards-compat: callers used to pass (page, refresh) numerically.
+            let append = false;
+            let refresh = false;
+            if (typeof opts === 'object' && opts !== null) {
+                append = !!opts.append;
+                refresh = !!opts.refresh;
+            } else if (typeof opts === 'boolean') {
+                refresh = opts;
+            }
+
+            if (seriesLoading) return;
+
+            if (refresh || !append) {
+                seriesLibrary = [];
+                seriesOffset = 0;
+                seriesTotal = 0;
+            }
+
             // Render an immediate loading state into the file list so that
             // switching to the series view always gives the user feedback,
             // even if the underlying API call is slow on large libraries.
             const fileListEl = document.getElementById('fileList');
-            if (fileListEl && !currentSeriesDetailId) {
+            if (!append && fileListEl && !currentSeriesDetailId) {
                 fileListEl.innerHTML = `
                     <div class="loading">
                         <div class="spinner"></div>
@@ -1260,8 +1296,9 @@
                 `;
             }
 
+            seriesLoading = true;
             try {
-                let url = apiUrl(`/api/files/series?page=${page}&per_page=${perPage}`);
+                let url = apiUrl(`/api/files/series?offset=${seriesOffset}&limit=${SERIES_PAGE_SIZE}`);
                 if (refresh) {
                     url += '&refresh=true';
                 }
@@ -1287,10 +1324,11 @@
                 }
 
                 const data = await response.json();
-                seriesLibrary = data.series || [];
-                currentPage = data.page;
-                totalPages = data.total_pages;
-                totalFiles = data.total_series || 0;
+                const newSeries = data.series || [];
+                seriesLibrary = seriesLibrary.concat(newSeries);
+                seriesOffset += newSeries.length;
+                seriesTotal = data.total_series || 0;
+                totalFiles = seriesTotal;
                 unmarkedCount = data.unmarked_count || 0;
 
                 if (currentSeriesDetailId) {
@@ -1299,21 +1337,51 @@
                     renderSeriesLibrary();
                 }
 
-                updatePagination();
                 updateButtonVisibility();
                 updateLibraryViewLayout();
+                ensureScrollObserver();
 
                 if (refresh) {
                     loadLibraryHealth();
                 }
             } catch (error) {
                 showMessage('Failed to load series: ' + error.message, 'error');
+            } finally {
+                seriesLoading = false;
             }
         }
 
-        async function loadFiles(page = 1, refresh = false) {
+        async function loadFolders(opts) {
+            let append = false;
+            let refresh = false;
+            if (typeof opts === 'object' && opts !== null) {
+                append = !!opts.append;
+                refresh = !!opts.refresh;
+            } else if (typeof opts === 'boolean') {
+                refresh = opts;
+            }
+
+            if (folderLoading) return;
+
+            // For non-append calls, reset the folder summary list (we re-fetch
+            // from offset 0). When the call is an explicit refresh, also clear
+            // per-folder file caches and collapsed state so the user sees fresh
+            // data. Otherwise, preserve cached folder file lists / expanded
+            // state so per-file SSE events don't wipe the user's session.
+            if (!append) {
+                folderList = [];
+                folderOffset = 0;
+                folderTotal = 0;
+                if (refresh) {
+                    folderFiles.clear();
+                    collapsedDirectories.clear();
+                    allFoldersExpanded = false;
+                }
+            }
+
+            folderLoading = true;
             try {
-                let url = apiUrl(`/api/files?page=${page}&per_page=${perPage}`);
+                let url = apiUrl(`/api/files/folders?offset=${folderOffset}&limit=${FOLDER_PAGE_SIZE}`);
                 if (refresh) {
                     url += '&refresh=true';
                 }
@@ -1329,7 +1397,7 @@
                 if (sortDirection !== 'asc') {
                     url += `&direction=${encodeURIComponent(sortDirection)}`;
                 }
-                
+
                 const response = await fetch(url, {
                     headers: getAuthHeaders()
                 });
@@ -1338,58 +1406,46 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const data = await response.json();
-                
-                files = data.files;
-                currentPage = data.page;
-                totalPages = data.total_pages;
-                totalFiles = data.total_files;
+
+                const newFolders = data.folders || [];
+                folderList = folderList.concat(newFolders);
+                folderOffset += newFolders.length;
+                folderTotal = data.total_folders || 0;
+                totalFiles = folderTotal;
                 unmarkedCount = data.unmarked_count || 0;
-                
+
+                // Newly arrived folders should be collapsed by default, but
+                // preserve the user's explicit state for folders we've already
+                // expanded in this session.
+                for (const f of newFolders) {
+                    if (f && typeof f.path === 'string') {
+                        if (!folderFiles.has(f.path)) {
+                            collapsedDirectories.add(f.path);
+                        }
+                    }
+                }
+
                 renderFileList();
-                updatePagination();
                 updateButtonVisibility();
+                ensureScrollObserver();
                 if (refresh) {
                     loadLibraryHealth();
                 }
             } catch (error) {
                 showMessage('Failed to load files: ' + error.message, 'error');
+            } finally {
+                folderLoading = false;
             }
         }
-        
-        function updatePagination() {
-            const paginationDiv = document.getElementById('pagination');
-            const pageInfo = document.getElementById('pageInfo');
-            const prevBtn = document.getElementById('prevBtn');
-            const nextBtn = document.getElementById('nextBtn');
 
-            if (libraryViewMode === 'series' && currentSeriesDetailId) {
-                paginationDiv.style.display = 'none';
-                return;
-            }
-            
-            if (totalPages > 1 || totalFiles > 0) {
-                paginationDiv.style.display = 'flex';
-                const itemLabel = libraryViewMode === 'series' ? 'series' : 'file';
-                let pageText = `Page ${currentPage} of ${totalPages} (${totalFiles} ${itemLabel}${totalFiles !== 1 ? 's' : ''}`;
-                if (searchQuery || filterMode !== 'all') {
-                    pageText += ' matching';
-                }
-                pageText += ')';
-                pageInfo.textContent = pageText;
-                
-                // Hide Previous and Next buttons when "All" option is selected
-                if (perPage === -1) {
-                    prevBtn.style.display = 'none';
-                    nextBtn.style.display = 'none';
-                } else {
-                    prevBtn.style.display = '';
-                    nextBtn.style.display = '';
-                    prevBtn.disabled = currentPage <= 1;
-                    nextBtn.disabled = currentPage >= totalPages;
-                }
-            } else {
-                paginationDiv.style.display = 'none';
-            }
+        // Backward-compatible shim so legacy callers still work.
+        async function loadFiles(_page = 1, refresh = false) {
+            return loadFolders({ refresh });
+        }
+
+        function updatePagination() {
+            // Pagination has been replaced with infinite scroll; this is a no-op
+            // kept so any leftover callers (or browser extensions) don't error.
         }
         
         function updateButtonVisibility() {
@@ -1412,27 +1468,11 @@
         }
         
         async function changePerPage() {
-            const perPageSelect = document.getElementById('perPageSelect');
-            perPage = parseInt(perPageSelect.value);
-            
-            // Save to server
-            await setPreferences({ perPage: perPage });
-            
-            // Reload files from page 1 with new per-page value
-            loadActiveLibraryView(1);
+            // Per-page selector has been removed in favor of infinite scroll.
         }
         
-        function nextPage() {
-            if (currentPage < totalPages) {
-                loadActiveLibraryView(currentPage + 1);
-            }
-        }
-        
-        function previousPage() {
-            if (currentPage > 1) {
-                loadActiveLibraryView(currentPage - 1);
-            }
-        }
+        function nextPage() { /* deprecated: infinite scroll */ }
+        function previousPage() { /* deprecated: infinite scroll */ }
         
         function filterFiles() {
             searchQuery = document.getElementById('headerSearchInput').value;
@@ -1893,21 +1933,143 @@
             hydrateProtectedImages(fileList);
         }
         
+        function renderFileRow(file, dir) {
+            const isSelected = selectedFiles.has(file.relative_path);
+            const fileSize = formatFileSize(file.size);
+            const modifiedDate = formatModifiedDate(file.modified);
+
+            let readIcon = '';
+            let readTitle = '';
+            if (file.read) {
+                readIcon = '👁️';
+                readTitle = 'Read';
+            }
+
+            let statusIcon = '';
+            let statusTitle = '';
+            let statusClass = '';
+
+            if (file.duplicate) {
+                statusIcon = '🔁';
+                statusTitle = 'Duplicate';
+                statusClass = 'status-duplicate';
+            } else if (file.renamed && file.normalized) {
+                statusIcon = '✅';
+                statusTitle = 'Processed (Renamed & Normalized)';
+                statusClass = 'status-marked';
+            } else if (file.renamed && !file.normalized) {
+                statusIcon = '🔵';
+                statusTitle = 'Renamed';
+                statusClass = 'status-renamed';
+            } else if (file.normalized && !file.renamed) {
+                statusIcon = '🔴';
+                statusTitle = 'Normalized';
+                statusClass = 'status-normalized';
+            } else {
+                statusIcon = '⚠️';
+                statusTitle = 'Unmarked';
+                statusClass = 'status-unmarked';
+            }
+
+            const filenameParts = truncateFilenameMiddle(file.name);
+            const filenameHtml = filenameParts.end
+                ? `<span class="file-name-start">${escapeHtml(filenameParts.start)}</span><span class="file-name-end">${escapeHtml(filenameParts.end)}</span>`
+                : `<span class="file-name-content">${escapeHtml(filenameParts.start)}</span>`;
+
+            return `
+                <div class="file-item ${statusClass}">
+                    <input type="checkbox"
+                           ${isSelected ? 'checked' : ''}
+                           onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
+                    <div class="status-badge" title="${statusTitle}">
+                        <span>${statusIcon}</span>
+                    </div>
+                    <div>
+                        <div class="file-name" title="${escapeHtml(file.name)}">
+                            ${readIcon ? `<span class="read-indicator" title="${readTitle}">${readIcon}</span> ` : ''}${filenameHtml}
+                        </div>
+                        ${!dir ? `<div class="file-path">${escapeHtml(file.relative_path)}</div>` : ''}
+                    </div>
+                    <div>${fileSize}</div>
+                    <div style="color: var(--text-muted); font-size: 13px;">${modifiedDate}</div>
+                    <div class="file-actions">
+                        <div class="file-actions-dropdown">
+                            <button class="dropdown-toggle" onclick="toggleDropdown(event, '${escapeJs(file.relative_path)}')">
+                                Actions
+                            </button>
+                            <div class="dropdown-menu" id="${getDropdownId(file.relative_path)}">
+                                <button class="dropdown-item" onclick="showFileInfo('${escapeJs(file.relative_path)}', '${escapeJs(file.name)}'); closeAllDropdowns();">
+                                    ℹ️ Info
+                                </button>
+                                <button class="dropdown-item" onclick="viewTags('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                    👁️ View/Edit
+                                </button>
+                                <button class="dropdown-item" onclick="readComic('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                    📖 Read Comic
+                                </button>
+                                ${file.duplicate
+                                    ? `<button class="dropdown-item" onclick="openDuplicateReviewModal('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                        🔁 Review Duplicate
+                                    </button>`
+                                    : ''
+                                }
+                                <div class="dropdown-divider"></div>
+                                ${file.read
+                                    ? `<button class="dropdown-item" onclick="markFileUnread('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                        📚 Mark Unread
+                                    </button>`
+                                    : `<button class="dropdown-item" onclick="markFileRead('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                        ✅ Mark Read
+                                    </button>`
+                                }
+                                <div class="dropdown-divider"></div>
+                                <button class="dropdown-item" onclick="processSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                    🚀 Process
+                                </button>
+                                <button class="dropdown-item" onclick="renameSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                    📝 Rename
+                                </button>
+                                <button class="dropdown-item" onclick="normalizeSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                    ✨ Normalize
+                                </button>
+                                <div class="dropdown-divider"></div>
+                                <button class="dropdown-item" onclick="deleteSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                    🗑️ Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
         function renderFileList() {
             const fileList = document.getElementById('fileList');
-            
-            // Clean up selectedFiles to remove files that no longer exist
-            // This must happen before the early return for empty file lists
-            const currentFilePaths = new Set(files.map(f => f.relative_path));
-            for (const filepath of selectedFiles) {
-                if (!currentFilePaths.has(filepath)) {
+
+            // Prune selections for files in *loaded* folders; leave selections in
+            // unloaded folders alone so the user doesn't lose them.
+            const loadedFiles = getAllLoadedFiles();
+            const loadedFolderPaths = new Set();
+            for (const [k, v] of folderFiles) {
+                if (v && v.status === 'loaded') loadedFolderPaths.add(k);
+            }
+            const currentFilePaths = new Set(loadedFiles.map(f => f.relative_path));
+            for (const filepath of Array.from(selectedFiles)) {
+                const dir = getFolderForRelativePath(filepath);
+                if (loadedFolderPaths.has(dir) && !currentFilePaths.has(filepath)) {
                     selectedFiles.delete(filepath);
                 }
             }
-            
-            if (files.length === 0) {
-                // Check if we have search/filter active to show appropriate message
-                if (searchQuery || filterMode !== 'all') {
+
+            if (folderList.length === 0) {
+                if (folderLoading) {
+                    fileList.innerHTML = `
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading files...</p>
+                        </div>
+                    `;
+                } else if (searchQuery || filterMode !== 'all') {
                     fileList.innerHTML = `
                         <div class="empty-state">
                             <div class="empty-state-icon">🔍</div>
@@ -1924,36 +2086,15 @@
                         </div>
                     `;
                 }
-                // Update UI state after clearing selections
                 updateSelectInfo();
                 updateSelectAllCheckbox();
+                ensureScrollObserver();
                 return;
             }
-            
-            // Group files by directory (filtering is now done on backend)
-            const filesByDirectory = {};
-            files.forEach(file => {
-                // Skip files with missing relative_path (should not happen with proper API response)
-                if (!file.relative_path) {
-                    console.error('File object missing relative_path:', file);
-                    return;
-                }
-                
-                const dirPath = file.relative_path.includes('/') || file.relative_path.includes('\\') 
-                    ? file.relative_path.substring(0, file.relative_path.lastIndexOf(file.relative_path.includes('/') ? '/' : '\\'))
-                    : '';
-                if (!filesByDirectory[dirPath]) {
-                    filesByDirectory[dirPath] = [];
-                }
-                filesByDirectory[dirPath].push(file);
-            });
-            
-            // Sort directories
-            const sortedDirs = Object.keys(filesByDirectory).sort();
-            
+
             let html = `
                 <div class="file-list-header">
-                    <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)">
+                    <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)" title="Select all loaded files">
                     <button class="toggle-all-btn" onclick="toggleAllFolders()" id="toggleAllBtn" title="Expand/Collapse All">
                         ${allFoldersExpanded ? '▼' : '▶'}
                     </button>
@@ -1963,20 +2104,21 @@
                     <div>Actions</div>
                 </div>
             `;
-            
-            // Render files grouped by directory
-            sortedDirs.forEach(dir => {
+
+            folderList.forEach(folder => {
+                const dir = folder.path || '';
                 const isCollapsed = collapsedDirectories.has(dir);
-                const fileCount = filesByDirectory[dir].length;
-                
+                const entry = folderFiles.get(dir);
+                const loadedFiles = (entry && entry.status === 'loaded') ? entry.files : [];
+
                 if (dir) {
-                    const allSelected = filesByDirectory[dir].every(file => selectedFiles.has(file.relative_path));
-                    const someSelected = filesByDirectory[dir].some(file => selectedFiles.has(file.relative_path));
+                    const allSelected = loadedFiles.length > 0 && loadedFiles.every(f => selectedFiles.has(f.relative_path));
+                    const someSelected = loadedFiles.some(f => selectedFiles.has(f.relative_path));
                     html += `
                         <div class="directory-header">
-                            <input type="checkbox" 
+                            <input type="checkbox"
                                    class="directory-checkbox"
-                                   ${allSelected ? 'checked' : ''} 
+                                   ${allSelected ? 'checked' : ''}
                                    ${someSelected && !allSelected ? 'style="opacity: 0.5"' : ''}
                                    onchange="toggleDirectorySelection('${escapeJs(dir)}', this.checked)"
                                    onclick="event.stopPropagation()">
@@ -1987,143 +2129,46 @@
                                 <span class="directory-icon">📁</span>
                                 <span class="directory-path">${escapeHtml(dir)}</span>
                             </div>
-                            <span class="directory-file-count">${fileCount} file${fileCount !== 1 ? 's' : ''}</span>
-                            <!-- Empty spans fill grid columns 5-6 to maintain 6-column alignment with file-list-header -->
-                            <!-- These are hidden in responsive views via CSS -->
+                            <span class="directory-file-count">${folder.file_count} file${folder.file_count !== 1 ? 's' : ''}</span>
                             <span></span>
                             <span></span>
                         </div>
                     `;
                 }
-                
+
                 html += `<div class="directory-content ${isCollapsed ? 'collapsed' : ''}" data-dir="${escapeHtml(dir)}">`;
-                
-                filesByDirectory[dir].forEach(file => {
-                    const isSelected = selectedFiles.has(file.relative_path);
-                    const fileSize = formatFileSize(file.size);
-                    const modifiedDate = formatModifiedDate(file.modified);
-                    
-                    // Determine read status indicator
-                    let readIcon = '';
-                    let readTitle = '';
-                    if (file.read) {
-                        readIcon = '👁️';
-                        readTitle = 'Read';
+
+                if (!isCollapsed) {
+                    if (entry && entry.status === 'loaded') {
+                        loadedFiles.forEach(file => {
+                            html += renderFileRow(file, dir);
+                        });
+                    } else if (entry && entry.status === 'loading') {
+                        html += `
+                            <div class="folder-loading">
+                                <div class="spinner"></div>
+                                <span>Loading files...</span>
+                            </div>
+                        `;
+                    } else if (entry && entry.status === 'error') {
+                        html += `
+                            <div class="folder-error">
+                                Failed to load files in this folder.
+                                <button class="btn btn-small" onclick="ensureFolderLoaded('${escapeJs(dir)}', true)">Retry</button>
+                            </div>
+                        `;
                     }
-                    
-                    // Determine status icon and class based on processing state
-                    // Priority: duplicate > fully processed (both) > renamed only > normalized only > unmarked
-                    let statusIcon = '';
-                    let statusTitle = '';
-                    let statusClass = '';
-                    
-                    if (file.duplicate) {
-                        statusIcon = '🔁';
-                        statusTitle = 'Duplicate';
-                        statusClass = 'status-duplicate';
-                    } else if (file.renamed && file.normalized) {
-                        // Both renamed AND normalized = processed
-                        statusIcon = '✅';
-                        statusTitle = 'Processed (Renamed & Normalized)';
-                        statusClass = 'status-marked';
-                    } else if (file.renamed && !file.normalized) {
-                        // Renamed only
-                        statusIcon = '🔵';
-                        statusTitle = 'Renamed';
-                        statusClass = 'status-renamed';
-                    } else if (file.normalized && !file.renamed) {
-                        // Normalized only
-                        statusIcon = '🔴';
-                        statusTitle = 'Normalized';
-                        statusClass = 'status-normalized';
-                    } else {
-                        // Neither renamed nor normalized = unmarked
-                        statusIcon = '⚠️';
-                        statusTitle = 'Unmarked';
-                        statusClass = 'status-unmarked';
-                    }
-                    
-                    // Split filename for middle truncation
-                    const filenameParts = truncateFilenameMiddle(file.name);
-                    const filenameHtml = filenameParts.end 
-                        ? `<span class="file-name-start">${escapeHtml(filenameParts.start)}</span><span class="file-name-end">${escapeHtml(filenameParts.end)}</span>`
-                        : `<span class="file-name-content">${escapeHtml(filenameParts.start)}</span>`;
-                    
-                    html += `
-                        <div class="file-item ${statusClass}">
-                            <input type="checkbox" 
-                                   ${isSelected ? 'checked' : ''} 
-                                   onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
-                            <div class="status-badge" title="${statusTitle}">
-                                <span>${statusIcon}</span>
-                            </div>
-                            <div>
-                                <div class="file-name" title="${escapeHtml(file.name)}">
-                                    ${readIcon ? `<span class="read-indicator" title="${readTitle}">${readIcon}</span> ` : ''}${filenameHtml}
-                                </div>
-                                ${!dir ? `<div class="file-path">${escapeHtml(file.relative_path)}</div>` : ''}
-                            </div>
-                            <div>${fileSize}</div>
-                            <div style="color: var(--text-muted); font-size: 13px;">${modifiedDate}</div>
-                            <div class="file-actions">
-                                <div class="file-actions-dropdown">
-                                    <button class="dropdown-toggle" onclick="toggleDropdown(event, '${escapeJs(file.relative_path)}')">
-                                        Actions
-                                    </button>
-                                    <div class="dropdown-menu" id="${getDropdownId(file.relative_path)}">
-                                        <button class="dropdown-item" onclick="showFileInfo('${escapeJs(file.relative_path)}', '${escapeJs(file.name)}'); closeAllDropdowns();">
-                                            ℹ️ Info
-                                        </button>
-                                        <button class="dropdown-item" onclick="viewTags('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                            👁️ View/Edit
-                                        </button>
-                                        <button class="dropdown-item" onclick="readComic('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                            📖 Read Comic
-                                        </button>
-                                        ${file.duplicate
-                                            ? `<button class="dropdown-item" onclick="openDuplicateReviewModal('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                                🔁 Review Duplicate
-                                            </button>`
-                                            : ''
-                                        }
-                                        <div class="dropdown-divider"></div>
-                                        ${file.read 
-                                            ? `<button class="dropdown-item" onclick="markFileUnread('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                                📚 Mark Unread
-                                            </button>`
-                                            : `<button class="dropdown-item" onclick="markFileRead('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                                ✅ Mark Read
-                                            </button>`
-                                        }
-                                        <div class="dropdown-divider"></div>
-                                        <button class="dropdown-item" onclick="processSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                            🚀 Process
-                                        </button>
-                                        <button class="dropdown-item" onclick="renameSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                            📝 Rename
-                                        </button>
-                                        <button class="dropdown-item" onclick="normalizeSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                            ✨ Normalize
-                                        </button>
-                                        <div class="dropdown-divider"></div>
-                                        <button class="dropdown-item" onclick="deleteSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                            🗑️ Delete
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                });
-                
+                }
+
                 html += `</div>`;
             });
-            
+
             fileList.innerHTML = html;
-            
+
             updateSelectInfo();
             updateSelectAllCheckbox();
             updateToggleAllButton();
+            ensureScrollObserver();
         }
         
         function formatFileSize(bytes) {
@@ -2180,6 +2225,106 @@
                        .replace(/\r/g, '\\r')
                        .replace(/\t/g, '\\t');
         }
+
+        // Encode a folder path for use in URLs (URL-safe base64, matching the
+        // server-side DecodeBase64UrlSafe helper).
+        function encodeFolderPath(p) {
+            try {
+                const b64 = btoa(unescape(encodeURIComponent(p || '')));
+                return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            } catch (e) {
+                return '';
+            }
+        }
+
+        function getAllLoadedFiles() {
+            const out = [];
+            for (const [, v] of folderFiles) {
+                if (v && v.status === 'loaded' && Array.isArray(v.files)) {
+                    out.push(...v.files);
+                }
+            }
+            return out;
+        }
+
+        function getFolderForRelativePath(relativePath) {
+            if (!relativePath) return '';
+            const idx = Math.max(relativePath.lastIndexOf('/'), relativePath.lastIndexOf('\\'));
+            return idx >= 0 ? relativePath.substring(0, idx) : '';
+        }
+
+        function invalidateFolderForFile(relativePath) {
+            const dir = getFolderForRelativePath(relativePath);
+            const entry = folderFiles.get(dir);
+            if (!entry) return;
+            const wasExpanded = !collapsedDirectories.has(dir) && entry.status === 'loaded';
+            folderFiles.delete(dir);
+            if (wasExpanded) {
+                ensureFolderLoaded(dir, true).catch(() => {});
+            }
+        }
+
+        async function ensureFolderLoaded(dir, force = false) {
+            const existing = folderFiles.get(dir);
+            if (!force && existing && existing.status === 'loaded') return;
+            if (existing && existing.status === 'loading') return existing.promise;
+
+            const encoded = encodeFolderPath(dir);
+            let url = apiUrl(`/api/files/folders/${encoded}/files`);
+            const params = [];
+            if (searchQuery) params.push(`search=${encodeURIComponent(searchQuery)}`);
+            if (filterMode !== 'all') params.push(`filter=${encodeURIComponent(filterMode)}`);
+            if (sortMode !== 'name') params.push(`sort=${encodeURIComponent(sortMode)}`);
+            if (sortDirection !== 'asc') params.push(`direction=${encodeURIComponent(sortDirection)}`);
+            if (params.length) url += '?' + params.join('&');
+
+            const fetchPromise = (async () => {
+                try {
+                    const response = await fetch(url, { headers: getAuthHeaders() });
+                    if (handleAuthError(response)) {
+                        folderFiles.set(dir, { status: 'error', files: [] });
+                        return;
+                    }
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const data = await response.json();
+                    folderFiles.set(dir, { status: 'loaded', files: data.files || [] });
+                } catch (err) {
+                    folderFiles.set(dir, { status: 'error', files: [] });
+                } finally {
+                    renderFileList();
+                }
+            })();
+
+            folderFiles.set(dir, { status: 'loading', files: [], promise: fetchPromise });
+            renderFileList();
+            return fetchPromise;
+        }
+
+        function ensureScrollObserver() {
+            if (scrollObserver) {
+                try { scrollObserver.disconnect(); } catch (e) { /* ignore */ }
+            }
+            const sentinel = document.getElementById('libraryScrollSentinel');
+            if (!sentinel) return;
+            scrollObserver = new IntersectionObserver((entries) => {
+                for (const e of entries) {
+                    if (!e.isIntersecting) continue;
+                    if (libraryViewMode === 'series') {
+                        if (!seriesLoading && seriesOffset < seriesTotal) {
+                            loadSeriesLibrary({ append: true });
+                        }
+                    } else {
+                        if (!folderLoading && folderOffset < folderTotal) {
+                            loadFolders({ append: true });
+                        }
+                    }
+                }
+            }, { rootMargin: '400px' });
+            scrollObserver.observe(sentinel);
+        }
+
 
         // Extract just the filename portion from a relative or absolute path.
         function extractDisplayName(filepath) {
@@ -2246,9 +2391,11 @@
         }
         
         function toggleSelectAll(checked) {
-            selectedFiles.clear();
+            const allLoaded = getAllLoadedFiles();
             if (checked) {
-                files.forEach(file => selectedFiles.add(file.relative_path));
+                allLoaded.forEach(file => selectedFiles.add(file.relative_path));
+            } else {
+                allLoaded.forEach(file => selectedFiles.delete(file.relative_path));
             }
             renderFileList();
         }
@@ -2298,93 +2445,99 @@
         function updateSelectAllCheckbox() {
             const selectAllCheckbox = document.getElementById('selectAll');
             if (!selectAllCheckbox) return;
-            
-            if (files.length === 0) {
+
+            const allLoaded = getAllLoadedFiles();
+            if (allLoaded.length === 0) {
                 selectAllCheckbox.checked = false;
                 selectAllCheckbox.indeterminate = false;
             } else {
-                const allSelected = files.every(file => selectedFiles.has(file.relative_path));
-                const someSelected = files.some(file => selectedFiles.has(file.relative_path));
-                
+                const allSelected = allLoaded.every(file => selectedFiles.has(file.relative_path));
+                const someSelected = allLoaded.some(file => selectedFiles.has(file.relative_path));
+
                 selectAllCheckbox.checked = allSelected;
                 selectAllCheckbox.indeterminate = someSelected && !allSelected;
             }
         }
-        
-        function toggleDirectory(dir) {
-            if (collapsedDirectories.has(dir)) {
+
+        async function toggleDirectory(dir) {
+            const wasCollapsed = collapsedDirectories.has(dir);
+            if (wasCollapsed) {
                 collapsedDirectories.delete(dir);
+                renderFileList();
+                await ensureFolderLoaded(dir);
             } else {
                 collapsedDirectories.add(dir);
+                renderFileList();
             }
             updateToggleAllButton();
-            renderFileList();
         }
-        
-        function toggleAllFolders() {
+
+        async function toggleAllFolders() {
             if (allFoldersExpanded) {
                 collapseAllFolders();
             } else {
-                expandAllFolders();
+                await expandAllFolders();
             }
         }
-        
-        function expandAllFolders() {
+
+        async function expandAllFolders() {
             collapsedDirectories.clear();
             allFoldersExpanded = true;
-            updateToggleAllButton();
             renderFileList();
+
+            // Concurrency-limited loader for unloaded folders.
+            const concurrency = 4;
+            const queue = folderList
+                .map(f => f.path || '')
+                .filter(dir => {
+                    const e = folderFiles.get(dir);
+                    return !e || e.status === 'error';
+                });
+            let active = 0;
+            let index = 0;
+            await new Promise(resolve => {
+                const launch = () => {
+                    while (active < concurrency && index < queue.length) {
+                        const dir = queue[index++];
+                        active++;
+                        ensureFolderLoaded(dir).catch(() => {}).finally(() => {
+                            active--;
+                            if (index >= queue.length && active === 0) {
+                                resolve();
+                            } else {
+                                launch();
+                            }
+                        });
+                    }
+                    if (queue.length === 0) resolve();
+                };
+                launch();
+            });
+            updateToggleAllButton();
         }
-        
+
         function collapseAllFolders() {
-            // Get all directories from files
-            const allDirs = new Set();
-            files.forEach(file => {
-                const dirPath = file.relative_path.includes('/') || file.relative_path.includes('\\') 
-                    ? file.relative_path.substring(0, file.relative_path.lastIndexOf(file.relative_path.includes('/') ? '/' : '\\'))
-                    : '';
-                if (dirPath) {
-                    allDirs.add(dirPath);
-                }
-            });
-            
-            // Collapse all directories
-            collapsedDirectories = new Set(allDirs);
+            collapsedDirectories = new Set(folderList.map(f => f.path || ''));
             allFoldersExpanded = false;
-            updateToggleAllButton();
             renderFileList();
         }
-        
+
         function updateToggleAllButton() {
-            // Count total directories
-            const allDirs = new Set();
-            files.forEach(file => {
-                const dirPath = file.relative_path.includes('/') || file.relative_path.includes('\\') 
-                    ? file.relative_path.substring(0, file.relative_path.lastIndexOf(file.relative_path.includes('/') ? '/' : '\\'))
-                    : '';
-                if (dirPath) {
-                    allDirs.add(dirPath);
-                }
-            });
-            
-            // Update state based on collapsed directories
-            if (collapsedDirectories.size === allDirs.size && allDirs.size > 0) {
+            const totalDirs = folderList.length;
+            if (totalDirs > 0 && collapsedDirectories.size >= totalDirs) {
                 allFoldersExpanded = false;
             } else {
                 allFoldersExpanded = true;
             }
         }
-        
-        function toggleDirectorySelection(dir, checked) {
-            // Find all files in this directory
-            const dirFiles = files.filter(file => {
-                const fileDirPath = file.relative_path.includes('/') || file.relative_path.includes('\\') 
-                    ? file.relative_path.substring(0, file.relative_path.lastIndexOf(file.relative_path.includes('/') ? '/' : '\\'))
-                    : '';
-                return fileDirPath === dir;
-            });
-            
-            // Update selection
+
+        async function toggleDirectorySelection(dir, checked) {
+            const entry = folderFiles.get(dir);
+            if (!entry || entry.status !== 'loaded') {
+                await ensureFolderLoaded(dir);
+            }
+            const refreshed = folderFiles.get(dir);
+            const dirFiles = (refreshed && refreshed.status === 'loaded') ? refreshed.files : [];
             dirFiles.forEach(file => {
                 if (checked) {
                     selectedFiles.add(file.relative_path);
@@ -2392,7 +2545,6 @@
                     selectedFiles.delete(file.relative_path);
                 }
             });
-            
             renderFileList();
         }
         
@@ -2401,8 +2553,8 @@
             document.getElementById('fileInfoPath').textContent = filepath;
             document.getElementById('fileInfoName').textContent = filename;
             
-            // Find the file in the files array to get size info
-            const file = files.find(f => f.relative_path === filepath);
+            // Find the file in the loaded files to get size info
+            const file = getAllLoadedFiles().find(f => f.relative_path === filepath);
             const duplicateReview = document.getElementById('fileInfoDuplicateReview');
             const duplicateReviewBtn = document.getElementById('fileInfoDuplicateReviewBtn');
             if (file) {
@@ -3971,7 +4123,7 @@
                 }
                 
                 showMessage('File deleted successfully!', 'success');
-                await loadActiveLibraryView(currentPage, true);
+                await loadActiveLibraryView(1, true);
             } catch (error) {
                 showMessage('Failed to delete file: ' + error.message, 'error');
             }
@@ -3997,7 +4149,7 @@
                 }
                 
                 showMessage('File marked as read!', 'success');
-                await loadActiveLibraryView(currentPage, true);
+                await loadActiveLibraryView(1, true);
             } catch (error) {
                 showMessage('Failed to mark file as read: ' + error.message, 'error');
             }
@@ -4023,12 +4175,25 @@
                 }
                 
                 showMessage('File marked as unread!', 'success');
-                await loadActiveLibraryView(currentPage, true);
+                await loadActiveLibraryView(1, true);
             } catch (error) {
                 showMessage('Failed to mark file as unread: ' + error.message, 'error');
             }
         }
         
+        async function fetchAllLibraryFilePaths() {
+            // Use the legacy /api/files endpoint with per_page=-1 to grab every
+            // path for whole-library bulk operations.
+            const url = apiUrl('/api/files?per_page=-1');
+            const response = await fetch(url, { headers: getAuthHeaders() });
+            if (handleAuthError(response)) return [];
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            const data = await response.json();
+            return (data.files || []).map(f => f.relative_path);
+        }
+
         async function markAllFilesRead() {
             if (!confirm('Mark all files as read?')) {
                 return;
@@ -4037,7 +4202,7 @@
             try {
                 showMessage('Marking all files as read...', 'info');
                 
-                const allFilePaths = files.map(f => f.relative_path);
+                const allFilePaths = await fetchAllLibraryFilePaths();
                 const response = await fetch(apiUrl('/api/files/read-batch'), {
                     method: 'POST',
                     headers: {
@@ -4053,7 +4218,7 @@
                 }
                 
                 showMessage('All files marked as read!', 'success');
-                await loadActiveLibraryView(currentPage, true);
+                await loadActiveLibraryView(1, true);
             } catch (error) {
                 showMessage('Failed to mark files as read: ' + error.message, 'error');
             }
@@ -4067,7 +4232,7 @@
             try {
                 showMessage('Marking all files as unread...', 'info');
                 
-                const allFilePaths = files.map(f => f.relative_path);
+                const allFilePaths = await fetchAllLibraryFilePaths();
                 const response = await fetch(apiUrl('/api/files/read-batch'), {
                     method: 'POST',
                     headers: {
@@ -4083,7 +4248,7 @@
                 }
                 
                 showMessage('All files marked as unread!', 'success');
-                await loadActiveLibraryView(currentPage, true);
+                await loadActiveLibraryView(1, true);
             } catch (error) {
                 showMessage('Failed to mark files as unread: ' + error.message, 'error');
             }
@@ -4114,7 +4279,7 @@
                 }
                 
                 showMessage(`${selectedFiles.size} file(s) marked as read!`, 'success');
-                await loadActiveLibraryView(currentPage, true);
+                await loadActiveLibraryView(1, true);
             } catch (error) {
                 showMessage('Failed to mark files as read: ' + error.message, 'error');
             }
@@ -4145,7 +4310,7 @@
                 }
                 
                 showMessage(`${selectedFiles.size} file(s) marked as unread!`, 'success');
-                await loadActiveLibraryView(currentPage, true);
+                await loadActiveLibraryView(1, true);
             } catch (error) {
                 showMessage('Failed to mark files as unread: ' + error.message, 'error');
             }
@@ -4153,7 +4318,7 @@
         
         function refreshFiles() {
             showMessage('Refreshing file list...', 'info');
-            loadActiveLibraryView(currentPage, true);
+            loadActiveLibraryView(1, true);
         }
         
         function showMessage(message, type = 'info') {
@@ -5505,7 +5670,7 @@
                         metadataRefreshJobs.delete(jobId);
                         // Final library refresh + provider health update.
                         if (typeof loadSeriesLibrary === 'function') {
-                            loadSeriesLibrary(currentPage || 1, true);
+                            loadSeriesLibrary({ refresh: true });
                         }
                         loadProviderHealth();
                         return;

@@ -2929,3 +2929,36 @@
         }
         .metadata-refresh-toast-meta { opacity: 0.8; }
         .metadata-refresh-toast--done { opacity: 0.85; }
+
+        /* Incremental library view */
+        .folder-loading {
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-muted);
+        }
+        .folder-loading .spinner {
+            width: 18px;
+            height: 18px;
+            border-width: 2px;
+        }
+        .folder-error {
+            padding: 16px;
+            color: var(--danger, #c33);
+        }
+        .folder-error .btn {
+            margin-left: 8px;
+        }
+        #libraryScrollSentinel {
+            height: 1px;
+            width: 100%;
+        }
+        .library-loading-indicator {
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            color: var(--text-muted);
+        }

@@ -168,6 +168,8 @@ public class FilesController : ControllerBase
         [FromQuery] string? sort = "name",
         [FromQuery] string? direction = "asc",
         [FromQuery] bool include_issues = false,
+        [FromQuery] int? offset = null,
+        [FromQuery] int? limit = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -192,7 +194,27 @@ public class FilesController : ControllerBase
                 });
             }
 
-            var result = await _seriesLibrary.GetSeriesSummariesAsync(mappedFilter, search, page, per_page, sort, direction, cancellationToken);
+            bool offsetMode = limit.HasValue && limit.Value > 0;
+            var result = await _seriesLibrary.GetSeriesSummariesAsync(
+                mappedFilter, search, page, per_page, sort, direction,
+                offsetMode ? offset ?? 0 : (int?)null,
+                offsetMode ? limit : (int?)null,
+                cancellationToken);
+
+            if (offsetMode)
+            {
+                return Ok(new
+                {
+                    series = result.Series,
+                    page = result.Page,
+                    total_pages = result.TotalPages,
+                    total_series = result.TotalSeries,
+                    offset = result.Offset,
+                    limit = limit!.Value,
+                    unmarked_count = allUnmarked.Count()
+                });
+            }
+
             return Ok(new
             {
                 series = result.Series,
@@ -206,6 +228,100 @@ public class FilesController : ControllerBase
         {
             _logger.LogError(ex, "Error getting series library");
             return StatusCode(500, "Error retrieving series library");
+        }
+    }
+
+    [HttpGet("folders")]
+    public async Task<ActionResult<object>> GetFolders(
+        [FromQuery] string? filter = null,
+        [FromQuery] string? search = null,
+        [FromQuery] string? sort = "name",
+        [FromQuery] string? direction = "asc",
+        [FromQuery] int offset = 0,
+        [FromQuery] int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            _logger.LogDebug("GetFolders: Filter={Filter}, Search={Search}, Sort={Sort}, Direction={Direction}, Offset={Offset}, Limit={Limit}",
+                LoggingHelper.SanitizeForLog(filter), LoggingHelper.SanitizeForLog(search),
+                LoggingHelper.SanitizeForLog(sort), LoggingHelper.SanitizeForLog(direction), offset, limit);
+
+            var mappedFilter = MapFilter(filter);
+            var result = await _fileStore.GetFolderSummariesAsync(mappedFilter, search, sort, direction, offset, limit, cancellationToken);
+
+            var allUnmarked = await _fileStore.GetFilteredFilesAsync("unprocessed", cancellationToken);
+
+            return Ok(new
+            {
+                folders = result.Folders,
+                offset = result.Offset,
+                limit = result.Limit,
+                total_folders = result.TotalFolders,
+                unmarked_count = allUnmarked.Count()
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting folders");
+            return StatusCode(500, "Error retrieving folders");
+        }
+    }
+
+    [HttpGet("folders/{encodedPath}/files")]
+    public async Task<ActionResult<object>> GetFolderFiles(
+        string encodedPath,
+        [FromQuery] string? filter = null,
+        [FromQuery] string? search = null,
+        [FromQuery] string? sort = "name",
+        [FromQuery] string? direction = "asc",
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var decodedPath = DecodeBase64UrlSafe(encodedPath ?? string.Empty);
+            _logger.LogDebug("GetFolderFiles: DecodedPath={DecodedPath}, Filter={Filter}",
+                LoggingHelper.SanitizeForLog(decodedPath), LoggingHelper.SanitizeForLog(filter));
+
+            var mappedFilter = MapFilter(filter);
+            var allFiles = await _fileStore.GetFilteredFilesAsync(mappedFilter, cancellationToken);
+
+            if (!string.IsNullOrEmpty(search))
+            {
+                allFiles = allFiles.Where(f =>
+                    f.FileName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    f.FilePath.Contains(search, StringComparison.OrdinalIgnoreCase));
+            }
+
+            var watchedDir = _settings.CurrentValue?.WatchedDirectory;
+            var folderFiles = allFiles
+                .Where(f => string.Equals(
+                    FileStoreService.ComputeFolderKey(f.FilePath, watchedDir),
+                    decodedPath ?? string.Empty,
+                    StringComparison.Ordinal));
+
+            folderFiles = (sort?.ToLower(), direction?.ToLower()) switch
+            {
+                ("name", "desc") => folderFiles.OrderByDescending(f => f.FileName),
+                ("date", "asc") => folderFiles.OrderBy(f => f.LastModified),
+                ("date", "desc") => folderFiles.OrderByDescending(f => f.LastModified),
+                ("size", "asc") => folderFiles.OrderBy(f => f.FileSize),
+                ("size", "desc") => folderFiles.OrderByDescending(f => f.FileSize),
+                _ => folderFiles.OrderBy(f => f.FileName)
+            };
+
+            var dtos = folderFiles.Select(FileDto.FromComicFile).ToList();
+
+            return Ok(new
+            {
+                path = decodedPath ?? string.Empty,
+                files = dtos
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting files for folder");
+            return StatusCode(500, "Error retrieving folder files");
         }
     }
 

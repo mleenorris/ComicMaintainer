@@ -116,7 +116,7 @@ public class FilesControllerTests
     [Fact]
     public async Task GetSeries_DefaultMode_ReturnsSummariesWithoutIssues()
     {
-        _mockSeriesLibrary.Setup(service => service.GetSeriesSummariesAsync("processed", null, 1, 100, "name", "asc", It.IsAny<CancellationToken>()))
+        _mockSeriesLibrary.Setup(service => service.GetSeriesSummariesAsync("processed", null, 1, 100, "name", "asc", null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesSummaryResult
             {
                 Series = new List<SeriesSummaryDto>
@@ -1958,6 +1958,105 @@ public class FilesControllerTests
         {
             try { System.IO.Directory.Delete(tempDir, true); } catch { }
         }
+    }
+
+    // --- Folder summary / folder files endpoint tests ---
+
+    [Fact]
+    public async Task GetFolders_ReturnsFoldersAndUnmarkedCount()
+    {
+        var folderResult = new FolderSummariesResult
+        {
+            Folders = new List<FolderSummaryDto>
+            {
+                new() { Path = "Batman", FileCount = 2, UnmarkedCount = 1 },
+                new() { Path = "Superman", FileCount = 3, UnmarkedCount = 0 }
+            },
+            Offset = 0,
+            Limit = 100,
+            TotalFolders = 2
+        };
+        _mockFileStore.Setup(fs => fs.GetFolderSummariesAsync(
+                null, null, "name", "asc", 0, 100, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(folderResult);
+        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("unprocessed", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>
+            {
+                new() { FilePath = "/x/a.cbz" },
+                new() { FilePath = "/x/b.cbz" }
+            });
+
+        var result = await _controller.GetFolders();
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(ok.Value);
+        var t = ok.Value!.GetType();
+        var folders = t.GetProperty("folders")!.GetValue(ok.Value) as List<FolderSummaryDto>;
+        Assert.NotNull(folders);
+        Assert.Equal(2, folders!.Count);
+        Assert.Equal(2, (int)t.GetProperty("total_folders")!.GetValue(ok.Value)!);
+        Assert.Equal(2, (int)t.GetProperty("unmarked_count")!.GetValue(ok.Value)!);
+    }
+
+    [Fact]
+    public async Task GetFolderFiles_ValidEncodedPath_ReturnsOnlyMatchingFiles()
+    {
+        var watched = Path.GetTempPath();
+        var batmanFile = Path.Combine(watched, "Batman", "001.cbz");
+        var supermanFile = Path.Combine(watched, "Superman", "001.cbz");
+
+        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>
+            {
+                new() { FilePath = batmanFile, FileName = "001.cbz" },
+                new() { FilePath = supermanFile, FileName = "001.cbz" }
+            });
+
+        var encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("Batman"))
+            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+
+        var result = await _controller.GetFolderFiles(encoded);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(ok.Value);
+        var t = ok.Value!.GetType();
+        Assert.Equal("Batman", (string)t.GetProperty("path")!.GetValue(ok.Value)!);
+        var files = t.GetProperty("files")!.GetValue(ok.Value) as List<FileDto>;
+        Assert.NotNull(files);
+        Assert.Single(files!);
+        Assert.Equal(batmanFile, files![0].RelativePath);
+    }
+
+    [Fact]
+    public async Task GetFolderFiles_EmptyEncodedPath_ReturnsRootFiles()
+    {
+        var watched = Path.GetTempPath();
+        // Ensure no trailing separator quirks affect ComputeFolderKey by
+        // re-aligning the mocked settings with the canonical path form used
+        // for the test files.
+        var canonical = Path.GetFullPath(watched);
+        var settings = new AppSettings { WatchedDirectory = canonical };
+        _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
+
+        var rootFile = Path.Combine(canonical, "loose.cbz");
+        var subFile = Path.Combine(canonical, "Batman", "001.cbz");
+
+        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>
+            {
+                new() { FilePath = rootFile, FileName = "loose.cbz" },
+                new() { FilePath = subFile, FileName = "001.cbz" }
+            });
+
+        var result = await _controller.GetFolderFiles(string.Empty);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(ok.Value);
+        var t = ok.Value!.GetType();
+        var files = t.GetProperty("files")!.GetValue(ok.Value) as List<FileDto>;
+        Assert.NotNull(files);
+        Assert.Single(files!);
+        Assert.Equal(rootFile, files![0].RelativePath);
     }
 }
 

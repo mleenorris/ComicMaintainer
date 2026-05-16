@@ -393,24 +393,7 @@
                         <p>Loading files...</p>
                     </div>
                 </div>
-                
-                <!-- Pagination Controls -->
-                <div class="pagination" id="pagination" style="display: none;">
-                    <button class="btn btn-small" id="prevBtn" onclick="previousPage()" disabled>← Previous</button>
-                    <span class="page-info" id="pageInfo">Page 1 of 1</span>
-                    <button class="btn btn-small" id="nextBtn" onclick="nextPage()" disabled>Next →</button>
-                    <div style="display: flex; align-items: center; gap: 8px; margin-left: 15px;">
-                        <label for="perPageSelect" style="color: var(--text-secondary); font-size: 14px;">Files per page:</label>
-                        <select id="perPageSelect" name="perPageSelect" onchange="changePerPage()" style="padding: 5px 10px; border-radius: 4px; border: 1px solid var(--border-primary); background: var(--bg-secondary); color: var(--text-primary); cursor: pointer;">
-                            <option value="25">25</option>
-                            <option value="50">50</option>
-                            <option value="100" selected>100</option>
-                            <option value="200">200</option>
-                            <option value="500">500</option>
-                            <option value="-1">All</option>
-                        </select>
-                    </div>
-                </div>
+                <div id="libraryScrollSentinel"></div>
             </div>
         </section>
     </div>

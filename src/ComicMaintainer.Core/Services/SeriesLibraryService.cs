@@ -107,6 +107,8 @@ public class SeriesLibraryService : ISeriesLibraryService
         int perPage = 100,
         string? sort = "name",
         string? direction = "asc",
+        int? offset = null,
+        int? limit = null,
         CancellationToken cancellationToken = default)
     {
         // Summary mode never opens an archive on disk, so even huge libraries
@@ -143,15 +145,31 @@ public class SeriesLibraryService : ISeriesLibraryService
             keySize: item => item.Accumulator.TotalSize);
 
         var totalSeries = summaries.Count;
-        var totalPages = perPage == -1 ? 1 : (int)Math.Ceiling((double)totalSeries / Math.Max(1, perPage));
-        page = Math.Max(1, Math.Min(page, totalPages == 0 ? 1 : totalPages));
 
-        if (perPage != -1)
+        bool offsetMode = offset.HasValue && limit.HasValue && limit.Value > 0;
+        int effectiveOffset = 0;
+        int totalPages;
+
+        if (offsetMode)
         {
-            summaries = summaries
-                .Skip((page - 1) * perPage)
-                .Take(perPage)
-                .ToList();
+            effectiveOffset = Math.Max(0, offset!.Value);
+            var lim = Math.Max(1, limit!.Value);
+            summaries = summaries.Skip(effectiveOffset).Take(lim).ToList();
+            totalPages = (int)Math.Ceiling((double)totalSeries / lim);
+            page = 1;
+        }
+        else
+        {
+            totalPages = perPage == -1 ? 1 : (int)Math.Ceiling((double)totalSeries / Math.Max(1, perPage));
+            page = Math.Max(1, Math.Min(page, totalPages == 0 ? 1 : totalPages));
+
+            if (perPage != -1)
+            {
+                summaries = summaries
+                    .Skip((page - 1) * perPage)
+                    .Take(perPage)
+                    .ToList();
+            }
         }
 
         return new SeriesSummaryResult
@@ -174,7 +192,8 @@ public class SeriesLibraryService : ISeriesLibraryService
             }).ToList(),
             Page = page,
             TotalPages = totalPages,
-            TotalSeries = totalSeries
+            TotalSeries = totalSeries,
+            Offset = effectiveOffset
         };
     }
 

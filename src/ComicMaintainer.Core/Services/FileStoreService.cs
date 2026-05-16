@@ -1025,4 +1025,119 @@ public class FileStoreService : IFileStoreService
             return 1; // Default to page 1 on error
         }
     }
+
+    /// <summary>
+    /// Compute the directory key for a file path, relative to the watched
+    /// directory, normalized to forward slashes. Returns empty string when the
+    /// file lives directly inside the watched directory.
+    /// </summary>
+    public static string ComputeFolderKey(string filePath, string? watchedDirectory)
+    {
+        if (string.IsNullOrEmpty(filePath))
+            return string.Empty;
+
+        try
+        {
+            var fileDir = Path.GetDirectoryName(filePath) ?? string.Empty;
+
+            if (!string.IsNullOrEmpty(watchedDirectory))
+            {
+                // Normalize and strip trailing directory separators so paths
+                // like "/tmp/" and "/tmp" compare equal.
+                var watchedFull = Path.GetFullPath(watchedDirectory)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                var fileDirFull = string.IsNullOrEmpty(fileDir)
+                    ? string.Empty
+                    : Path.GetFullPath(fileDir)
+                        .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                if (!string.IsNullOrEmpty(fileDirFull) &&
+                    (string.Equals(fileDirFull, watchedFull, StringComparison.OrdinalIgnoreCase) ||
+                     fileDirFull.StartsWith(watchedFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
+                {
+                    var rel = Path.GetRelativePath(watchedFull, fileDirFull);
+                    if (rel == "." || string.IsNullOrEmpty(rel))
+                    {
+                        return string.Empty;
+                    }
+                    return rel.Replace('\\', '/');
+                }
+            }
+
+            // Fallback: file lives outside watched dir, use directory portion.
+            return fileDir.Replace('\\', '/');
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    public async Task<FolderSummariesResult> GetFolderSummariesAsync(
+        string? filter = null,
+        string? search = null,
+        string? sort = "name",
+        string? direction = "asc",
+        int offset = 0,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        var filtered = await GetFilteredFilesAsync(filter, cancellationToken);
+        IEnumerable<ComicFile> files = filtered;
+
+        if (!string.IsNullOrEmpty(search))
+        {
+            files = files.Where(f =>
+                (f.FileName?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (f.FilePath?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        var watchedDir = _settings.CurrentValue?.WatchedDirectory;
+
+        var grouped = files
+            .GroupBy(f => ComputeFolderKey(f.FilePath, watchedDir))
+            .Select(g => new FolderSummaryDto
+            {
+                Path = g.Key,
+                FileCount = g.Count(),
+                TotalSize = g.Sum(f => f.FileSize),
+                LastModified = g.Max(f => f.LastModified.Kind == DateTimeKind.Utc
+                    ? new DateTimeOffset(f.LastModified, TimeSpan.Zero).ToUnixTimeSeconds()
+                    : new DateTimeOffset(f.LastModified).ToUnixTimeSeconds()),
+                UnmarkedCount = g.Count(f => !f.IsProcessed && !f.IsDuplicate),
+                DuplicateCount = g.Count(f => f.IsDuplicate)
+            })
+            .ToList();
+
+        var dir = (direction ?? "asc").ToLowerInvariant();
+        var sortKey = (sort ?? "name").ToLowerInvariant();
+        grouped = sortKey switch
+        {
+            "date" => (dir == "desc"
+                ? grouped.OrderByDescending(g => g.LastModified)
+                : grouped.OrderBy(g => g.LastModified)).ToList(),
+            "size" => (dir == "desc"
+                ? grouped.OrderByDescending(g => g.TotalSize)
+                : grouped.OrderBy(g => g.TotalSize)).ToList(),
+            _ => (dir == "desc"
+                ? grouped.OrderByDescending(g => g.Path, StringComparer.OrdinalIgnoreCase)
+                : grouped.OrderBy(g => g.Path, StringComparer.OrdinalIgnoreCase)).ToList(),
+        };
+
+        var total = grouped.Count;
+        var safeOffset = Math.Max(0, offset);
+        var safeLimit = Math.Max(0, limit);
+
+        var page = safeLimit <= 0
+            ? new List<FolderSummaryDto>()
+            : grouped.Skip(safeOffset).Take(safeLimit).ToList();
+
+        return new FolderSummariesResult
+        {
+            Folders = page,
+            Offset = safeOffset,
+            Limit = safeLimit,
+            TotalFolders = total
+        };
+    }
 }

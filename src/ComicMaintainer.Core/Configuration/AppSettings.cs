@@ -30,6 +30,12 @@ public class AppSettings
     // Database cleanup settings
     public int DatabaseCleanupIntervalHours { get; set; } = 12;
 
+    /// <summary>
+    /// Default library view shown on initial page load.
+    /// Supported values: "files" (folder/file list) or "series" (grouped series grid).
+    /// </summary>
+    public string DefaultLibraryView { get; set; } = "files";
+
     // External series metadata / alias enrichment
     public bool EnableExternalSeriesMetadata { get; set; }
     public string? ComicVineApiKey { get; set; }

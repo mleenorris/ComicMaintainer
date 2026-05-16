@@ -260,6 +260,37 @@ public class SettingsServiceTests : IDisposable
             _service.UpdateDatabaseCleanupIntervalHoursAsync(-100));
     }
 
+    [Theory]
+    [InlineData("series")]
+    [InlineData("files")]
+    [InlineData("SERIES")]
+    [InlineData("  Files  ")]
+    public async Task UpdateDefaultLibraryView_PersistsNormalizedValue(string input)
+    {
+        // Act
+        await _service.UpdateDefaultLibraryViewAsync(input);
+
+        // Assert
+        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        Assert.True(File.Exists(settingsFilePath));
+
+        var settings = ReadAppSettingsSection(settingsFilePath);
+        Assert.True(settings.ContainsKey("DefaultLibraryView"));
+        var expected = input.Trim().ToLowerInvariant();
+        Assert.Equal(expected, settings["DefaultLibraryView"].GetString());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData(null)]
+    [InlineData("grid")]
+    public async Task UpdateDefaultLibraryView_WithInvalidValue_ThrowsException(string? input)
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.UpdateDefaultLibraryViewAsync(input!));
+    }
+
     [Fact]
     public async Task MultipleUpdates_PreservesAllSettings()
     {

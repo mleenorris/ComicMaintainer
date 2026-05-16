@@ -900,6 +900,31 @@
             setTheme(selectedTheme);
             await setPreferences({ theme: selectedTheme });
         }
+
+        // Update default library view from settings modal
+        async function updateDefaultLibraryViewFromSettings() {
+            const select = document.getElementById('defaultLibraryViewSelect');
+            if (!select) return;
+            const selectedView = select.value === 'series' ? 'series' : 'files';
+            try {
+                const response = await fetch(apiUrl('/api/settings/default-library-view'), {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ view: selectedView })
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                showMessage(`Default library view set to ${selectedView === 'series' ? 'Series' : 'Files (folder view)'}`, 'success');
+            } catch (error) {
+                console.error('Failed to update default library view:', error);
+                showMessage('Failed to update default library view: ' + error.message, 'error');
+            }
+        }
         
         // Note: Watcher is now automatically enabled/disabled based on rename and normalize settings
         // No need for explicit watcher toggle
@@ -1170,8 +1195,8 @@
                     });
                 }
 
-                if (prefs.libraryViewMode === 'series') {
-                    libraryViewMode = 'series';
+                if (prefs.libraryViewMode === 'series' || prefs.libraryViewMode === 'files') {
+                    libraryViewMode = prefs.libraryViewMode;
                 }
 
                 updateLibraryViewButtons();
@@ -4390,6 +4415,13 @@
                 document.getElementById('mangaDexBaseUrl').value = settingsData.mangadex_base_url || 'https://api.mangadex.org';
                 document.getElementById('enableAniListManhwaMetadata').checked = !!settingsData.enable_anilist_manhwa_metadata;
                 document.getElementById('aniListBaseUrl').value = settingsData.anilist_base_url || 'https://graphql.anilist.co';
+
+                // Load default library view
+                const defaultLibraryViewSelect = document.getElementById('defaultLibraryViewSelect');
+                if (defaultLibraryViewSelect) {
+                    const defaultView = settingsData.default_library_view === 'series' ? 'series' : 'files';
+                    defaultLibraryViewSelect.value = defaultView;
+                }
                 
                 console.log('[SETTINGS] All settings loaded successfully, opening modal');
                 document.getElementById('settingsModal').classList.add('active');

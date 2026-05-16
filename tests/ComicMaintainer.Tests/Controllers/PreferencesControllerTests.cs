@@ -1,6 +1,8 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace ComicMaintainer.Tests.Controllers;
@@ -8,12 +10,17 @@ namespace ComicMaintainer.Tests.Controllers;
 public class PreferencesControllerTests
 {
     private readonly Mock<ILogger<PreferencesController>> _loggerMock;
+    private readonly Mock<IOptionsMonitor<AppSettings>> _appSettingsMock;
+    private readonly AppSettings _appSettings;
     private readonly PreferencesController _controller;
 
     public PreferencesControllerTests()
     {
         _loggerMock = new Mock<ILogger<PreferencesController>>();
-        _controller = new PreferencesController(_loggerMock.Object);
+        _appSettings = new AppSettings();
+        _appSettingsMock = new Mock<IOptionsMonitor<AppSettings>>();
+        _appSettingsMock.Setup(x => x.CurrentValue).Returns(_appSettings);
+        _controller = new PreferencesController(_loggerMock.Object, _appSettingsMock.Object);
     }
 
     [Fact]
@@ -48,6 +55,65 @@ public class PreferencesControllerTests
         var readingModeProperty = preferences.GetType().GetProperty("readingMode");
         Assert.NotNull(readingModeProperty);
         Assert.Equal("manga", readingModeProperty.GetValue(preferences));
+    }
+
+    [Fact]
+    public void GetPreferences_IncludesLibraryViewMode_DefaultsToFiles()
+    {
+        // Act
+        var result = _controller.GetPreferences();
+
+        // Assert
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
+        Assert.NotNull(objectResult.Value);
+
+        var preferences = objectResult.Value;
+        var libraryViewModeProperty = preferences.GetType().GetProperty("libraryViewMode");
+        Assert.NotNull(libraryViewModeProperty);
+        Assert.Equal("files", libraryViewModeProperty.GetValue(preferences));
+    }
+
+    [Theory]
+    [InlineData("series")]
+    [InlineData("files")]
+    public void GetPreferences_ReflectsConfiguredDefaultLibraryView(string view)
+    {
+        // Arrange
+        _appSettings.DefaultLibraryView = view;
+
+        // Act
+        var result = _controller.GetPreferences();
+
+        // Assert
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
+        Assert.NotNull(objectResult.Value);
+
+        var preferences = objectResult.Value;
+        var libraryViewModeProperty = preferences.GetType().GetProperty("libraryViewMode");
+        Assert.NotNull(libraryViewModeProperty);
+        Assert.Equal(view, libraryViewModeProperty.GetValue(preferences));
+    }
+
+    [Fact]
+    public void GetPreferences_FallsBackToFiles_WhenDefaultLibraryViewIsInvalid()
+    {
+        // Arrange
+        _appSettings.DefaultLibraryView = "not-a-real-view";
+
+        // Act
+        var result = _controller.GetPreferences();
+
+        // Assert
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
+        Assert.NotNull(objectResult.Value);
+
+        var preferences = objectResult.Value;
+        var libraryViewModeProperty = preferences.GetType().GetProperty("libraryViewMode");
+        Assert.NotNull(libraryViewModeProperty);
+        Assert.Equal("files", libraryViewModeProperty.GetValue(preferences));
     }
 
     [Fact]

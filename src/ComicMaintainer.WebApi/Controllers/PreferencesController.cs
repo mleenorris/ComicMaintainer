@@ -1,6 +1,8 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
@@ -10,16 +12,27 @@ namespace ComicMaintainer.WebApi.Controllers;
 public class PreferencesController : ControllerBase
 {
     private readonly ILogger<PreferencesController> _logger;
+    private readonly IOptionsMonitor<AppSettings> _appSettings;
 
-    public PreferencesController(ILogger<PreferencesController> logger)
+    public PreferencesController(
+        ILogger<PreferencesController> logger,
+        IOptionsMonitor<AppSettings> appSettings)
     {
         _logger = logger;
+        _appSettings = appSettings;
     }
 
     // RESTful endpoint: GET /api/preferences
     [HttpGet]
     public ActionResult<object> GetPreferences()
     {
+        var defaultView = _appSettings.CurrentValue.DefaultLibraryView;
+        if (string.IsNullOrWhiteSpace(defaultView) ||
+            (defaultView != "files" && defaultView != "series"))
+        {
+            defaultView = "files";
+        }
+
         // Return default preferences
         return Ok(new
         {
@@ -28,7 +41,8 @@ public class PreferencesController : ControllerBase
             filenameFormat = "{series} - Chapter {issue}",
             issueNumberPadding = 4,
             watcherEnabled = true,
-            readingMode = "manga" // Default reading mode: "manga" or "webcomic"
+            readingMode = "manga", // Default reading mode: "manga" or "webcomic"
+            libraryViewMode = defaultView // "files" (folder view) or "series"
         });
     }
 

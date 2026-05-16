@@ -23,15 +23,18 @@ public class SeriesImagesController : ControllerBase
 
     private readonly ISeriesMetadataCacheService _cache;
     private readonly ISeriesImageStore _imageStore;
+    private readonly IExternalSeriesMetadataService _externalMetadata;
     private readonly ILogger<SeriesImagesController> _logger;
 
     public SeriesImagesController(
         ISeriesMetadataCacheService cache,
         ISeriesImageStore imageStore,
+        IExternalSeriesMetadataService externalMetadata,
         ILogger<SeriesImagesController> logger)
     {
         _cache = cache;
         _imageStore = imageStore;
+        _externalMetadata = externalMetadata;
         _logger = logger;
     }
 
@@ -134,6 +137,103 @@ public class SeriesImagesController : ControllerBase
     }
 
     /// <summary>
+    /// Search every configured external metadata provider for series whose
+    /// records include a cover image URL. The front-end uses the returned
+    /// candidates to render a thumbnail picker from which a user can select
+    /// the image to apply via <see cref="ApplyFromProvider"/>.
+    /// </summary>
+    [HttpGet("candidates")]
+    public async Task<ActionResult<object>> SearchCandidates(
+        [FromQuery] string query,
+        [FromQuery] int limit = 10,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return BadRequest("Query is required");
+        }
+
+        try
+        {
+            var results = await _externalMetadata.SearchSeriesAsync(
+                query,
+                Math.Clamp(limit, 1, 25),
+                cancellationToken);
+
+            var candidates = results
+                .Where(r => !string.IsNullOrWhiteSpace(r.ImageUrl))
+                .Select(r => new
+                {
+                    source = r.Source,
+                    canonical_title = r.CanonicalTitle,
+                    image_url = r.ImageUrl,
+                    thumbnail_url = r.ThumbnailUrl
+                })
+                .ToList();
+
+            return Ok(new { query, candidates });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error searching provider image candidates for {Query}"),
+                LoggingHelper.SanitizeForLog(query));
+            return StatusCode(500, "Error searching provider image candidates");
+        }
+    }
+
+    /// <summary>
+    /// Download a series cover image from one of the URLs returned by
+    /// <see cref="SearchCandidates"/> and persist it as the cached image for
+    /// the series. The URL is re-validated by <see cref="ISeriesImageStore"/>
+    /// (scheme allow-list, SSRF guard, content-type and magic-byte checks,
+    /// size cap), so unknown / hostile URLs are rejected with a 400.
+    /// </summary>
+    [HttpPost("{seriesTitle}/from-provider")]
+    public async Task<IActionResult> ApplyFromProvider(
+        string seriesTitle,
+        [FromBody] ApplyFromProviderRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return BadRequest("Series title is required");
+        }
+        if (request is null || string.IsNullOrWhiteSpace(request.ImageUrl))
+        {
+            return BadRequest("Image URL is required");
+        }
+
+        try
+        {
+            var record = await _cache.ApplyExternalImageAsync(
+                seriesTitle,
+                request.ImageUrl,
+                request.Source,
+                cancellationToken);
+            return Ok(record);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // ImageStore validation failures (bad URL, SSRF, wrong content
+            // type, oversize) and the user-image-sticky check both surface
+            // as InvalidOperationException. The user-image case maps to a
+            // 409 Conflict so the UI can prompt the user to clear it first;
+            // everything else is a 400.
+            if (ex.Message.Contains("user-uploaded", StringComparison.OrdinalIgnoreCase))
+            {
+                return Conflict(new { error = ex.Message });
+            }
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error applying provider image for {SeriesTitle}"),
+                LoggingHelper.SanitizeForLog(seriesTitle));
+            return StatusCode(500, "Error applying provider image");
+        }
+    }
+
+    /// <summary>
     /// Delete the cached series image (downloaded or user-uploaded). The next
     /// metadata refresh is then free to re-download an external image.
     /// </summary>
@@ -156,5 +256,11 @@ public class SeriesImagesController : ControllerBase
                 LoggingHelper.SanitizeForLog(normalizedKey));
             return StatusCode(500, "Error clearing series image");
         }
+    }
+
+    public class ApplyFromProviderRequest
+    {
+        public string ImageUrl { get; set; } = string.Empty;
+        public string? Source { get; set; }
     }
 }

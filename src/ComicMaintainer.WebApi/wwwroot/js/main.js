@@ -5698,6 +5698,132 @@
             }
         }
 
+        // ---- Fetch series image from external provider --------------------
+
+        function openFetchSeriesImageFromProvider() {
+            const panel = document.getElementById('manageSeriesImageProviderPanel');
+            if (!panel) return;
+            panel.style.display = 'block';
+            const queryInput = document.getElementById('manageSeriesImageProviderQuery');
+            if (queryInput) {
+                queryInput.value = (manageSeriesState && manageSeriesState.seriesTitle) || '';
+                queryInput.focus();
+                queryInput.select();
+                // Convenience: press Enter to search.
+                queryInput.onkeydown = (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        searchSeriesImageCandidates();
+                    }
+                };
+            }
+            const results = document.getElementById('manageSeriesImageProviderResults');
+            if (results) results.innerHTML = '';
+            const status = document.getElementById('manageSeriesImageProviderStatus');
+            if (status) status.textContent = 'Enter a title and click Search to find cover candidates from the configured providers.';
+        }
+
+        function closeFetchSeriesImageFromProvider() {
+            const panel = document.getElementById('manageSeriesImageProviderPanel');
+            if (panel) panel.style.display = 'none';
+        }
+
+        async function searchSeriesImageCandidates() {
+            const queryInput = document.getElementById('manageSeriesImageProviderQuery');
+            const status = document.getElementById('manageSeriesImageProviderStatus');
+            const results = document.getElementById('manageSeriesImageProviderResults');
+            if (!queryInput || !status || !results) return;
+            const query = (queryInput.value || '').trim();
+            if (!query) {
+                status.textContent = 'Enter a title to search.';
+                return;
+            }
+            status.textContent = 'Searching providers...';
+            results.innerHTML = '';
+            try {
+                const response = await fetch(
+                    apiUrl(`/api/series-images/candidates?query=${encodeURIComponent(query)}&limit=12`),
+                    { headers: getAuthHeaders() }
+                );
+                if (!response.ok) {
+                    status.textContent = 'Search failed.';
+                    return;
+                }
+                const data = await response.json();
+                const candidates = (data && data.candidates) || [];
+                if (!candidates.length) {
+                    status.textContent = 'No provider returned a cover image for that query.';
+                    return;
+                }
+                status.textContent = `${candidates.length} candidate${candidates.length === 1 ? '' : 's'} — click a thumbnail to apply.`;
+                results.innerHTML = '';
+                candidates.forEach((cand) => {
+                    const previewUrl = cand.thumbnail_url || cand.image_url;
+                    const card = document.createElement('div');
+                    card.style.cssText = 'display: flex; flex-direction: column; align-items: center; gap: 4px; width: 90px; cursor: pointer; padding: 4px; border-radius: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary);';
+                    card.title = `${cand.canonical_title || ''} (${cand.source || ''})`;
+                    // Use DOM APIs (not innerHTML) so provider-controlled text
+                    // can't introduce script in the picker.
+                    const img = document.createElement('img');
+                    img.alt = cand.canonical_title || 'Series cover';
+                    img.referrerPolicy = 'no-referrer';
+                    img.loading = 'lazy';
+                    img.style.cssText = 'width: 80px; height: 120px; object-fit: cover; border-radius: 4px; background: var(--bg-hover);';
+                    img.src = previewUrl;
+                    const sourceLabel = document.createElement('div');
+                    sourceLabel.textContent = cand.source || '';
+                    sourceLabel.style.cssText = 'font-size: 11px; color: var(--text-secondary);';
+                    const titleLabel = document.createElement('div');
+                    titleLabel.textContent = cand.canonical_title || '';
+                    titleLabel.style.cssText = 'font-size: 11px; color: var(--text-primary); text-align: center; max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+                    card.appendChild(img);
+                    card.appendChild(titleLabel);
+                    card.appendChild(sourceLabel);
+                    card.onclick = () => applySeriesImageCandidate(cand.image_url, cand.source);
+                    results.appendChild(card);
+                });
+            } catch (err) {
+                console.error('searchSeriesImageCandidates failed', err);
+                status.textContent = 'Search failed.';
+            }
+        }
+
+        async function applySeriesImageCandidate(imageUrl, source) {
+            const { seriesTitle } = manageSeriesState;
+            if (!seriesTitle || !imageUrl) return;
+            const status = document.getElementById('manageSeriesImageProviderStatus');
+            if (status) status.textContent = 'Downloading selected image...';
+            try {
+                const response = await fetch(
+                    apiUrl(`/api/series-images/${encodeURIComponent(seriesTitle)}/from-provider`),
+                    {
+                        method: 'POST',
+                        headers: Object.assign({ 'Content-Type': 'application/json' }, getAuthHeaders()),
+                        body: JSON.stringify({ imageUrl, source })
+                    }
+                );
+                if (!response.ok) {
+                    let msg = 'Failed to apply provider image';
+                    try { const j = await response.json(); if (j && j.error) msg = j.error; } catch {}
+                    if (status) status.textContent = msg;
+                    showMessage(msg, 'error');
+                    return;
+                }
+                const record = await response.json();
+                manageSeriesState.record = record;
+                renderManageSeriesImage(record);
+                showMessage('Series image updated from provider', 'success');
+                closeFetchSeriesImageFromProvider();
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
+            } catch (err) {
+                console.error('applySeriesImageCandidate failed', err);
+                if (status) status.textContent = 'Failed to apply provider image';
+                showMessage('Failed to apply provider image', 'error');
+            }
+        }
+
         function renderManageSeriesProviderAliases(record) {
             const container = document.getElementById('manageSeriesProviderAliases');
             const aliases = record.aliases || [];

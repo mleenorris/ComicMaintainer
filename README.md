@@ -390,7 +390,7 @@ External series metadata lookups (ComicVine / MangaDex) are run manually, and re
   - Search external providers for alternative names,
   - Adopt a candidate's canonical title or copy its aliases into the user list,
   - Refresh metadata from the provider on demand,
-  - Upload a custom series cover image or clear the cached one.
+  - Upload a custom series cover image, **fetch a cover on demand from a configured external provider** (with a thumbnail picker across all providers), or clear the cached one.
 
 User-defined aliases drive the library's folder-combination matching: two folders are merged into the same series card as soon as one names the other in its alias list.
 
@@ -410,6 +410,8 @@ When external metadata refreshes succeed, ComicMaintainer also tries to download
 
 - **GET** `/api/series-images/{normalizedKey}` — stream the cached series image (404 when none).
 - **PUT** `/api/series-images/{seriesTitle}` — upload a user-supplied image (multipart form field `file`). User uploads are sticky and never overwritten by future external refreshes. Allowed types: `image/jpeg`, `image/png`, `image/webp`.
+- **GET** `/api/series-images/candidates?query={text}&limit={n}` — search every configured external provider for series whose records expose a cover image. Returns `{ "query": "...", "candidates": [{ "source": "ComicVine", "canonical_title": "...", "image_url": "...", "thumbnail_url": "..." }, ...] }`. Used by the Manage Names modal's "🌐 Fetch from Provider" picker.
+- **POST** `/api/series-images/{seriesTitle}/from-provider` — body `{ "imageUrl": "...", "source": "ComicVine" }`. Downloads the URL via `ISeriesImageStore` (same SSRF / content-type / magic-byte / size checks as auto-refresh), persists it, and marks the cached image as `downloaded`. Returns `409 Conflict` when a user-uploaded image is already set (clear it first), `400` on URL validation failure.
 - **DELETE** `/api/series-images/{normalizedKey}` — clear the cached image; the next refresh is then free to re-download from the external provider.
 
 **Security:**

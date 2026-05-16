@@ -257,4 +257,97 @@ public class SeriesMetadataCacheServiceTests
         Assert.False(cleared.HasImage);
         _imageStore.Verify(s => s.Delete("batman-abc.jpg"), Times.Once);
     }
+
+    [Fact]
+    public async Task ApplyExternalImageAsync_CreatesRecordAndDownloads_WhenMissing()
+    {
+        _imageStore.Setup(s => s.DownloadAsync(
+                It.IsAny<string>(),
+                "https://example.com/cover.png",
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("batman-xyz.png", "image/png", 4096));
+
+        var record = await _service.ApplyExternalImageAsync(
+            "Batman",
+            "https://example.com/cover.png",
+            source: "ComicVine");
+
+        Assert.Equal("batman", record.NormalizedKey);
+        Assert.Equal("downloaded", record.ImageStatus);
+        Assert.Equal("batman-xyz.png", record.LocalImageFile);
+        Assert.Equal("image/png", record.ImageContentType);
+        Assert.Equal("https://example.com/cover.png", record.RemoteImageUrl);
+        Assert.Equal("ComicVine", record.Source);
+        Assert.True(record.HasImage);
+        Assert.False(record.IsUserImage);
+    }
+
+    [Fact]
+    public async Task ApplyExternalImageAsync_ReplacesPreviousDownloadedImage()
+    {
+        // Seed an existing downloaded image so we can verify the previous
+        // filename is passed to DownloadAsync for cleanup.
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Aliases = new List<string>(),
+                Source = "ComicVine",
+                ImageUrl = "https://example.com/old.jpg"
+            });
+        _imageStore.Setup(s => s.DownloadAsync(
+                It.IsAny<string>(), "https://example.com/old.jpg", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("batman-old.jpg", "image/jpeg", 100));
+        await _service.RefreshAsync("Batman");
+
+        _imageStore.Setup(s => s.DownloadAsync(
+                It.IsAny<string>(), "https://example.com/new.png", "batman-old.jpg", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("batman-new.png", "image/png", 200));
+
+        var record = await _service.ApplyExternalImageAsync(
+            "Batman",
+            "https://example.com/new.png",
+            source: "MangaDex");
+
+        Assert.Equal("batman-new.png", record.LocalImageFile);
+        Assert.Equal("MangaDex", record.Source);
+        _imageStore.Verify(s => s.DownloadAsync(
+                It.IsAny<string>(), "https://example.com/new.png", "batman-old.jpg", It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ApplyExternalImageAsync_Throws_WhenCurrentImageIsUserUploaded()
+    {
+        // Seed a user-uploaded image.
+        await using (var content = new MemoryStream(new byte[] { 1, 2, 3 }))
+        {
+            _imageStore.Setup(s => s.SaveUserImageAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<Stream>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SeriesImageStoreResult("user-abc.png", "image/png", 3));
+            await _service.SetUserImageAsync("Batman", content, "image/png");
+        }
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _service.ApplyExternalImageAsync("Batman", "https://example.com/cover.png", source: null));
+
+        Assert.Contains("user-uploaded", ex.Message, StringComparison.OrdinalIgnoreCase);
+        _imageStore.Verify(s => s.DownloadAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task ApplyExternalImageAsync_RejectsEmptyArguments()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.ApplyExternalImageAsync("", "https://example.com/x.png", null));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.ApplyExternalImageAsync("Batman", "", null));
+    }
 }

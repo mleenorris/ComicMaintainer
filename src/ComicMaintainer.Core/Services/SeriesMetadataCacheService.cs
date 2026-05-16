@@ -335,6 +335,79 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
     }
 
     /// <summary>
+    /// Download an external-provider image URL and persist it for the series
+    /// key. Creates the cache row when missing. Refuses to overwrite an
+    /// existing user-uploaded image (throws InvalidOperationException so the
+    /// caller can return a clean 409).
+    /// </summary>
+    public async Task<SeriesMetadataCacheRecord> ApplyExternalImageAsync(
+        string seriesTitle,
+        string remoteImageUrl,
+        string? source,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            throw new ArgumentException("Series title is required", nameof(seriesTitle));
+        }
+        if (string.IsNullOrWhiteSpace(remoteImageUrl))
+        {
+            throw new ArgumentException("Remote image URL is required", nameof(remoteImageUrl));
+        }
+
+        var key = NormalizeKey(seriesTitle);
+        var trimmedTitle = seriesTitle.Trim();
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        var now = DateTime.UtcNow;
+        if (entity is null)
+        {
+            entity = new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = key,
+                CanonicalTitle = trimmedTitle,
+                Aliases = new List<string>(),
+                UserAliases = new List<string>(),
+                IsUserCanonical = false,
+                LookupStatus = "manual",
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            db.SeriesMetadataCache.Add(entity);
+        }
+        else if (string.Equals(entity.ImageStatus, "user", StringComparison.OrdinalIgnoreCase))
+        {
+            // The image store / cache contract treats user uploads as sticky;
+            // a fetch-from-provider action must not silently clobber them.
+            throw new InvalidOperationException(
+                "A user-uploaded image is already set for this series. Clear it before fetching from a provider.");
+        }
+
+        // ISeriesImageStore performs URL/scheme validation, SSRF guard, size
+        // cap, magic-byte validation, and cleanup of the previous file.
+        var result = await _imageStore.DownloadAsync(
+            entity.NormalizedKey,
+            remoteImageUrl,
+            entity.LocalImageFile,
+            cancellationToken);
+
+        entity.RemoteImageUrl = remoteImageUrl;
+        entity.LocalImageFile = result.FileName;
+        entity.ImageContentType = result.ContentType;
+        entity.ImageDownloadedUtc = now;
+        entity.ImageStatus = "downloaded";
+        if (!string.IsNullOrWhiteSpace(source))
+        {
+            entity.Source = source;
+        }
+        entity.UpdatedAt = now;
+
+        await db.SaveChangesAsync(cancellationToken);
+        return ToRecord(entity);
+    }
+
+    /// <summary>
     /// Clear any cached series image (downloaded or user-uploaded). The next
     /// metadata refresh will be free to re-download an external image.
     /// </summary>

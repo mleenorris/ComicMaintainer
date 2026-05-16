@@ -52,6 +52,23 @@ public interface ISeriesMetadataCacheService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Download a series cover image from an external provider URL and persist
+    /// it under the cache key derived from <paramref name="seriesTitle"/>.
+    /// Creates the cache record when missing. Throws
+    /// <see cref="InvalidOperationException"/> when the current image is
+    /// user-uploaded (caller should surface a 409); use
+    /// <see cref="ClearImageAsync"/> first to drop the user image.
+    /// </summary>
+    /// <param name="seriesTitle">Free-form series title (will be normalized).</param>
+    /// <param name="remoteImageUrl">Public http(s) URL returned by a provider.</param>
+    /// <param name="source">Optional provider name (e.g. "ComicVine") for audit/source attribution.</param>
+    Task<SeriesMetadataCacheRecord> ApplyExternalImageAsync(
+        string seriesTitle,
+        string remoteImageUrl,
+        string? source,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Clear any cached series image (downloaded or user-uploaded). Returns
     /// null when no record exists for the key.
     /// </summary>

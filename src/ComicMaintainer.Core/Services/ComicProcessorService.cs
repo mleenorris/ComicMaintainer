@@ -1509,7 +1509,9 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             var userCanonical = await LookupUserCanonicalSeriesAsync(candidate, cancellationToken);
             if (!string.IsNullOrWhiteSpace(userCanonical))
             {
-                return userCanonical!.Trim();
+                var resolved = userCanonical!.Trim();
+                await EnsureFolderNameIsAliasAsync(fallbackSeries, resolved, cancellationToken);
+                return resolved;
             }
         }
 
@@ -1518,11 +1520,95 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             var externalMetadata = await LookupExternalSeriesMetadataAsync(candidate, cancellationToken);
             if (!string.IsNullOrWhiteSpace(externalMetadata?.CanonicalTitle))
             {
-                return externalMetadata!.CanonicalTitle.Trim();
+                var resolved = externalMetadata!.CanonicalTitle.Trim();
+                await EnsureFolderNameIsAliasAsync(fallbackSeries, resolved, cancellationToken);
+                return resolved;
             }
         }
 
         return candidateSeries.FirstOrDefault() ?? UnknownSeries;
+    }
+
+    /// <summary>
+    /// Ensures that the file's folder-derived series name is present in the
+    /// resolved series' cache record. If the cache contains no record for the
+    /// resolved series yet, one is created with the folder name as the sole
+    /// user alias. This lets the system "learn" alternative names automatically
+    /// the first time we see a file whose folder name differs from its
+    /// canonical series title.
+    /// </summary>
+    private async Task EnsureFolderNameIsAliasAsync(string folderSeriesName, string resolvedSeries, CancellationToken cancellationToken)
+    {
+        if (_seriesMetadataCache is null
+            || string.IsNullOrWhiteSpace(folderSeriesName)
+            || string.IsNullOrWhiteSpace(resolvedSeries)
+            || string.Equals(folderSeriesName, UnknownSeries, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(resolvedSeries, UnknownSeries, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(folderSeriesName, resolvedSeries, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            var resolvedKey = _seriesMetadataCache.NormalizeKey(resolvedSeries);
+            if (string.IsNullOrWhiteSpace(resolvedKey))
+            {
+                return;
+            }
+
+            var record = await _seriesMetadataCache.GetAsync(resolvedKey, cancellationToken);
+
+            // If the folder name is already known under any title on the
+            // record (canonical title, provider alias, or existing user alias),
+            // there is nothing to do.
+            if (record is not null)
+            {
+                if (string.Equals(record.CanonicalTitle, folderSeriesName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+                if (record.Aliases is not null
+                    && record.Aliases.Any(a => string.Equals(a, folderSeriesName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return;
+                }
+                if (record.UserAliases is not null
+                    && record.UserAliases.Any(a => string.Equals(a, folderSeriesName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return;
+                }
+            }
+
+            // Merge the folder name into the existing user-alias list (or
+            // start a fresh list when no record exists yet) and persist it.
+            // Passing canonicalTitleOverride=null leaves IsUserCanonical
+            // untouched on existing records.
+            var mergedAliases = new List<string>();
+            if (record?.UserAliases is { Count: > 0 } existing)
+            {
+                mergedAliases.AddRange(existing);
+            }
+            mergedAliases.Add(folderSeriesName.Trim());
+
+            await _seriesMetadataCache.SetUserAliasesAsync(
+                resolvedSeries,
+                mergedAliases,
+                canonicalTitleOverride: null,
+                cancellationToken);
+
+            _logger.LogInformation(
+                "Added folder name '{Folder}' as user alias for series '{Series}'",
+                LoggingHelper.SanitizeForLog(folderSeriesName),
+                LoggingHelper.SanitizeForLog(resolvedSeries));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to add folder name {Folder} as alias for series {Series}",
+                LoggingHelper.SanitizeForLog(folderSeriesName),
+                LoggingHelper.SanitizeForLog(resolvedSeries));
+        }
     }
 
     private async Task<string?> LookupUserCanonicalSeriesAsync(string seriesName, CancellationToken cancellationToken)

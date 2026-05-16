@@ -1068,6 +1068,168 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task NormalizeFileAsync_FolderNameNotInAliases_AddedAsUserAlias()
+    {
+        // The file lives under a folder named "The Dark Knight" but external
+        // lookup steers us to canonical title "Batman". The folder name
+        // should be persisted as a user alias on the Batman cache record so
+        // future combines/normalizes "remember" it.
+        var seriesFolder = Path.Combine(_testDirectory, "The Dark Knight");
+        Directory.CreateDirectory(seriesFolder);
+
+        var filePath = Path.Combine(seriesFolder, "Chapter 7.cbz");
+        var comicInfoXml = @"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>The Dark Knight</Series>
+    <Number>7</Number>
+    <Title>Chapter 7</Title>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy");
+            }
+        }
+
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+
+        _mockExternalSeriesMetadata
+            .Setup(service => service.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Aliases = new List<string>(),
+                Source = "Test"
+            });
+
+        var mockSeriesMetadataCache = new Mock<ISeriesMetadataCacheService>();
+        mockSeriesMetadataCache.Setup(c => c.NormalizeKey(It.IsAny<string>()))
+            .Returns<string>(s => (s ?? string.Empty).ToLowerInvariant());
+        // No record exists yet for "Batman", and no user-canonical record
+        // for the folder name either - so the external lookup wins.
+        mockSeriesMetadataCache
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        mockSeriesMetadataCache
+            .Setup(c => c.SetUserAliasesAsync(
+                It.IsAny<string>(),
+                It.IsAny<IEnumerable<string>>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord());
+
+        using var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            seriesMetadataCache: mockSeriesMetadataCache.Object);
+
+        var result = await service.ProcessFileAsync(filePath);
+        Assert.True(result);
+
+        // Folder name should have been persisted as a user alias on "Batman"
+        // (with no canonical title override - we're just adding to the
+        // existing/empty alias list, not declaring ownership of canonicality).
+        // Note: ResolveNormalizedSeriesAsync is invoked both during the
+        // "needs normalize" precheck and the actual normalize, so this can
+        // fire more than once with the same effective payload.
+        mockSeriesMetadataCache.Verify(c => c.SetUserAliasesAsync(
+            "Batman",
+            It.Is<IEnumerable<string>>(aliases =>
+                aliases.Contains("The Dark Knight", StringComparer.OrdinalIgnoreCase)),
+            (string?)null,
+            It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task NormalizeFileAsync_FolderNameAlreadyInAliases_DoesNotResetAliases()
+    {
+        // The folder name is already in the user-alias list - we should
+        // not re-call SetUserAliasesAsync.
+        var seriesFolder = Path.Combine(_testDirectory, "The Dark Knight");
+        Directory.CreateDirectory(seriesFolder);
+
+        var filePath = Path.Combine(seriesFolder, "Chapter 7.cbz");
+        var comicInfoXml = @"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>The Dark Knight</Series>
+    <Number>7</Number>
+    <Title>Chapter 7</Title>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy");
+            }
+        }
+
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+
+        _mockExternalSeriesMetadata
+            .Setup(service => service.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Aliases = new List<string>(),
+                Source = "Test"
+            });
+
+        var mockSeriesMetadataCache = new Mock<ISeriesMetadataCacheService>();
+        mockSeriesMetadataCache.Setup(c => c.NormalizeKey(It.IsAny<string>()))
+            .Returns<string>(s => (s ?? string.Empty).ToLowerInvariant());
+        mockSeriesMetadataCache
+            .Setup(c => c.GetAsync(It.Is<string>(k => k == "batman"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord
+            {
+                NormalizedKey = "batman",
+                CanonicalTitle = "Batman",
+                UserAliases = new List<string> { "The Dark Knight" }
+            });
+        mockSeriesMetadataCache
+            .Setup(c => c.GetAsync(It.Is<string>(k => k != "batman"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+
+        using var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            seriesMetadataCache: mockSeriesMetadataCache.Object);
+
+        var result = await service.ProcessFileAsync(filePath);
+        Assert.True(result);
+
+        mockSeriesMetadataCache.Verify(c => c.SetUserAliasesAsync(
+            It.IsAny<string>(),
+            It.IsAny<IEnumerable<string>>(),
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task RenameFilesAsync_WhenForceReprocessIsTrue_RenamesAlreadyRenamedFile()
     {
         var filePath = CreateTestComicArchive("Force Series", "3");

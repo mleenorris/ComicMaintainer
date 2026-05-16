@@ -357,15 +357,21 @@ builder.Services.AddRateLimiter(options =>
 {
     options.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(context =>
     {
-        // Allow 100 requests per minute per IP
+        // Allow generous per-minute limits for authenticated traffic to avoid
+        // throttling normal UI activity (metadata refresh polling + image loads).
+        var isAuthenticated = context.User?.Identity?.IsAuthenticated == true;
+        var partitionKey = isAuthenticated
+            ? $"user:{context.User?.Identity?.Name ?? "authenticated"}"
+            : $"ip:{context.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+
         return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            partitionKey: partitionKey,
             factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
             {
-                PermitLimit = 100,
+                PermitLimit = isAuthenticated ? 1000 : 100,
                 Window = TimeSpan.FromMinutes(1),
                 QueueProcessingOrder = System.Threading.RateLimiting.QueueProcessingOrder.OldestFirst,
-                QueueLimit = 10
+                QueueLimit = isAuthenticated ? 100 : 10
             });
     });
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -544,9 +550,6 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 
-// Use rate limiter
-app.UseRateLimiter();
-
 // Use request timeouts
 app.UseRequestTimeouts();
 
@@ -652,6 +655,7 @@ app.UseStaticFiles(new StaticFileOptions
 app.UseRouting();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapControllers();
 app.MapHub<ProgressHub>("/hubs/progress");

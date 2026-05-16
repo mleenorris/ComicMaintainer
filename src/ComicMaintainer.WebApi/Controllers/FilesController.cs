@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -474,6 +475,15 @@ public class FilesController : ControllerBase
             var results = new List<object>(plan!.Moves.Count);
             var movedDestinationPaths = new List<string>();
 
+            // Capture in-memory series metadata for the files about to be moved so
+            // we can persist their existing series names (which the user has
+            // implicitly endorsed by combining the folders) as aliases on the
+            // destination series. This must happen *before* the moves because the
+            // in-memory ComicFile list keys off the original source paths.
+            var preMoveSeriesBySourcePath = await GetPreMoveSeriesNamesAsync(
+                plan.Moves.Where(m => !m.Skipped).Select(m => m.SourcePath),
+                cancellationToken);
+
             foreach (var move in plan.Moves)
             {
                 if (move.Skipped)
@@ -554,6 +564,18 @@ public class FilesController : ControllerBase
             Guid? postProcessJobId = null;
             if (movedDestinationPaths.Count > 0)
             {
+                // Before kicking off the post-process job, persist the source-folder
+                // series names (and any distinct file-level Series values) as user
+                // aliases on the destination series record, with the destination
+                // folder name as the user-canonical title. This teaches the
+                // metadata cache to:
+                //   * surface the destination folder name on subsequent normalizes
+                //     (NormalizeFile prefers the user-canonical title over any
+                //     external lookup result)
+                //   * group these folders together on subsequent folder-combine
+                //     suggestions even after their original folders are gone.
+                await PersistFolderCombineAliasesAsync(plan, preMoveSeriesBySourcePath, cancellationToken);
+
                 try
                 {
                     postProcessJobId = await _processor.NormalizeAndRenameFilesAsync(movedDestinationPaths, cancellationToken);
@@ -736,6 +758,160 @@ public class FilesController : ControllerBase
         });
     }
 
+    /// <summary>
+    /// Returns a map of source-file path -> existing in-memory Series metadata for
+    /// the supplied paths, captured *before* a folder-combine move so the values
+    /// survive the rename.
+    /// </summary>
+    private async Task<Dictionary<string, string>> GetPreMoveSeriesNamesAsync(
+        IEnumerable<string> sourcePaths,
+        CancellationToken cancellationToken)
+    {
+        var pathSet = new HashSet<string>(sourcePaths, StringComparer.OrdinalIgnoreCase);
+        if (pathSet.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var files = await _fileStore.GetAllFilesAsync(cancellationToken);
+            if (files == null)
+            {
+                return result;
+            }
+
+            foreach (var file in files)
+            {
+                if (string.IsNullOrWhiteSpace(file.FilePath)) continue;
+                if (!pathSet.Contains(file.FilePath)) continue;
+                var series = file.Metadata?.Series;
+                if (!string.IsNullOrWhiteSpace(series))
+                {
+                    result[file.FilePath] = series!.Trim();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to capture pre-move series metadata for folder combine");
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Persists the source-folder series names (and any distinct file-level
+    /// series names) as user aliases on the destination's series cache record,
+    /// with the destination folder name set as the user-canonical title. This
+    /// is best-effort: a cache failure is logged and swallowed so it never
+    /// breaks the combine response.
+    /// </summary>
+    private async Task PersistFolderCombineAliasesAsync(
+        CombineFoldersPlan plan,
+        IReadOnlyDictionary<string, string> preMoveSeriesBySourcePath,
+        CancellationToken cancellationToken)
+    {
+        if (_metadataCache is null || plan is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var destFolderName = Path.GetFileName(plan.Destination.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+            if (string.IsNullOrWhiteSpace(destFolderName))
+            {
+                return;
+            }
+
+            var destSeriesName = ComicFileProcessor.NormalizeSeriesName(destFolderName, forComparison: false);
+            if (string.IsNullOrWhiteSpace(destSeriesName))
+            {
+                return;
+            }
+
+            // Build the set of alias candidates from:
+            //   1. Each source folder's folder-name-derived series.
+            //   2. Any distinct Series values captured from the in-memory
+            //      metadata of files that were just moved.
+            var candidates = new List<string>();
+            foreach (var sourceDir in plan.SourceDirectories ?? new List<string>())
+            {
+                if (string.IsNullOrWhiteSpace(sourceDir)) continue;
+                var folderName = Path.GetFileName(sourceDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                if (string.IsNullOrWhiteSpace(folderName)) continue;
+                var derived = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
+                if (!string.IsNullOrWhiteSpace(derived))
+                {
+                    candidates.Add(derived);
+                }
+            }
+
+            foreach (var series in preMoveSeriesBySourcePath.Values)
+            {
+                if (!string.IsNullOrWhiteSpace(series))
+                {
+                    candidates.Add(series.Trim());
+                }
+            }
+
+            // De-duplicate (case-insensitive) and drop anything equal to the
+            // destination series name itself.
+            var filtered = candidates
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .Select(c => c.Trim())
+                .Where(c => !string.Equals(c, destSeriesName, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            // Merge with any existing user aliases so we never lose what the
+            // user has previously taught the system.
+            var existingKey = _metadataCache.NormalizeKey(destSeriesName);
+            if (!string.IsNullOrWhiteSpace(existingKey))
+            {
+                try
+                {
+                    var existingRecord = await _metadataCache.GetAsync(existingKey, cancellationToken);
+                    if (existingRecord?.UserAliases is { Count: > 0 } existingAliases)
+                    {
+                        var merged = new HashSet<string>(filtered, StringComparer.OrdinalIgnoreCase);
+                        foreach (var existing in existingAliases)
+                        {
+                            if (!string.IsNullOrWhiteSpace(existing)
+                                && !string.Equals(existing, destSeriesName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                merged.Add(existing.Trim());
+                            }
+                        }
+                        filtered = merged.ToList();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to merge existing user aliases for series {Series}",
+                        LoggingHelper.SanitizeForLog(destSeriesName));
+                }
+            }
+
+            await _metadataCache.SetUserAliasesAsync(
+                destSeriesName,
+                filtered,
+                canonicalTitleOverride: destSeriesName,
+                cancellationToken);
+
+            _logger.LogInformation(
+                "Persisted {AliasCount} user alias(es) and set canonical title to '{Canonical}' after folder combine",
+                filtered.Count,
+                LoggingHelper.SanitizeForLog(destSeriesName));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist folder-combine aliases for destination {Destination}",
+                LoggingHelper.SanitizePathForLog(plan.Destination));
+        }
+    }
+
     private static CombinableFolderGroupDto ToCombinableFolderGroupDto(CombinableFolderGroup group)
     {
         return new CombinableFolderGroupDto
@@ -901,7 +1077,7 @@ public class FilesController : ControllerBase
         IReadOnlyList<SeriesMetadataCacheRecord> records;
         try
         {
-            records = await _metadataCache.GetAllAsync(cancellationToken);
+            records = await _metadataCache.GetAllAsync(cancellationToken) ?? Array.Empty<SeriesMetadataCacheRecord>();
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException)
         {

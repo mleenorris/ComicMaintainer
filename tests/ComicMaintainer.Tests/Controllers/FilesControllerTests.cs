@@ -1481,6 +1481,19 @@ public class FilesControllerTests
             var settings = new AppSettings { WatchedDirectory = tempDir };
             _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
+            var mockMetadataCache = new Mock<ISeriesMetadataCacheService>();
+            mockMetadataCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+            mockMetadataCache.Setup(c => c.NormalizeKey(It.IsAny<string>()))
+                .Returns<string>(s => (s ?? string.Empty).ToLowerInvariant());
+            mockMetadataCache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+            mockMetadataCache.Setup(c => c.SetUserAliasesAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<IEnumerable<string>>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SeriesMetadataCacheRecord());
+
             var controller = new FilesController(
                 _mockFileStore.Object,
                 _mockProcessor.Object,
@@ -1488,7 +1501,9 @@ public class FilesControllerTests
                 _mockSeriesLibrary.Object,
                 _mockLogger.Object,
                 _mockSettings.Object,
-                new TestDbContextFactory(options));
+                new TestDbContextFactory(options),
+                eventBroadcaster: null,
+                metadataCache: mockMetadataCache.Object);
 
             var request = new FilesController.CombineFoldersRequest
             {
@@ -1509,6 +1524,240 @@ public class FilesControllerTests
 
             _mockFileStore.Verify(fs => fs.UpdateFilePathAsync(olderPath,
                 Path.Combine(newerDir, "Batman-001.cbz"), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Once);
+
+            // Verify that the metadata cache was updated with the destination
+            // folder name as the canonical title and the source folder name as a
+            // user alias.
+            var destFolderName = Path.GetFileName(newerDir);
+            mockMetadataCache.Verify(c => c.SetUserAliasesAsync(
+                destFolderName,
+                It.Is<IEnumerable<string>>(aliases =>
+                    aliases.Contains(Path.GetFileName(olderDir), StringComparer.OrdinalIgnoreCase)),
+                destFolderName,
+                It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task CombineFolders_PersistsSourceSeriesNamesAsUserAliases()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
+        var olderDir = Path.Combine(tempDir, "Batman (Classic)");
+        var newerDir = Path.Combine(tempDir, "Batman");
+        System.IO.Directory.CreateDirectory(olderDir);
+        System.IO.Directory.CreateDirectory(newerDir);
+        try
+        {
+            var olderPath = Path.Combine(olderDir, "Batman-001.cbz");
+            var newerPath = Path.Combine(newerDir, "Batman-002.cbz");
+            System.IO.File.WriteAllText(olderPath, "x");
+            System.IO.File.WriteAllText(newerPath, "x");
+
+            var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            await using (var dbContext = new ComicMaintainerDbContext(options))
+            {
+                dbContext.ComicFiles.AddRange(
+                    new ComicFileEntity
+                    {
+                        FilePath = olderPath,
+                        FileName = "Batman-001.cbz",
+                        Directory = olderDir,
+                        CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
+                    },
+                    new ComicFileEntity
+                    {
+                        FilePath = newerPath,
+                        FileName = "Batman-002.cbz",
+                        Directory = newerDir,
+                        CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc)
+                    });
+                await dbContext.SaveChangesAsync();
+            }
+
+            // The two folders should be groupable because alias metadata says
+            // "Batman" and "Batman (Classic)" both resolve to the same series.
+            // We seed that by giving the in-memory ComicFile entries metadata
+            // pointing at the same canonical title - this is the actual signal
+            // BuildFolderCombineGroupKey uses when no cache record exists.
+            var files = new List<ComicFile>
+            {
+                new()
+                {
+                    FilePath = olderPath,
+                    FileName = "Batman-001.cbz",
+                    Directory = olderDir,
+                    LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                    Metadata = new ComicMetadata { Series = "The Batman Adventures" }
+                },
+                new()
+                {
+                    FilePath = newerPath,
+                    FileName = "Batman-002.cbz",
+                    Directory = newerDir,
+                    LastModified = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
+                    Metadata = new ComicMetadata { Series = "The Batman Adventures" }
+                }
+            };
+
+            _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(files);
+
+            var settings = new AppSettings { WatchedDirectory = tempDir };
+            _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
+
+            var mockMetadataCache = new Mock<ISeriesMetadataCacheService>();
+            mockMetadataCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+            mockMetadataCache.Setup(c => c.NormalizeKey(It.IsAny<string>()))
+                .Returns<string>(s => (s ?? string.Empty).ToLowerInvariant());
+            mockMetadataCache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+            mockMetadataCache.Setup(c => c.SetUserAliasesAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<IEnumerable<string>>(),
+                    It.IsAny<string?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SeriesMetadataCacheRecord());
+
+            var controller = new FilesController(
+                _mockFileStore.Object,
+                _mockProcessor.Object,
+                _mockHistoryService.Object,
+                _mockSeriesLibrary.Object,
+                _mockLogger.Object,
+                _mockSettings.Object,
+                new TestDbContextFactory(options),
+                eventBroadcaster: null,
+                metadataCache: mockMetadataCache.Object);
+
+            var request = new FilesController.CombineFoldersRequest
+            {
+                DestinationDirectory = newerDir,
+                SourceDirectories = new List<string> { olderDir }
+            };
+
+            var result = await controller.CombineFolders(request);
+
+            Assert.IsType<OkObjectResult>(result.Result);
+
+            // The destination folder name ("Batman") should be the canonical
+            // title override and "Batman (Classic)" + "The Batman Adventures"
+            // should appear in the alias list. The destination's own name
+            // should NOT be in the alias list.
+            mockMetadataCache.Verify(c => c.SetUserAliasesAsync(
+                "Batman",
+                It.Is<IEnumerable<string>>(aliases =>
+                    aliases.Contains("Batman (Classic)", StringComparer.OrdinalIgnoreCase)
+                    && aliases.Contains("The Batman Adventures", StringComparer.OrdinalIgnoreCase)
+                    && !aliases.Contains("Batman", StringComparer.OrdinalIgnoreCase)),
+                "Batman",
+                It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task CombineFolders_StillSucceedsWhenMetadataCacheUnavailable()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
+        var olderDir = Path.Combine(tempDir, "older");
+        var newerDir = Path.Combine(tempDir, "newer");
+        System.IO.Directory.CreateDirectory(olderDir);
+        System.IO.Directory.CreateDirectory(newerDir);
+        try
+        {
+            var olderPath = Path.Combine(olderDir, "Batman-001.cbz");
+            var newerPath = Path.Combine(newerDir, "Batman-002.cbz");
+            System.IO.File.WriteAllText(olderPath, "x");
+            System.IO.File.WriteAllText(newerPath, "x");
+
+            var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            await using (var dbContext = new ComicMaintainerDbContext(options))
+            {
+                dbContext.ComicFiles.AddRange(
+                    new ComicFileEntity
+                    {
+                        FilePath = olderPath,
+                        FileName = "Batman-001.cbz",
+                        Directory = olderDir,
+                        CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
+                    },
+                    new ComicFileEntity
+                    {
+                        FilePath = newerPath,
+                        FileName = "Batman-002.cbz",
+                        Directory = newerDir,
+                        CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc)
+                    });
+                await dbContext.SaveChangesAsync();
+            }
+
+            var files = new List<ComicFile>
+            {
+                new()
+                {
+                    FilePath = olderPath,
+                    FileName = "Batman-001.cbz",
+                    Directory = olderDir,
+                    LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                    Metadata = new ComicMetadata { Series = "Batman" }
+                },
+                new()
+                {
+                    FilePath = newerPath,
+                    FileName = "Batman-002.cbz",
+                    Directory = newerDir,
+                    LastModified = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
+                    Metadata = new ComicMetadata { Series = "Batman" }
+                }
+            };
+
+            _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(files);
+
+            var settings = new AppSettings { WatchedDirectory = tempDir };
+            _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
+
+            // Explicitly pass a null metadata cache - the combine must still
+            // succeed without it.
+            var controller = new FilesController(
+                _mockFileStore.Object,
+                _mockProcessor.Object,
+                _mockHistoryService.Object,
+                _mockSeriesLibrary.Object,
+                _mockLogger.Object,
+                _mockSettings.Object,
+                new TestDbContextFactory(options),
+                eventBroadcaster: null,
+                metadataCache: null);
+
+            var request = new FilesController.CombineFoldersRequest
+            {
+                DestinationDirectory = newerDir,
+                SourceDirectories = new List<string> { olderDir }
+            };
+
+            var result = await controller.CombineFolders(request);
+
+            var okResult = Assert.IsType<OkObjectResult>(result.Result);
+            using var doc = SerializeAsCamelCase(okResult.Value);
+            Assert.Equal(1, doc.RootElement.GetProperty("moved").GetInt32());
+            Assert.Equal(0, doc.RootElement.GetProperty("failed").GetInt32());
+            Assert.True(System.IO.File.Exists(Path.Combine(newerDir, "Batman-001.cbz")));
         }
         finally
         {

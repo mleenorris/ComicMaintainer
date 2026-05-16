@@ -117,6 +117,22 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("DatabaseCleanupIntervalHours", hours, cancellationToken);
     }
 
+    public async Task UpdateDefaultLibraryViewAsync(string view, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(view))
+        {
+            throw new ArgumentException("View cannot be null or whitespace", nameof(view));
+        }
+
+        var normalized = view.Trim().ToLowerInvariant();
+        if (normalized != "files" && normalized != "series")
+        {
+            throw new ArgumentException("View must be either 'files' or 'series'", nameof(view));
+        }
+
+        await UpdateSettingAsync("DefaultLibraryView", normalized, cancellationToken);
+    }
+
     public async Task UpdateExternalSeriesMetadataEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         await UpdateSettingAsync("EnableExternalSeriesMetadata", enabled, cancellationToken);

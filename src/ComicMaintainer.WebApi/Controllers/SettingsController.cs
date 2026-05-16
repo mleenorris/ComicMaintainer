@@ -62,7 +62,8 @@ public class SettingsController : ControllerBase
             enable_mangadex_metadata = _appSettings.CurrentValue.EnableMangaDexMetadata,
             mangadex_base_url = _appSettings.CurrentValue.MangaDexBaseUrl,
             enable_anilist_manhwa_metadata = _appSettings.CurrentValue.EnableAniListManhwaMetadata,
-            anilist_base_url = _appSettings.CurrentValue.AniListBaseUrl
+            anilist_base_url = _appSettings.CurrentValue.AniListBaseUrl,
+            default_library_view = _appSettings.CurrentValue.DefaultLibraryView
         };
         
         _logger.LogDebug("Returning settings: FilenameFormat={FilenameFormat}, IssueNumberPadding={IssueNumberPadding}, WatcherEnableRename={WatcherEnableRename}, WatcherEnableNormalize={WatcherEnableNormalize}, LogMaxBytes={LogMaxBytes}, DatabaseCleanupIntervalHours={DatabaseCleanupIntervalHours}",
@@ -258,6 +259,45 @@ public class SettingsController : ControllerBase
     public Task<ActionResult> SetDatabaseCleanupIntervalHours([FromBody] DatabaseCleanupIntervalRequest request, CancellationToken cancellationToken = default)
         => UpdateDatabaseCleanupIntervalHours(request, cancellationToken);
 
+    [HttpGet("default-library-view")]
+    public ActionResult<object> GetDefaultLibraryView()
+    {
+        return Ok(new { view = _appSettings.CurrentValue.DefaultLibraryView });
+    }
+
+    [HttpPut("default-library-view")]
+    public async Task<ActionResult> UpdateDefaultLibraryView([FromBody] DefaultLibraryViewRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.View))
+        {
+            return BadRequest(new { error = "View is required" });
+        }
+
+        var normalized = request.View.Trim().ToLowerInvariant();
+        if (normalized != "files" && normalized != "series")
+        {
+            return BadRequest(new { error = "View must be either 'files' or 'series'" });
+        }
+
+        _logger.LogInformation("Default library view update requested: {View}", LoggingHelper.SanitizeForLog(normalized));
+
+        try
+        {
+            await _settingsService.UpdateDefaultLibraryViewAsync(normalized, cancellationToken);
+            return Ok(new { message = "Default library view updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update default library view");
+            return StatusCode(500, new { error = "Failed to update default library view" });
+        }
+    }
+
+    [HttpPost("default-library-view")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public Task<ActionResult> SetDefaultLibraryView([FromBody] DefaultLibraryViewRequest request, CancellationToken cancellationToken = default)
+        => UpdateDefaultLibraryView(request, cancellationToken);
+
     [HttpPut("external-series-metadata")]
     public async Task<ActionResult> UpdateExternalSeriesMetadata([FromBody] ExternalSeriesMetadataSettingsRequest request, CancellationToken cancellationToken = default)
     {
@@ -424,6 +464,11 @@ public class SettingsController : ControllerBase
     public class DatabaseCleanupIntervalRequest
     {
         public int Hours { get; set; }
+    }
+
+    public class DefaultLibraryViewRequest
+    {
+        public string? View { get; set; }
     }
 
     public class ExternalSeriesMetadataSettingsRequest

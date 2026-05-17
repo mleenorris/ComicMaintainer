@@ -12,7 +12,8 @@ permissions:
   pull-requests: write
 
 jobs:
-  test:
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -20,27 +21,43 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ matrix.dotnet-version }}
-    
+
     - name: Restore dependencies (excluding MAUI)
       run: |
         dotnet restore src/ComicMaintainer.Core/ComicMaintainer.Core.csproj
         dotnet restore src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
         dotnet restore tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
-    
+
     - name: Build (excluding MAUI)
       run: |
         dotnet build src/ComicMaintainer.Core/ComicMaintainer.Core.csproj --no-restore --configuration Release
         dotnet build src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj --no-restore --configuration Release
         dotnet build tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj --no-restore --configuration Release
-    
-    - name: Test
-      run: dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage" --results-directory ./TestResults
-    
+
+    - name: Run unit tests (Category!=Integration)
+      run: >
+        dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
+        --no-build --configuration Release --verbosity normal
+        --filter "Category!=Integration"
+        --collect:"XPlat Code Coverage"
+        --results-directory ./TestResults
+        --logger "trx;LogFileName=unit-tests.trx"
+
+    - name: Upload unit test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-test-results
+        path: |
+          ./TestResults/**/*.trx
+          ./TestResults/**/coverage.cobertura.xml
+        if-no-files-found: warn
+
     - name: Code Coverage Summary
       uses: irongut/CodeCoverageSummary@v1.3.0
       with:
@@ -53,7 +70,7 @@ jobs:
         indicators: true
         output: both
         thresholds: '60 80'
-    
+
     - name: Add Testing Policy Note to Coverage Report
       if: github.event_name == 'pull_request'
       run: |
@@ -69,14 +86,14 @@ jobs:
         echo "- ✅ Integration tests for multi-component features" >> code-coverage-results.md
         echo "- ✅ Target: 80%+ coverage for new code" >> code-coverage-results.md
         echo "- ✅ No significant coverage decrease" >> code-coverage-results.md
-    
+
     - name: Add Coverage PR Comment
       uses: marocchino/sticky-pull-request-comment@v2
       if: github.event_name == 'pull_request'
       with:
         recreate: true
         path: code-coverage-results.md
-    
+
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v4
       if: github.event_name == 'push'
@@ -86,3 +103,50 @@ jobs:
         verbose: true
       env:
         CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        dotnet-version: ['9.0.x']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ matrix.dotnet-version }}
+
+    - name: Restore dependencies (excluding MAUI)
+      run: |
+        dotnet restore src/ComicMaintainer.Core/ComicMaintainer.Core.csproj
+        dotnet restore src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
+        dotnet restore tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
+
+    - name: Build (excluding MAUI)
+      run: |
+        dotnet build src/ComicMaintainer.Core/ComicMaintainer.Core.csproj --no-restore --configuration Release
+        dotnet build src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj --no-restore --configuration Release
+        dotnet build tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj --no-restore --configuration Release
+
+    - name: Run integration tests (Category=Integration)
+      run: >
+        dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
+        --no-build --configuration Release --verbosity normal
+        --filter "Category=Integration"
+        --collect:"XPlat Code Coverage"
+        --results-directory ./TestResults
+        --logger "trx;LogFileName=integration-tests.trx"
+
+    - name: Upload integration test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: integration-test-results
+        path: |
+          ./TestResults/**/*.trx
+          ./TestResults/**/coverage.cobertura.xml
+        if-no-files-found: warn

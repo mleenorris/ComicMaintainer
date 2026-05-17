@@ -1,0 +1,57 @@
+name: Integration Tests (E2E Container)
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  container-smoke:
+    name: Docker Container Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        file: ./Dockerfile.dotnet
+        push: false
+        load: true
+        tags: comicmaintainer:ci
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Run container smoke test
+      env:
+        IMAGE: comicmaintainer:ci
+        HOST_PORT: '5050'
+        STARTUP_TIMEOUT: '120'
+        PROCESSING_TIMEOUT: '60'
+      run: ./scripts/container-smoke-test.sh
+
+    - name: Capture container logs on failure
+      if: failure()
+      run: |
+        mkdir -p ./smoke-logs
+        docker ps -a > ./smoke-logs/docker-ps.txt 2>&1 || true
+        docker logs comicmaintainer-smoke > ./smoke-logs/container.log 2>&1 || true
+
+    - name: Upload container logs
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: container-smoke-logs
+        path: ./smoke-logs/
+        if-no-files-found: ignore

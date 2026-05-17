@@ -7,6 +7,7 @@ namespace ComicMaintainer.Tests.Integration;
 /// These tests verify that the reader loads correctly and doesn't open new windows.
 /// Note: These are file-based tests that verify JavaScript content directly.
 /// </summary>
+[Trait("Category", "Integration")]
 public class ReaderIntegrationTests
 {
     private readonly string _wwwrootPath;

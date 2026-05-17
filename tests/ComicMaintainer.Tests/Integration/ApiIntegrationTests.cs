@@ -9,6 +9,7 @@ namespace ComicMaintainer.Tests.Integration;
 /// Integration tests for the API endpoints.
 /// These tests verify end-to-end functionality of the web API.
 /// </summary>
+[Trait("Category", "Integration")]
 public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly WebApplicationFactory<Program> _factory;

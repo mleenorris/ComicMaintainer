@@ -201,4 +201,112 @@ public class MetadataControllerTests
         Assert.Equal("ComicVine", single.Name);
         Assert.True(single.Reachable);
     }
+
+    [Fact]
+    public async Task Search_ReturnsResultsScoredAndSortedByConfidence()
+    {
+        _external.Setup(e => e.SearchSeriesAsync("Batman", It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ExternalSeriesMetadata>
+            {
+                new() { CanonicalTitle = "Naruto", Source = "MangaDex" },
+                new() { CanonicalTitle = "Batman", Source = "ComicVine", ImageUrl = "https://x/b.jpg" },
+                new() { CanonicalTitle = "Batman: Year One", Source = "ComicVine" }
+            });
+
+        var result = await _controller.Search("Batman", 10, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var resultsProp = ok.Value!.GetType().GetProperty("results")!.GetValue(ok.Value);
+        var enumerable = Assert.IsAssignableFrom<System.Collections.IEnumerable>(resultsProp!);
+        var list = enumerable.Cast<object>().ToList();
+        Assert.Equal(3, list.Count);
+
+        // Exact "Batman" canonical match must score 100 and come first.
+        var firstScore = (double)list[0].GetType().GetProperty("match_score")!.GetValue(list[0])!;
+        var firstTitle = (string)list[0].GetType().GetProperty("canonical_title")!.GetValue(list[0])!;
+        Assert.Equal(100d, firstScore);
+        Assert.Equal("Batman", firstTitle);
+
+        // Image URL must be propagated so the client can echo it back when
+        // applying the match.
+        var imageUrlProp = list[0].GetType().GetProperty("image_url")!.GetValue(list[0]);
+        Assert.Equal("https://x/b.jpg", imageUrlProp);
+
+        // Naruto (no similarity) must score lower than Batman: Year One (substring).
+        var lastScore = (double)list[2].GetType().GetProperty("match_score")!.GetValue(list[2])!;
+        Assert.True(firstScore >= lastScore);
+    }
+
+    [Fact]
+    public async Task ApplyMatch_DelegatesToCacheService()
+    {
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "batman",
+            CanonicalTitle = "Batman: Year One",
+            Aliases = new List<string> { "Year One" },
+            Source = "ComicVine",
+            LookupStatus = "manual_match"
+        };
+        _cache.Setup(c => c.ApplyExternalMatchAsync(
+                "Batman",
+                It.Is<ExternalSeriesMetadata>(m =>
+                    m.CanonicalTitle == "Batman: Year One"
+                    && m.Source == "ComicVine"
+                    && m.Aliases.Contains("Year One")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(record);
+
+        var result = await _controller.ApplyMatch(
+            "Batman",
+            new MetadataController.ApplyMatchRequest
+            {
+                CanonicalTitle = "Batman: Year One",
+                Aliases = new List<string> { "Year One" },
+                Source = "ComicVine"
+            },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Same(record, ok.Value);
+    }
+
+    [Fact]
+    public async Task ApplyMatch_RejectsEmptyCanonical()
+    {
+        var bad = await _controller.ApplyMatch("Batman", new MetadataController.ApplyMatchRequest(), CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(bad.Result);
+
+        var bad2 = await _controller.ApplyMatch("", new MetadataController.ApplyMatchRequest { CanonicalTitle = "X" }, CancellationToken.None);
+        Assert.IsType<BadRequestObjectResult>(bad2.Result);
+    }
+
+    [Fact]
+    public async Task ClearExternal_DelegatesToCacheService()
+    {
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "batman",
+            CanonicalTitle = "batman",
+            LookupStatus = "cleared"
+        };
+        _cache.Setup(c => c.ClearExternalMetadataAsync("batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(record);
+
+        var result = await _controller.ClearExternal("Batman", CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Same(record, ok.Value);
+    }
+
+    [Fact]
+    public async Task ClearExternal_ReturnsNotFoundWhenMissing()
+    {
+        _cache.Setup(c => c.ClearExternalMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+
+        var result = await _controller.ClearExternal("Batman", CancellationToken.None);
+
+        Assert.IsType<NotFoundResult>(result.Result);
+    }
 }

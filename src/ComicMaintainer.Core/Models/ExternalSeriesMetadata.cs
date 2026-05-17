@@ -19,4 +19,12 @@ public class ExternalSeriesMetadata
     /// Optional smaller thumbnail URL when the provider returns multiple sizes.
     /// </summary>
     public string? ThumbnailUrl { get; set; }
+
+    /// <summary>
+    /// Optional confidence score (0–100) describing how well this candidate
+    /// matches a user query. Populated by the search/scoring layer (not by
+    /// providers themselves). 100 = exact normalized match on the canonical
+    /// title; lower values reflect alias matches or fuzzy similarity.
+    /// </summary>
+    public double? MatchScore { get; set; }
 }

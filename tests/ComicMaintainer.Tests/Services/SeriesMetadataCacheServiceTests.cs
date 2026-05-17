@@ -350,4 +350,146 @@ public class SeriesMetadataCacheServiceTests
         await Assert.ThrowsAsync<ArgumentException>(() =>
             _service.ApplyExternalImageAsync("Batman", "", null));
     }
+
+    [Fact]
+    public async Task ApplyExternalMatchAsync_UpsertsCandidateAndPreservesUserAliases()
+    {
+        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" }, null);
+
+        var record = await _service.ApplyExternalMatchAsync(
+            "Batman",
+            new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman: Year One",
+                Aliases = new List<string> { "Year One" },
+                Source = "ComicVine"
+            });
+
+        Assert.Equal("Batman: Year One", record.CanonicalTitle);
+        Assert.Equal("ComicVine", record.Source);
+        Assert.Equal("manual_match", record.LookupStatus);
+        Assert.NotNull(record.LastLookupUtc);
+        Assert.Contains("Year One", record.Aliases);
+        // User-managed aliases must survive a manual match override.
+        Assert.Contains("Caped Crusader", record.UserAliases);
+    }
+
+    [Fact]
+    public async Task ApplyExternalMatchAsync_PreservesUserCanonicalOverride()
+    {
+        await _service.SetUserAliasesAsync("Batman", Array.Empty<string>(), canonicalTitleOverride: "My Batman");
+
+        var record = await _service.ApplyExternalMatchAsync(
+            "Batman",
+            new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman (1940)",
+                Aliases = new List<string> { "Detective Comics" },
+                Source = "ComicVine"
+            });
+
+        Assert.Equal("My Batman", record.CanonicalTitle);
+        Assert.True(record.IsUserCanonical);
+        Assert.Contains("Detective Comics", record.Aliases);
+    }
+
+    [Fact]
+    public async Task ApplyExternalMatchAsync_RejectsEmptyCandidate()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.ApplyExternalMatchAsync("Batman", new ExternalSeriesMetadata()));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.ApplyExternalMatchAsync("", new ExternalSeriesMetadata { CanonicalTitle = "X" }));
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            _service.ApplyExternalMatchAsync("Batman", null!));
+    }
+
+    [Fact]
+    public async Task ClearExternalMetadataAsync_DropsProviderFieldsAndKeepsUserAliases()
+    {
+        _external.Setup(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Aliases = new List<string> { "Dark Knight" },
+                Source = "ComicVine"
+            });
+        await _service.RefreshAsync("Batman");
+        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" }, null);
+
+        var cleared = await _service.ClearExternalMetadataAsync("batman");
+
+        Assert.NotNull(cleared);
+        Assert.Empty(cleared!.Aliases);
+        Assert.Null(cleared.Source);
+        Assert.Null(cleared.LastLookupUtc);
+        Assert.Equal("cleared", cleared.LookupStatus);
+        // Provider-supplied canonical should revert to the normalized key
+        // placeholder when there is no user override.
+        Assert.Equal("batman", cleared.CanonicalTitle);
+        // User-managed aliases must survive the clear.
+        Assert.Contains("Caped Crusader", cleared.UserAliases);
+    }
+
+    [Fact]
+    public async Task ClearExternalMetadataAsync_PreservesUserCanonicalAndUserImage()
+    {
+        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" }, canonicalTitleOverride: "My Batman");
+
+        // Simulate a user-uploaded image already attached to the record.
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            var entity = db.SeriesMetadataCache.Single(e => e.NormalizedKey == "batman");
+            entity.LocalImageFile = "batman-user.jpg";
+            entity.ImageContentType = "image/jpeg";
+            entity.ImageStatus = "user";
+            entity.Source = "ComicVine";
+            entity.Aliases = new List<string> { "Dark Knight" };
+            await db.SaveChangesAsync();
+        }
+
+        var cleared = await _service.ClearExternalMetadataAsync("batman");
+
+        Assert.NotNull(cleared);
+        Assert.Equal("My Batman", cleared!.CanonicalTitle);
+        Assert.True(cleared.IsUserCanonical);
+        // User image must be sticky across a metadata clear.
+        Assert.Equal("user", cleared.ImageStatus);
+        Assert.Equal("batman-user.jpg", cleared.LocalImageFile);
+        _imageStore.Verify(s => s.Delete(It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ClearExternalMetadataAsync_DropsProviderDownloadedImage()
+    {
+        _external.Setup(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Aliases = new List<string>(),
+                Source = "ComicVine",
+                ImageUrl = "https://example.com/b.jpg"
+            });
+        _imageStore.Setup(s => s.DownloadAsync(
+                It.IsAny<string>(),
+                "https://example.com/b.jpg",
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("batman.jpg", "image/jpeg", 100));
+        await _service.RefreshAsync("Batman");
+
+        var cleared = await _service.ClearExternalMetadataAsync("batman");
+
+        Assert.NotNull(cleared);
+        Assert.Equal("none", cleared!.ImageStatus);
+        Assert.Null(cleared.LocalImageFile);
+        _imageStore.Verify(s => s.Delete("batman.jpg"), Times.Once);
+    }
+
+    [Fact]
+    public async Task ClearExternalMetadataAsync_ReturnsNullWhenRecordMissing()
+    {
+        var result = await _service.ClearExternalMetadataAsync("does-not-exist");
+        Assert.Null(result);
+    }
 }

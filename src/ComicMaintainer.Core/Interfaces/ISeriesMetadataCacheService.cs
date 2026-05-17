@@ -75,4 +75,31 @@ public interface ISeriesMetadataCacheService
     Task<SeriesMetadataCacheRecord?> ClearImageAsync(
         string normalizedKey,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Manually adopt an externally-supplied candidate as the cached
+    /// metadata for the series. Used when the automatic best-match was wrong
+    /// and the user picks a different candidate from the search results.
+    /// Preserves the user's canonical-title override (if any) and the user
+    /// alias list. A user-uploaded image is never overwritten; otherwise the
+    /// candidate's image is downloaded best-effort and replaces the cached
+    /// one. The cache row is upserted.
+    /// </summary>
+    /// <param name="seriesTitle">Free-form series title (will be normalized).</param>
+    /// <param name="match">The candidate to adopt. Must have a non-empty CanonicalTitle.</param>
+    Task<SeriesMetadataCacheRecord> ApplyExternalMatchAsync(
+        string seriesTitle,
+        ExternalSeriesMetadata match,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Clear the external-metadata fields cached for a series (provider
+    /// aliases, source, last-lookup, lookup-status, and the canonical-title
+    /// override if it came from the provider). User-managed aliases and a
+    /// user-uploaded image are preserved; a provider-downloaded image is
+    /// dropped. Returns null when no record exists for the key.
+    /// </summary>
+    Task<SeriesMetadataCacheRecord?> ClearExternalMetadataAsync(
+        string normalizedKey,
+        CancellationToken cancellationToken = default);
 }

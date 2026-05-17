@@ -442,6 +442,131 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         return ToRecord(entity);
     }
 
+    /// <summary>
+    /// Manually adopt an externally-supplied candidate as the cached metadata
+    /// for the series. Used to correct a wrong automatic match.
+    /// </summary>
+    public async Task<SeriesMetadataCacheRecord> ApplyExternalMatchAsync(
+        string seriesTitle,
+        ExternalSeriesMetadata match,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            throw new ArgumentException("Series title is required", nameof(seriesTitle));
+        }
+        if (match is null)
+        {
+            throw new ArgumentNullException(nameof(match));
+        }
+        if (string.IsNullOrWhiteSpace(match.CanonicalTitle))
+        {
+            throw new ArgumentException("Match must have a canonical title", nameof(match));
+        }
+
+        var key = NormalizeKey(seriesTitle);
+        var trimmedTitle = seriesTitle.Trim();
+        var now = DateTime.UtcNow;
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        if (entity is null)
+        {
+            entity = new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = key,
+                CanonicalTitle = match.CanonicalTitle,
+                Aliases = match.Aliases?.ToList() ?? new List<string>(),
+                UserAliases = new List<string>(),
+                IsUserCanonical = false,
+                Source = match.Source,
+                LastLookupUtc = now,
+                LookupStatus = "manual_match",
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            db.SeriesMetadataCache.Add(entity);
+        }
+        else
+        {
+            // Preserve a user-overridden canonical title; only update the
+            // provider-derived fields. A user can change the canonical title
+            // separately via SetUserAliasesAsync.
+            if (!entity.IsUserCanonical)
+            {
+                entity.CanonicalTitle = match.CanonicalTitle;
+            }
+            entity.Aliases = match.Aliases?.ToList() ?? new List<string>();
+            entity.Source = match.Source;
+            entity.LastLookupUtc = now;
+            entity.LookupStatus = "manual_match";
+            entity.UpdatedAt = now;
+        }
+
+        // Try to grab the candidate's image. User-uploaded images are sticky.
+        await TryDownloadImageAsync(entity, match, cancellationToken);
+
+        await db.SaveChangesAsync(cancellationToken);
+        return ToRecord(entity);
+    }
+
+    /// <summary>
+    /// Clear the external-metadata fields cached for a series. Preserves
+    /// user-managed aliases and a user-uploaded image; drops a
+    /// provider-downloaded image.
+    /// </summary>
+    public async Task<SeriesMetadataCacheRecord?> ClearExternalMetadataAsync(
+        string normalizedKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            return null;
+        }
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == normalizedKey, cancellationToken);
+        if (entity is null)
+        {
+            return null;
+        }
+
+        // Drop provider-supplied aliases / source / lookup metadata. Keep
+        // user aliases and (if set) the user's canonical-title override.
+        entity.Aliases = new List<string>();
+        entity.Source = null;
+        entity.LastLookupUtc = null;
+        entity.LookupStatus = "cleared";
+
+        // If the canonical title was provider-derived, revert it to the
+        // normalized key so the UI shows a recognisable placeholder rather
+        // than a stale provider title. When the user has overridden the
+        // canonical title we leave it alone.
+        if (!entity.IsUserCanonical)
+        {
+            entity.CanonicalTitle = entity.NormalizedKey;
+        }
+
+        // Drop any provider-downloaded image. A user-uploaded image is
+        // sticky and must survive a metadata clear.
+        if (!string.Equals(entity.ImageStatus, "user", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.IsNullOrEmpty(entity.LocalImageFile))
+            {
+                _imageStore.Delete(entity.LocalImageFile);
+            }
+            entity.LocalImageFile = null;
+            entity.ImageContentType = null;
+            entity.ImageDownloadedUtc = null;
+            entity.ImageStatus = "none";
+            entity.RemoteImageUrl = null;
+        }
+
+        entity.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
+        return ToRecord(entity);
+    }
+
     private static SeriesMetadataCacheRecord ToRecord(SeriesMetadataCacheEntity entity)
     {
         return new SeriesMetadataCacheRecord

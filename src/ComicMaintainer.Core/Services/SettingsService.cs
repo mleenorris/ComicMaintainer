@@ -158,14 +158,9 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("MangaDexBaseUrl", baseUrl, cancellationToken);
     }
 
-    public async Task UpdateAniListManhwaEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    public async Task UpdateAniListEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("EnableAniListManhwaMetadata", enabled, cancellationToken);
-    }
-
-    public async Task UpdateAniListMangaEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
-    {
-        await UpdateSettingAsync("EnableAniListMangaMetadata", enabled, cancellationToken);
+        await UpdateSettingAsync("EnableAniListMetadata", enabled, cancellationToken);
     }
 
     public async Task UpdateAniListBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default)

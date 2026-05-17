@@ -4548,8 +4548,7 @@
                 document.getElementById('comicVineBaseUrl').value = settingsData.comicvine_base_url || 'https://comicvine.gamespot.com/api';
                 document.getElementById('enableMangaDexMetadata').checked = !!settingsData.enable_mangadex_metadata;
                 document.getElementById('mangaDexBaseUrl').value = settingsData.mangadex_base_url || 'https://api.mangadex.org';
-                document.getElementById('enableAniListManhwaMetadata').checked = !!settingsData.enable_anilist_manhwa_metadata;
-                document.getElementById('enableAniListMangaMetadata').checked = !!settingsData.enable_anilist_manga_metadata;
+                document.getElementById('enableAniListMetadata').checked = !!settingsData.enable_anilist_metadata;
                 document.getElementById('aniListBaseUrl').value = settingsData.anilist_base_url || 'https://graphql.anilist.co';
 
                 // Load default library view
@@ -5269,8 +5268,7 @@
             const comicVineBaseUrl = document.getElementById('comicVineBaseUrl').value.trim();
             const enableMangaDexMetadata = document.getElementById('enableMangaDexMetadata').checked;
             const mangaDexBaseUrl = document.getElementById('mangaDexBaseUrl').value.trim();
-            const enableAniListManhwaMetadata = document.getElementById('enableAniListManhwaMetadata').checked;
-            const enableAniListMangaMetadata = document.getElementById('enableAniListMangaMetadata').checked;
+            const enableAniListMetadata = document.getElementById('enableAniListMetadata').checked;
             const aniListBaseUrl = document.getElementById('aniListBaseUrl').value.trim();
             
             if (!format) {
@@ -5382,8 +5380,7 @@
                         comicVineBaseUrl: comicVineBaseUrl || 'https://comicvine.gamespot.com/api',
                         enableMangaDex: enableMangaDexMetadata,
                         mangaDexBaseUrl: mangaDexBaseUrl || 'https://api.mangadex.org',
-                        enableAniListManhwa: enableAniListManhwaMetadata,
-                        enableAniListManga: enableAniListMangaMetadata,
+                        enableAniList: enableAniListMetadata,
                         aniListBaseUrl: aniListBaseUrl || 'https://graphql.anilist.co'
                     })
                 });

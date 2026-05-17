@@ -71,7 +71,7 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
         }
 
         var config = _settings.CurrentValue;
-        if (!config.EnableAniListMangaMetadata)
+        if (!config.EnableAniListMetadata)
         {
             return null;
         }
@@ -103,7 +103,7 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
         }
 
         var config = _settings.CurrentValue;
-        if (!config.EnableAniListMangaMetadata)
+        if (!config.EnableAniListMetadata)
         {
             return Array.Empty<ExternalSeriesMetadata>();
         }
@@ -155,7 +155,7 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
     public async Task<ProviderHealth> CheckHealthAsync(CancellationToken cancellationToken = default)
     {
         var config = _settings.CurrentValue;
-        var enabled = config.EnableAniListMangaMetadata;
+        var enabled = config.EnableAniListMetadata;
         var configured = enabled && !string.IsNullOrWhiteSpace(config.AniListBaseUrl);
 
         var snapshot = _health.Snapshot();

@@ -1094,7 +1094,176 @@
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        
+
+        /* ── Series grid (titled variant) — cover with title BELOW it ── */
+        /* Used by the "Grid" layout option so long titles can wrap onto two
+           lines against the page background instead of being clipped against
+           the dark overlay on top of the cover. */
+        .series-grid--titled .series-card {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .series-card-body--below {
+            position: static;
+            padding: 8px 10px 10px;
+            background: transparent;
+            pointer-events: auto;
+        }
+
+        .series-title--below {
+            color: var(--text-primary);
+            font-size: 13px;
+            font-weight: 600;
+            white-space: normal;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.3;
+        }
+
+        .series-meta--below {
+            color: var(--text-secondary);
+            font-size: 11px;
+            line-height: 1.4;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-top: 2px;
+        }
+
+        /* ── Series list layout — mobile-portrait default ── */
+        /* Single-column rows with thumbnail + readable, wrapping title.
+           Designed for phones in portrait where the cover-grid clips titles. */
+        .series-list {
+            display: flex;
+            flex-direction: column;
+            padding: 8px;
+            gap: 0;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .series-list-row {
+            display: flex;
+            align-items: stretch;
+            gap: 12px;
+            width: 100%;
+            padding: 10px 12px;
+            border: none;
+            border-bottom: 1px solid var(--border-primary);
+            background: var(--bg-secondary);
+            color: inherit;
+            font: inherit;
+            text-align: left;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            /* Big touch target — at least the 48px Apple/Material guideline. */
+            min-height: 84px;
+        }
+
+        .series-list-row:first-child {
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+        }
+
+        .series-list-row:last-child {
+            border-bottom: none;
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+        }
+
+        .series-list-row:hover,
+        .series-list-row:focus-visible {
+            background: var(--bg-hover);
+        }
+
+        .series-list-row:focus-visible {
+            outline: 2px solid var(--text-primary);
+            outline-offset: -2px;
+        }
+
+        .series-list-thumb-wrapper {
+            flex: 0 0 auto;
+            width: 48px;
+            height: 72px;
+            border-radius: 4px;
+            overflow: hidden;
+            background: var(--bg-hover);
+            position: relative;
+        }
+
+        .series-list-thumb {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .series-list-info {
+            flex: 1 1 auto;
+            min-width: 0; /* allow text to ellipsize inside flex */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 2px;
+        }
+
+        .series-list-title {
+            margin: 0;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            word-break: break-word;
+        }
+
+        .series-list-meta {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.3;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .series-list-aside {
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--text-secondary);
+        }
+
+        .series-list-count {
+            font-size: 13px;
+            font-weight: 700;
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            padding: 2px 8px;
+            border-radius: 999px;
+            min-width: 28px;
+            text-align: center;
+        }
+
+        .series-list-chevron {
+            font-size: 22px;
+            line-height: 1;
+            color: var(--text-secondary);
+            opacity: 0.6;
+        }
+
+        /* Layout-toggle button group sits next to the existing Files/Series
+           toggle. The series-layout buttons share .header-view-btn styling. */
+        .series-layout-toggle[hidden] {
+            display: none !important;
+        }
+
         @keyframes pulse {
             0%, 100% {
                 opacity: 1;
@@ -2722,6 +2891,12 @@
                 grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
                 gap: 12px;
                 padding: 12px;
+            }
+
+            /* In the explicit "Grid" layout on mobile, force 2 columns so each
+               card is wide enough for the title underneath to be readable. */
+            .series-grid--titled {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
             }
 
             .series-detail-cover {

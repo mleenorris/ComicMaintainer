@@ -223,6 +223,15 @@
         let perPage = DEFAULT_PER_PAGE; // Will be loaded from server preferences
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
         let libraryViewMode = 'files';
+        // Series layout: null = auto (list on mobile portrait, compact otherwise),
+        // or one of 'list', 'grid', 'compact' when explicitly chosen by the user.
+        let seriesLayoutPreference = null;
+        try {
+            const stored = localStorage.getItem('seriesLayout');
+            if (stored === 'list' || stored === 'grid' || stored === 'compact') {
+                seriesLayoutPreference = stored;
+            }
+        } catch (_e) { /* localStorage may be unavailable */ }
         let seriesLibrary = [];
         // Incremental library view state
         const FOLDER_PAGE_SIZE = 100;
@@ -1254,7 +1263,67 @@
         function updateLibraryViewButtons() {
             document.getElementById('filesViewModeBtn')?.classList.toggle('active', libraryViewMode === 'files');
             document.getElementById('seriesViewModeBtn')?.classList.toggle('active', libraryViewMode === 'series');
+            updateSeriesLayoutButtons();
         }
+
+        // ── Series layout (List / Grid / Compact) ─────────────────────────────
+        // The layout toggle is only meaningful when viewing the series library;
+        // hide it entirely when in Files mode to avoid cluttering the header.
+        function isMobilePortrait() {
+            try {
+                return window.matchMedia('(max-width: 600px) and (orientation: portrait)').matches;
+            } catch (_e) {
+                return false;
+            }
+        }
+
+        function getEffectiveSeriesLayout() {
+            if (seriesLayoutPreference) return seriesLayoutPreference;
+            // Auto: list on phone-portrait so titles are always readable,
+            // overlay-grid ("compact") everywhere else to preserve desktop behaviour.
+            return isMobilePortrait() ? 'list' : 'compact';
+        }
+
+        function updateSeriesLayoutButtons() {
+            const toggle = document.getElementById('seriesLayoutToggle');
+            if (!toggle) return;
+            const inSeriesMode = libraryViewMode === 'series';
+            toggle.hidden = !inSeriesMode;
+            if (!inSeriesMode) return;
+            const effective = getEffectiveSeriesLayout();
+            document.getElementById('seriesLayoutListBtn')?.classList.toggle('active', effective === 'list');
+            document.getElementById('seriesLayoutGridBtn')?.classList.toggle('active', effective === 'grid');
+            document.getElementById('seriesLayoutCompactBtn')?.classList.toggle('active', effective === 'compact');
+        }
+
+        function setSeriesLayout(layout) {
+            if (layout !== 'list' && layout !== 'grid' && layout !== 'compact') return;
+            seriesLayoutPreference = layout;
+            try {
+                localStorage.setItem('seriesLayout', layout);
+            } catch (_e) { /* localStorage may be unavailable */ }
+            updateSeriesLayoutButtons();
+            if (libraryViewMode === 'series' && !currentSeriesDetailId) {
+                renderSeriesLibrary();
+            }
+        }
+
+        // Re-evaluate auto layout when the viewport rotates between portrait/landscape.
+        try {
+            const portraitMql = window.matchMedia('(max-width: 600px) and (orientation: portrait)');
+            const onChange = () => {
+                if (seriesLayoutPreference) return; // user has an explicit choice; don't override
+                updateSeriesLayoutButtons();
+                if (libraryViewMode === 'series' && !currentSeriesDetailId) {
+                    renderSeriesLibrary();
+                }
+            };
+            if (typeof portraitMql.addEventListener === 'function') {
+                portraitMql.addEventListener('change', onChange);
+            } else if (typeof portraitMql.addListener === 'function') {
+                portraitMql.addListener(onChange); // Safari < 14
+            }
+        } catch (_e) { /* matchMedia may be unavailable */ }
 
         function updateLibraryViewLayout() {
             const controlsWrapper = document.querySelector('#libraryFilesView .controls-wrapper');
@@ -1735,9 +1804,27 @@
                 return;
             }
 
+            const layout = getEffectiveSeriesLayout();
+            const body = (layout === 'list')
+                ? renderSeriesLibraryList()
+                : (layout === 'grid')
+                    ? renderSeriesLibraryGrid()
+                    : renderSeriesLibraryCompact();
+
             fileList.innerHTML = `
                 ${renderProviderHealthWidget()}
-                <div class="series-grid">
+                ${body}
+            `;
+
+            hydrateProtectedImages(fileList);
+            // Provider health is loaded asynchronously and re-rendered into its container.
+            scheduleProviderHealthLoad();
+        }
+
+        // Cover-only cards with title overlaid on the cover (original behaviour).
+        function renderSeriesLibraryCompact() {
+            return `
+                <div class="series-grid series-grid--compact">
                     ${seriesLibrary.map(series => `
                         <button class="series-card" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
                             <div class="series-cover-wrapper">
@@ -1754,10 +1841,54 @@
                     `).join('')}
                 </div>
             `;
+        }
 
-            hydrateProtectedImages(fileList);
-            // Provider health is loaded asynchronously and re-rendered into its container.
-            scheduleProviderHealthLoad();
+        // Grid of cards with the title rendered *below* the cover (not overlaid),
+        // allowing it to wrap onto multiple lines so long names remain readable.
+        function renderSeriesLibraryGrid() {
+            return `
+                <div class="series-grid series-grid--titled">
+                    ${seriesLibrary.map(series => `
+                        <button class="series-card series-card--titled" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                            <div class="series-cover-wrapper">
+                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                                <span class="series-count-badge">${series.issue_count}</span>
+                                ${renderLookupStatusBadge(series)}
+                            </div>
+                            <div class="series-card-body series-card-body--below">
+                                <h3 class="series-title series-title--below" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
+                                <div class="series-meta series-meta--below">${formatFileSize(series.total_size)}</div>
+                            </div>
+                        </button>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // Single-column list rows optimised for phones in portrait: small thumbnail
+        // on the left, full-width title (wraps to 2 lines) and meta on the right,
+        // issue count on the far right.
+        function renderSeriesLibraryList() {
+            return `
+                <div class="series-list" role="list">
+                    ${seriesLibrary.map(series => `
+                        <button class="series-list-row" type="button" role="listitem" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                            <div class="series-list-thumb-wrapper">
+                                <img class="series-list-thumb" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                            </div>
+                            <div class="series-list-info">
+                                <h3 class="series-list-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
+                                <div class="series-list-meta">${formatFileSize(series.total_size)}</div>
+                            </div>
+                            <div class="series-list-aside">
+                                ${renderLookupStatusBadge(series)}
+                                <span class="series-list-count" aria-label="${series.issue_count} issues">${series.issue_count}</span>
+                                <span class="series-list-chevron" aria-hidden="true">›</span>
+                            </div>
+                        </button>
+                    `).join('')}
+                </div>
+            `;
         }
 
         function renderLookupStatusBadge(series) {

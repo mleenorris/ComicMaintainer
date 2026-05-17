@@ -141,6 +141,12 @@ public void ProcessFile_Issue123_HandlesDecimalChapterNumbers()
 # Run all tests
 dotnet test
 
+# Run only unit tests (fast)
+dotnet test --filter "Category!=Integration"
+
+# Run only integration tests (in-process Web API)
+dotnet test --filter "Category=Integration"
+
 # Run tests with coverage
 dotnet test --collect:"XPlat Code Coverage"
 
@@ -149,13 +155,28 @@ dotnet test --filter "FullyQualifiedName~ComicFileProcessorTests"
 
 # Run tests with verbose output
 dotnet test --verbosity normal
+
+# Run the end-to-end container smoke test (requires Docker)
+docker build -f Dockerfile.dotnet -t comicmaintainer:ci .
+./scripts/container-smoke-test.sh
 ```
 
 ### CI/CD Testing
-- Tests run automatically on every push and pull request
-- Test results appear in the GitHub Actions workflow
-- Coverage reports are posted as PR comments
-- Failed tests block PR merging
+Every push and pull request runs three jobs that must all stay green:
+
+1. **Unit Tests** (`test-dotnet.yml`) — `dotnet test --filter "Category!=Integration"`,
+   plus coverage reporting/PR comment.
+2. **Integration Tests** (`test-dotnet.yml`) — `dotnet test --filter "Category=Integration"`,
+   exercising the real Web API through `WebApplicationFactory<Program>` (real
+   EF Core + middleware pipeline).
+3. **Docker Container Smoke Test** (`integration-tests-e2e.yml`) — builds
+   `Dockerfile.dotnet`, runs the container, verifies `/api/version` is healthy,
+   and confirms the file watcher reacts to a fixture `.cbz`. Container logs are
+   uploaded as an artifact on failure.
+
+Test results appear in the GitHub Actions workflow, coverage is posted as a PR
+comment, and failed jobs block merging once the corresponding check names are
+added to branch-protection settings.
 
 ## Pull Request Test Requirements
 

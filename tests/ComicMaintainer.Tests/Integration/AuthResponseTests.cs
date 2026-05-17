@@ -10,6 +10,7 @@ namespace ComicMaintainer.Tests.Integration;
 /// Integration tests for authentication responses.
 /// These tests verify that API endpoints return proper JSON responses for authentication failures.
 /// </summary>
+[Trait("Category", "Integration")]
 public class AuthResponseTests : IClassFixture<WebApplicationFactory<Program>>
 {
     private readonly HttpClient _client;

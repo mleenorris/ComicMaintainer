@@ -105,12 +105,32 @@ Add health check endpoint for container orchestration
 # Run all tests
 dotnet test
 
+# Run only unit tests (fast)
+dotnet test --filter "Category!=Integration"
+
+# Run only integration tests (in-process API via WebApplicationFactory)
+dotnet test --filter "Category=Integration"
+
 # Run tests with coverage
 dotnet test --collect:"XPlat Code Coverage"
 
 # Run tests with verbose output
 dotnet test --verbosity normal
 ```
+
+### Run End-to-End Container Smoke Test
+
+The Docker-based smoke test verifies that the published image starts, serves
+`/api/version`, and the file watcher reacts to a comic dropped into the
+watched directory.
+
+```bash
+docker build -f Dockerfile.dotnet -t comicmaintainer:ci .
+./scripts/container-smoke-test.sh
+```
+
+This is the same script run by the **Docker Container Smoke Test** job in
+`.github/workflows/integration-tests-e2e.yml` on every PR.
 
 ### Run Specific Test File
 

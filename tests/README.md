@@ -123,7 +123,17 @@ Tests are automatically run on:
 - Pull requests targeting `main` or `develop`
 - Manual workflow dispatch
 
-See `.github/workflows/test-dotnet.yml` for CI configuration.
+There are two CI workflows that gate every PR:
+
+| Workflow | Job(s) | What it runs |
+|---|---|---|
+| `.github/workflows/test-dotnet.yml` | **Unit Tests** | `dotnet test --filter "Category!=Integration"` (fast) |
+|  | **Integration Tests** | `dotnet test --filter "Category=Integration"` (in-process API tests) |
+| `.github/workflows/integration-tests-e2e.yml` | **Docker Container Smoke Test** | Builds `Dockerfile.dotnet`, starts the container, hits `/api/version`, and verifies the file watcher reacts to a fixture `.cbz` |
+
+All three jobs must pass for a PR to be considered green. To make them
+required for merge, add their check names to branch protection for
+`main`/`develop` in repository settings.
 
 ## Test Categories
 
@@ -131,11 +141,38 @@ See `.github/workflows/test-dotnet.yml` for CI configuration.
 - Test individual components in isolation
 - Use mocks for dependencies
 - Fast execution
+- Run on every push and PR by the **Unit Tests** job in
+  `.github/workflows/test-dotnet.yml`.
 
-### Integration Tests (Future)
-- Test component interactions
-- Use real or test databases
-- Slower execution
+### Integration Tests
+- Marked with `[Trait("Category", "Integration")]`.
+- Two flavours:
+  1. **In-process API integration tests** (`tests/ComicMaintainer.Tests/Integration/`):
+     spin up the real Web API via `WebApplicationFactory<Program>` and exercise it
+     over HTTP. Real EF Core (SQLite) is used, so DB migrations and most
+     middleware run end-to-end.
+  2. **End-to-end container smoke test** (`scripts/container-smoke-test.sh`):
+     builds the Docker image (`Dockerfile.dotnet`), starts a container, verifies
+     `/api/version` is healthy, and checks that the file watcher reacts to a
+     fixture `.cbz` dropped into the mounted watch directory. Run in CI by
+     `.github/workflows/integration-tests-e2e.yml`.
+- Both run on every PR targeting `main`/`develop`.
+
+### Running only one category locally
+
+```bash
+# Unit tests only (fast)
+dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj \
+    --filter "Category!=Integration"
+
+# In-process integration tests only
+dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj \
+    --filter "Category=Integration"
+
+# End-to-end container smoke test (requires Docker)
+docker build -f Dockerfile.dotnet -t comicmaintainer:ci .
+./scripts/container-smoke-test.sh
+```
 
 ## Best Practices
 

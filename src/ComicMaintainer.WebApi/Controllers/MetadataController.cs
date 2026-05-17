@@ -212,14 +212,30 @@ public class MetadataController : ControllerBase
         try
         {
             var results = await _externalMetadata.SearchSeriesAsync(query, Math.Clamp(limit, 1, 50), cancellationToken);
+            // Score each candidate against the query so the UI can show a
+            // confidence percentage and let the user pick the best one when
+            // the automatic match was wrong. Sort descending by score so the
+            // most-likely match is presented first.
+            var scored = results
+                .Select(r => new
+                {
+                    metadata = r,
+                    score = SeriesMatchScorer.Score(query, r.CanonicalTitle, r.Aliases)
+                })
+                .OrderByDescending(x => x.score)
+                .ToList();
+
             return Ok(new
             {
                 query,
-                results = results.Select(r => new
+                results = scored.Select(x => new
                 {
-                    canonical_title = r.CanonicalTitle,
-                    aliases = r.Aliases ?? new List<string>(),
-                    source = r.Source
+                    canonical_title = x.metadata.CanonicalTitle,
+                    aliases = x.metadata.Aliases ?? new List<string>(),
+                    source = x.metadata.Source,
+                    image_url = x.metadata.ImageUrl,
+                    thumbnail_url = x.metadata.ThumbnailUrl,
+                    match_score = x.score
                 })
             });
         }
@@ -297,6 +313,83 @@ public class MetadataController : ControllerBase
         return record is null ? NotFound() : Ok(record);
     }
 
+    /// <summary>
+    /// Manually adopt one of the candidates returned by <c>/search</c> as the
+    /// cached external metadata for a series. Used when the automatic match
+    /// was wrong and the user picks a different candidate from the list.
+    /// Preserves any user-overridden canonical title and the user alias list.
+    /// </summary>
+    [HttpPost("series/{seriesTitle}/apply-match")]
+    public async Task<ActionResult<SeriesMetadataCacheRecord>> ApplyMatch(
+        string seriesTitle,
+        [FromBody] ApplyMatchRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return BadRequest("Series title is required");
+        }
+        if (request is null || string.IsNullOrWhiteSpace(request.CanonicalTitle))
+        {
+            return BadRequest("Candidate canonical title is required");
+        }
+
+        try
+        {
+            var record = await _cache.ApplyExternalMatchAsync(
+                seriesTitle,
+                new ExternalSeriesMetadata
+                {
+                    CanonicalTitle = request.CanonicalTitle.Trim(),
+                    Aliases = request.Aliases?.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()).ToList()
+                              ?? new List<string>(),
+                    Source = request.Source ?? string.Empty,
+                    ImageUrl = string.IsNullOrWhiteSpace(request.ImageUrl) ? null : request.ImageUrl,
+                    ThumbnailUrl = string.IsNullOrWhiteSpace(request.ThumbnailUrl) ? null : request.ThumbnailUrl
+                },
+                cancellationToken);
+            return Ok(record);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error applying match for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
+            return StatusCode(500, "Error applying match");
+        }
+    }
+
+    /// <summary>
+    /// Clear the external metadata cached for a single series (provider
+    /// aliases, source, last lookup, provider-supplied canonical title, and
+    /// any provider-downloaded image). User-managed aliases and user-uploaded
+    /// images are preserved.
+    /// </summary>
+    [HttpDelete("series/{seriesTitle}/external")]
+    public async Task<ActionResult<SeriesMetadataCacheRecord>> ClearExternal(
+        string seriesTitle,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return BadRequest("Series title is required");
+        }
+
+        try
+        {
+            var key = _cache.NormalizeKey(seriesTitle);
+            var record = await _cache.ClearExternalMetadataAsync(key, cancellationToken);
+            return record is null ? NotFound() : Ok(record);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error clearing external metadata for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
+            return StatusCode(500, "Error clearing external metadata");
+        }
+    }
+
     public class RefreshSelectedRequest
     {
         public List<string> Series { get; set; } = new();
@@ -318,5 +411,14 @@ public class MetadataController : ControllerBase
     {
         public List<string> Aliases { get; set; } = new();
         public string? CanonicalTitle { get; set; }
+    }
+
+    public class ApplyMatchRequest
+    {
+        public string CanonicalTitle { get; set; } = string.Empty;
+        public List<string>? Aliases { get; set; }
+        public string? Source { get; set; }
+        public string? ImageUrl { get; set; }
+        public string? ThumbnailUrl { get; set; }
     }
 }

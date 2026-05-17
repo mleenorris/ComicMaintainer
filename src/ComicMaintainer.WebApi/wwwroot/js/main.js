@@ -6185,14 +6185,29 @@
                 }
                 container.innerHTML = results.map((r, idx) => {
                     const aliases = (r.aliases || []).map(a => escapeHtml(a)).join(', ') || '<em>none</em>';
+                    // Server returns match_score on [0,100]. Render a colour
+                    // hint so the user can see at a glance which candidate is
+                    // the most-likely match when the automatic pick was wrong.
+                    const score = typeof r.match_score === 'number' ? r.match_score : null;
+                    let scoreBadge = '';
+                    if (score !== null) {
+                        const tone = score >= 90 ? 'var(--accent-success, #1f9d55)'
+                                   : score >= 60 ? 'var(--accent-warning, #c69026)'
+                                   : 'var(--text-secondary)';
+                        scoreBadge = `<span title="Confidence that this is the right match" style="font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--bg-secondary); color: ${tone}; border: 1px solid ${tone};">${score.toFixed(1)}% match</span>`;
+                    }
                     return `
                         <div style="border: 1px solid var(--border-primary); border-radius: 5px; padding: 10px; margin-bottom: 8px;">
-                            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
                                 <strong>${escapeHtml(r.canonical_title || '')}</strong>
-                                <span style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(r.source || '')}</span>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    ${scoreBadge}
+                                    <span style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(r.source || '')}</span>
+                                </div>
                             </div>
                             <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Aliases: ${aliases}</div>
-                            <div style="display: flex; gap: 6px; margin-top: 8px;">
+                            <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;">
+                                <button class="btn btn-small btn-primary" type="button" onclick="applySearchResultAsMatch(${idx})" title="Mark this candidate as the correct match for the series">✅ Use This Match</button>
                                 <button class="btn btn-small" type="button" onclick="adoptSearchResult(${idx}, 'canonical')">Adopt as Canonical</button>
                                 <button class="btn btn-small" type="button" onclick="adoptSearchResult(${idx}, 'aliases')">Add Aliases</button>
                             </div>
@@ -6232,4 +6247,89 @@
             }
             manageSeriesState.record.user_aliases = current;
             renderManageSeriesUserAliases(manageSeriesState.record);
+        }
+
+        // Mark one of the candidates returned by /search as the *correct*
+        // external match for the series. Used when the automatic best-match
+        // chose the wrong candidate. Server-side this overwrites the cached
+        // provider aliases / source / lookup status with the chosen ones
+        // (preserving any user canonical-title override and user aliases).
+        async function applySearchResultAsMatch(index) {
+            const { seriesTitle } = manageSeriesState;
+            if (!seriesTitle) return;
+            const results = window.__manageSeriesSearchResults || [];
+            const result = results[index];
+            if (!result || !result.canonical_title) return;
+            if (!confirm(`Mark "${result.canonical_title}" (${result.source || 'unknown source'}) as the correct match for "${seriesTitle}"? This replaces the cached provider metadata for this series.`)) {
+                return;
+            }
+            try {
+                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/apply-match`), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        canonicalTitle: result.canonical_title,
+                        aliases: result.aliases || [],
+                        source: result.source || null,
+                        imageUrl: result.image_url || null,
+                        thumbnailUrl: result.thumbnail_url || null
+                    })
+                });
+                if (!response.ok) {
+                    let msg = 'Failed to apply match';
+                    try { const j = await response.json(); if (j && (j.error || typeof j === 'string')) msg = j.error || j; } catch {}
+                    showMessage(msg, 'error');
+                    return;
+                }
+                const record = await response.json();
+                manageSeriesState.record = record;
+                renderManageSeriesProviderAliases(record);
+                renderManageSeriesUserAliases(record);
+                renderManageSeriesImage(record);
+                showMessage('Match applied', 'success');
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
+            } catch (err) {
+                console.error('applySearchResultAsMatch failed', err);
+                showMessage('Failed to apply match', 'error');
+            }
+        }
+
+        // Wipe the cached external metadata for the current series (provider
+        // aliases, source, lookup status, and any provider-downloaded image).
+        // User aliases and user-uploaded images are preserved.
+        async function clearSeriesExternalMetadata() {
+            const { seriesTitle } = manageSeriesState;
+            if (!seriesTitle) return;
+            if (!confirm(`Clear cached external metadata for "${seriesTitle}"? User aliases and a user-uploaded image will be kept.`)) {
+                return;
+            }
+            try {
+                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/external`), {
+                    method: 'DELETE',
+                    credentials: 'same-origin'
+                });
+                if (response.status === 404) {
+                    showMessage('Nothing to clear — no external metadata cached for this series.', 'info');
+                    return;
+                }
+                if (!response.ok) {
+                    showMessage('Failed to clear external metadata', 'error');
+                    return;
+                }
+                const record = await response.json();
+                manageSeriesState.record = record;
+                renderManageSeriesProviderAliases(record);
+                renderManageSeriesUserAliases(record);
+                renderManageSeriesImage(record);
+                showMessage('External metadata cleared', 'success');
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
+            } catch (err) {
+                console.error('clearSeriesExternalMetadata failed', err);
+                showMessage('Failed to clear external metadata', 'error');
+            }
         }

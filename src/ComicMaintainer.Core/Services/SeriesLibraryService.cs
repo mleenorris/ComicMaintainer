@@ -10,6 +10,12 @@ public class SeriesLibraryService : ISeriesLibraryService
 {
     private static readonly Regex SeriesKeySanitizer = new("[^a-z0-9]+", RegexOptions.Compiled);
 
+    // Series-level filters that operate on the grouped/series record (rather
+    // than on individual files in the file store). These are applied AFTER
+    // BuildGroupsAsync so the file-store call sees a no-op file filter.
+    private const string ProviderMatchedFilter = "matched";
+    private const string ProviderUnmatchedFilter = "unmatched";
+
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly ISeriesMetadataCacheService _metadataCache;
@@ -36,9 +42,11 @@ public class SeriesLibraryService : ISeriesLibraryService
         string? direction = "asc",
         CancellationToken cancellationToken = default)
     {
-        var groups = await BuildGroupsAsync(filter, allowDiskRead: true, cancellationToken);
+        var (fileFilter, providerFilter) = SplitFilter(filter);
+        var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: true, cancellationToken);
 
         var groupedSeries = groups.Values
+            .Where(accumulator => MatchesProviderFilter(accumulator, providerFilter))
             .Select(accumulator =>
             {
                 accumulator.Issues = SortIssues(accumulator.Issues);
@@ -111,11 +119,13 @@ public class SeriesLibraryService : ISeriesLibraryService
         int? limit = null,
         CancellationToken cancellationToken = default)
     {
+        var (fileFilter, providerFilter) = SplitFilter(filter);
         // Summary mode never opens an archive on disk, so even huge libraries
         // stay snappy. Per-issue details are loaded lazily by GetSeriesIssuesAsync.
-        var groups = await BuildGroupsAsync(filter, allowDiskRead: false, cancellationToken);
+        var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
 
         var summaries = groups.Values
+            .Where(accumulator => MatchesProviderFilter(accumulator, providerFilter))
             .Select(accumulator =>
             {
                 var sortedIssues = SortIssues(accumulator.Issues);
@@ -212,7 +222,8 @@ public class SeriesLibraryService : ISeriesLibraryService
         // Group cache-only first (cheap). If the requested id matches a group,
         // optionally upgrade just that group's metadata via disk reads to fill
         // in per-issue details that may be missing from the DB cache.
-        var groups = await BuildGroupsAsync(filter, allowDiskRead: false, cancellationToken);
+        var (fileFilter, _) = SplitFilter(filter);
+        var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
         if (!groups.TryGetValue(seriesId, out var accumulator))
         {
             return null;
@@ -297,7 +308,8 @@ public class SeriesLibraryService : ISeriesLibraryService
             return Array.Empty<string>();
         }
 
-        var groups = await BuildGroupsAsync(filter, allowDiskRead: false, cancellationToken);
+        var (fileFilter, _) = SplitFilter(filter);
+        var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
         if (!groups.TryGetValue(seriesId, out var accumulator))
         {
             return Array.Empty<string>();
@@ -717,6 +729,50 @@ public class SeriesLibraryService : ISeriesLibraryService
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Splits the inbound filter token into a file-level filter (passed to the
+    /// file store) and an optional series-level provider-match filter
+    /// (<c>matched</c> or <c>unmatched</c>) applied after grouping.
+    /// </summary>
+    private static (string? FileFilter, string? ProviderFilter) SplitFilter(string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            return (null, null);
+        }
+
+        if (string.Equals(filter, ProviderMatchedFilter, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(filter, ProviderUnmatchedFilter, StringComparison.OrdinalIgnoreCase))
+        {
+            return (null, filter.ToLowerInvariant());
+        }
+
+        return (filter, null);
+    }
+
+    /// <summary>
+    /// Returns true when the accumulator passes the requested provider-match
+    /// filter. A series is considered "matched" when it has a non-empty
+    /// metadata source (i.e. an external provider lookup or a manual entry
+    /// has produced data for the series). Unknown providerFilter values
+    /// disable the filter.
+    /// </summary>
+    private static bool MatchesProviderFilter(SeriesAccumulator accumulator, string? providerFilter)
+    {
+        if (string.IsNullOrWhiteSpace(providerFilter))
+        {
+            return true;
+        }
+
+        var hasMatch = !string.IsNullOrWhiteSpace(accumulator.MetadataSource);
+        return providerFilter switch
+        {
+            ProviderMatchedFilter => hasMatch,
+            ProviderUnmatchedFilter => !hasMatch,
+            _ => true
+        };
     }
 
     private sealed class SeriesAccumulator

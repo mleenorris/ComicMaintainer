@@ -1983,6 +1983,12 @@ public class FilesController : ControllerBase
         "normalized" => "normalized",
         "read" => "read",
         "unread" => "unread",
+        // Series-level provider-match filters. The file store treats these as
+        // a no-op; SeriesLibraryService applies them after grouping so the
+        // series list is filtered by whether an external metadata provider
+        // returned a match (or one was set manually).
+        "matched" => "matched",
+        "unmatched" => "unmatched",
         _ => null
     };
 }

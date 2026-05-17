@@ -874,13 +874,9 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         if (!string.IsNullOrEmpty(mangaDexBaseUrl))
             options.MangaDexBaseUrl = mangaDexBaseUrl;
 
-        var enableAniListManhwaMetadata = Environment.GetEnvironmentVariable("ENABLE_ANILIST_MANHWA_METADATA");
-        if (!string.IsNullOrEmpty(enableAniListManhwaMetadata))
-            options.EnableAniListManhwaMetadata = enableAniListManhwaMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
-
-        var enableAniListMangaMetadata = Environment.GetEnvironmentVariable("ENABLE_ANILIST_MANGA_METADATA");
-        if (!string.IsNullOrEmpty(enableAniListMangaMetadata))
-            options.EnableAniListMangaMetadata = enableAniListMangaMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
+        var enableAniListMetadata = Environment.GetEnvironmentVariable("ENABLE_ANILIST_METADATA");
+        if (!string.IsNullOrEmpty(enableAniListMetadata))
+            options.EnableAniListMetadata = enableAniListMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
 
         var aniListBaseUrl = Environment.GetEnvironmentVariable("ANILIST_BASE_URL");
         if (!string.IsNullOrEmpty(aniListBaseUrl))

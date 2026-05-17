@@ -45,12 +45,9 @@ public class AppSettings
     public bool EnableMangaDexMetadata { get; set; }
     public string MangaDexBaseUrl { get; set; } = "https://api.mangadex.org";
 
-    // AniList metadata provider scoped to Manhwa (Korean origin)
-    public bool EnableAniListManhwaMetadata { get; set; }
+    // AniList metadata provider (Manhwa and Manga)
+    public bool EnableAniListMetadata { get; set; }
     public string AniListBaseUrl { get; set; } = "https://graphql.anilist.co";
-
-    // AniList metadata provider scoped to Manga (Japanese origin)
-    public bool EnableAniListMangaMetadata { get; set; }
 
     /// <summary>
     /// When true (the default), external metadata refreshes also try to

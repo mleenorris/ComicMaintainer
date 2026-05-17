@@ -55,7 +55,7 @@ public class AniListMangaSeriesMetadataServiceTests
 
         var service = CreateService(handler, new AppSettings
         {
-            EnableAniListMangaMetadata = true,
+            EnableAniListMetadata = true,
             AniListBaseUrl = "https://graphql.anilist.example"
         });
 
@@ -97,7 +97,7 @@ public class AniListMangaSeriesMetadataServiceTests
 
         var service = CreateService(handler, new AppSettings
         {
-            EnableAniListMangaMetadata = true,
+            EnableAniListMetadata = true,
             AniListBaseUrl = "https://graphql.anilist.example"
         });
 
@@ -135,7 +135,7 @@ public class AniListMangaSeriesMetadataServiceTests
 
         var service = CreateService(handler, new AppSettings
         {
-            EnableAniListMangaMetadata = true,
+            EnableAniListMetadata = true,
             AniListBaseUrl = "https://graphql.anilist.example"
         });
 
@@ -152,7 +152,7 @@ public class AniListMangaSeriesMetadataServiceTests
     {
         var service = CreateService(
             new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)),
-            new AppSettings { EnableAniListMangaMetadata = false });
+            new AppSettings { EnableAniListMetadata = false });
 
         var result = await service.LookupSeriesAsync("Attack on Titan");
 
@@ -164,7 +164,7 @@ public class AniListMangaSeriesMetadataServiceTests
     {
         var service = CreateService(
             new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)),
-            new AppSettings { EnableAniListMangaMetadata = true, AniListBaseUrl = "https://graphql.anilist.example" });
+            new AppSettings { EnableAniListMetadata = true, AniListBaseUrl = "https://graphql.anilist.example" });
 
         var result = await service.LookupSeriesAsync(string.Empty);
 
@@ -181,7 +181,7 @@ public class AniListMangaSeriesMetadataServiceTests
 
         var service = CreateService(handler, new AppSettings
         {
-            EnableAniListMangaMetadata = true,
+            EnableAniListMetadata = true,
             AniListBaseUrl = "https://graphql.anilist.example"
         });
 
@@ -197,7 +197,7 @@ public class AniListMangaSeriesMetadataServiceTests
 
         var service = CreateService(handler, new AppSettings
         {
-            EnableAniListMangaMetadata = true,
+            EnableAniListMetadata = true,
             AniListBaseUrl = "https://graphql.anilist.example"
         });
 
@@ -224,7 +224,7 @@ public class AniListMangaSeriesMetadataServiceTests
 
         var service = CreateService(handler, new AppSettings
         {
-            EnableAniListMangaMetadata = true,
+            EnableAniListMetadata = true,
             AniListBaseUrl = "https://graphql.anilist.example"
         });
 
@@ -244,7 +244,7 @@ public class AniListMangaSeriesMetadataServiceTests
     public async Task CheckHealthAsync_DisabledProvider_ReportsDisabled()
     {
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
-        var service = CreateService(handler, new AppSettings { EnableAniListMangaMetadata = false });
+        var service = CreateService(handler, new AppSettings { EnableAniListMetadata = false });
 
         var health = await service.CheckHealthAsync();
 
@@ -260,7 +260,7 @@ public class AniListMangaSeriesMetadataServiceTests
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { ReasonPhrase = "Service Unavailable" });
         var service = CreateService(handler, new AppSettings
         {
-            EnableAniListMangaMetadata = true,
+            EnableAniListMetadata = true,
             AniListBaseUrl = "https://graphql.anilist.example"
         });
 
@@ -281,7 +281,7 @@ public class AniListMangaSeriesMetadataServiceTests
         });
         var service = CreateService(handler, new AppSettings
         {
-            EnableAniListMangaMetadata = true,
+            EnableAniListMetadata = true,
             AniListBaseUrl = "https://graphql.anilist.example"
         });
 
@@ -299,7 +299,7 @@ public class AniListMangaSeriesMetadataServiceTests
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
         var service = CreateService(handler, new AppSettings
         {
-            EnableAniListMangaMetadata = true,
+            EnableAniListMetadata = true,
             AniListBaseUrl = "https://graphql.anilist.example"
         });
 

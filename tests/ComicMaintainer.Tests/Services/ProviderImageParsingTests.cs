@@ -280,7 +280,7 @@ public class ProviderImageParsingTests
             var settings = new Mock<IOptionsMonitor<AppSettings>>();
             settings.Setup(s => s.CurrentValue).Returns(new AppSettings
             {
-                EnableAniListManhwaMetadata = true,
+                EnableAniListMetadata = true,
                 AniListBaseUrl = "https://graphql.anilist.co"
             });
             return new AniListManhwaSeriesMetadataService(

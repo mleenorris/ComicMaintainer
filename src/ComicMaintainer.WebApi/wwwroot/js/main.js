@@ -4414,6 +4414,7 @@
                 document.getElementById('enableMangaDexMetadata').checked = !!settingsData.enable_mangadex_metadata;
                 document.getElementById('mangaDexBaseUrl').value = settingsData.mangadex_base_url || 'https://api.mangadex.org';
                 document.getElementById('enableAniListManhwaMetadata').checked = !!settingsData.enable_anilist_manhwa_metadata;
+                document.getElementById('enableAniListMangaMetadata').checked = !!settingsData.enable_anilist_manga_metadata;
                 document.getElementById('aniListBaseUrl').value = settingsData.anilist_base_url || 'https://graphql.anilist.co';
 
                 // Load default library view
@@ -5134,6 +5135,7 @@
             const enableMangaDexMetadata = document.getElementById('enableMangaDexMetadata').checked;
             const mangaDexBaseUrl = document.getElementById('mangaDexBaseUrl').value.trim();
             const enableAniListManhwaMetadata = document.getElementById('enableAniListManhwaMetadata').checked;
+            const enableAniListMangaMetadata = document.getElementById('enableAniListMangaMetadata').checked;
             const aniListBaseUrl = document.getElementById('aniListBaseUrl').value.trim();
             
             if (!format) {
@@ -5246,6 +5248,7 @@
                         enableMangaDex: enableMangaDexMetadata,
                         mangaDexBaseUrl: mangaDexBaseUrl || 'https://api.mangadex.org',
                         enableAniListManhwa: enableAniListManhwaMetadata,
+                        enableAniListManga: enableAniListMangaMetadata,
                         aniListBaseUrl: aniListBaseUrl || 'https://graphql.anilist.co'
                     })
                 });

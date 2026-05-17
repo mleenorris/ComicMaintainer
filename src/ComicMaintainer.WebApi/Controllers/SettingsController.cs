@@ -62,6 +62,7 @@ public class SettingsController : ControllerBase
             enable_mangadex_metadata = _appSettings.CurrentValue.EnableMangaDexMetadata,
             mangadex_base_url = _appSettings.CurrentValue.MangaDexBaseUrl,
             enable_anilist_manhwa_metadata = _appSettings.CurrentValue.EnableAniListManhwaMetadata,
+            enable_anilist_manga_metadata = _appSettings.CurrentValue.EnableAniListMangaMetadata,
             anilist_base_url = _appSettings.CurrentValue.AniListBaseUrl,
             default_library_view = _appSettings.CurrentValue.DefaultLibraryView
         };
@@ -322,6 +323,7 @@ public class SettingsController : ControllerBase
             }
 
             await _settingsService.UpdateAniListManhwaEnabledAsync(request.EnableAniListManhwa, cancellationToken);
+            await _settingsService.UpdateAniListMangaEnabledAsync(request.EnableAniListManga, cancellationToken);
             if (!string.IsNullOrWhiteSpace(request.AniListBaseUrl))
             {
                 await _settingsService.UpdateAniListBaseUrlAsync(request.AniListBaseUrl.Trim(), cancellationToken);
@@ -479,6 +481,7 @@ public class SettingsController : ControllerBase
         public bool EnableMangaDex { get; set; }
         public string? MangaDexBaseUrl { get; set; }
         public bool EnableAniListManhwa { get; set; }
+        public bool EnableAniListManga { get; set; }
         public string? AniListBaseUrl { get; set; }
     }
 }

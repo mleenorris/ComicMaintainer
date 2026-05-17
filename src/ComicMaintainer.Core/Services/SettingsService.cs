@@ -163,6 +163,11 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("EnableAniListManhwaMetadata", enabled, cancellationToken);
     }
 
+    public async Task UpdateAniListMangaEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("EnableAniListMangaMetadata", enabled, cancellationToken);
+    }
+
     public async Task UpdateAniListBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default)
     {
         await UpdateSettingAsync("AniListBaseUrl", baseUrl, cancellationToken);

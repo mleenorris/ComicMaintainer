@@ -454,15 +454,18 @@ builder.Services.AddHttpClient(SeriesImageStore.HttpClientName)
 builder.Services.AddHttpClient(nameof(ComicVineSeriesMetadataService));
 builder.Services.AddHttpClient(nameof(MangaDexSeriesMetadataService));
 builder.Services.AddHttpClient(nameof(AniListManhwaSeriesMetadataService));
+builder.Services.AddHttpClient(nameof(AniListMangaSeriesMetadataService));
 builder.Services.AddSingleton<ComicVineSeriesMetadataService>();
 builder.Services.AddSingleton<MangaDexSeriesMetadataService>();
 builder.Services.AddSingleton<AniListManhwaSeriesMetadataService>();
+builder.Services.AddSingleton<AniListMangaSeriesMetadataService>();
 builder.Services.AddSingleton<IExternalSeriesMetadataService>(sp =>
     new CompositeExternalSeriesMetadataService(
         [
             sp.GetRequiredService<ComicVineSeriesMetadataService>(),
             sp.GetRequiredService<MangaDexSeriesMetadataService>(),
-            sp.GetRequiredService<AniListManhwaSeriesMetadataService>()
+            sp.GetRequiredService<AniListManhwaSeriesMetadataService>(),
+            sp.GetRequiredService<AniListMangaSeriesMetadataService>()
         ],
         sp.GetRequiredService<ILogger<CompositeExternalSeriesMetadataService>>()));
 
@@ -874,6 +877,10 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         var enableAniListManhwaMetadata = Environment.GetEnvironmentVariable("ENABLE_ANILIST_MANHWA_METADATA");
         if (!string.IsNullOrEmpty(enableAniListManhwaMetadata))
             options.EnableAniListManhwaMetadata = enableAniListManhwaMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        var enableAniListMangaMetadata = Environment.GetEnvironmentVariable("ENABLE_ANILIST_MANGA_METADATA");
+        if (!string.IsNullOrEmpty(enableAniListMangaMetadata))
+            options.EnableAniListMangaMetadata = enableAniListMangaMetadata.Equals("true", StringComparison.OrdinalIgnoreCase);
 
         var aniListBaseUrl = Environment.GetEnvironmentVariable("ANILIST_BASE_URL");
         if (!string.IsNullOrEmpty(aniListBaseUrl))

@@ -1181,7 +1181,9 @@
                         'all': '📚 All',
                         'unmarked': '⚠️ Unmarked',
                         'marked': '✅ Marked',
-                        'duplicates': '🔁 Duplicates'
+                        'duplicates': '🔁 Duplicates',
+                        'matched': '🔗 Matched',
+                        'unmatched': '❓ Not Matched'
                     };
                     document.getElementById('headerFilterLabel').textContent = filterLabels[filterMode];
                     
@@ -1521,7 +1523,9 @@
                 'renamed': '📝 Renamed',
                 'normalized': '📋 Normalized',
                 'read': '👁️ Read',
-                'unread': '📚 Unread'
+                'unread': '📚 Unread',
+                'matched': '🔗 Matched',
+                'unmatched': '❓ Not Matched'
             };
             
             document.getElementById('headerFilterLabel').textContent = filterLabels[mode];

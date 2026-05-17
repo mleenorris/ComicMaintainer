@@ -460,6 +460,116 @@ public class SeriesLibraryServiceTests
         Assert.Contains(b.Aliases, alias => alias.Equals("C", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task GetSeriesAsync_FilterByProviderMatched_ReturnsOnlySeriesWithMetadataSource()
+    {
+        // Two series: "Batman" has a cached external-provider record (matched),
+        // "Lonely Title" has no cache record at all (unmatched). The file store
+        // is invoked with a null file-level filter because "matched" is a
+        // series-level filter applied after grouping.
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Batman/Batman 001.cbz",
+                FileName = "Batman 001.cbz",
+                Directory = "/library/Batman",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Batman", Issue = "1" }
+            },
+            new()
+            {
+                FilePath = "/library/Lonely Title/Lonely Title 001.cbz",
+                FileName = "Lonely Title 001.cbz",
+                Directory = "/library/Lonely Title",
+                FileSize = 200,
+                LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Lonely Title", Issue = "1" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "batman",
+                    CanonicalTitle = "Batman",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>(),
+                    Source = "ComicVine",
+                    LookupStatus = "success"
+                }
+            });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
+
+        var matched = await service.GetSeriesAsync(filter: "matched");
+        Assert.Single(matched.Series);
+        Assert.Equal("Batman", matched.Series[0].Title);
+        Assert.Equal("ComicVine", matched.Series[0].MetadataSource);
+
+        var unmatched = await service.GetSeriesAsync(filter: "unmatched");
+        Assert.Single(unmatched.Series);
+        Assert.Equal("Lonely Title", unmatched.Series[0].Title);
+        Assert.Null(unmatched.Series[0].MetadataSource);
+    }
+
+    [Fact]
+    public async Task GetSeriesSummariesAsync_FilterByProviderUnmatched_ReturnsOnlySeriesWithoutMetadataSource()
+    {
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Batman/Batman 001.cbz",
+                FileName = "Batman 001.cbz",
+                Directory = "/library/Batman",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Batman", Issue = "1" }
+            },
+            new()
+            {
+                FilePath = "/library/Unknown/Unknown 001.cbz",
+                FileName = "Unknown 001.cbz",
+                Directory = "/library/Unknown",
+                FileSize = 200,
+                LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Unknown", Issue = "1" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "batman",
+                    CanonicalTitle = "Batman",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>(),
+                    Source = "ComicVine",
+                    LookupStatus = "success"
+                }
+            });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync(filter: "unmatched");
+
+        Assert.Single(result.Series);
+        Assert.Equal("Unknown", result.Series[0].Title);
+        Assert.Equal(1, result.TotalSeries);
+    }
+
     private static string NormalizeKey(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))

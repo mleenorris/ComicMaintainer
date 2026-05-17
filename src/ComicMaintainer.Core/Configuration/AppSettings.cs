@@ -49,6 +49,9 @@ public class AppSettings
     public bool EnableAniListManhwaMetadata { get; set; }
     public string AniListBaseUrl { get; set; } = "https://graphql.anilist.co";
 
+    // AniList metadata provider scoped to Manga (Japanese origin)
+    public bool EnableAniListMangaMetadata { get; set; }
+
     /// <summary>
     /// When true (the default), external metadata refreshes also try to
     /// download a series cover image from the chosen provider and persist it

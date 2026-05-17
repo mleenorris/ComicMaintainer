@@ -67,5 +67,6 @@ public interface ISettingsService
     Task UpdateMangaDexEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task UpdateMangaDexBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
     Task UpdateAniListManhwaEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
+    Task UpdateAniListMangaEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task UpdateAniListBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
 }

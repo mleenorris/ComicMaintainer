@@ -1278,6 +1278,11 @@
         }
 
         function getEffectiveSeriesLayout() {
+            // On phone portrait, the compact overlay layout truncates titles too
+            // aggressively. Keep it readable by coercing compact to list there.
+            if (isMobilePortrait() && seriesLayoutPreference === 'compact') {
+                return 'list';
+            }
             if (seriesLayoutPreference) return seriesLayoutPreference;
             // Auto: list on phone-portrait so titles are always readable,
             // overlay-grid ("compact") everywhere else to preserve desktop behaviour.

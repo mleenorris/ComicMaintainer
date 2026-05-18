@@ -570,6 +570,125 @@ public class SeriesLibraryServiceTests
         Assert.Equal(1, result.TotalSeries);
     }
 
+    [Fact]
+    public async Task GetSeriesSummariesAsync_PrefersSuccessRecordOverNotFoundSiblingInSameGroup()
+    {
+        // Reproduces the bug where a successful folder-refresh produced both
+        // a "success" record (for the canonical title) and a stale "not_found"
+        // sibling (for the folder/alternate title that didn't match any
+        // provider). Both share the same union-find component because the
+        // file links to both — the folder title and the embedded series
+        // name. If we just returned the first record encountered, the stale
+        // "not_found" sibling could win and the series-list badge would
+        // render the yellow "?" even though a successful match exists.
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Berserk Deluxe Edition/Berserk 001.cbz",
+                FileName = "Berserk 001.cbz",
+                Directory = "/library/Berserk Deluxe Edition",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Berserk", Issue = "1" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        // Two records share the same logical series. The "not_found" record
+        // is listed first to exercise the previous "first-match wins" bug.
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "berserk-deluxe-edition",
+                    CanonicalTitle = "Berserk Deluxe Edition",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>(),
+                    Source = null,
+                    LookupStatus = "not_found",
+                    LastLookupUtc = new DateTime(2024, 5, 1, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new()
+                {
+                    NormalizedKey = "berserk",
+                    CanonicalTitle = "Berserk",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>(),
+                    Source = "MangaDex",
+                    LookupStatus = "success",
+                    LastLookupUtc = new DateTime(2024, 5, 1, 0, 0, 0, DateTimeKind.Utc)
+                }
+            });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync();
+
+        Assert.Single(result.Series);
+        Assert.Equal("success", result.Series[0].LookupStatus);
+        Assert.Equal("MangaDex", result.Series[0].MetadataSource);
+    }
+
+    [Fact]
+    public async Task GetSeriesSummariesAsync_PrefersManualMatchOverAutoSuccessInSameGroup()
+    {
+        // A user's manual match must outrank a sibling provider-success
+        // record so the explicit user choice survives an automatic refresh
+        // that happened to land on a different cache key.
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Series Alt/Series 001.cbz",
+                FileName = "Series 001.cbz",
+                Directory = "/library/Series Alt",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Series", Issue = "1" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "series-alt",
+                    CanonicalTitle = "Series Alt",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>(),
+                    Source = "MangaDex",
+                    LookupStatus = "success",
+                    LastLookupUtc = new DateTime(2024, 5, 2, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new()
+                {
+                    NormalizedKey = "series",
+                    CanonicalTitle = "Series",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>(),
+                    Source = "AniList",
+                    LookupStatus = "manual_match",
+                    LastLookupUtc = new DateTime(2024, 5, 1, 0, 0, 0, DateTimeKind.Utc)
+                }
+            });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync();
+
+        Assert.Single(result.Series);
+        Assert.Equal("manual_match", result.Series[0].LookupStatus);
+        Assert.Equal("AniList", result.Series[0].MetadataSource);
+    }
+
     private static string NormalizeKey(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))

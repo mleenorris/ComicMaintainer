@@ -692,9 +692,33 @@ public class FilesController : ControllerBase
                 //     suggestions even after their original folders are gone.
                 await PersistFolderCombineAliasesAsync(plan, preMoveSeriesBySourcePath, cancellationToken);
 
+                // Include the destination folder's *existing* files in the
+                // normalize-and-rename batch, not just the moved ones. The user
+                // explicitly wants every item in the combined folder to share
+                // the destination series' metadata, so any previously-existing
+                // file with stale (or merely folder-derived) metadata is
+                // brought into line at the same time as the incoming items.
+                var pathsToProcess = new HashSet<string>(movedDestinationPaths, StringComparer.OrdinalIgnoreCase);
                 try
                 {
-                    postProcessJobId = await _processor.NormalizeAndRenameFilesAsync(movedDestinationPaths, cancellationToken);
+                    var existingDestinationFiles = await GetFilesInDirectoryAsync(plan.Destination, cancellationToken);
+                    foreach (var existingPath in existingDestinationFiles)
+                    {
+                        if (!string.IsNullOrWhiteSpace(existingPath))
+                        {
+                            pathsToProcess.Add(existingPath);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to enumerate existing destination files for {Destination}; only moved files will be re-normalized",
+                        LoggingHelper.SanitizePathForLog(plan.Destination));
+                }
+
+                try
+                {
+                    postProcessJobId = await _processor.NormalizeAndRenameFilesAsync(pathsToProcess, cancellationToken);
                 }
                 catch (Exception ex)
                 {
@@ -917,6 +941,43 @@ public class FilesController : ControllerBase
     }
 
     /// <summary>
+    /// Enumerates the absolute file paths of every tracked file whose parent
+    /// directory matches <paramref name="directory"/> (case-insensitive,
+    /// trailing-separator tolerant). Used by the folder-combine flow to scoop
+    /// up the destination folder's pre-existing files when queuing the post-
+    /// combine normalize-and-rename batch.
+    /// </summary>
+    private async Task<List<string>> GetFilesInDirectoryAsync(string directory, CancellationToken cancellationToken)
+    {
+        var result = new List<string>();
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return result;
+        }
+
+        var normalizedDir = directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var files = await _fileStore.GetAllFilesAsync(cancellationToken);
+        foreach (var file in files)
+        {
+            if (string.IsNullOrWhiteSpace(file.FilePath))
+            {
+                continue;
+            }
+            var parent = Path.GetDirectoryName(file.FilePath);
+            if (string.IsNullOrEmpty(parent))
+            {
+                continue;
+            }
+            var trimmedParent = parent.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(trimmedParent, normalizedDir, StringComparison.OrdinalIgnoreCase))
+            {
+                result.Add(file.FilePath);
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Persists the source-folder series names (and any distinct file-level
     /// series names) as user aliases on the destination's series cache record,
     /// with the destination folder name set as the user-canonical title. This
@@ -947,6 +1008,34 @@ public class FilesController : ControllerBase
                 return;
             }
 
+            // If the destination already has a matched canonical title in the
+            // cache (either via an applied external match or a user override),
+            // prefer that as the canonical-title override. This ensures the
+            // combined folder's metadata converges on the matched name rather
+            // than the raw folder name.
+            var canonicalOverride = destSeriesName;
+            try
+            {
+                var existingKeyForLookup = _metadataCache.NormalizeKey(destSeriesName);
+                if (!string.IsNullOrWhiteSpace(existingKeyForLookup))
+                {
+                    var existing = await _metadataCache.GetAsync(existingKeyForLookup, cancellationToken);
+                    if (existing is not null
+                        && !string.IsNullOrWhiteSpace(existing.CanonicalTitle)
+                        && (existing.IsUserCanonical
+                            || string.Equals(existing.LookupStatus, "success", StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(existing.LookupStatus, "manual_match", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        canonicalOverride = existing.CanonicalTitle.Trim();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to consult existing canonical title for destination {Destination}",
+                    LoggingHelper.SanitizePathForLog(plan.Destination));
+            }
+
             // Build the set of alias candidates from:
             //   1. Each source folder's folder-name-derived series.
             //   2. Any distinct Series values captured from the in-memory
@@ -973,17 +1062,24 @@ public class FilesController : ControllerBase
             }
 
             // De-duplicate (case-insensitive) and drop anything equal to the
-            // destination series name itself.
+            // canonical-title override itself. Also include the destination
+            // folder-derived name as an alias when it differs from the chosen
+            // canonical override (so the cache learns the folder name too).
+            if (!string.Equals(destSeriesName, canonicalOverride, StringComparison.OrdinalIgnoreCase))
+            {
+                candidates.Add(destSeriesName);
+            }
+
             var filtered = candidates
                 .Where(c => !string.IsNullOrWhiteSpace(c))
                 .Select(c => c.Trim())
-                .Where(c => !string.Equals(c, destSeriesName, StringComparison.OrdinalIgnoreCase))
+                .Where(c => !string.Equals(c, canonicalOverride, StringComparison.OrdinalIgnoreCase))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
             // Merge with any existing user aliases so we never lose what the
             // user has previously taught the system.
-            var existingKey = _metadataCache.NormalizeKey(destSeriesName);
+            var existingKey = _metadataCache.NormalizeKey(canonicalOverride);
             if (!string.IsNullOrWhiteSpace(existingKey))
             {
                 try
@@ -995,7 +1091,7 @@ public class FilesController : ControllerBase
                         foreach (var existing in existingAliases)
                         {
                             if (!string.IsNullOrWhiteSpace(existing)
-                                && !string.Equals(existing, destSeriesName, StringComparison.OrdinalIgnoreCase))
+                                && !string.Equals(existing, canonicalOverride, StringComparison.OrdinalIgnoreCase))
                             {
                                 merged.Add(existing.Trim());
                             }
@@ -1006,20 +1102,20 @@ public class FilesController : ControllerBase
                 catch (Exception ex)
                 {
                     _logger.LogDebug(ex, "Failed to merge existing user aliases for series {Series}",
-                        LoggingHelper.SanitizeForLog(destSeriesName));
+                        LoggingHelper.SanitizeForLog(canonicalOverride));
                 }
             }
 
             await _metadataCache.SetUserAliasesAsync(
-                destSeriesName,
+                canonicalOverride,
                 filtered,
-                canonicalTitleOverride: destSeriesName,
+                canonicalTitleOverride: canonicalOverride,
                 cancellationToken);
 
             _logger.LogInformation(
                 "Persisted {AliasCount} user alias(es) and set canonical title to '{Canonical}' after folder combine",
                 filtered.Count,
-                LoggingHelper.SanitizeForLog(destSeriesName));
+                LoggingHelper.SanitizeForLog(canonicalOverride));
         }
         catch (Exception ex)
         {

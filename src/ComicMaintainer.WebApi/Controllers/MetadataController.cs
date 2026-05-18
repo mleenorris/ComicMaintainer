@@ -16,6 +16,8 @@ public class MetadataController : ControllerBase
     private readonly ISeriesMetadataCacheService _cache;
     private readonly ISeriesMetadataRefreshJobService _refreshJobs;
     private readonly IExternalSeriesMetadataService _externalMetadata;
+    private readonly IComicProcessorService? _processor;
+    private readonly IFileStoreService? _fileStore;
     private readonly ILogger<MetadataController> _logger;
 
     public MetadataController(
@@ -23,13 +25,17 @@ public class MetadataController : ControllerBase
         ISeriesMetadataCacheService cache,
         ISeriesMetadataRefreshJobService refreshJobs,
         IExternalSeriesMetadataService externalMetadata,
-        ILogger<MetadataController> logger)
+        ILogger<MetadataController> logger,
+        IComicProcessorService? processor = null,
+        IFileStoreService? fileStore = null)
     {
         _library = library;
         _cache = cache;
         _refreshJobs = refreshJobs;
         _externalMetadata = externalMetadata;
         _logger = logger;
+        _processor = processor;
+        _fileStore = fileStore;
     }
 
     /// <summary>Queue an external metadata refresh for every series in the library.</summary>
@@ -348,6 +354,26 @@ public class MetadataController : ControllerBase
                     ThumbnailUrl = string.IsNullOrWhiteSpace(request.ThumbnailUrl) ? null : request.ThumbnailUrl
                 },
                 cancellationToken);
+
+            // After adopting the match, queue a background normalize-and-rename
+            // job so every file currently belonging to this series has its
+            // ComicInfo.xml series field and filename updated to reflect the
+            // newly-matched canonical title. This is best-effort: failures are
+            // logged and swallowed so the apply-match response still succeeds.
+            // The job's progress is reported via the standard SSE job-update
+            // broadcast, so we don't need to surface the id in the response
+            // payload (which would break existing API consumers that expect a
+            // SeriesMetadataCacheRecord).
+            try
+            {
+                await QueueSeriesNormalizeRenameJobAsync(seriesTitle, record, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, LoggingHelper.WithWebsitePrefix("Failed to queue normalize-and-rename job after applying match for {SeriesTitle}"),
+                    LoggingHelper.SanitizeForLog(seriesTitle));
+            }
+
             return Ok(record);
         }
         catch (ArgumentException ex)
@@ -420,5 +446,109 @@ public class MetadataController : ControllerBase
         public string? Source { get; set; }
         public string? ImageUrl { get; set; }
         public string? ThumbnailUrl { get; set; }
+    }
+
+    /// <summary>
+    /// Locate every file currently belonging to <paramref name="seriesTitle"/>
+    /// (matched by folder-derived series name, current ComicInfo.xml series,
+    /// or any cached alias of the new canonical title) and queue a background
+    /// normalize-and-rename job so each file's metadata is rewritten to the
+    /// freshly-matched canonical title. Returns null when there are no files
+    /// to update or the processor/file-store dependencies are missing.
+    /// </summary>
+    private async Task<Guid?> QueueSeriesNormalizeRenameJobAsync(
+        string seriesTitle,
+        SeriesMetadataCacheRecord record,
+        CancellationToken cancellationToken)
+    {
+        if (_processor is null || _fileStore is null)
+        {
+            return null;
+        }
+
+        // Build a case-insensitive set of names that should map to this series.
+        // We include the requested title (which is typically the current folder
+        // name), the new canonical title, and every cached alias so files whose
+        // metadata still references an older name are picked up.
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                names.Add(value!.Trim());
+            }
+        }
+
+        Add(seriesTitle);
+        Add(record.CanonicalTitle);
+        if (record.Aliases is { Count: > 0 })
+        {
+            foreach (var alias in record.Aliases) Add(alias);
+        }
+        if (record.UserAliases is { Count: > 0 })
+        {
+            foreach (var alias in record.UserAliases) Add(alias);
+        }
+
+        if (names.Count == 0)
+        {
+            return null;
+        }
+
+        // Normalize comparison keys via the cache so they line up with how the
+        // rest of the system identifies series (case- and whitespace-tolerant).
+        var keys = new HashSet<string>(
+            names.Select(n => _cache.NormalizeKey(n))
+                 .Where(k => !string.IsNullOrWhiteSpace(k))!,
+            StringComparer.OrdinalIgnoreCase);
+
+        var files = await _fileStore.GetAllFilesAsync(cancellationToken);
+        var matchingPaths = new List<string>();
+        foreach (var file in files)
+        {
+            if (string.IsNullOrWhiteSpace(file.FilePath))
+            {
+                continue;
+            }
+
+            // Match on the file's current ComicInfo.xml series (if known).
+            var metadataSeries = file.Metadata?.Series;
+            if (!string.IsNullOrWhiteSpace(metadataSeries))
+            {
+                var metaKey = _cache.NormalizeKey(metadataSeries);
+                if (!string.IsNullOrWhiteSpace(metaKey) && keys.Contains(metaKey))
+                {
+                    matchingPaths.Add(file.FilePath);
+                    continue;
+                }
+            }
+
+            // Fall back to the parent-folder-derived series name so that files
+            // whose metadata has not yet been written still get updated.
+            var folderName = Path.GetFileName(Path.GetDirectoryName(file.FilePath));
+            if (string.IsNullOrWhiteSpace(folderName))
+            {
+                continue;
+            }
+            var folderSeries = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
+            var folderKey = _cache.NormalizeKey(folderSeries);
+            if (!string.IsNullOrWhiteSpace(folderKey) && keys.Contains(folderKey))
+            {
+                matchingPaths.Add(file.FilePath);
+            }
+        }
+
+        if (matchingPaths.Count == 0)
+        {
+            return null;
+        }
+
+        var jobId = await _processor.NormalizeAndRenameFilesAsync(matchingPaths, cancellationToken);
+        _logger.LogInformation(
+            LoggingHelper.WithWebsitePrefix("Queued normalize-and-rename job {JobId} for {FileCount} file(s) after applying match for {SeriesTitle}"),
+            jobId,
+            matchingPaths.Count,
+            LoggingHelper.SanitizeForLog(seriesTitle));
+        return jobId;
     }
 }

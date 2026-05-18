@@ -1515,6 +1515,22 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             }
         }
 
+        // Second pass: if any candidate has a cached match from an external
+        // provider (or a previously-applied manual match), prefer that canonical
+        // title over the folder-derived name. This ensures that once a series
+        // has been matched, every subsequent normalization writes the matched
+        // name into the file's metadata instead of the raw folder name.
+        foreach (var candidate in candidateSeries)
+        {
+            var matched = await LookupMatchedSeriesAsync(candidate, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(matched))
+            {
+                var resolved = matched!.Trim();
+                await EnsureFolderNameIsAliasAsync(fallbackSeries, resolved, cancellationToken);
+                return resolved;
+            }
+        }
+
         foreach (var candidate in candidateSeries)
         {
             var externalMetadata = await LookupExternalSeriesMetadataAsync(candidate, cancellationToken);
@@ -1635,6 +1651,58 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to consult series metadata cache for user-canonical title {SeriesName}",
+                LoggingHelper.SanitizeForLog(seriesName));
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Returns the cached canonical title for a series when the cache record
+    /// represents a confirmed match — either an external provider lookup that
+    /// succeeded or a manually-applied match. Differs from
+    /// <see cref="LookupUserCanonicalSeriesAsync"/> in that it does not require
+    /// the record to be flagged as user-canonical; any successful match is
+    /// considered authoritative for normalization so that the matched name
+    /// (rather than the raw folder name) ends up in file metadata.
+    /// </summary>
+    private async Task<string?> LookupMatchedSeriesAsync(string seriesName, CancellationToken cancellationToken)
+    {
+        if (_seriesMetadataCache is null || string.IsNullOrWhiteSpace(seriesName))
+        {
+            return null;
+        }
+
+        try
+        {
+            var key = _seriesMetadataCache.NormalizeKey(seriesName);
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return null;
+            }
+
+            var record = await _seriesMetadataCache.GetAsync(key, cancellationToken);
+            if (record is null || string.IsNullOrWhiteSpace(record.CanonicalTitle))
+            {
+                return null;
+            }
+
+            // Recognise any cache record whose status implies a positive match.
+            // "success" comes from a provider lookup that returned a hit;
+            // "manual_match" is set when the user explicitly picked a candidate.
+            // A user-canonical override is already handled by
+            // LookupUserCanonicalSeriesAsync but we accept it here too so callers
+            // can use this method in isolation.
+            var status = record.LookupStatus;
+            var isMatched = record.IsUserCanonical
+                || string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "manual_match", StringComparison.OrdinalIgnoreCase);
+
+            return isMatched ? record.CanonicalTitle : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to consult series metadata cache for matched title {SeriesName}",
                 LoggingHelper.SanitizeForLog(seriesName));
         }
 

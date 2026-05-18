@@ -133,42 +133,47 @@
                         <div class="settings-dropdown-item user-info-item" id="userInfo" style="display: none;">
                             👤 <span id="usernameDisplay"></span>
                         </div>
-                        <button class="settings-dropdown-item" onclick="openAboutModal(); closeSettingsMenu();">
-                            ℹ️ About
-                        </button>
-                        <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
-                            ⚙️ Settings
-                        </button>
-                         <button class="settings-dropdown-item" onclick="openProcessingHistoryModal(); closeSettingsMenu();">
-                             📜 Processing History
-                         </button>
-                         <button class="settings-dropdown-item" onclick="openDuplicateReviewModal(); closeSettingsMenu();">
-                             🔁 Review Duplicates
-                         </button>
-                         <button class="settings-dropdown-item" onclick="openCombineFoldersModal(); closeSettingsMenu();">
-                             📁 Combine Folders
-                         </button>
-                         <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
-                             📋 View Logs
-                         </button>
-                        <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
-                            🌓 Toggle Theme
-                        </button>
+                        <div class="settings-dropdown-section-label">Library</div>
                         <button class="settings-dropdown-item" onclick="refreshFiles(); closeSettingsMenu();">
                             🔄 Refresh
                         </button>
                         <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
                             🔍 Scan Unmarked
                         </button>
+                        <button class="settings-dropdown-item" onclick="openDuplicateReviewModal(); closeSettingsMenu();">
+                            🔁 Review Duplicates
+                        </button>
+                        <button class="settings-dropdown-item" onclick="openCombineFoldersModal(); closeSettingsMenu();">
+                            📁 Combine Folders
+                        </button>
+                        <button class="settings-dropdown-item" onclick="openProcessingHistoryModal(); closeSettingsMenu();">
+                            📜 Processing History
+                        </button>
+                        <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
+                            📋 View Logs
+                        </button>
+                        <div class="settings-dropdown-section-label">View</div>
+                        <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
+                            🌓 Toggle Theme
+                        </button>
                         <button class="settings-dropdown-item" id="installAppButton" onclick="installApp(); closeSettingsMenu();" style="display: none;">
                             📱 Install App
+                        </button>
+                        <div class="settings-dropdown-section-label">Account</div>
+                        <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
+                            ⚙️ Settings
                         </button>
                         <button class="settings-dropdown-item" onclick="openChangePasswordModal(); closeSettingsMenu();">
                             🔑 Change Password
                         </button>
-                        <button class="settings-dropdown-item" onclick="logout(); closeSettingsMenu();" style="border-top: 1px solid var(--border-primary); margin-top: 5px; padding-top: 10px;">
+                        <button class="settings-dropdown-item settings-dropdown-item-logout" onclick="logout(); closeSettingsMenu();">
                             🚪 Logout
                         </button>
+                        <div class="settings-dropdown-section-label">About</div>
+                        <button class="settings-dropdown-item" onclick="openAboutModal(); closeSettingsMenu();">
+                            ℹ️ About
+                        </button>
+                    
                     </div>
                 </div>
                 <div class="header-controls">
@@ -266,6 +271,9 @@
              <button class="mobile-library-view-btn active" id="mobileFilesViewBtn" type="button" aria-controls="libraryFilesView" aria-label="Switch to files view" aria-pressed="true">
                  Files
              </button>
+             <button class="mobile-library-view-btn" id="mobileSeriesViewBtn" type="button" aria-controls="libraryFilesView" aria-label="Switch to series view" aria-pressed="false">
+                 Series
+             </button>
          </div>
          <div class="visually-hidden" id="mobileLibraryViewStatus" aria-live="polite"></div>
  
@@ -273,12 +281,12 @@
              <div class="library-health-header">
                  <div>
                      <h2 id="libraryHealthTitle">Library Health</h2>
-                     <p id="libraryHealthSummary">Loading library health...</p>
+                     <p id="libraryHealthSummary" class="library-health-summary" role="status" aria-live="polite"></p>
                  </div>
                  <div class="library-health-actions">
-                     <button class="btn btn-small" onclick="refreshLibraryHealth()">🔄 Refresh</button>
-                     <button class="btn btn-small btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" disabled>🔁 Review Duplicates</button>
-                     <button class="btn btn-small" id="combineFoldersBtn" onclick="openCombineFoldersModal()" disabled>📁 Combine Folders</button>
+                     <button class="btn btn-small" onclick="refreshLibraryHealth()" aria-label="Refresh library health" title="Refresh">🔄<span class="btn-label"> Refresh</span></button>
+                     <button class="btn btn-small btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" hidden>🔁<span class="btn-label"> Review Duplicates</span></button>
+                     <button class="btn btn-small" id="combineFoldersBtn" onclick="openCombineFoldersModal()" hidden>📁<span class="btn-label"> Combine Folders</span></button>
                  </div>
              </div>
              <div class="library-health-grid">
@@ -292,7 +300,7 @@
                      <strong id="libraryHealthUnprocessed">—</strong>
                      <small>Still unmarked</small>
                  </button>
-                 <button class="library-health-card accent" type="button" onclick="openDuplicateReviewModal()">
+                 <button class="library-health-card warning" type="button" onclick="openDuplicateReviewModal()">
                      <span class="library-health-label">Duplicates</span>
                      <strong id="libraryHealthDuplicates">—</strong>
                      <small>Ready for review</small>
@@ -302,6 +310,12 @@
                      <strong id="libraryHealthCombinableFolders">—</strong>
                      <small>Review &amp; merge duplicate folders</small>
                  </button>
+             </div>
+             <div class="library-health-empty" id="libraryHealthEmpty" hidden>
+                 <div class="library-health-empty-icon">📚</div>
+                 <h3>No files indexed yet</h3>
+                 <p>Add comics to your watched folder, or use <strong>Scan Unmarked</strong> from the ⋮ menu to bring them in. Once files appear here, you'll see processing status, duplicates, and folders ready to combine.</p>
+                 <button class="btn btn-primary btn-small" onclick="scanUnmarkedFiles()">🔍 Scan Unmarked</button>
              </div>
          </section>
 

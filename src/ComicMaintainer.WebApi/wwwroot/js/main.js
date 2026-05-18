@@ -686,6 +686,8 @@
 
         async function loadLibraryHealth() {
             const summary = document.getElementById('libraryHealthSummary');
+            const emptyState = document.getElementById('libraryHealthEmpty');
+            const grid = document.querySelector('#libraryHealthDashboard .library-health-grid');
 
             if (libraryHealthRequestInFlight) {
                 libraryHealthRefreshPending = true;
@@ -714,24 +716,44 @@
                 document.getElementById('libraryHealthDuplicates').textContent = duplicates.toLocaleString();
                 document.getElementById('libraryHealthCombinableFolders').textContent = combinableFolders.toLocaleString();
 
-                if (summary) {
-                    summary.textContent = total > 0
-                        ? `${processed.toLocaleString()} processed, ${unprocessed.toLocaleString()} still need attention, ${duplicates.toLocaleString()} duplicate${duplicates === 1 ? '' : 's'} ready for review, and ${combinableFolders.toLocaleString()} folder${combinableFolders === 1 ? '' : 's'} ready to combine.`
-                        : 'No files have been indexed yet.';
+                // Toggle empty-state guidance vs the stat grid based on whether
+                // the library has any files indexed yet.
+                if (emptyState && grid) {
+                    if (total > 0) {
+                        emptyState.hidden = true;
+                        grid.style.display = '';
+                    } else {
+                        emptyState.hidden = false;
+                        grid.style.display = 'none';
+                    }
                 }
 
+                // Clear the prose summary on success — the stat cards are the
+                // canonical source of truth, and the summary just repeated them.
+                // (The element is kept for error/status messaging below.)
+                if (summary) {
+                    summary.textContent = '';
+                    summary.classList.remove('library-health-summary--status');
+                }
+
+                // Hide (not just disable) zero-count CTAs so the dashboard
+                // doesn't show greyed-out "Combine Folders" buttons that don't
+                // do anything when tapped.
                 const reviewDuplicatesBtn = document.getElementById('reviewDuplicatesBtn');
                 if (reviewDuplicatesBtn) {
+                    reviewDuplicatesBtn.hidden = duplicates === 0;
                     reviewDuplicatesBtn.disabled = duplicates === 0;
                 }
                 const combineFoldersBtn = document.getElementById('combineFoldersBtn');
                 if (combineFoldersBtn) {
+                    combineFoldersBtn.hidden = combinableFolders === 0;
                     combineFoldersBtn.disabled = combinableFolders === 0;
                 }
             } catch (error) {
                 console.error('Failed to load library health:', error);
                 if (summary) {
                     summary.textContent = 'Unable to load library health right now.';
+                    summary.classList.add('library-health-summary--status');
                 }
             } finally {
                 libraryHealthRequestInFlight = false;
@@ -753,6 +775,7 @@
         function initializeMobileLibraryViewToggle() {
             const overviewButton = document.getElementById('mobileOverviewViewBtn');
             const filesButton = document.getElementById('mobileFilesViewBtn');
+            const seriesButton = document.getElementById('mobileSeriesViewBtn');
 
             if (!overviewButton || !filesButton) {
                 return;
@@ -767,6 +790,11 @@
                 filesButton.addEventListener('click', () => setMobileLibraryView('files'));
                 filesButton.dataset.bound = 'true';
             }
+
+            if (seriesButton && !seriesButton.dataset.bound) {
+                seriesButton.addEventListener('click', () => setMobileLibraryView('series'));
+                seriesButton.dataset.bound = 'true';
+            }
         }
 
         function applyMobileLibraryView() {
@@ -775,6 +803,7 @@
             const filesView = document.getElementById('libraryFilesView');
             const overviewButton = document.getElementById('mobileOverviewViewBtn');
             const filesButton = document.getElementById('mobileFilesViewBtn');
+            const seriesButton = document.getElementById('mobileSeriesViewBtn');
 
             if (!toggle || !dashboard || !filesView || !overviewButton || !filesButton) {
                 console.warn('Mobile library view controls are missing from the page.', {
@@ -789,6 +818,8 @@
 
             const isMobile = isMobileLibraryViewport();
             const showingOverview = currentMobileLibraryView === 'overview';
+            const showingFiles = currentMobileLibraryView === 'files';
+            const showingSeries = currentMobileLibraryView === 'series';
 
             toggle.hidden = !isMobile;
             dashboard.hidden = isMobile && !showingOverview;
@@ -797,23 +828,67 @@
             overviewButton.classList.toggle('active', showingOverview);
             overviewButton.setAttribute('aria-pressed', showingOverview ? 'true' : 'false');
 
-            filesButton.classList.toggle('active', !showingOverview);
-            filesButton.setAttribute('aria-pressed', !showingOverview ? 'true' : 'false');
+            filesButton.classList.toggle('active', showingFiles);
+            filesButton.setAttribute('aria-pressed', showingFiles ? 'true' : 'false');
+
+            if (seriesButton) {
+                seriesButton.classList.toggle('active', showingSeries);
+                seriesButton.setAttribute('aria-pressed', showingSeries ? 'true' : 'false');
+            }
+
+            // Expose the active mobile view on <body> so CSS can hide
+            // header-search/filter/sort when they don't apply (Overview/Series).
+            if (document.body) {
+                document.body.dataset.mobileView = isMobile ? currentMobileLibraryView : '';
+            }
         }
 
         function setMobileLibraryView(view) {
-            if (view !== 'overview' && view !== 'files') {
+            if (view !== 'overview' && view !== 'files' && view !== 'series') {
                 return;
             }
 
+            const previous = currentMobileLibraryView;
             currentMobileLibraryView = view;
             applyMobileLibraryView();
+
+            // When the user picks Files or Series on mobile, also switch the
+            // underlying library view mode so the list actually reflects the
+            // choice. Avoid triggering a redundant reload if nothing changed.
+            if (view === 'files' && libraryViewMode !== 'files') {
+                setLibraryViewMode('files');
+            } else if (view === 'series' && libraryViewMode !== 'series') {
+                setLibraryViewMode('series');
+            }
 
             const status = document.getElementById('mobileLibraryViewStatus');
             if (status) {
                 status.textContent = view === 'overview'
                     ? 'Overview view selected.'
-                    : 'Files view selected.';
+                    : view === 'series'
+                        ? 'Series view selected.'
+                        : 'Files view selected.';
+            }
+
+            // Restore scroll position when navigating between views so users
+            // don't lose their place. Save the outgoing view's scroll first.
+            if (previous && previous !== view) {
+                saveMobileViewScroll(previous);
+                restoreMobileViewScroll(view);
+            }
+        }
+
+        // Per-view scroll memory so the back-trip from Files → Overview → Files
+        // (or Series → Overview → Series) preserves the user's place.
+        const mobileViewScrollPositions = {};
+        function saveMobileViewScroll(view) {
+            mobileViewScrollPositions[view] = window.scrollY || window.pageYOffset || 0;
+        }
+        function restoreMobileViewScroll(view) {
+            const y = mobileViewScrollPositions[view];
+            if (typeof y === 'number') {
+                // Defer to next frame so the layout swap completes first.
+                requestAnimationFrame(() => window.scrollTo(0, y));
             }
         }
 
@@ -1344,8 +1419,17 @@
         }
 
         async function setLibraryViewMode(mode) {
-            if (isMobileLibraryViewport() && currentMobileLibraryView !== 'files') {
-                setMobileLibraryView('files');
+            if (isMobileLibraryViewport()) {
+                // Ensure the mobile view tracks the underlying library mode:
+                // Series → 'series'; Files (or anything else) → 'files'. If
+                // the user is currently in Overview, leave them there.
+                const desiredMobileView = mode === 'series' ? 'series' : 'files';
+                if (currentMobileLibraryView !== 'overview' && currentMobileLibraryView !== desiredMobileView) {
+                    // Inline the visual swap without recursing into
+                    // setMobileLibraryView (which would call back into us).
+                    currentMobileLibraryView = desiredMobileView;
+                    applyMobileLibraryView();
+                }
             }
 
             if (libraryViewMode === mode && !(mode === 'series' && currentSeriesDetailId)) {
@@ -4932,6 +5016,34 @@
             }
         }
         
+        // Helper: toggle the progress indicator pill, adding the
+        // mobile-sticky modifier on small viewports so it pins to the bottom
+        // of the screen (the in-header pill is invisible once users scroll).
+        function setProgressIndicatorVisible(visible) {
+            const indicator = document.getElementById('progressIndicator');
+            if (!indicator) return;
+            if (visible) {
+                indicator.style.display = 'flex';
+                if (isMobileLibraryViewport()) {
+                    indicator.classList.add('progress-indicator-btn--mobile-sticky');
+                } else {
+                    indicator.classList.remove('progress-indicator-btn--mobile-sticky');
+                }
+            } else {
+                indicator.style.display = 'none';
+                indicator.classList.remove('progress-indicator-btn--mobile-sticky');
+            }
+        }
+
+        // Re-evaluate sticky-class placement on viewport rotation/resize so
+        // the indicator follows the user between mobile and desktop sizes.
+        window.addEventListener('resize', () => {
+            const indicator = document.getElementById('progressIndicator');
+            if (indicator && indicator.style.display !== 'none') {
+                setProgressIndicatorVisible(true);
+            }
+        });
+
         function showProgressModal(title) {
             const modal = document.getElementById('progressModal');
             const indicator = document.getElementById('progressIndicator');
@@ -4962,13 +5074,13 @@
             if (wasMinimized) {
                 // Show the minimized indicator instead of the full modal
                 modal.classList.remove('active');
-                indicator.style.display = 'flex';
+                setProgressIndicatorVisible(true);
                 const indicatorText = document.getElementById('progressIndicatorText');
                 indicatorText.textContent = `⏳ ${title}`;
             } else {
                 // Show the full modal
                 modal.classList.add('active');
-                indicator.style.display = 'none';
+                setProgressIndicatorVisible(false);
             }
         }
         
@@ -5113,7 +5225,7 @@
         
         function closeProgressModal() {
             document.getElementById('progressModal').classList.remove('active');
-            document.getElementById('progressIndicator').style.display = 'none';
+            setProgressIndicatorVisible(false);
             document.getElementById('progressCancelBtn').style.display = 'none';  // Hide cancel button
             // Clear minimized state when modal is closed
             try {
@@ -5126,7 +5238,6 @@
         
         function minimizeProgressModal() {
             const modal = document.getElementById('progressModal');
-            const indicator = document.getElementById('progressIndicator');
             const indicatorText = document.getElementById('progressIndicatorText');
             
             // Hide the modal
@@ -5136,7 +5247,7 @@
             const percentText = document.getElementById('progressPercent').textContent;
             const progressText = document.getElementById('progressText').textContent;
             indicatorText.textContent = `⏳ ${progressText} (${percentText})`;
-            indicator.style.display = 'flex';
+            setProgressIndicatorVisible(true);
             
             // Save minimized state to localStorage
             try {
@@ -5149,13 +5260,12 @@
         
         function restoreProgressModal() {
             const modal = document.getElementById('progressModal');
-            const indicator = document.getElementById('progressIndicator');
             
             // Show the modal
             modal.classList.add('active');
             
             // Hide the indicator
-            indicator.style.display = 'none';
+            setProgressIndicatorVisible(false);
             
             // Clear minimized state when modal is restored
             try {

@@ -54,6 +54,7 @@ public class AniListManhwaSeriesMetadataService : IExternalSeriesMetadataService
     private readonly IMemoryCache _cache;
     private readonly ILogger<AniListManhwaSeriesMetadataService> _logger;
     private readonly ProviderHealthTracker _health = new("AniListManhwa");
+    private readonly Lazy<ProviderRateLimiter> _rateLimiter;
 
     public AniListManhwaSeriesMetadataService(
         IHttpClientFactory httpClientFactory,
@@ -65,6 +66,9 @@ public class AniListManhwaSeriesMetadataService : IExternalSeriesMetadataService
         _settings = settings;
         _cache = cache;
         _logger = logger;
+        _rateLimiter = new Lazy<ProviderRateLimiter>(
+            () => SharedRateLimiters.GetOrCreateAniList(_settings.CurrentValue.AniListRequestsPerMinute),
+            LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public string ProviderName => "AniListManhwa";
@@ -127,20 +131,33 @@ public class AniListManhwaSeriesMetadataService : IExternalSeriesMetadataService
         try
         {
             using var httpClient = _httpClientFactory.CreateClient(nameof(AniListManhwaSeriesMetadataService));
-            using var request = BuildGraphQlRequest(config, SearchQuery, new Dictionary<string, object?>
-            {
-                ["search"] = seriesName,
-                ["perPage"] = perPage
-            });
-
-            using var response = await httpClient.SendAsync(request, cancellationToken);
+            using var response = await RateLimitedHttpInvoker.SendAsync(
+                httpClient,
+                () => BuildGraphQlRequest(config, SearchQuery, new Dictionary<string, object?>
+                {
+                    ["search"] = seriesName,
+                    ["perPage"] = perPage
+                }),
+                _rateLimiter.Value,
+                _health,
+                _logger,
+                "AniListManhwa",
+                HttpCompletionOption.ResponseContentRead,
+                cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning(
                     "AniList manhwa lookup failed for {SeriesName} with status code {StatusCode}",
                     LoggingHelper.SanitizeForLog(seriesName),
                     response.StatusCode);
-                _health.RecordFailure($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+                if ((int)response.StatusCode == 429)
+                {
+                    _health.RecordRateLimited(TimeSpan.FromSeconds(5), $"HTTP 429 {response.ReasonPhrase}");
+                }
+                else
+                {
+                    _health.RecordFailure($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+                }
                 return Array.Empty<ExternalSeriesMetadata>();
             }
 
@@ -206,6 +223,12 @@ public class AniListManhwaSeriesMetadataService : IExternalSeriesMetadataService
             snapshot.StatusMessage = "Reachable (recent lookup succeeded)";
         }
 
+        // Override status when rate-limited so the UI shows a degraded badge.
+        if (snapshot.RateLimited)
+        {
+            snapshot.StatusMessage = "Degraded - rate limited";
+        }
+
         return snapshot;
     }
 
@@ -216,11 +239,22 @@ public class AniListManhwaSeriesMetadataService : IExternalSeriesMetadataService
             using var httpClient = _httpClientFactory.CreateClient(nameof(AniListManhwaSeriesMetadataService));
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
-            using var request = BuildGraphQlRequest(config, ProbeQuery, variables: null);
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            using var response = await RateLimitedHttpInvoker.SendAsync(
+                httpClient,
+                () => BuildGraphQlRequest(config, ProbeQuery, variables: null),
+                _rateLimiter.Value,
+                _health,
+                _logger,
+                "AniListManhwa",
+                HttpCompletionOption.ResponseHeadersRead,
+                cts.Token);
             if (response.IsSuccessStatusCode)
             {
                 return (true, "Reachable");
+            }
+            if ((int)response.StatusCode == 429)
+            {
+                return (false, "Rate limited (HTTP 429)");
             }
             return (false, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
         }

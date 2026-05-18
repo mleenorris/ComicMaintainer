@@ -375,7 +375,7 @@ External series metadata lookups (ComicVine / MangaDex) are run manually, and re
   - Body: `{ "seriesId": "batman" }` (or `{ "titles": ["Batman", "Dark Knight"] }`, or both — they're merged).
   - Returns: `{ "jobId": "...", "totalSeries": N, "titles": [...] }`
 - **GET** `/api/metadata/refresh/job/{jobId}` — poll the status of a refresh job. Includes a rolling `recentResults` ring (last ~20 per-series outcomes) so the UI can show a live "last lookup" trail.
-- **GET** `/api/metadata/providers` — runtime health of every external metadata provider. Returns `{ "providers": [{ "name": "ComicVine", "enabled": true, "configured": true, "reachable": true, "status_message": "Reachable", "last_error": null, "last_success_utc": ..., "last_failure_utc": ..., "success_count": N, "failure_count": N }, ...] }`. Reachability is probed lazily and cached for ~60s.
+- **GET** `/api/metadata/providers` — runtime health of every external metadata provider. Returns `{ "providers": [{ "name": "ComicVine", "enabled": true, "configured": true, "reachable": true, "status_message": "Reachable", "last_error": null, "last_success_utc": ..., "last_failure_utc": ..., "success_count": N, "failure_count": N, "rate_limited": false, "rate_limited_until_utc": null }, ...] }`. Reachability is probed lazily and cached for ~60s. When a provider returns HTTP 429 the response is marked `rate_limited: true` with the back-off deadline, and the status message becomes `Degraded - rate limited`.
 - **GET** `/api/metadata/search?query=...&limit=10` — search the configured providers for candidate series matches, useful for finding alternative names.
   - Returns: `{ "query": "...", "results": [{ "canonical_title": "...", "aliases": [...], "source": "ComicVine" }, ...] }`
 - **GET** `/api/metadata/series/{seriesTitle}` — read the cached record (canonical title, provider aliases, user aliases) for a series.
@@ -393,6 +393,17 @@ External series metadata lookups (ComicVine / MangaDex) are run manually, and re
   - Upload a custom series cover image, **fetch a cover on demand from a configured external provider** (with a thumbnail picker across all providers), or clear the cached one.
 
 User-defined aliases drive the library's folder-combination matching: two folders are merged into the same series card as soon as one names the other in its alias list.
+
+#### Provider rate limits
+
+To stay under each provider's published API quota and avoid being blocked, ComicMaintainer applies a client-side rate limiter to every outbound request and honors HTTP 429 `Retry-After` headers:
+
+| Provider | Published limit | Default client throttle | Env var |
+|---|---|---|---|
+| MangaDex | 5 req/s per IP (returns `X-RateLimit-Retry-After`) | 4 req/s | `MANGADEX_REQUESTS_PER_SECOND` |
+| AniList | 90 req/min (currently degraded to 30/min) | 28 req/min (shared across Manga + Manhwa lookups) | `ANILIST_REQUESTS_PER_MINUTE` |
+
+When a provider returns HTTP 429 the request is automatically retried once after the server-indicated `Retry-After` interval (capped at 2 minutes), the failure is recorded against the provider's health tracker, and the `/api/metadata/providers` endpoint surfaces a `rate_limited: true` flag with a `Degraded - rate limited` status message until the back-off window passes. All outbound requests are also tagged with a descriptive `User-Agent` so providers can identify our traffic.
 
 ### External Series Images
 

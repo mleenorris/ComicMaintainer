@@ -487,9 +487,25 @@ builder.Services.AddHttpClient(SeriesImageStore.HttpClientName)
         client.Timeout = TimeSpan.FromSeconds(30);
     });
 builder.Services.AddHttpClient(nameof(ComicVineSeriesMetadataService));
-builder.Services.AddHttpClient(nameof(MangaDexSeriesMetadataService));
-builder.Services.AddHttpClient(nameof(AniListManhwaSeriesMetadataService));
-builder.Services.AddHttpClient(nameof(AniListMangaSeriesMetadataService));
+builder.Services.AddHttpClient(nameof(MangaDexSeriesMetadataService))
+    .ConfigureHttpClient(client =>
+    {
+        // MangaDex (and AniList below) recommend setting a descriptive
+        // User-Agent. Identifying ourselves makes it easier for the provider
+        // to contact us if our traffic causes issues, and some providers
+        // reject empty User-Agent values from misbehaving clients.
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
+    });
+builder.Services.AddHttpClient(nameof(AniListManhwaSeriesMetadataService))
+    .ConfigureHttpClient(client =>
+    {
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
+    });
+builder.Services.AddHttpClient(nameof(AniListMangaSeriesMetadataService))
+    .ConfigureHttpClient(client =>
+    {
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
+    });
 builder.Services.AddSingleton<ComicVineSeriesMetadataService>();
 builder.Services.AddSingleton<MangaDexSeriesMetadataService>();
 builder.Services.AddSingleton<AniListManhwaSeriesMetadataService>();
@@ -916,6 +932,14 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         var aniListBaseUrl = Environment.GetEnvironmentVariable("ANILIST_BASE_URL");
         if (!string.IsNullOrEmpty(aniListBaseUrl))
             options.AniListBaseUrl = aniListBaseUrl;
+
+        var mangaDexRps = Environment.GetEnvironmentVariable("MANGADEX_REQUESTS_PER_SECOND");
+        if (!string.IsNullOrEmpty(mangaDexRps) && int.TryParse(mangaDexRps, out var mdRps) && mdRps > 0)
+            options.MangaDexRequestsPerSecond = mdRps;
+
+        var aniListRpm = Environment.GetEnvironmentVariable("ANILIST_REQUESTS_PER_MINUTE");
+        if (!string.IsNullOrEmpty(aniListRpm) && int.TryParse(aniListRpm, out var alRpm) && alRpm > 0)
+            options.AniListRequestsPerMinute = alRpm;
 
         var downloadSeriesImages = Environment.GetEnvironmentVariable("DOWNLOAD_EXTERNAL_SERIES_IMAGES");
         if (!string.IsNullOrEmpty(downloadSeriesImages))

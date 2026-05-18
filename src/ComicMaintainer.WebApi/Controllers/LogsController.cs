@@ -33,6 +33,7 @@ public class LogsController : ControllerBase
             {
                 "app" => "app*.log",
                 "watcher" => "watcher*.log",
+                "metadata" => "metadata*.log",
                 "debug" => "debug*.log",
                 _ => "debug*.log"
             };
@@ -79,6 +80,7 @@ public class LogsController : ControllerBase
             {
                 "app" => "app*.log",
                 "watcher" => "watcher*.log",
+                "metadata" => "metadata*.log",
                 "debug" => "debug*.log",
                 _ => "debug*.log"
             };
@@ -110,6 +112,7 @@ public class LogsController : ControllerBase
                 {
                     "app" => filenameOnly.StartsWith("app") && filenameOnly.EndsWith(".log"),
                     "watcher" => filenameOnly.StartsWith("watcher") && filenameOnly.EndsWith(".log"),
+                    "metadata" => filenameOnly.StartsWith("metadata") && filenameOnly.EndsWith(".log"),
                     "debug" => filenameOnly.StartsWith("debug") && filenameOnly.EndsWith(".log"),
                     _ => filenameOnly.StartsWith("debug") && filenameOnly.EndsWith(".log")
                 };

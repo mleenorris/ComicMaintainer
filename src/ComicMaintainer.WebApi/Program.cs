@@ -52,6 +52,35 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddJsonFile(userSettingsPath, optional: true, reloadOnChange: true);
 
 // Use Serilog for logging - configure with the builder context to ensure proper integration
+//
+// Source-context predicates for routing logs to dedicated files. Anything
+// produced by these classes is routed to the matching log file AND excluded
+// from app.log so the general application log stays focused on high-signal
+// events. They still go to debug.log (which is the catch-all).
+Func<Serilog.Events.LogEvent, bool> isWatcherSource = e =>
+    e.Properties.TryGetValue("SourceContext", out var ctx)
+    && (ctx.ToString().Contains("FileWatcherService")
+        || ctx.ToString().Contains("FileWatcherHostedService"));
+
+// Metadata-related sources: every external provider client, the composite
+// service, the cache, the refresh job, the provider health tracker, the
+// per-series image store, the MetadataController API surface, and (looser)
+// any other type whose SourceContext contains "Metadata".
+Func<Serilog.Events.LogEvent, bool> isMetadataSource = e =>
+{
+    if (!e.Properties.TryGetValue("SourceContext", out var ctx)) return false;
+    var s = ctx.ToString();
+    return s.Contains("Metadata")
+        || s.Contains("AniListMangaSeriesMetadataService")
+        || s.Contains("AniListManhwaSeriesMetadataService")
+        || s.Contains("ComicVineSeriesMetadataService")
+        || s.Contains("MangaDexSeriesMetadataService")
+        || s.Contains("CompositeExternalSeriesMetadataService")
+        || s.Contains("ProviderHealthTracker")
+        || s.Contains("SeriesImageStore")
+        || s.Contains("MetadataController");
+};
+
 builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
     .ReadFrom.Services(services)
@@ -61,12 +90,9 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
     .WriteTo.Console(
         restrictedToMinimumLevel: LogEventLevel.Information,
         outputTemplate: "[{Timestamp:HH:mm:ss}] [{Level:u3}] {Message:lj}{NewLine}{Exception}")
-    // Basic/Info log file - Information level and above, excluding watcher logs
+    // Basic/Info log file - Information level and above, excluding watcher AND metadata logs
     .WriteTo.Logger(lc => lc
-        .Filter.ByExcluding(e => 
-            e.Properties.ContainsKey("SourceContext") && 
-            (e.Properties["SourceContext"].ToString().Contains("FileWatcherService") ||
-             e.Properties["SourceContext"].ToString().Contains("FileWatcherHostedService")))
+        .Filter.ByExcluding(e => isWatcherSource(e) || isMetadataSource(e))
         .WriteTo.File(
             Path.Combine(configDir, "app.log"),
             restrictedToMinimumLevel: LogEventLevel.Information,
@@ -74,7 +100,7 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
             retainedFileCountLimit: 7,
             fileSizeLimitBytes: logMaxBytes,
             outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] {Message:lj}{NewLine}{Exception}"))
-    // Debug log file - capture everything at Debug level and above (including watcher)
+    // Debug log file - capture everything at Debug level and above (including watcher and metadata)
     .WriteTo.File(
         Path.Combine(configDir, "debug.log"),
         restrictedToMinimumLevel: LogEventLevel.Debug,
@@ -84,10 +110,7 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
         outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
     // Watcher-specific log file - capture all watcher-related logs
     .WriteTo.Logger(lc => lc
-        .Filter.ByIncludingOnly(e => 
-            e.Properties.ContainsKey("SourceContext") && 
-            (e.Properties["SourceContext"].ToString().Contains("FileWatcherService") ||
-             e.Properties["SourceContext"].ToString().Contains("FileWatcherHostedService")))
+        .Filter.ByIncludingOnly(e => isWatcherSource(e))
         .WriteTo.File(
             Path.Combine(configDir, "watcher.log"),
             restrictedToMinimumLevel: LogEventLevel.Debug,
@@ -95,6 +118,18 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
             retainedFileCountLimit: 7,
             fileSizeLimitBytes: logMaxBytes,
             outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] {Message:lj}{NewLine}{Exception}"))
+    // Metadata-specific log file - capture external provider lookups, cache
+    // updates, refresh jobs and image fetches. Makes debugging metadata
+    // requests possible without sifting through the noisier debug log.
+    .WriteTo.Logger(lc => lc
+        .Filter.ByIncludingOnly(e => isMetadataSource(e))
+        .WriteTo.File(
+            Path.Combine(configDir, "metadata.log"),
+            restrictedToMinimumLevel: LogEventLevel.Debug,
+            rollingInterval: RollingInterval.Day,
+            retainedFileCountLimit: 7,
+            fileSizeLimitBytes: logMaxBytes,
+            outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}"))
     // Override specific namespaces to reduce console noise
     .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
     .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)

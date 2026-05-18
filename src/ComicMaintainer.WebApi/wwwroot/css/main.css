@@ -1647,9 +1647,19 @@
 
         .library-health-grid {
             display: grid;
-            /* Keep this in sync with the Library Health cards rendered in index.html. */
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: 12px;
+            /* Compact 2×2 / responsive auto-fit so the stat bubbles stay
+               minimal across portrait phones, landscape phones, tablets and
+               desktops — per the v2 design ("the summary bubbles in portrait
+               are nice; make them match in all other views"). */
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 10px;
+        }
+
+        /* Hide the secondary caption (`<small>`) on every viewport so the
+           bubbles stay concise/minimal everywhere — they were already hidden
+           on mobile portrait; this just extends the rule. */
+        .library-health-card small {
+            display: none;
         }
 
         .library-health-summary {
@@ -2565,17 +2575,10 @@
                 display: none !important;
             }
 
-            /* The header search input doesn't apply to Series/Overview mode
-               uniformly. The `data-active-view` attribute on <body> is set by
-               JS to the active mobile view; hide search outside Files mode. */
-            body[data-mobile-view="overview"] .header-search,
-            body[data-mobile-view="series"] .header-search,
-            body[data-mobile-view="overview"] .header-filter-dropdown,
-            body[data-mobile-view="series"] .header-filter-dropdown,
-            body[data-mobile-view="overview"] .header-sort-dropdown,
-            body[data-mobile-view="series"] .header-sort-dropdown {
-                display: none;
-            }
+            /* The header search input doesn't apply to Series mode now is
+               handled inline by both Files and Series views, so it stays
+               visible across mobile sub-views. (Overview is no longer a
+               separate sub-view; it's a collapsible section.) */
             
             .header {
                 padding: 6px 10px;
@@ -3371,4 +3374,191 @@
             justify-content: center;
             gap: 8px;
             color: var(--text-muted);
+        }
+
+        /* ─────────────────────────────────────────────────────────────────
+           Library Health dashboard expand/collapse toggle
+           Issue #10 — Overview is no longer its own tab; it sits inline
+           above the file/series list and can be expanded or collapsed.
+           ───────────────────────────────────────────────────────────────── */
+        .library-health-titlewrap {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+        .library-health-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: transparent;
+            border: none;
+            padding: 0;
+            color: inherit;
+            cursor: pointer;
+            text-align: left;
+            font: inherit;
+        }
+        .library-health-toggle h2 {
+            margin: 0;
+        }
+        .library-health-toggle-chevron {
+            display: inline-block;
+            font-size: 14px;
+            color: var(--text-muted);
+            transition: transform 0.18s ease;
+            width: 14px;
+            text-align: center;
+        }
+        .library-health-dashboard--collapsed .library-health-body {
+            display: none;
+        }
+        .library-health-dashboard--collapsed .library-health-header {
+            margin-bottom: 0;
+        }
+        /* When the dashboard is collapsed we don't want the empty-state notice
+           to peek out of the chrome either — it lives inside the body. */
+        .library-health-dashboard--collapsed .library-health-empty {
+            display: none;
+        }
+
+        /* ─────────────────────────────────────────────────────────────────
+           Issue #3 — Manage Series Names modal: mobile readability
+           The inline `style="..."` attributes on the original inputs render
+           as transparent/dark-on-dark on phones for some themes. Pin a
+           readable color/background and ensure controls are full-width and
+           tappable.
+           ───────────────────────────────────────────────────────────────── */
+        @media (max-width: 768px) {
+            #manageSeriesNamesModal .modal-content {
+                width: calc(100vw - 16px);
+                max-width: calc(100vw - 16px);
+                margin: 8px;
+                max-height: calc(100vh - 16px);
+            }
+            #manageSeriesNamesModal .form-group {
+                margin-bottom: 16px;
+            }
+            #manageSeriesNamesModal input[type="text"],
+            #manageSeriesNamesModal input[type="search"] {
+                width: 100% !important;
+                box-sizing: border-box;
+                padding: 12px !important;
+                font-size: 16px !important; /* prevents iOS zoom on focus */
+                background: var(--bg-secondary) !important;
+                color: var(--text-primary) !important;
+                border: 1px solid var(--border-input, var(--border-primary)) !important;
+                border-radius: 6px !important;
+            }
+            #manageSeriesNamesModal input[type="text"]::placeholder {
+                color: var(--text-muted);
+                opacity: 1;
+            }
+            /* The "Add an alias" row stacks vertically on phones so both the
+               input and the Add button stay full width / readable. */
+            #manageSeriesNamesModal .form-group > div[style*="display: flex"] {
+                flex-direction: column !important;
+                gap: 8px !important;
+            }
+            #manageSeriesNamesModal .form-group > div[style*="display: flex"] > .btn {
+                width: 100%;
+            }
+            /* Series image controls: stack the cover above its action buttons
+               so the buttons aren't squeezed into an unreadable strip. */
+            #manageSeriesNamesModal .form-group > div[style*="display: flex"][style*="align-items: flex-start"] {
+                flex-direction: column !important;
+                align-items: stretch !important;
+            }
+            #manageSeriesImagePreview {
+                width: 120px !important;
+                height: 180px !important;
+                align-self: center;
+            }
+            /* The provider-search popover inside Manage Names. */
+            #manageSeriesImageProviderPanel input[type="text"] {
+                width: 100%;
+                box-sizing: border-box;
+            }
+            #manageSeriesImageProviderPanel > div:first-child {
+                flex-direction: column !important;
+                align-items: stretch !important;
+            }
+            #manageSeriesImageProviderPanel > div:first-child .btn {
+                width: 100%;
+            }
+            /* The modal footer should let action buttons wrap on phones. */
+            #manageSeriesNamesModal .modal-footer {
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            #manageSeriesNamesModal .modal-footer .btn {
+                flex: 1 1 calc(50% - 8px);
+                min-width: 0;
+            }
+            #manageSeriesNamesModal .modal-footer .btn.btn-primary {
+                flex-basis: 100%;
+            }
+        }
+
+        /* ─────────────────────────────────────────────────────────────────
+           Issue #4 + #7 — Landscape phones
+           Phones in landscape report a width that's > 768px (e.g. 844×390)
+           so the desktop layout took over and the Series section ended up
+           hidden behind the header. Force the mobile layout when the
+           viewport is in landscape orientation AND short (typical phone).
+           Mirrors the rules in the (max-width: 768px) block above.
+           ───────────────────────────────────────────────────────────────── */
+        @media (orientation: landscape) and (max-height: 600px) {
+            /* Mobile Files/Series toggle stays usable. */
+            .mobile-library-view-toggle {
+                display: flex !important;
+                margin: 12px 12px 0;
+            }
+            /* Hide the desktop "Files / Series" segmented control. */
+            .header-view-toggle:not(.series-layout-toggle) {
+                display: none !important;
+            }
+            /* Series view: show the dedicated layout toolbar above the list
+               at the same position used in portrait mobile. Hide the header
+               copy so the controls remain accessible at the top of the list
+               instead of being buried in the header. */
+            .series-layout-toggle {
+                display: none !important;
+            }
+            .series-layout-toolbar-mobile {
+                display: flex;
+                gap: 6px;
+                padding: 8px 10px;
+                margin: 0 10px 8px;
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-primary);
+                border-radius: 999px;
+                box-shadow: var(--shadow-sm);
+            }
+            /* Compact stat cards (matches portrait). */
+            .library-health-grid {
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 8px;
+            }
+            .library-health-card {
+                padding: 8px 10px;
+                min-height: 0;
+            }
+            .library-health-card strong {
+                font-size: 20px;
+            }
+            .library-health-card .library-health-label {
+                font-size: 11px;
+            }
+            .library-health-dashboard {
+                padding: 10px 12px;
+            }
+            /* Modals: avoid the original 80vh height burying inputs below the
+               keyboard / address bar when the user opens Manage Series Names
+               in landscape on a phone. */
+            #manageSeriesNamesModal .modal-content,
+            #logsModal .modal-content,
+            #settingsModal .modal-content {
+                max-height: 95vh;
+            }
         }

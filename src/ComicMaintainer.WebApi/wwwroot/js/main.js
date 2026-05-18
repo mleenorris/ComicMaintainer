@@ -773,17 +773,11 @@
         }
 
         function initializeMobileLibraryViewToggle() {
-            const overviewButton = document.getElementById('mobileOverviewViewBtn');
             const filesButton = document.getElementById('mobileFilesViewBtn');
             const seriesButton = document.getElementById('mobileSeriesViewBtn');
 
-            if (!overviewButton || !filesButton) {
+            if (!filesButton) {
                 return;
-            }
-
-            if (!overviewButton.dataset.bound) {
-                overviewButton.addEventListener('click', () => setMobileLibraryView('overview'));
-                overviewButton.dataset.bound = 'true';
             }
 
             if (!filesButton.dataset.bound) {
@@ -799,34 +793,34 @@
 
         function applyMobileLibraryView() {
             const toggle = document.getElementById('mobileLibraryViewToggle');
-            const dashboard = document.getElementById('libraryHealthDashboard');
             const filesView = document.getElementById('libraryFilesView');
-            const overviewButton = document.getElementById('mobileOverviewViewBtn');
             const filesButton = document.getElementById('mobileFilesViewBtn');
             const seriesButton = document.getElementById('mobileSeriesViewBtn');
 
-            if (!toggle || !dashboard || !filesView || !overviewButton || !filesButton) {
+            if (!toggle || !filesView || !filesButton) {
                 console.warn('Mobile library view controls are missing from the page.', {
                     toggleMissing: !toggle,
-                    dashboardMissing: !dashboard,
                     filesViewMissing: !filesView,
-                    overviewButtonMissing: !overviewButton,
                     filesButtonMissing: !filesButton
                 });
                 return;
             }
 
+            // 'overview' is no longer a separate view; the overview dashboard
+            // is now an expand/collapse panel rendered above the file list and
+            // controlled independently via toggleLibraryHealthDashboard().
+            if (currentMobileLibraryView === 'overview') {
+                currentMobileLibraryView = 'files';
+            }
+
             const isMobile = isMobileLibraryViewport();
-            const showingOverview = currentMobileLibraryView === 'overview';
             const showingFiles = currentMobileLibraryView === 'files';
             const showingSeries = currentMobileLibraryView === 'series';
 
             toggle.hidden = !isMobile;
-            dashboard.hidden = isMobile && !showingOverview;
-            filesView.hidden = isMobile && showingOverview;
-
-            overviewButton.classList.toggle('active', showingOverview);
-            overviewButton.setAttribute('aria-pressed', showingOverview ? 'true' : 'false');
+            // The file/series list is always rendered now; the overview lives
+            // in its own collapsible section above it.
+            filesView.hidden = false;
 
             filesButton.classList.toggle('active', showingFiles);
             filesButton.setAttribute('aria-pressed', showingFiles ? 'true' : 'false');
@@ -836,15 +830,14 @@
                 seriesButton.setAttribute('aria-pressed', showingSeries ? 'true' : 'false');
             }
 
-            // Expose the active mobile view on <body> so CSS can hide
-            // header-search/filter/sort when they don't apply (Overview/Series).
+            // Expose the active mobile view on <body> so CSS can react.
             if (document.body) {
                 document.body.dataset.mobileView = isMobile ? currentMobileLibraryView : '';
             }
         }
 
         function setMobileLibraryView(view) {
-            if (view !== 'overview' && view !== 'files' && view !== 'series') {
+            if (view !== 'files' && view !== 'series') {
                 return;
             }
 
@@ -863,11 +856,9 @@
 
             const status = document.getElementById('mobileLibraryViewStatus');
             if (status) {
-                status.textContent = view === 'overview'
-                    ? 'Overview view selected.'
-                    : view === 'series'
-                        ? 'Series view selected.'
-                        : 'Files view selected.';
+                status.textContent = view === 'series'
+                    ? 'Series view selected.'
+                    : 'Files view selected.';
             }
 
             // Restore scroll position when navigating between views so users
@@ -876,6 +867,43 @@
                 saveMobileViewScroll(previous);
                 restoreMobileViewScroll(view);
             }
+        }
+
+        // Expand/collapse the Library Health overview panel. Replaces the old
+        // 3-way Overview/Files/Series mobile tab — the overview is no longer a
+        // separate "page" but an inline section that can be hidden when not
+        // wanted. Persisted to localStorage so the choice survives reloads.
+        const LIBRARY_HEALTH_COLLAPSED_KEY = 'cm.libraryHealth.collapsed';
+        function setLibraryHealthCollapsed(collapsed) {
+            const dashboard = document.getElementById('libraryHealthDashboard');
+            const toggleBtn = document.getElementById('libraryHealthToggle');
+            const chevron = toggleBtn ? toggleBtn.querySelector('.library-health-toggle-chevron') : null;
+            if (!dashboard) return;
+            dashboard.classList.toggle('library-health-dashboard--collapsed', collapsed);
+            if (toggleBtn) {
+                toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            }
+            if (chevron) {
+                chevron.textContent = collapsed ? '▸' : '▾';
+            }
+            try {
+                localStorage.setItem(LIBRARY_HEALTH_COLLAPSED_KEY, collapsed ? '1' : '0');
+            } catch (e) { /* localStorage unavailable */ }
+        }
+        function toggleLibraryHealthDashboard() {
+            const dashboard = document.getElementById('libraryHealthDashboard');
+            if (!dashboard) return;
+            const collapsed = dashboard.classList.contains('library-health-dashboard--collapsed');
+            setLibraryHealthCollapsed(!collapsed);
+        }
+        function initializeLibraryHealthToggle() {
+            // Default: collapsed on mobile (small screen), expanded otherwise.
+            let stored = null;
+            try { stored = localStorage.getItem(LIBRARY_HEALTH_COLLAPSED_KEY); } catch (e) { /* ignore */ }
+            const collapsed = stored !== null
+                ? stored === '1'
+                : isMobileLibraryViewport();
+            setLibraryHealthCollapsed(collapsed);
         }
 
         // Per-view scroll memory so the back-trip from Files → Overview → Files
@@ -1205,6 +1233,7 @@
             initTheme();
             initializeMobileLibraryViewToggle();
             applyMobileLibraryView();
+            initializeLibraryHealthToggle();
             
             // Check authentication FIRST before doing anything else
             // This prevents race condition where SSE and API calls start before auth is verified
@@ -1421,10 +1450,9 @@
         async function setLibraryViewMode(mode) {
             if (isMobileLibraryViewport()) {
                 // Ensure the mobile view tracks the underlying library mode:
-                // Series → 'series'; Files (or anything else) → 'files'. If
-                // the user is currently in Overview, leave them there.
+                // Series → 'series'; Files (or anything else) → 'files'.
                 const desiredMobileView = mode === 'series' ? 'series' : 'files';
-                if (currentMobileLibraryView !== 'overview' && currentMobileLibraryView !== desiredMobileView) {
+                if (currentMobileLibraryView !== desiredMobileView) {
                     // Inline the visual swap without recursing into
                     // setMobileLibraryView (which would call back into us).
                     currentMobileLibraryView = desiredMobileView;
@@ -1900,13 +1928,10 @@
                     : renderSeriesLibraryCompact();
 
             fileList.innerHTML = `
-                ${renderProviderHealthWidget()}
                 ${body}
             `;
 
             hydrateProtectedImages(fileList);
-            // Provider health is loaded asynchronously and re-rendered into its container.
-            scheduleProviderHealthLoad();
         }
 
         // Cover-only cards with title overlaid on the cover (original behaviour).
@@ -2013,6 +2038,26 @@
             providerHealthRefreshTimer = setTimeout(() => loadProviderHealth(), 50);
         }
 
+        // Show the External Providers Status modal. The widget itself lives in
+        // the modal body now (previously it was always-visible above the series
+        // grid) so the main view stays focused on the library.
+        function openExternalProvidersModal() {
+            const modal = document.getElementById('externalProvidersModal');
+            const host = document.getElementById('externalProvidersModalContent');
+            if (!modal || !host) return;
+            host.innerHTML = renderProviderHealthWidget();
+            modal.classList.add('show');
+            modal.style.display = 'flex';
+            loadProviderHealth();
+        }
+
+        function closeExternalProvidersModal() {
+            const modal = document.getElementById('externalProvidersModal');
+            if (!modal) return;
+            modal.classList.remove('show');
+            modal.style.display = 'none';
+        }
+
         async function loadProviderHealth() {
             const container = document.getElementById('providerHealthWidget');
             if (!container) return;
@@ -2022,13 +2067,13 @@
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    container.innerHTML = '';
+                    container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>';
                     return;
                 }
                 const data = await response.json();
                 const providers = data.providers || [];
                 if (!providers.length) {
-                    container.innerHTML = '';
+                    container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">No external providers are configured.</div>';
                     return;
                 }
                 container.innerHTML = `
@@ -2048,13 +2093,12 @@
                                 <span class="provider-health-dot"></span>${escapeHtml(p.name)}
                             </span>`;
                         }).join('')}
-                        <button type="button" class="btn btn-tiny" onclick="loadProviderHealth()" title="Re-check provider status">↻</button>
                     </div>
                 `;
                 container.dataset.loaded = 'true';
             } catch (err) {
                 console.warn('Provider health fetch failed', err);
-                container.innerHTML = '';
+                container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>';
             }
         }
 

@@ -152,6 +152,9 @@
                         <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
                             📋 View Logs
                         </button>
+                        <button class="settings-dropdown-item" onclick="openExternalProvidersModal(); closeSettingsMenu();">
+                            🌐 External Providers Status
+                        </button>
                         <div class="settings-dropdown-section-label">View</div>
                         <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
                             🌓 Toggle Theme
@@ -265,22 +268,22 @@
          <div id="messageContainer"></div>
  
          <div class="mobile-library-view-toggle" id="mobileLibraryViewToggle" hidden>
-             <button class="mobile-library-view-btn" id="mobileOverviewViewBtn" type="button" aria-controls="libraryHealthDashboard" aria-label="Switch to overview view" aria-pressed="false">
-                 Overview
-             </button>
              <button class="mobile-library-view-btn active" id="mobileFilesViewBtn" type="button" aria-controls="libraryFilesView" aria-label="Switch to files view" aria-pressed="true">
-                 Files
+                 📄 Files
              </button>
              <button class="mobile-library-view-btn" id="mobileSeriesViewBtn" type="button" aria-controls="libraryFilesView" aria-label="Switch to series view" aria-pressed="false">
-                 Series
+                 🖼️ Series
              </button>
          </div>
          <div class="visually-hidden" id="mobileLibraryViewStatus" aria-live="polite"></div>
- 
-         <section class="library-health-dashboard" id="libraryHealthDashboard" aria-labelledby="libraryHealthTitle">
+
+         <section class="library-health-dashboard library-health-dashboard--collapsed" id="libraryHealthDashboard" aria-labelledby="libraryHealthTitle">
              <div class="library-health-header">
-                 <div>
-                     <h2 id="libraryHealthTitle">Library Health</h2>
+                 <div class="library-health-titlewrap">
+                     <button type="button" class="library-health-toggle" id="libraryHealthToggle" aria-expanded="false" aria-controls="libraryHealthBody" onclick="toggleLibraryHealthDashboard()" title="Show / hide overview">
+                         <span class="library-health-toggle-chevron" aria-hidden="true">▸</span>
+                         <h2 id="libraryHealthTitle">Library Health</h2>
+                     </button>
                      <p id="libraryHealthSummary" class="library-health-summary" role="status" aria-live="polite"></p>
                  </div>
                  <div class="library-health-actions">
@@ -289,6 +292,7 @@
                      <button class="btn btn-small" id="combineFoldersBtn" onclick="openCombineFoldersModal()" hidden>📁<span class="btn-label"> Combine Folders</span></button>
                  </div>
              </div>
+             <div class="library-health-body" id="libraryHealthBody">
              <div class="library-health-grid">
                  <button class="library-health-card success" type="button" onclick="setHeaderFilter('marked')">
                      <span class="library-health-label">Processed</span>
@@ -316,6 +320,7 @@
                  <h3>No files indexed yet</h3>
                  <p>Add comics to your watched folder, or use <strong>Scan Unmarked</strong> from the ⋮ menu to bring them in. Once files appear here, you'll see processing status, duplicates, and folders ready to combine.</p>
                  <button class="btn btn-primary btn-small" onclick="scanUnmarkedFiles()">🔍 Scan Unmarked</button>
+             </div>
              </div>
          </section>
 
@@ -972,6 +977,7 @@
                     <select id="logType" name="logType" onchange="onLogTypeChange()" style="padding: 5px 10px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
                         <option value="app" selected>Application Logs</option>
                         <option value="watcher">Watcher Logs</option>
+                        <option value="metadata">Metadata Logs</option>
                         <option value="debug">Debug Logs</option>
                     </select>
                     <label for="logFile" style="color: var(--text-secondary); font-weight: 500; margin-left: 10px;">Log File:</label>
@@ -997,6 +1003,30 @@
             </div>
             <div class="modal-footer">
                 <button class="btn" onclick="closeLogsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- External Providers Status Modal -->
+    <div class="modal" id="externalProvidersModal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2>External Providers Status</h2>
+                <button class="close-btn" onclick="closeExternalProvidersModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">
+                    Live status for the configured external metadata providers
+                    (ComicVine, MangaDex, AniList). Hover over a pill for the
+                    most recent error message and success/failure counts.
+                </p>
+                <div id="externalProvidersModalContent">
+                    <!-- providerHealthWidget is rendered here when the modal is open -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="loadProviderHealth()">↻ Refresh</button>
+                <button class="btn" onclick="closeExternalProvidersModal()">Close</button>
             </div>
         </div>
     </div>

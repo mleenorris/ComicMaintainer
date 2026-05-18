@@ -766,7 +766,15 @@ public class SeriesLibraryService : ISeriesLibraryService
             return true;
         }
 
-        var hasMatch = !string.IsNullOrWhiteSpace(accumulator.MetadataSource);
+        // A series counts as "matched" when EITHER it has a recorded metadata
+        // source (a successful provider lookup) OR the user has explicitly
+        // matched it (lookup_status of "manual_match" / "manual"). Without the
+        // status check, manual matches that don't persist a source value end
+        // up filed under the "unmatched" filter and rendered with the yellow
+        // "?" badge, which is incorrect.
+        var hasMatch = !string.IsNullOrWhiteSpace(accumulator.MetadataSource)
+            || string.Equals(accumulator.LookupStatus, "manual_match", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(accumulator.LookupStatus, "manual", StringComparison.OrdinalIgnoreCase);
         return providerFilter switch
         {
             ProviderMatchedFilter => hasMatch,

@@ -161,21 +161,31 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         var key = NormalizeKey(seriesTitle);
         var trimmedTitle = seriesTitle.Trim();
 
+        // If the user previously chose a manual match for this series, refresh
+        // must re-resolve to that same match (not perform a fresh title search
+        // that might pick a different result). We look up by the user-selected
+        // canonical title and preserve the "manual_match" status so the
+        // series stays marked as manually matched.
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        var wasManualMatch = string.Equals(entity?.LookupStatus, "manual_match", StringComparison.OrdinalIgnoreCase);
+        var lookupQuery = wasManualMatch && !string.IsNullOrWhiteSpace(entity!.CanonicalTitle)
+            ? entity.CanonicalTitle
+            : trimmedTitle;
+
         ExternalSeriesMetadata? lookup = null;
         string status;
         try
         {
-            lookup = await _externalMetadata.LookupSeriesAsync(trimmedTitle, cancellationToken);
+            lookup = await _externalMetadata.LookupSeriesAsync(lookupQuery, cancellationToken);
             status = lookup is null ? "not_found" : "success";
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "External metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(trimmedTitle));
+            _logger.LogWarning(ex, "External metadata refresh failed for {SeriesTitle}", LoggingHelper.SanitizeForLog(lookupQuery));
             status = "error";
         }
 
-        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
         var now = DateTime.UtcNow;
         if (entity is null)
         {
@@ -204,10 +214,29 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 }
                 entity.Aliases = lookup.Aliases?.ToList() ?? new List<string>();
                 entity.Source = lookup.Source;
+                entity.LastLookupUtc = now;
+                // A manually-matched series stays manually matched after a
+                // successful refresh — the lookup just updates the cached
+                // fields for the user-selected match.
+                entity.LookupStatus = wasManualMatch ? "manual_match" : status;
+                entity.UpdatedAt = now;
             }
-            entity.LastLookupUtc = now;
-            entity.LookupStatus = status;
-            entity.UpdatedAt = now;
+            else if (wasManualMatch)
+            {
+                // Lookup failed (not_found / error) for a series the user had
+                // previously manually matched. Don't clobber the user's
+                // selection — preserve the existing canonical title, aliases,
+                // and source, and keep the manual_match status. Only record
+                // that a refresh was attempted.
+                entity.LastLookupUtc = now;
+                entity.UpdatedAt = now;
+            }
+            else
+            {
+                entity.LastLookupUtc = now;
+                entity.LookupStatus = status;
+                entity.UpdatedAt = now;
+            }
         }
 
         // Best-effort series-image download. Failure must NEVER fail the

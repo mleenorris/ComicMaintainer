@@ -238,6 +238,100 @@ public class MetadataControllerTests
     }
 
     [Fact]
+    public async Task ApplyMatch_QueuesNormalizeAndRenameJobForMatchingFiles()
+    {
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "batman",
+            CanonicalTitle = "Batman: Year One",
+            Aliases = new List<string> { "Year One" },
+            Source = "ComicVine",
+            LookupStatus = "manual_match"
+        };
+        _cache.Setup(c => c.ApplyExternalMatchAsync(
+                "Batman",
+                It.IsAny<ExternalSeriesMetadata>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(record);
+
+        var processor = new Mock<IComicProcessorService>();
+        var fileStore = new Mock<IFileStoreService>();
+
+        // Three files: one whose metadata.Series matches "Batman",
+        // one whose parent folder is "Batman", and one unrelated.
+        var allFiles = new List<ComicFile>
+        {
+            new() { FilePath = "/library/Other/Batman 001.cbz",
+                    Metadata = new ComicMetadata { Series = "Batman" } },
+            new() { FilePath = "/library/Batman/Batman 002.cbz" },
+            new() { FilePath = "/library/Other/Superman 001.cbz",
+                    Metadata = new ComicMetadata { Series = "Superman" } }
+        };
+        fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+                 .ReturnsAsync(allFiles);
+
+        List<string>? queuedPaths = null;
+        processor.Setup(p => p.NormalizeAndRenameFilesAsync(
+                    It.IsAny<IEnumerable<string>>(),
+                    It.IsAny<CancellationToken>()))
+                 .Callback<IEnumerable<string>, CancellationToken>((paths, _) => queuedPaths = paths.ToList())
+                 .ReturnsAsync(Guid.NewGuid());
+
+        var controller = new MetadataController(
+            _library.Object,
+            _cache.Object,
+            _refreshJobs.Object,
+            _external.Object,
+            new Mock<ILogger<MetadataController>>().Object,
+            processor.Object,
+            fileStore.Object);
+
+        var result = await controller.ApplyMatch(
+            "Batman",
+            new MetadataController.ApplyMatchRequest
+            {
+                CanonicalTitle = "Batman: Year One",
+                Aliases = new List<string> { "Year One" },
+                Source = "ComicVine"
+            },
+            CancellationToken.None);
+
+        Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(queuedPaths);
+        Assert.Equal(2, queuedPaths!.Count);
+        Assert.Contains("/library/Other/Batman 001.cbz", queuedPaths);
+        Assert.Contains("/library/Batman/Batman 002.cbz", queuedPaths);
+        Assert.DoesNotContain("/library/Other/Superman 001.cbz", queuedPaths);
+    }
+
+    [Fact]
+    public async Task ApplyMatch_StillReturnsRecord_WhenProcessorNotInjected()
+    {
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "batman",
+            CanonicalTitle = "Batman: Year One",
+            LookupStatus = "manual_match"
+        };
+        _cache.Setup(c => c.ApplyExternalMatchAsync(
+                "Batman",
+                It.IsAny<ExternalSeriesMetadata>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(record);
+
+        // _controller was constructed without processor/fileStore, so the
+        // post-match job is silently skipped and the response remains the
+        // unchanged SeriesMetadataCacheRecord shape consumed by the UI.
+        var result = await _controller.ApplyMatch(
+            "Batman",
+            new MetadataController.ApplyMatchRequest { CanonicalTitle = "Batman: Year One" },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Same(record, ok.Value);
+    }
+
+    [Fact]
     public async Task ApplyMatch_DelegatesToCacheService()
     {
         var record = new SeriesMetadataCacheRecord

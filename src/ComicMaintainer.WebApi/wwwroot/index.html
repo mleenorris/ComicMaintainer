@@ -404,6 +404,17 @@
             </div>
 
             <div class="content-wrapper">
+                <div class="series-layout-toolbar-mobile" id="seriesLayoutToolbarMobile" role="group" aria-label="Series layout" hidden>
+                    <button type="button" class="series-layout-mobile-btn" id="seriesLayoutListBtnMobile" onclick="setSeriesLayout('list')" aria-label="List layout">
+                        ☰ List
+                    </button>
+                    <button type="button" class="series-layout-mobile-btn" id="seriesLayoutGridBtnMobile" onclick="setSeriesLayout('grid')" aria-label="Grid layout">
+                        ▦ Grid
+                    </button>
+                    <button type="button" class="series-layout-mobile-btn" id="seriesLayoutCompactBtnMobile" onclick="setSeriesLayout('compact')" aria-label="Compact layout">
+                        ⊞ Compact
+                    </button>
+                </div>
                 <div class="file-list" id="fileList">
                     <div class="loading">
                         <div class="spinner"></div>

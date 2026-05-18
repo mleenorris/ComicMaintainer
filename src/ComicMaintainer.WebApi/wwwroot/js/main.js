@@ -1286,14 +1286,18 @@
 
         function updateSeriesLayoutButtons() {
             const toggle = document.getElementById('seriesLayoutToggle');
-            if (!toggle) return;
+            const mobileToolbar = document.getElementById('seriesLayoutToolbarMobile');
             const inSeriesMode = libraryViewMode === 'series';
-            toggle.hidden = !inSeriesMode;
+            if (toggle) toggle.hidden = !inSeriesMode;
+            if (mobileToolbar) mobileToolbar.hidden = !inSeriesMode;
             if (!inSeriesMode) return;
             const effective = getEffectiveSeriesLayout();
             document.getElementById('seriesLayoutListBtn')?.classList.toggle('active', effective === 'list');
             document.getElementById('seriesLayoutGridBtn')?.classList.toggle('active', effective === 'grid');
             document.getElementById('seriesLayoutCompactBtn')?.classList.toggle('active', effective === 'compact');
+            document.getElementById('seriesLayoutListBtnMobile')?.classList.toggle('active', effective === 'list');
+            document.getElementById('seriesLayoutGridBtnMobile')?.classList.toggle('active', effective === 'grid');
+            document.getElementById('seriesLayoutCompactBtnMobile')?.classList.toggle('active', effective === 'compact');
         }
 
         function setSeriesLayout(layout) {

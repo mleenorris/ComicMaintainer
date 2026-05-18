@@ -20,6 +20,7 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
     private readonly IMemoryCache _cache;
     private readonly ILogger<MangaDexSeriesMetadataService> _logger;
     private readonly ProviderHealthTracker _health = new("MangaDex");
+    private readonly Lazy<ProviderRateLimiter> _rateLimiter;
 
     public MangaDexSeriesMetadataService(
         IHttpClientFactory httpClientFactory,
@@ -31,6 +32,12 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
         _settings = settings;
         _cache = cache;
         _logger = logger;
+        _rateLimiter = new Lazy<ProviderRateLimiter>(
+            () => new ProviderRateLimiter(
+                "MangaDex",
+                Math.Max(1, _settings.CurrentValue.MangaDexRequestsPerSecond),
+                TimeSpan.FromSeconds(1)),
+            LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public string ProviderName => "MangaDex";
@@ -93,11 +100,26 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
         {
             var requestUri = BuildRequestUri(config, seriesName, limit);
             using var httpClient = _httpClientFactory.CreateClient(nameof(MangaDexSeriesMetadataService));
-            using var response = await httpClient.GetAsync(requestUri, cancellationToken);
+            using var response = await RateLimitedHttpInvoker.SendAsync(
+                httpClient,
+                () => new HttpRequestMessage(HttpMethod.Get, requestUri),
+                _rateLimiter.Value,
+                _health,
+                _logger,
+                "MangaDex",
+                HttpCompletionOption.ResponseContentRead,
+                cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("MangaDex lookup failed for {SeriesName} with status code {StatusCode}", LoggingHelper.SanitizeForLog(seriesName), response.StatusCode);
-                _health.RecordFailure($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+                if ((int)response.StatusCode == 429)
+                {
+                    _health.RecordRateLimited(TimeSpan.FromSeconds(5), $"HTTP 429 {response.ReasonPhrase}");
+                }
+                else
+                {
+                    _health.RecordFailure($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+                }
                 return Array.Empty<ExternalSeriesMetadata>();
             }
 
@@ -143,6 +165,10 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
         {
             snapshot.Reachable = cached.Value.Reachable;
             snapshot.StatusMessage = cached.Value.Message;
+            if (snapshot.RateLimited)
+            {
+                snapshot.StatusMessage = "Degraded - rate limited";
+            }
             return snapshot;
         }
 
@@ -150,6 +176,13 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
         snapshot.Reachable = reachable;
         snapshot.StatusMessage = message;
         _cache.Set(probeCacheKey, (reachable, message), HealthCacheDuration);
+
+        // If we have observed a 429 within the back-off window, surface a
+        // "degraded - rate limited" status even when reachability checks pass.
+        if (snapshot.RateLimited)
+        {
+            snapshot.StatusMessage = "Degraded - rate limited";
+        }
         return snapshot;
     }
 
@@ -161,12 +194,27 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
             using var httpClient = _httpClientFactory.CreateClient(nameof(MangaDexSeriesMetadataService));
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             cts.CancelAfter(TimeSpan.FromSeconds(5));
-            using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            using var response = await httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            using var response = await RateLimitedHttpInvoker.SendAsync(
+                httpClient,
+                () =>
+                {
+                    var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+                    request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                    return request;
+                },
+                _rateLimiter.Value,
+                _health,
+                _logger,
+                "MangaDex",
+                HttpCompletionOption.ResponseHeadersRead,
+                cts.Token);
             if (response.IsSuccessStatusCode)
             {
                 return (true, "Reachable");
+            }
+            if ((int)response.StatusCode == 429)
+            {
+                return (false, "Rate limited (HTTP 429)");
             }
             return (false, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
         }

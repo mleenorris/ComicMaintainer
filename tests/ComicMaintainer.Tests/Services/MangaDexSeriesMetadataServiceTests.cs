@@ -262,6 +262,76 @@ public class MangaDexSeriesMetadataServiceTests
         Assert.NotNull(health.LastFailureUtc);
     }
 
+    [Fact]
+    public async Task LookupSeriesAsync_RetriesOnce_When429WithRetryAfter()
+    {
+        var callCount = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            callCount++;
+            if (callCount == 1)
+            {
+                var resp = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+                // Use a very short Retry-After so the test does not hang.
+                resp.Headers.TryAddWithoutValidation("Retry-After", "0");
+                return resp;
+            }
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                {
+                  "data": [
+                    {
+                      "attributes": {
+                        "title": { "en": "Berserk" },
+                        "altTitles": []
+                      }
+                    }
+                  ]
+                }
+                """, Encoding.UTF8, "application/json")
+            };
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        var result = await service.LookupSeriesAsync("Berserk");
+
+        Assert.Equal(2, callCount); // first 429, then retry
+        Assert.NotNull(result);
+        Assert.Equal("Berserk", result!.CanonicalTitle);
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_RecordsRateLimited_OnPersistent429()
+    {
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            var resp = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            resp.Headers.TryAddWithoutValidation("Retry-After", "0");
+            return resp;
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        await service.LookupSeriesAsync("Anything");
+        var health = await service.CheckHealthAsync();
+
+        Assert.True(health.RateLimited);
+        Assert.NotNull(health.RateLimitedUntilUtc);
+        // Cached probe path runs SearchInternalAsync's status, but the rate-limit
+        // override should produce a degraded status message.
+        Assert.Equal("Degraded - rate limited", health.StatusMessage);
+    }
+
     private sealed class StubHttpMessageHandler : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, HttpResponseMessage> _handler;

@@ -51,4 +51,21 @@ public class ProviderHealth
     /// <summary>Total failed calls observed since process start.</summary>
     [JsonPropertyName("failure_count")]
     public long FailureCount { get; set; }
+
+    /// <summary>
+    /// True when the provider is currently being throttled (either we have
+    /// recently observed an HTTP 429 from the provider, or our client-side
+    /// rate limiter is delaying requests). Surfaces a "degraded" indicator in
+    /// the UI.
+    /// </summary>
+    [JsonPropertyName("rate_limited")]
+    public bool RateLimited { get; set; }
+
+    /// <summary>
+    /// UTC timestamp until which the provider is considered rate limited
+    /// (driven by the most recent <c>Retry-After</c> response header).
+    /// Null when not rate limited.
+    /// </summary>
+    [JsonPropertyName("rate_limited_until_utc")]
+    public DateTime? RateLimitedUntilUtc { get; set; }
 }

@@ -50,6 +50,20 @@ public class AppSettings
     public string AniListBaseUrl { get; set; } = "https://graphql.anilist.co";
 
     /// <summary>
+    /// Client-side rate limit for MangaDex API requests. MangaDex enforces a
+    /// global limit of 5 requests/second per IP; we default to 4/sec to leave
+    /// headroom and avoid 429 responses.
+    /// </summary>
+    public int MangaDexRequestsPerSecond { get; set; } = 4;
+
+    /// <summary>
+    /// Client-side rate limit for AniList API requests. AniList's documented
+    /// cap is 90 requests/minute, but the API is currently in a degraded
+    /// state limited to 30/minute; we default to 28/min to leave headroom.
+    /// </summary>
+    public int AniListRequestsPerMinute { get; set; } = 28;
+
+    /// <summary>
     /// When true (the default), external metadata refreshes also try to
     /// download a series cover image from the chosen provider and persist it
     /// under <see cref="SeriesImageCacheDirectory"/>. Set to false to keep

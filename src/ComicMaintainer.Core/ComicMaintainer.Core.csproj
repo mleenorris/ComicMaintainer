@@ -17,6 +17,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.10" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.10" />
     <PackageReference Include="SharpCompress" Version="0.41.0" />
+    <PackageReference Include="System.Threading.RateLimiting" Version="9.0.10" />
   </ItemGroup>
 
 </Project>

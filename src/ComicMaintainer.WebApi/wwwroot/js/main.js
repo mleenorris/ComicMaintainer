@@ -5742,6 +5742,11 @@
                 }
                 const data = await response.json();
                 showMessage(`Metadata refresh job queued for ${data.totalSeries || 0} series.`, 'success');
+                // Surface progress through the same toast/poll flow used by the
+                // per-series refresh so the user can see the job advancing.
+                if (data.jobId) {
+                    trackMetadataRefreshJob(data.jobId, `All Series (${data.totalSeries || 0})`);
+                }
             } catch (err) {
                 console.error('refreshAllExternalMetadata failed', err);
                 showMessage('Failed to queue metadata refresh', 'error');

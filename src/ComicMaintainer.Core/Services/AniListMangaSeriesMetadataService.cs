@@ -22,6 +22,12 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
     private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(12);
     private static readonly TimeSpan HealthCacheDuration = TimeSpan.FromSeconds(60);
 
+    // If a real lookup/search succeeded within this window we trust that
+    // signal over the synthetic reachability probe, which can spuriously
+    // report unreachable (e.g. transient network blip, AniList rejecting
+    // the probe shape) while normal traffic still works.
+    private static readonly TimeSpan RecentSuccessWindow = TimeSpan.FromMinutes(5);
+
     // AniList GraphQL search query. We request the title in romaji/english/native
     // plus synonyms so we can build a rich alias list, and constrain the search
     // to MANGA media originating from Japan (i.e. manga).
@@ -180,13 +186,26 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
         {
             snapshot.Reachable = cached.Value.Reachable;
             snapshot.StatusMessage = cached.Value.Message;
-            return snapshot;
+        }
+        else
+        {
+            var (reachable, message) = await ProbeReachabilityAsync(config, cancellationToken);
+            snapshot.Reachable = reachable;
+            snapshot.StatusMessage = message;
+            _cache.Set(probeCacheKey, (reachable, message), HealthCacheDuration);
         }
 
-        var (reachable, message) = await ProbeReachabilityAsync(config, cancellationToken);
-        snapshot.Reachable = reachable;
-        snapshot.StatusMessage = message;
-        _cache.Set(probeCacheKey, (reachable, message), HealthCacheDuration);
+        // If the synthetic probe says we can't reach AniList but a real
+        // lookup succeeded very recently, trust the real traffic — otherwise
+        // the UI shows red even though metadata matching is working fine.
+        if (snapshot.Reachable != true &&
+            snapshot.LastSuccessUtc.HasValue &&
+            DateTime.UtcNow - snapshot.LastSuccessUtc.Value <= RecentSuccessWindow)
+        {
+            snapshot.Reachable = true;
+            snapshot.StatusMessage = "Reachable (recent lookup succeeded)";
+        }
+
         return snapshot;
     }
 

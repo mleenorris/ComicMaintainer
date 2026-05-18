@@ -2998,26 +2998,37 @@
         }
 
         /* ---------- Series view: lookup status badge ---------- */
+        /* Per-series marker showing whether the series has been matched
+           against an external metadata provider. Sized and outlined so the
+           "matched" vs "not matched" state is obvious at a glance over any
+           cover-art background. */
         .series-lookup-badge {
             position: absolute;
             top: 6px;
             left: 6px;
-            min-width: 18px;
-            height: 18px;
-            padding: 0 5px;
-            border-radius: 9px;
-            font-size: 11px;
+            min-width: 22px;
+            height: 22px;
+            padding: 0 6px;
+            border-radius: 11px;
+            font-size: 13px;
             font-weight: 700;
-            line-height: 18px;
+            line-height: 22px;
             text-align: center;
             color: #fff;
             background: rgba(0, 0, 0, 0.55);
+            box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.4);
             pointer-events: auto;
+            z-index: 2;
         }
-        .series-lookup-badge--success { background: #2ea44f; }
-        .series-lookup-badge--warn    { background: #d4a017; }
-        .series-lookup-badge--error   { background: #cb2431; }
-        .series-lookup-badge--none    { background: rgba(0,0,0,0.45); color: rgba(255,255,255,0.6); }
+        .series-lookup-badge--success   { background: #2ea44f; }
+        .series-lookup-badge--warn      { background: #d4a017; }
+        .series-lookup-badge--error     { background: #cb2431; }
+        /* "Unmatched" = no external lookup has been performed yet. Use a
+           saturated colour (not a near-invisible grey) so users can spot
+           which series still need attention. */
+        .series-lookup-badge--unmatched { background: #6e7681; }
+        /* Legacy class name kept for backwards compatibility with any cached HTML. */
+        .series-lookup-badge--none      { background: #6e7681; color: #fff; }
 
         /* ---------- Provider health widget ---------- */
         .provider-health-widget { margin: 0 0 12px 0; }

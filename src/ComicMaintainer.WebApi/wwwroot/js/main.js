@@ -1893,21 +1893,22 @@
 
         function renderLookupStatusBadge(series) {
             // Visual indicator for the most recent external metadata lookup.
-            // Helps the user see whether "Refresh metadata" actually did anything.
+            // Helps the user see at a glance whether the series has been
+            // matched against an external provider (so the next bulk
+            // refresh is meaningful) or is still unmatched.
             const status = (series.lookup_status || '').toLowerCase();
-            if (!status) {
-                return '<span class="series-lookup-badge series-lookup-badge--none" title="No external metadata lookup yet">·</span>';
-            }
             const map = {
-                success: { cls: 'success', symbol: '✓', label: 'Last lookup succeeded' },
-                manual: { cls: 'success', symbol: '✓', label: 'Manually managed' },
-                not_found: { cls: 'warn', symbol: '?', label: 'No external match found' },
-                error: { cls: 'error', symbol: '!', label: 'Last lookup failed' }
+                success:   { cls: 'success',   symbol: '✓', label: 'Provider matched' },
+                manual:    { cls: 'success',   symbol: '✓', label: 'Manually matched' },
+                not_found: { cls: 'warn',      symbol: '?', label: 'No external match found' },
+                error:     { cls: 'error',     symbol: '!', label: 'Last lookup failed' }
             };
-            const info = map[status] || { cls: 'warn', symbol: '?', label: status };
+            const info = status
+                ? (map[status] || { cls: 'warn', symbol: '?', label: status })
+                : { cls: 'unmatched', symbol: '✕', label: 'Not yet matched to a provider' };
             const sourceText = series.metadata_source ? ` · ${series.metadata_source}` : '';
             const lookupText = series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : '';
-            return `<span class="series-lookup-badge series-lookup-badge--${info.cls}" title="${escapeHtml(info.label + sourceText + lookupText)}">${info.symbol}</span>`;
+            return `<span class="series-lookup-badge series-lookup-badge--${info.cls}" title="${escapeHtml(info.label + sourceText + lookupText)}" aria-label="${escapeHtml(info.label)}">${info.symbol}</span>`;
         }
 
         function renderProviderHealthWidget() {

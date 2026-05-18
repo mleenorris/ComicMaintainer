@@ -197,13 +197,95 @@ public class MetadataController : ControllerBase
             {
                 providers.Add(await _externalMetadata.CheckHealthAsync(cancellationToken));
             }
-            return Ok(new { providers });
+            return Ok(new { providers = MergeAniListProviders(providers) });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error retrieving provider health"));
             return StatusCode(500, "Error retrieving provider health");
         }
+    }
+
+    /// <summary>
+    /// AniList is queried as two separate providers internally
+    /// (<c>AniListManga</c> for JP titles and <c>AniListManhwa</c> for KR
+    /// titles) because the GraphQL query filters by country of origin. From
+    /// the user's perspective there is a single "AniList" backend, so the
+    /// provider-health widget collapses them into one entry by combining
+    /// their counters and taking the best reachability signal.
+    /// </summary>
+    private static List<ProviderHealth> MergeAniListProviders(IEnumerable<ProviderHealth> providers)
+    {
+        var result = new List<ProviderHealth>();
+        ProviderHealth? merged = null;
+        foreach (var provider in providers)
+        {
+            if (provider.Name is "AniListManga" or "AniListManhwa" or "AniList")
+            {
+                if (merged is null)
+                {
+                    merged = new ProviderHealth
+                    {
+                        Name = "AniList",
+                        Enabled = provider.Enabled,
+                        Configured = provider.Configured,
+                        Reachable = provider.Reachable,
+                        StatusMessage = provider.StatusMessage,
+                        LastError = provider.LastError,
+                        LastSuccessUtc = provider.LastSuccessUtc,
+                        LastFailureUtc = provider.LastFailureUtc,
+                        SuccessCount = provider.SuccessCount,
+                        FailureCount = provider.FailureCount
+                    };
+                    result.Add(merged);
+                }
+                else
+                {
+                    // Enabled/Configured: either side counts.
+                    merged.Enabled = merged.Enabled || provider.Enabled;
+                    merged.Configured = merged.Configured || provider.Configured;
+
+                    // Reachability: any successful probe wins, otherwise
+                    // an explicit failure beats "unknown" (null).
+                    merged.Reachable = CombineReachable(merged.Reachable, provider.Reachable);
+                    if (merged.Reachable == true)
+                    {
+                        merged.StatusMessage = "Reachable";
+                    }
+                    else if (!string.IsNullOrEmpty(provider.StatusMessage) && string.IsNullOrEmpty(merged.StatusMessage))
+                    {
+                        merged.StatusMessage = provider.StatusMessage;
+                    }
+
+                    merged.SuccessCount += provider.SuccessCount;
+                    merged.FailureCount += provider.FailureCount;
+
+                    if (provider.LastSuccessUtc.HasValue &&
+                        (!merged.LastSuccessUtc.HasValue || provider.LastSuccessUtc > merged.LastSuccessUtc))
+                    {
+                        merged.LastSuccessUtc = provider.LastSuccessUtc;
+                    }
+                    if (provider.LastFailureUtc.HasValue &&
+                        (!merged.LastFailureUtc.HasValue || provider.LastFailureUtc > merged.LastFailureUtc))
+                    {
+                        merged.LastFailureUtc = provider.LastFailureUtc;
+                        merged.LastError = provider.LastError ?? merged.LastError;
+                    }
+                }
+            }
+            else
+            {
+                result.Add(provider);
+            }
+        }
+        return result;
+    }
+
+    private static bool? CombineReachable(bool? a, bool? b)
+    {
+        if (a == true || b == true) return true;
+        if (a == false || b == false) return false;
+        return null;
     }
 
     /// <summary>Search external providers for series candidates by alternative names.</summary>

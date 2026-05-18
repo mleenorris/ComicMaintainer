@@ -390,6 +390,26 @@
         .settings-dropdown-item.user-info-item:hover {
             background: none;
         }
+
+        .settings-dropdown-section-label {
+            padding: 8px 15px 4px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border-primary);
+            margin-top: 4px;
+            background: var(--bg-hover);
+        }
+        .settings-dropdown-section-label:first-child,
+        .settings-dropdown-item.user-info-item + .settings-dropdown-section-label {
+            border-top: none;
+            margin-top: 0;
+        }
+        .settings-dropdown-item-logout {
+            color: #c0392b;
+        }
         
         .container {
             max-width: 1400px;
@@ -1264,6 +1284,32 @@
             display: none !important;
         }
 
+        /* Mobile-only secondary toolbar shown inside the series view so the
+           List / Grid / Compact options remain reachable on phones where the
+           header version is hidden to save horizontal space. */
+        .series-layout-toolbar-mobile {
+            display: none;
+        }
+        .series-layout-toolbar-mobile[hidden] {
+            display: none !important;
+        }
+        .series-layout-mobile-btn {
+            flex: 1;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            border-radius: 999px;
+            padding: 8px 10px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s ease, color 0.2s ease;
+        }
+        .series-layout-mobile-btn.active {
+            background: var(--accent-primary);
+            color: #fff;
+        }
+
         @keyframes pulse {
             0%, 100% {
                 opacity: 1;
@@ -1606,6 +1652,39 @@
             gap: 12px;
         }
 
+        .library-health-summary {
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+        .library-health-summary:empty {
+            display: none;
+        }
+
+        .library-health-empty {
+            margin-top: 8px;
+            padding: 28px 18px;
+            text-align: center;
+            background: var(--bg-hover);
+            border: 1px dashed var(--border-secondary);
+            border-radius: 10px;
+        }
+        .library-health-empty .library-health-empty-icon {
+            font-size: 38px;
+            margin-bottom: 8px;
+        }
+        .library-health-empty h3 {
+            margin: 0 0 6px;
+            font-size: 16px;
+            color: var(--text-primary);
+        }
+        .library-health-empty p {
+            margin: 0 auto 14px;
+            max-width: 460px;
+            font-size: 13px;
+            line-height: 1.5;
+            color: var(--text-muted);
+        }
+
         .library-health-card {
             border: 1px solid var(--border-primary);
             background: var(--bg-primary);
@@ -1643,15 +1722,18 @@
         }
 
         .library-health-card.success {
-            border-color: rgba(39, 174, 96, 0.25);
+            border-color: rgba(39, 174, 96, 0.35);
+            background: linear-gradient(180deg, rgba(39, 174, 96, 0.06), transparent 70%);
         }
 
         .library-health-card.warning {
-            border-color: rgba(243, 156, 18, 0.3);
+            border-color: rgba(243, 156, 18, 0.45);
+            background: linear-gradient(180deg, rgba(243, 156, 18, 0.08), transparent 70%);
         }
 
         .library-health-card.accent {
-            border-color: rgba(52, 152, 219, 0.3);
+            border-color: rgba(52, 152, 219, 0.4);
+            background: linear-gradient(180deg, rgba(52, 152, 219, 0.06), transparent 70%);
         }
 
         .library-health-card.neutral {
@@ -2400,20 +2482,34 @@
         
         /* Mobile Responsive Styles */
         @media (max-width: 768px) {
-            body {
-                height: 100vh;
-                height: 100dvh; /* Use dynamic viewport height on mobile */
+            /* On phones, let the page scroll naturally instead of locking the
+               viewport and trying to host an internal scroller. The locked
+               layout caused Library Health cards and the Files/Series list to
+               be clipped at the bottom with no way to reach them in either
+               portrait or landscape. */
+            html, body {
+                height: auto;
+                min-height: 100%;
+                overflow-x: hidden;
+                overflow-y: visible;
             }
-            
+
+            body {
+                /* Cancel the desktop "viewport-locked column" model so the
+                   document itself becomes the scroll container on phones. */
+                display: block;
+            }
+
             .container {
                 padding: 0;
                 max-width: 100vw;
                 min-width: 0;
                 overflow-x: hidden;
-                flex: 1;
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
+                overflow-y: visible;
+                /* Cancel the desktop flex column so children flow naturally
+                   and contribute to page height (which the document scrolls). */
+                display: block;
+                flex: none;
             }
 
             .mobile-library-view-toggle {
@@ -2422,11 +2518,67 @@
             }
 
             .library-health-grid {
-                grid-template-columns: 1fr;
+                /* 2×2 grid on mobile keeps stat cards from each consuming a full viewport. */
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 8px;
+            }
+
+            .library-health-card {
+                padding: 10px;
+                min-height: 0;
+            }
+
+            .library-health-card strong {
+                font-size: 22px;
+            }
+
+            .library-health-card small {
+                /* Cards already labelled by the big number + title; the trailing
+                   caption is redundant on phones where vertical space is scarce. */
+                display: none;
+            }
+
+            .library-health-card .library-health-label {
+                font-size: 11px;
+            }
+
+            .library-health-dashboard {
+                padding: 12px;
+            }
+
+            /* Drop the redundant prose summary on mobile — the stat cards
+               directly below already convey the same numbers. */
+            .library-health-summary {
+                display: none;
+            }
+            /* But keep it visible on mobile if it's been repurposed to carry
+               an error/status message (those are written with the
+               `library-health-summary--status` modifier from JS). */
+            .library-health-summary.library-health-summary--status {
+                display: block;
+            }
+
+            /* Hide the desktop "Files / Series" segmented control on mobile —
+               the 3-way Overview / Files / Series toggle below the header
+               replaces it and avoids the header overflow. */
+            .header-view-toggle:not(.series-layout-toggle) {
+                display: none !important;
+            }
+
+            /* The header search input doesn't apply to Series/Overview mode
+               uniformly. The `data-active-view` attribute on <body> is set by
+               JS to the active mobile view; hide search outside Files mode. */
+            body[data-mobile-view="overview"] .header-search,
+            body[data-mobile-view="series"] .header-search,
+            body[data-mobile-view="overview"] .header-filter-dropdown,
+            body[data-mobile-view="series"] .header-filter-dropdown,
+            body[data-mobile-view="overview"] .header-sort-dropdown,
+            body[data-mobile-view="series"] .header-sort-dropdown {
+                display: none;
             }
             
             .header {
-                padding: 10px;
+                padding: 6px 10px;
             }
             
             .header .container {
@@ -2436,7 +2588,13 @@
             
             .header-content {
                 flex-wrap: wrap;
-                gap: 10px;
+                gap: 6px;
+            }
+            
+            /* Shrink the header logo SVG on phones to reclaim vertical space. */
+            .header-content > svg {
+                width: 32px;
+                height: 32px;
             }
             
             .header h1 {
@@ -2555,6 +2713,34 @@
                 border-radius: 0;
                 flex-shrink: 0;
             }
+
+            #libraryFilesView {
+                /* Stop forcing the files view to be a flex item that fills the
+                   viewport — on mobile we want it to grow with its content so
+                   the document can scroll past the action bar to reach the
+                   list below. */
+                flex: none;
+                display: block;
+                min-height: 0;
+            }
+
+            /* On phones, the header has no room for the List/Grid/Compact
+               buttons next to Search/Filter/Sort/Files/Series, so we hide
+               the header copy and show a dedicated mobile toolbar inside
+               the series view instead. */
+            .series-layout-toggle {
+                display: none !important;
+            }
+            .series-layout-toolbar-mobile {
+                display: flex;
+                gap: 6px;
+                padding: 8px 10px;
+                margin: 0 10px 8px;
+                background: var(--bg-secondary);
+                border: 1px solid var(--border-primary);
+                border-radius: 999px;
+                box-shadow: var(--shadow-sm);
+            }
             
             .btn {
                 padding: 10px;
@@ -2637,21 +2823,24 @@
             }
             
             .content-wrapper {
-                flex: 1;
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
+                /* Let the document own scrolling on mobile rather than
+                   creating an inner scroll region that competes with the
+                   page (and clipped the list below the fold). */
+                flex: none;
+                display: block;
+                overflow: visible;
                 min-height: 0;
             }
             
             .file-list {
                 overflow-x: hidden;
+                overflow-y: visible;
                 max-width: 100%;
                 width: 100%;
                 border-radius: 0;
                 margin: 0;
-                min-height: 300px;
-                flex: 1;
+                min-height: 0;
+                flex: none;
             }
             
             .file-list-header {
@@ -2911,6 +3100,31 @@
                 grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
                 gap: 12px;
             }
+
+            /* Sticky job-progress pill on mobile: when a job is running, the
+               in-header indicator is hard to spot once the user scrolls. Pin
+               a tappable bar to the bottom so progress is always visible. */
+            .progress-indicator-btn.progress-indicator-btn--mobile-sticky {
+                position: fixed;
+                left: 12px;
+                right: 12px;
+                bottom: 12px;
+                width: auto;
+                z-index: 1500;
+                justify-content: center;
+                padding: 12px 16px;
+                font-size: 14px;
+                box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+                border-radius: 999px;
+            }
+            /* Hide the original in-header copy when the mobile sticky copy is
+               doing the job; both share the #progressIndicator id so we toggle
+               visibility via the modifier class. */
+            #progressIndicator:not(.progress-indicator-btn--mobile-sticky) {
+                /* On phones, hide the header-anchored pill — the sticky copy
+                   below replaces it. */
+                display: none !important;
+            }
         }
         
         @media (max-width: 480px) {
@@ -3029,6 +3243,16 @@
         .series-lookup-badge--unmatched { background: #6e7681; }
         /* Legacy class name kept for backwards compatibility with any cached HTML. */
         .series-lookup-badge--none      { background: #6e7681; color: #fff; }
+
+        /* When the badge is rendered inside the series List row's aside, it
+           must flow in line with the issue count and chevron — not be
+           absolutely positioned (which lands at the viewport's top-left and
+           makes it invisible). */
+        .series-list-aside .series-lookup-badge {
+            position: static;
+            top: auto;
+            left: auto;
+        }
 
         /* ---------- Provider health widget ---------- */
         .provider-health-widget { margin: 0 0 12px 0; }

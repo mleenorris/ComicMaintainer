@@ -92,6 +92,10 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                     switch (record.LookupStatus)
                     {
                         case "success":
+                        case "manual_match":
+                            // A manually-matched series that successfully
+                            // re-resolves to its user-selected match is a
+                            // successful refresh outcome.
                             job.Successes++;
                             break;
                         case "not_found":

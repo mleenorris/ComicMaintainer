@@ -1898,10 +1898,11 @@
             // refresh is meaningful) or is still unmatched.
             const status = (series.lookup_status || '').toLowerCase();
             const map = {
-                success:   { cls: 'success',   symbol: '✓', label: 'Provider matched' },
-                manual:    { cls: 'success',   symbol: '✓', label: 'Manually matched' },
-                not_found: { cls: 'warn',      symbol: '?', label: 'No external match found' },
-                error:     { cls: 'error',     symbol: '!', label: 'Last lookup failed' }
+                success:      { cls: 'success',   symbol: '✓', label: 'Provider matched' },
+                manual_match: { cls: 'success',   symbol: '✓', label: 'Manually matched' },
+                manual:       { cls: 'success',   symbol: '✓', label: 'Manually matched' },
+                not_found:    { cls: 'warn',      symbol: '?', label: 'No external match found' },
+                error:        { cls: 'error',     symbol: '!', label: 'Last lookup failed' }
             };
             const info = status
                 ? (map[status] || { cls: 'warn', symbol: '?', label: status })
@@ -6269,7 +6270,9 @@
                 manageSeriesState.record = record;
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
-                showMessage(record.lookup_status === 'success' ? 'Metadata refreshed' : `Lookup status: ${record.lookup_status || 'unknown'}`, record.lookup_status === 'success' ? 'success' : 'info');
+                const successStatuses = new Set(['success', 'manual_match']);
+                const isSuccess = successStatuses.has(record.lookup_status);
+                showMessage(isSuccess ? 'Metadata refreshed' : `Lookup status: ${record.lookup_status || 'unknown'}`, isSuccess ? 'success' : 'info');
             } catch (err) {
                 console.error('refreshSeriesMetadata failed', err);
                 showMessage('Failed to refresh metadata', 'error');

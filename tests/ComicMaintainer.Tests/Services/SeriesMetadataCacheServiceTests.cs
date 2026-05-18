@@ -405,6 +405,87 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
+    public async Task RefreshAsync_AfterManualMatch_LooksUpByManualCanonicalAndPreservesStatus()
+    {
+        // User manually matched "Batman" to a specific candidate ("Batman: Year One").
+        await _service.ApplyExternalMatchAsync(
+            "Batman",
+            new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman: Year One",
+                Aliases = new List<string> { "Year One" },
+                Source = "ComicVine"
+            });
+
+        // Subsequent refresh must re-resolve using the manually-selected
+        // canonical title (not the original input), and must keep the series
+        // marked as manually matched.
+        _external.Setup(e => e.LookupSeriesAsync("Batman: Year One", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman: Year One",
+                Aliases = new List<string> { "Year One", "Frank Miller" },
+                Source = "ComicVine"
+            });
+
+        var refreshed = await _service.RefreshAsync("Batman");
+
+        Assert.Equal("manual_match", refreshed.LookupStatus);
+        Assert.Equal("Batman: Year One", refreshed.CanonicalTitle);
+        Assert.Equal("ComicVine", refreshed.Source);
+        Assert.Contains("Frank Miller", refreshed.Aliases);
+        _external.Verify(e => e.LookupSeriesAsync("Batman: Year One", It.IsAny<CancellationToken>()), Times.Once);
+        _external.Verify(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_AfterManualMatch_PreservesMatchOnLookupFailure()
+    {
+        await _service.ApplyExternalMatchAsync(
+            "Batman",
+            new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman: Year One",
+                Aliases = new List<string> { "Year One" },
+                Source = "ComicVine"
+            });
+
+        // Provider can't find the match on this refresh — must not clobber
+        // the user's manual selection.
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ExternalSeriesMetadata?)null);
+
+        var refreshed = await _service.RefreshAsync("Batman");
+
+        Assert.Equal("manual_match", refreshed.LookupStatus);
+        Assert.Equal("Batman: Year One", refreshed.CanonicalTitle);
+        Assert.Equal("ComicVine", refreshed.Source);
+        Assert.Contains("Year One", refreshed.Aliases);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_AfterManualMatch_PreservesMatchOnLookupError()
+    {
+        await _service.ApplyExternalMatchAsync(
+            "Batman",
+            new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman: Year One",
+                Aliases = new List<string> { "Year One" },
+                Source = "ComicVine"
+            });
+
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("provider down"));
+
+        var refreshed = await _service.RefreshAsync("Batman");
+
+        Assert.Equal("manual_match", refreshed.LookupStatus);
+        Assert.Equal("Batman: Year One", refreshed.CanonicalTitle);
+        Assert.Equal("ComicVine", refreshed.Source);
+    }
+
+    [Fact]
     public async Task ClearExternalMetadataAsync_DropsProviderFieldsAndKeepsUserAliases()
     {
         _external.Setup(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))

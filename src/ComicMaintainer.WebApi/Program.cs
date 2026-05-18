@@ -485,6 +485,12 @@ builder.Services.AddHttpClient(SeriesImageStore.HttpClientName)
         // applies its own per-request timeout. This is the absolute upper
         // bound for very slow connections.
         client.Timeout = TimeSpan.FromSeconds(30);
+        // Identify ourselves to provider CDNs (MangaDex / AniList / ComicVine).
+        // Some CDNs (notably Cloudflare-fronted endpoints like
+        // uploads.mangadex.org) reject requests with an empty or missing
+        // User-Agent with HTTP 400, which previously caused intermittent
+        // "image download failed: HTTP 400" errors for certain series.
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
     });
 builder.Services.AddHttpClient(nameof(ComicVineSeriesMetadataService));
 builder.Services.AddHttpClient(nameof(MangaDexSeriesMetadataService))

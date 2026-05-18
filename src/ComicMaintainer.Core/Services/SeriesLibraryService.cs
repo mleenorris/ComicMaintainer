@@ -720,15 +720,74 @@ public class SeriesLibraryService : ISeriesLibraryService
         IReadOnlyList<SeriesMetadataCacheRecord> records,
         UnionFind<string> unionFind)
     {
+        // A single series-group component may contain multiple cache records
+        // (e.g. a folder refresh issues a separate RefreshAsync for the
+        // canonical title AND each alias, so several records can end up
+        // pointing at the same logical series — one "success" and one or
+        // more "not_found" siblings). If we just returned the first record
+        // we encountered, a stale "not_found" sibling could win and the
+        // series-list badge would render the yellow "?" even though a
+        // successful match exists. Pick the most authoritative record
+        // instead: positive-match statuses (manual_match / manual / success)
+        // outrank not_found / error / cleared, with the most recent lookup
+        // winning ties.
+        SeriesMetadataCacheRecord? best = null;
+        var bestRank = int.MinValue;
+        DateTime? bestLookup = null;
+
         foreach (var record in records)
         {
-            if (unionFind.Contains(record.NormalizedKey)
-                && string.Equals(unionFind.Find(record.NormalizedKey), representative, StringComparison.OrdinalIgnoreCase))
+            if (!unionFind.Contains(record.NormalizedKey)
+                || !string.Equals(unionFind.Find(record.NormalizedKey), representative, StringComparison.OrdinalIgnoreCase))
             {
-                return record;
+                continue;
+            }
+
+            var rank = RankLookupStatus(record.LookupStatus);
+            if (rank > bestRank
+                || (rank == bestRank && IsMoreRecent(record.LastLookupUtc, bestLookup)))
+            {
+                best = record;
+                bestRank = rank;
+                bestLookup = record.LastLookupUtc;
             }
         }
-        return null;
+
+        return best;
+    }
+
+    /// <summary>
+    /// Ranks a cache record's <c>LookupStatus</c> by how authoritative it is
+    /// for representing a series. Higher rank wins when multiple cache
+    /// records share a union-find component (see <see cref="ResolveRecordForGroup"/>).
+    /// Kept in sync with the front-end badge mapping in <c>main.js</c>:
+    /// manual_match / manual / success render the green check; everything
+    /// else renders the yellow "?" or grey "✕".
+    /// </summary>
+    private static int RankLookupStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return 0;
+        }
+
+        return status.ToLowerInvariant() switch
+        {
+            "manual_match" => 5,
+            "manual" => 4,
+            "success" => 3,
+            "not_found" => 2,
+            "error" => 1,
+            "cleared" => 0,
+            _ => 0
+        };
+    }
+
+    private static bool IsMoreRecent(DateTime? candidate, DateTime? incumbent)
+    {
+        if (candidate is null) return false;
+        if (incumbent is null) return true;
+        return candidate.Value > incumbent.Value;
     }
 
     /// <summary>

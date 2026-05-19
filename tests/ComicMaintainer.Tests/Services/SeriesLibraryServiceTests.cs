@@ -744,6 +744,155 @@ public class SeriesLibraryServiceTests
         Assert.Equal("AniList", result.Series[0].MetadataSource);
     }
 
+    [Fact]
+    public async Task GetSeriesAsync_CollapsesDuplicateCanonicalTitlesAcrossRecords()
+    {
+        // Two cache records share the canonical title "Berserk" but live
+        // under different NormalizedKeys (e.g. user matched two on-disk
+        // folders to the same external series). Without the duplicate
+        // collapse pass each record produced its own card and the library
+        // rendered two series both labelled "Berserk".
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Berserk/Berserk 001.cbz",
+                FileName = "Berserk 001.cbz",
+                Directory = "/library/Berserk",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Berserk", Issue = "1" }
+            },
+            new()
+            {
+                FilePath = "/library/Berserk Deluxe/Berserk Deluxe 002.cbz",
+                FileName = "Berserk Deluxe 002.cbz",
+                Directory = "/library/Berserk Deluxe",
+                FileSize = 200,
+                LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Berserk Deluxe", Issue = "2" }
+            },
+            new()
+            {
+                FilePath = "/library/Berserk Deluxe/Berserk Deluxe 003.cbz",
+                FileName = "Berserk Deluxe 003.cbz",
+                Directory = "/library/Berserk Deluxe",
+                FileSize = 300,
+                LastModified = new DateTime(2024, 1, 3, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Berserk Deluxe", Issue = "3" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "berserk",
+                    CanonicalTitle = "Berserk",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>(),
+                    Source = "MangaDex",
+                    LookupStatus = "success",
+                    LastLookupUtc = new DateTime(2024, 5, 1, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new()
+                {
+                    NormalizedKey = "berserk-deluxe",
+                    CanonicalTitle = "Berserk",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>(),
+                    Source = "MangaDex",
+                    LookupStatus = "success",
+                    LastLookupUtc = new DateTime(2024, 5, 2, 0, 0, 0, DateTimeKind.Utc)
+                }
+            });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetSeriesAsync();
+
+        Assert.Single(result.Series);
+        Assert.Equal("Berserk", result.Series[0].Title);
+        Assert.Equal(3, result.Series[0].IssueCount);
+        // The survivor should be the one with the most issues (Berserk Deluxe with 2).
+        // Either way, the dropped group's title is preserved as an alias so the
+        // merge is transparent to the user.
+        Assert.Contains(result.Series[0].Aliases, a => a.Equals("Berserk Deluxe", StringComparison.OrdinalIgnoreCase)
+            || a.Equals("Berserk", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task GetFoldersForSeriesIdAsync_ReturnsDistinctFoldersWithCounts()
+    {
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Series/Series 001.cbz",
+                FileName = "Series 001.cbz",
+                Directory = "/library/Series",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Series", Issue = "1" }
+            },
+            new()
+            {
+                FilePath = "/library/Series/Series 002.cbz",
+                FileName = "Series 002.cbz",
+                Directory = "/library/Series",
+                FileSize = 200,
+                LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Series", Issue = "2" }
+            },
+            new()
+            {
+                FilePath = "/library/Series Alt/Series Alt 003.cbz",
+                FileName = "Series Alt 003.cbz",
+                Directory = "/library/Series Alt",
+                FileSize = 300,
+                LastModified = new DateTime(2024, 1, 3, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Series", Issue = "3" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var seriesList = await service.GetSeriesAsync();
+        Assert.Single(seriesList.Series);
+        var seriesId = seriesList.Series[0].Id;
+
+        var folders = await service.GetFoldersForSeriesIdAsync(seriesId);
+
+        Assert.NotNull(folders);
+        Assert.Equal(2, folders!.Folders.Count);
+        // Most populated folder comes first.
+        Assert.Equal("/library/Series", folders.Folders[0].Directory);
+        Assert.Equal(2, folders.Folders[0].FileCount);
+        Assert.Equal(300, folders.Folders[0].TotalSize);
+        Assert.Equal("/library/Series Alt", folders.Folders[1].Directory);
+        Assert.Equal(1, folders.Folders[1].FileCount);
+    }
+
+    [Fact]
+    public async Task GetFoldersForSeriesIdAsync_ReturnsNullForUnknownId()
+    {
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetFoldersForSeriesIdAsync("does-not-exist");
+
+        Assert.Null(result);
+    }
+
     private static string NormalizeKey(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))

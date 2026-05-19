@@ -2221,6 +2221,7 @@
                                 <div class="series-detail-actions">
                                     ${issues.length ? `<button type="button" class="btn btn-small" onclick="readComic('${escapeJs(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
                                     <button type="button" class="btn btn-small" onclick="openManageSeriesNamesModal('${escapeJs(series.title)}')">🏷️ Manage Names</button>
+                                    <button type="button" class="btn btn-small" onclick="openSeriesFoldersModal('${escapeJs(series.id)}','${escapeJs(series.title)}')" title="See the on-disk folders contributing to this series and merge them into one">📁 Manage Folders</button>
                                     <button type="button" class="btn btn-small" onclick="refreshSeriesMetadataDirect('${escapeJs(series.title)}')">🌐 Refresh Metadata</button>
                                     <button type="button" class="btn btn-small" onclick="refreshSeriesFolder('${escapeJs(series.id)}','${escapeJs(series.title)}')" title="Refresh metadata for every folder/alias that groups under this series">📁 Refresh Folder</button>
                                 </div>
@@ -3063,6 +3064,104 @@
 
             await deleteSingleFile(file.relative_path);
             await openDuplicateReviewModal();
+        }
+
+        // Per-series folder list state. Holds the latest response from
+        // /api/files/series/{id}/folders so the "Merge Folders" button can
+        // hand off to the existing combine-folders modal without re-fetching.
+        let seriesFoldersCurrent = null;
+
+        async function openSeriesFoldersModal(seriesId, seriesTitle) {
+            if (!seriesId) return;
+            const modal = document.getElementById('seriesFoldersModal');
+            const list = document.getElementById('seriesFoldersList');
+            const emptyState = document.getElementById('seriesFoldersEmptyState');
+            const mergeBtn = document.getElementById('seriesFoldersMergeBtn');
+            const mergeNote = document.getElementById('seriesFoldersMergeNote');
+            const titleEl = document.getElementById('seriesFoldersModalTitle');
+
+            titleEl.textContent = seriesTitle ? `Folders for "${seriesTitle}"` : 'Series Folders';
+            list.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading folders...</p></div>';
+            emptyState.style.display = 'none';
+            mergeBtn.disabled = true;
+            mergeNote.style.display = 'none';
+            mergeNote.textContent = '';
+            seriesFoldersCurrent = null;
+            modal.classList.add('active');
+
+            try {
+                const response = await fetch(apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/folders`), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                seriesFoldersCurrent = data;
+                const folders = Array.isArray(data.folders) ? data.folders : [];
+
+                if (folders.length === 0) {
+                    list.innerHTML = '';
+                    emptyState.style.display = 'block';
+                    return;
+                }
+
+                list.innerHTML = folders.map(folder => `
+                    <div class="combine-folder-row" style="padding: 8px 0; border-bottom: 1px solid var(--border, #ddd);">
+                        <div style="font-weight: 500; word-break: break-all;">${escapeHtml(folder.directory)}</div>
+                        <div class="combine-folders-meta">${folder.file_count} file${folder.file_count === 1 ? '' : 's'} · ${formatFileSize(folder.total_size)}</div>
+                    </div>
+                `).join('');
+
+                if (folders.length < 2) {
+                    mergeBtn.disabled = true;
+                    mergeNote.style.display = 'block';
+                    mergeNote.textContent = 'This series lives in a single folder — nothing to merge.';
+                } else if (data.combine_group_key) {
+                    mergeBtn.disabled = false;
+                    mergeNote.style.display = 'block';
+                    mergeNote.textContent = 'Click "Merge Folders" to combine these folders into one on disk.';
+                } else {
+                    // The folders aren't currently recognised as a combinable
+                    // group (e.g., the series matches via aliases that don't
+                    // line up with the global folder grouper). Surface this
+                    // clearly so the user understands why the action is off.
+                    mergeBtn.disabled = true;
+                    mergeNote.style.display = 'block';
+                    mergeNote.textContent = 'These folders are tracked as the same series but the automatic folder combiner can\'t group them. Use the global "Combine Folders" tool from the toolbar to merge manually.';
+                }
+            } catch (error) {
+                console.error('Failed to load series folders:', error);
+                list.innerHTML = '';
+                emptyState.style.display = 'block';
+                emptyState.textContent = `Failed to load folders: ${error.message}`;
+            }
+        }
+
+        function closeSeriesFoldersModal() {
+            document.getElementById('seriesFoldersModal').classList.remove('active');
+            seriesFoldersCurrent = null;
+        }
+
+        async function openMergeForSeriesFolders() {
+            if (!seriesFoldersCurrent || !seriesFoldersCurrent.combine_group_key) {
+                return;
+            }
+            const targetGroupKey = seriesFoldersCurrent.combine_group_key;
+            const suggestedDestination = seriesFoldersCurrent.suggested_destination_directory || null;
+            // Hand off to the existing combine-folders modal, then jump to the
+            // group that corresponds to this series so the user can review and
+            // confirm using the same UI as the global combine flow.
+            closeSeriesFoldersModal();
+            await openCombineFoldersModal();
+            const matchIndex = combineFolderGroups.findIndex(g => g && g.groupKey === targetGroupKey);
+            if (matchIndex >= 0) {
+                combineFolderIndex = matchIndex;
+                combineFolderSelectedDestination = suggestedDestination;
+                renderCombineFolderGroup();
+                updateCombineFoldersNavigation();
+            }
         }
 
         async function openCombineFoldersModal() {

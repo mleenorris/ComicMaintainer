@@ -17,7 +17,12 @@ namespace ComicMaintainer.WebApi.Controllers;
 [Authorize]
 public class FilesController : ControllerBase
 {
-    private static readonly Regex FolderCombineKeySanitizer = new("[^a-z0-9]+", RegexOptions.Compiled);
+    // Unicode-aware: keep any Unicode letter (\p{L}) or number (\p{N}) so
+    // non-ASCII titles (CJK, accented Latin, Cyrillic, etc.) produce rich,
+    // distinguishable keys instead of collapsing to a bare digit when every
+    // letter gets stripped. Pure-ASCII titles still produce the same output
+    // as the previous [^a-z0-9]+ sanitizer.
+    private static readonly Regex FolderCombineKeySanitizer = new(@"[^\p{L}\p{N}]+", RegexOptions.Compiled);
     private static readonly Regex FileNameSeriesSuffixSanitizer = new(
         @"\s*(?:-|_)?\s*(?:ch|chapter|issue|#)?\s*\d+(?:\.\d+)?[a-z]?\s*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -1222,7 +1227,14 @@ public class FilesController : ControllerBase
             foreach (var candidate in EnumerateSeriesNameCandidates(file))
             {
                 var key = NormalizeFolderCombineKey(candidate);
-                if (key is not null && aliasIndex.TryGetValue(key, out var entry))
+                // Skip degenerate keys (e.g. CJK-only titles that collapse to a
+                // bare number) so we don't accidentally cross-resolve to an
+                // unrelated record whose canonical key happens to share that digit.
+                if (key is null || IsAmbiguousNormalizedKey(key))
+                {
+                    continue;
+                }
+                if (aliasIndex.TryGetValue(key, out var entry))
                 {
                     normalizedSeries = entry.CanonicalKey;
                     break;
@@ -1245,6 +1257,33 @@ public class FilesController : ControllerBase
 
         var normalized = FolderCombineKeySanitizer.Replace(value.Trim().ToLowerInvariant(), "-").Trim('-');
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    /// <summary>
+    /// Returns true if a normalized folder-combine key carries no real identifying
+    /// signal and therefore must not be used to bridge two different cache records.
+    /// A key is ambiguous when it is empty, shorter than two characters, or
+    /// contains no letters at all (i.e. consists only of digits/dashes). With the
+    /// Unicode-aware sanitizer, "letters" here means any Unicode letter, so a
+    /// genuine CJK alias like "怪獣8号" survives as a non-ambiguous key while
+    /// the digit-only collapse "8" still gets rejected as a cross-record bridge.
+    /// </summary>
+    private static bool IsAmbiguousNormalizedKey(string? normalized)
+    {
+        if (string.IsNullOrEmpty(normalized) || normalized.Length < 2)
+        {
+            return true;
+        }
+
+        for (var i = 0; i < normalized.Length; i++)
+        {
+            if (char.IsLetter(normalized[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static IEnumerable<string> EnumerateSeriesNameCandidates(ComicFile file)
@@ -1324,8 +1363,21 @@ public class FilesController : ControllerBase
                 .Select(NormalizeFolderCombineKey)
                 .Where(k => k is not null)
                 .Select(k => k!)
+                .Where(k => !IsAmbiguousNormalizedKey(k))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+            // If the record's own canonical key is degenerate (e.g. a record
+            // whose only title is CJK and collapses to a bare digit), skip
+            // it entirely from the cross-record bridge. Otherwise two such
+            // records would share the same canonical-key string in the union-
+            // find and get falsely merged. The record's files will still group
+            // together on their own via NormalizeFolderCombineKey returning
+            // the same string outside the alias-index path.
+            if (IsAmbiguousNormalizedKey(canonicalKey))
+            {
+                continue;
+            }
 
             unionFind.Add(canonicalKey);
             foreach (var key in titleKeys)

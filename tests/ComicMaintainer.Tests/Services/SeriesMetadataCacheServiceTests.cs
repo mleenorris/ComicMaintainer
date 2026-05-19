@@ -48,6 +48,25 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
+    public void NormalizeKey_PreservesNonAsciiLettersAndDistinguishesSimilarCjkTitles()
+    {
+        // Regression: the previous [^a-z0-9]+ sanitizer stripped all CJK
+        // characters, collapsing "怪獣8号" and "8階級魔法使い" both to "8"
+        // and producing false-positive merges between unrelated series. The
+        // Unicode-aware sanitizer must keep Unicode letters so these two
+        // titles produce different keys.
+        var kaiju = _service.NormalizeKey("怪獣8号");
+        var mage = _service.NormalizeKey("8階級魔法使い");
+
+        Assert.NotEqual("8", kaiju);
+        Assert.NotEqual("8", mage);
+        Assert.NotEqual(kaiju, mage);
+
+        // Accented Latin characters should be preserved too (lowercased).
+        Assert.Equal("pokémon", _service.NormalizeKey("Pokémon"));
+    }
+
+    [Fact]
     public async Task SetUserAliasesAsync_CreatesRecordAndDedupes()
     {
         var record = await _service.SetUserAliasesAsync(

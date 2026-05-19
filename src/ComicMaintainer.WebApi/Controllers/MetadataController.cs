@@ -537,6 +537,51 @@ public class MetadataController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Set (or clear, by passing null/empty) the user's preferred display
+    /// language for a series. Accepts <c>en</c>, <c>ja</c>, <c>ko</c>, or
+    /// <c>zh</c>.
+    /// </summary>
+    [HttpPut("series/{seriesTitle}/preferred-language")]
+    public async Task<ActionResult<SeriesMetadataCacheRecord>> SetPreferredLanguage(
+        string seriesTitle,
+        [FromBody] PreferredLanguageRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return BadRequest("Series title is required");
+        }
+
+        try
+        {
+            var record = await _cache.SetPreferredLanguageAsync(
+                seriesTitle,
+                request?.Language,
+                cancellationToken);
+            return Ok(record);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error setting preferred language for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
+            return StatusCode(500, "Error setting preferred language");
+        }
+    }
+
+    public class PreferredLanguageRequest
+    {
+        /// <summary>
+        /// BCP-47 language tag (e.g. <c>en</c>, <c>ja</c>, <c>ko</c>,
+        /// <c>zh</c>). Pass null or empty to clear and revert to the global
+        /// default.
+        /// </summary>
+        public string? Language { get; set; }
+    }
+
     public class RefreshSelectedRequest
     {
         public List<string> Series { get; set; } = new();

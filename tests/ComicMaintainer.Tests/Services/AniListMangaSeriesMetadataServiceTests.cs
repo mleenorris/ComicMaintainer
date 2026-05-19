@@ -68,6 +68,15 @@ public class AniListMangaSeriesMetadataServiceTests
         Assert.Contains("AoT", result.Aliases);
         Assert.Contains("SnK", result.Aliases);
         Assert.Equal("AniListManga", result.Source);
+
+        // LocalizedTitles are tagged: english=en, romaji=ja-Latn, native=ja,
+        // synonyms have null language (no info available from AniList).
+        Assert.Collection(result.LocalizedTitles,
+            t => { Assert.Equal("Attack on Titan", t.Title); Assert.Equal("en", t.Language); },
+            t => { Assert.Equal("Shingeki no Kyojin", t.Title); Assert.Equal("ja-Latn", t.Language); },
+            t => { Assert.Equal("進撃の巨人", t.Title); Assert.Equal("ja", t.Language); },
+            t => { Assert.Equal("AoT", t.Title); Assert.Null(t.Language); },
+            t => { Assert.Equal("SnK", t.Title); Assert.Null(t.Language); });
     }
 
     [Fact]

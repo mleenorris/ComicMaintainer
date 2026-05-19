@@ -1,8 +1,10 @@
 using System.Text.RegularExpressions;
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -24,17 +26,20 @@ public class SeriesLibraryService : ISeriesLibraryService
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly ISeriesMetadataCacheService _metadataCache;
+    private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesLibraryService> _logger;
 
     public SeriesLibraryService(
         IFileStoreService fileStore,
         IComicProcessorService processor,
         ISeriesMetadataCacheService metadataCache,
+        IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesLibraryService> logger)
     {
         _fileStore = fileStore;
         _processor = processor;
         _metadataCache = metadataCache;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -431,12 +436,25 @@ public class SeriesLibraryService : ISeriesLibraryService
                 ? groupingTitle
                 : record.CanonicalTitle;
 
+            // The DisplayTitle is what the library renders; it honours the
+            // per-series preferred-language override (and the global default)
+            // by picking the first localized title in that language. The
+            // CanonicalTitle remains the unchanged "source of truth" used by
+            // tagging / file rename flows.
+            var displayTitle = record is null
+                ? canonicalTitle
+                : SeriesDisplayTitleResolver.Resolve(record, _settings.CurrentValue.DefaultPreferredLanguage);
+            if (string.IsNullOrWhiteSpace(displayTitle))
+            {
+                displayTitle = canonicalTitle;
+            }
+
             if (!groups.TryGetValue(representative, out var accumulator))
             {
                 accumulator = new SeriesAccumulator
                 {
                     Id = representative,
-                    DisplayTitle = canonicalTitle,
+                    DisplayTitle = displayTitle,
                     CanonicalTitle = canonicalTitle,
                     MetadataSource = record?.Source,
                     LookupStatus = record?.LookupStatus,

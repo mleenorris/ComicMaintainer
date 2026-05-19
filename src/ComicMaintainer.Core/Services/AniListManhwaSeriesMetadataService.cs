@@ -309,13 +309,14 @@ public class AniListManhwaSeriesMetadataService : IExternalSeriesMetadataService
         var output = new List<ExternalSeriesMetadata>();
         foreach (var item in media.EnumerateArray())
         {
-            var canonicalTitle = ExtractCanonicalTitle(item);
+            var localizedTitles = ExtractLocalizedTitles(item, nativeLanguage: "ko");
+            var canonicalTitle = localizedTitles.FirstOrDefault()?.Title;
             if (string.IsNullOrWhiteSpace(canonicalTitle))
             {
                 continue;
             }
 
-            var aliases = ExtractAliases(item, canonicalTitle);
+            var aliases = localizedTitles.Skip(1).Select(lt => lt.Title).ToList();
             var (imageUrl, thumbnailUrl) = ExtractCoverImage(item);
 
             output.Add(new ExternalSeriesMetadata
@@ -324,7 +325,8 @@ public class AniListManhwaSeriesMetadataService : IExternalSeriesMetadataService
                 Aliases = aliases,
                 Source = "AniListManhwa",
                 ImageUrl = imageUrl,
-                ThumbnailUrl = thumbnailUrl
+                ThumbnailUrl = thumbnailUrl,
+                LocalizedTitles = localizedTitles
             });
         }
 
@@ -385,77 +387,48 @@ public class AniListManhwaSeriesMetadataService : IExternalSeriesMetadataService
         return bestExact ?? bestAlias ?? candidates.FirstOrDefault();
     }
 
-    private static string? ExtractCanonicalTitle(JsonElement media)
+    /// <summary>
+    /// Build the localized title list for a single AniList media item. The
+    /// resulting list is ordered so the most user-friendly title comes first
+    /// (English → Romaji → Native), with synonyms appended at the end as
+    /// untagged entries (AniList synonyms don't include language tags).
+    /// </summary>
+    private static List<LocalizedTitle> ExtractLocalizedTitles(JsonElement media, string nativeLanguage)
     {
-        if (!media.TryGetProperty("title", out var titleObj) || titleObj.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
+        var result = new List<LocalizedTitle>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // Prefer English, then romaji, then native (manhwa originals are Korean
-        // and may not always have an English localization yet).
-        foreach (var key in new[] { "english", "romaji", "native" })
+        void AddIfNew(string? value, string? language)
         {
-            if (titleObj.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String)
+            if (string.IsNullOrWhiteSpace(value)) return;
+            if (seen.Add(value))
             {
-                var str = value.GetString();
-                if (!string.IsNullOrWhiteSpace(str))
-                {
-                    return str;
-                }
+                result.Add(new LocalizedTitle(value, language));
             }
         }
-
-        return null;
-    }
-
-    private static List<string> ExtractAliases(JsonElement media, string canonicalTitle)
-    {
-        var canonicalNormalized = Normalize(canonicalTitle);
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var aliases = new List<string>();
 
         if (media.TryGetProperty("title", out var titleObj) && titleObj.ValueKind == JsonValueKind.Object)
         {
-            foreach (var property in titleObj.EnumerateObject())
-            {
-                if (property.Value.ValueKind != JsonValueKind.String)
-                {
-                    continue;
-                }
-                var value = property.Value.GetString();
-                if (string.IsNullOrWhiteSpace(value) || Normalize(value) == canonicalNormalized)
-                {
-                    continue;
-                }
-                if (seen.Add(value))
-                {
-                    aliases.Add(value);
-                }
-            }
+            string? Get(string key) =>
+                titleObj.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String
+                    ? v.GetString()
+                    : null;
+
+            AddIfNew(Get("english"), "en");
+            AddIfNew(Get("romaji"), $"{nativeLanguage}-Latn");
+            AddIfNew(Get("native"), nativeLanguage);
         }
 
         if (media.TryGetProperty("synonyms", out var synonyms) && synonyms.ValueKind == JsonValueKind.Array)
         {
             foreach (var synonym in synonyms.EnumerateArray())
             {
-                if (synonym.ValueKind != JsonValueKind.String)
-                {
-                    continue;
-                }
-                var value = synonym.GetString();
-                if (string.IsNullOrWhiteSpace(value) || Normalize(value) == canonicalNormalized)
-                {
-                    continue;
-                }
-                if (seen.Add(value))
-                {
-                    aliases.Add(value);
-                }
+                if (synonym.ValueKind != JsonValueKind.String) continue;
+                AddIfNew(synonym.GetString(), null);
             }
         }
 
-        return aliases;
+        return result;
     }
 
     private static string Normalize(string value)

@@ -62,6 +62,12 @@ public class MangaDexSeriesMetadataServiceTests
         Assert.Contains("나 혼자만 레벨업", result.Aliases);
         Assert.Contains("Na Honjaman Level Up", result.Aliases);
         Assert.Equal("MangaDex", result.Source);
+
+        // MangaDex altTitles are already language-tagged; we should pass
+        // those tags through verbatim (incl. regional variants like ko-ro).
+        Assert.Contains(result.LocalizedTitles, t => t.Title == "Solo Leveling" && t.Language == "en");
+        Assert.Contains(result.LocalizedTitles, t => t.Title == "나 혼자만 레벨업" && t.Language == "ko");
+        Assert.Contains(result.LocalizedTitles, t => t.Title == "Na Honjaman Level Up" && t.Language == "ko-ro");
     }
 
     [Fact]

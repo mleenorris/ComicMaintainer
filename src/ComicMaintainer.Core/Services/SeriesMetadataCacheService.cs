@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
@@ -204,6 +205,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 Source = lookup?.Source,
                 LastLookupUtc = now,
                 LookupStatus = status,
+                LocalizedTitlesJson = lookup is null ? null : SerializeLocalizedTitles(BuildLocalizedTitles(lookup)),
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -220,6 +222,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 entity.Aliases = lookup.Aliases?.ToList() ?? new List<string>();
                 entity.Source = lookup.Source;
                 entity.LastLookupUtc = now;
+                entity.LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(lookup));
                 // A manually-matched series stays manually matched after a
                 // successful refresh — the lookup just updates the cached
                 // fields for the user-selected match.
@@ -516,6 +519,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 Source = match.Source,
                 LastLookupUtc = now,
                 LookupStatus = "manual_match",
+                LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(match)),
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -533,6 +537,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             entity.Aliases = match.Aliases?.ToList() ?? new List<string>();
             entity.Source = match.Source;
             entity.LastLookupUtc = now;
+            entity.LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(match));
             entity.LookupStatus = "manual_match";
             entity.UpdatedAt = now;
         }
@@ -571,6 +576,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         entity.Source = null;
         entity.LastLookupUtc = null;
         entity.LookupStatus = "cleared";
+        entity.LocalizedTitlesJson = null;
 
         // If the canonical title was provider-derived, revert it to the
         // normalized key so the UI shows a recognisable placeholder rather
@@ -617,7 +623,120 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             LocalImageFile = entity.LocalImageFile,
             ImageContentType = entity.ImageContentType,
             ImageDownloadedUtc = entity.ImageDownloadedUtc,
-            ImageStatus = entity.ImageStatus
+            ImageStatus = entity.ImageStatus,
+            PreferredLanguage = entity.PreferredLanguage,
+            LocalizedTitles = DeserializeLocalizedTitles(entity.LocalizedTitlesJson)
         };
+    }
+
+    /// <summary>
+    /// Serialize a list of <see cref="LocalizedTitle"/> values for persistence
+    /// in <see cref="SeriesMetadataCacheEntity.LocalizedTitlesJson"/>. Returns
+    /// null when the list is null/empty so the DB column stays sparse.
+    /// </summary>
+    private static string? SerializeLocalizedTitles(IEnumerable<LocalizedTitle>? titles)
+    {
+        if (titles is null) return null;
+        var list = titles
+            .Where(t => t is not null && !string.IsNullOrWhiteSpace(t.Title))
+            .ToList();
+        return list.Count == 0 ? null : JsonSerializer.Serialize(list);
+    }
+
+    /// <summary>Inverse of <see cref="SerializeLocalizedTitles"/>; never throws.</summary>
+    private static List<LocalizedTitle> DeserializeLocalizedTitles(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new List<LocalizedTitle>();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<LocalizedTitle>>(json) ?? new List<LocalizedTitle>();
+        }
+        catch (JsonException)
+        {
+            return new List<LocalizedTitle>();
+        }
+    }
+
+    /// <summary>
+    /// Build the localized-title list to persist on the cache row from a
+    /// provider lookup. Always seeds the entry with the canonical title (and
+    /// provider aliases as untagged fallbacks) when the provider didn't supply
+    /// explicit language tags, so the legacy data shape still flows through
+    /// the resolver consistently.
+    /// </summary>
+    private static List<LocalizedTitle> BuildLocalizedTitles(ExternalSeriesMetadata lookup)
+    {
+        if (lookup.LocalizedTitles is { Count: > 0 })
+        {
+            return lookup.LocalizedTitles
+                .Where(t => t is not null && !string.IsNullOrWhiteSpace(t.Title))
+                .Select(t => new LocalizedTitle(t.Title, t.Language))
+                .ToList();
+        }
+
+        var fallback = new List<LocalizedTitle>();
+        if (!string.IsNullOrWhiteSpace(lookup.CanonicalTitle))
+        {
+            fallback.Add(new LocalizedTitle(lookup.CanonicalTitle, null));
+        }
+        if (lookup.Aliases is { Count: > 0 })
+        {
+            foreach (var alias in lookup.Aliases)
+            {
+                if (!string.IsNullOrWhiteSpace(alias))
+                {
+                    fallback.Add(new LocalizedTitle(alias, null));
+                }
+            }
+        }
+        return fallback;
+    }
+
+    /// <inheritdoc />
+    public async Task<SeriesMetadataCacheRecord> SetPreferredLanguageAsync(
+        string seriesTitle,
+        string? language,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            throw new ArgumentException("Series title is required", nameof(seriesTitle));
+        }
+
+        // Throws ArgumentException for unsupported codes; null/empty means "clear".
+        var normalizedLanguage = SeriesLanguagePreference.ValidateOrThrow(language);
+
+        var key = NormalizeKey(seriesTitle);
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        var now = DateTime.UtcNow;
+        if (entity is null)
+        {
+            entity = new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = key,
+                CanonicalTitle = seriesTitle.Trim(),
+                Aliases = new List<string>(),
+                UserAliases = new List<string>(),
+                IsUserCanonical = false,
+                LookupStatus = "manual",
+                PreferredLanguage = normalizedLanguage,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            db.SeriesMetadataCache.Add(entity);
+        }
+        else
+        {
+            entity.PreferredLanguage = normalizedLanguage;
+            entity.UpdatedAt = now;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return ToRecord(entity);
     }
 }

@@ -102,4 +102,16 @@ public interface ISeriesMetadataCacheService
     Task<SeriesMetadataCacheRecord?> ClearExternalMetadataAsync(
         string normalizedKey,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Set (or clear) the user's preferred display language for a series.
+    /// Accepts one of <c>en</c>, <c>ja</c>, <c>ko</c>, <c>zh</c>; passing
+    /// null or empty clears the per-series preference so the global default
+    /// applies. Throws <see cref="ArgumentException"/> for unsupported codes.
+    /// Upserts the cache record when missing.
+    /// </summary>
+    Task<SeriesMetadataCacheRecord> SetPreferredLanguageAsync(
+        string seriesTitle,
+        string? language,
+        CancellationToken cancellationToken = default);
 }

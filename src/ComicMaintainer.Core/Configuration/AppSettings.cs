@@ -84,4 +84,12 @@ public class AppSettings
     /// Defaults to 5 MiB; oversize payloads are rejected.
     /// </summary>
     public int SeriesImageMaxBytes { get; set; } = 5 * 1024 * 1024;
+
+    /// <summary>
+    /// Default preferred language (one of <c>en</c>, <c>ja</c>, <c>ko</c>,
+    /// <c>zh</c>, or null/empty for "no preference") applied when a series
+    /// has no per-series override. When a matching localized title is
+    /// available, the library will show it in place of the canonical title.
+    /// </summary>
+    public string? DefaultPreferredLanguage { get; set; }
 }

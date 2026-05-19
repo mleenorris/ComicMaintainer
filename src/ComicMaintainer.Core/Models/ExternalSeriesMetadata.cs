@@ -27,4 +27,13 @@ public class ExternalSeriesMetadata
     /// title; lower values reflect alias matches or fuzzy similarity.
     /// </summary>
     public double? MatchScore { get; set; }
+
+    /// <summary>
+    /// Provider-supplied titles tagged with their language (BCP-47, e.g.
+    /// <c>en</c>, <c>ja</c>, <c>ja-Latn</c>, <c>ko</c>, <c>zh</c>). The list
+    /// is ordered with the provider's canonical title first, followed by any
+    /// remaining aliases. Untagged values (synonyms / unknown-language
+    /// aliases) carry <c>Language = null</c>.
+    /// </summary>
+    public List<LocalizedTitle> LocalizedTitles { get; set; } = new();
 }

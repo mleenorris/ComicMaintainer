@@ -167,6 +167,9 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.LocalImageFile).HasMaxLength(512);
             entity.Property(e => e.ImageContentType).HasMaxLength(64);
             entity.Property(e => e.ImageStatus).HasMaxLength(32);
+            entity.Property(e => e.PreferredLanguage).HasMaxLength(16);
+            // LocalizedTitlesJson is opaque JSON; no max length so it can
+            // accommodate long alias lists from providers like MangaDex.
         });
     }
 }
@@ -350,4 +353,20 @@ public class SeriesMetadataCacheEntity
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// User's preferred language for the displayed series name (one of
+    /// <c>en</c>, <c>ja</c>, <c>ko</c>, <c>zh</c>), or null to fall back to
+    /// the global default / canonical title.
+    /// </summary>
+    public string? PreferredLanguage { get; set; }
+
+    /// <summary>
+    /// JSON-encoded list of <see cref="Models.LocalizedTitle"/> entries
+    /// captured from the last successful external lookup. Used by the
+    /// display-title resolver to pick a title matching
+    /// <see cref="PreferredLanguage"/>. Stored as JSON to keep the schema
+    /// stable; null/empty when no language information is available.
+    /// </summary>
+    public string? LocalizedTitlesJson { get; set; }
 }

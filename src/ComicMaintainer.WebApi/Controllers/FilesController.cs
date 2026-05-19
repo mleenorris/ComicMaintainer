@@ -17,7 +17,12 @@ namespace ComicMaintainer.WebApi.Controllers;
 [Authorize]
 public class FilesController : ControllerBase
 {
-    private static readonly Regex FolderCombineKeySanitizer = new("[^a-z0-9]+", RegexOptions.Compiled);
+    // Unicode-aware: keep any Unicode letter (\p{L}) or number (\p{N}) so
+    // non-ASCII titles (CJK, accented Latin, Cyrillic, etc.) produce rich,
+    // distinguishable keys instead of collapsing to a bare digit when every
+    // letter gets stripped. Pure-ASCII titles still produce the same output
+    // as the previous [^a-z0-9]+ sanitizer.
+    private static readonly Regex FolderCombineKeySanitizer = new(@"[^\p{L}\p{N}]+", RegexOptions.Compiled);
     private static readonly Regex FileNameSeriesSuffixSanitizer = new(
         @"\s*(?:-|_)?\s*(?:ch|chapter|issue|#)?\s*\d+(?:\.\d+)?[a-z]?\s*$",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -1257,12 +1262,11 @@ public class FilesController : ControllerBase
     /// <summary>
     /// Returns true if a normalized folder-combine key carries no real identifying
     /// signal and therefore must not be used to bridge two different cache records.
-    /// The sanitizer strips every non-ASCII-letter/digit character, which collapses
-    /// CJK titles like "怪獣8号" or "モブサイコ100" down to just "8" or "100".
-    /// Allowing such keys into the cross-record union-find merges unrelated series
-    /// that only share a number, producing the false-positive groups users see.
     /// A key is ambiguous when it is empty, shorter than two characters, or
-    /// contains no ASCII letters (a–z).
+    /// contains no letters at all (i.e. consists only of digits/dashes). With the
+    /// Unicode-aware sanitizer, "letters" here means any Unicode letter, so a
+    /// genuine CJK alias like "怪獣8号" survives as a non-ambiguous key while
+    /// the digit-only collapse "8" still gets rejected as a cross-record bridge.
     /// </summary>
     private static bool IsAmbiguousNormalizedKey(string? normalized)
     {
@@ -1273,8 +1277,7 @@ public class FilesController : ControllerBase
 
         for (var i = 0; i < normalized.Length; i++)
         {
-            var c = normalized[i];
-            if (c >= 'a' && c <= 'z')
+            if (char.IsLetter(normalized[i]))
             {
                 return false;
             }

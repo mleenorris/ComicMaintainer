@@ -15,7 +15,12 @@ namespace ComicMaintainer.Core.Services;
 /// </summary>
 public class SeriesMetadataCacheService : ISeriesMetadataCacheService
 {
-    private static readonly Regex SeriesKeySanitizer = new("[^a-z0-9]+", RegexOptions.Compiled);
+    // Unicode-aware: keep any Unicode letter (\p{L}) or number (\p{N}) so
+    // non-ASCII titles (CJK, accented Latin, Cyrillic, etc.) produce rich,
+    // distinguishable keys instead of collapsing to a bare digit when every
+    // letter gets stripped. Pure-ASCII titles still produce the same output
+    // as the previous [^a-z0-9]+ sanitizer.
+    private static readonly Regex SeriesKeySanitizer = new(@"[^\p{L}\p{N}]+", RegexOptions.Compiled);
 
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IExternalSeriesMetadataService _externalMetadata;

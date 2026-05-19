@@ -8,7 +8,12 @@ namespace ComicMaintainer.Core.Services;
 
 public class SeriesLibraryService : ISeriesLibraryService
 {
-    private static readonly Regex SeriesKeySanitizer = new("[^a-z0-9]+", RegexOptions.Compiled);
+    // Unicode-aware: keep any Unicode letter (\p{L}) or number (\p{N}) so
+    // non-ASCII titles (CJK, accented Latin, Cyrillic, etc.) produce rich,
+    // distinguishable keys instead of collapsing to a bare digit when every
+    // letter gets stripped. Pure-ASCII titles still produce the same output
+    // as the previous [^a-z0-9]+ sanitizer.
+    private static readonly Regex SeriesKeySanitizer = new(@"[^\p{L}\p{N}]+", RegexOptions.Compiled);
 
     // Series-level filters that operate on the grouped/series record (rather
     // than on individual files in the file store). These are applied AFTER
@@ -619,11 +624,12 @@ public class SeriesLibraryService : ISeriesLibraryService
     /// <summary>
     /// Returns true if a normalized series key carries no real identifying
     /// signal and therefore must not be used to bridge two different cache
-    /// records. SeriesKeySanitizer strips every non-ASCII-letter/digit char,
-    /// which collapses CJK titles like "怪獣8号" down to "8", producing false
-    /// merges with any other series whose alias also reduces to "8". A key is
-    /// ambiguous when it is empty, "unknown-series", shorter than two chars,
-    /// or contains no ASCII letters.
+    /// records. A key is ambiguous when it is empty, "unknown-series", shorter
+    /// than two chars, or contains no letters at all (i.e. consists only of
+    /// digits/dashes). With the Unicode-aware sanitizer, "letters" here means
+    /// any Unicode letter, so a genuine CJK alias like "怪獣8号" survives as a
+    /// non-ambiguous key while the digit-only collapse "8" still gets rejected
+    /// as a cross-record bridge.
     /// </summary>
     private static bool IsAmbiguousNormalizedKey(string? normalized)
     {
@@ -636,8 +642,7 @@ public class SeriesLibraryService : ISeriesLibraryService
 
         for (var i = 0; i < normalized.Length; i++)
         {
-            var c = normalized[i];
-            if (c >= 'a' && c <= 'z')
+            if (char.IsLetter(normalized[i]))
             {
                 return false;
             }

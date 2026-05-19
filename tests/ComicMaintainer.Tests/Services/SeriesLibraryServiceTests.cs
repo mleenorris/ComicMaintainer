@@ -624,7 +624,7 @@ public class SeriesLibraryServiceTests
         {
             return "unknown-series";
         }
-        var normalized = System.Text.RegularExpressions.Regex.Replace(value.ToLowerInvariant(), "[^a-z0-9]+", "-").Trim('-');
+        var normalized = System.Text.RegularExpressions.Regex.Replace(value.ToLowerInvariant(), @"[^\p{L}\p{N}]+", "-").Trim('-');
         return string.IsNullOrWhiteSpace(normalized) ? "unknown-series" : normalized;
     }
 }

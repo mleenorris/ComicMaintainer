@@ -1165,6 +1165,30 @@
          </div>
      </div>
 
+     <!-- Per-series folder list / merge modal -->
+     <div class="modal" id="seriesFoldersModal">
+         <div class="modal-content" style="max-width: 720px;">
+             <div class="modal-header">
+                 <h2 id="seriesFoldersModalTitle">Series Folders</h2>
+                 <button class="close-btn" onclick="closeSeriesFoldersModal()">&times;</button>
+             </div>
+             <div class="modal-body">
+                 <p class="combine-folders-meta" id="seriesFoldersModalIntro">
+                     Folders on disk that contribute files to this series. When more than one folder is listed you can merge them into a single folder.
+                 </p>
+                 <div id="seriesFoldersList" class="combine-folders-list"></div>
+                 <div id="seriesFoldersEmptyState" class="duplicate-review-empty" style="display: none;">
+                     No folders found for this series.
+                 </div>
+                 <div id="seriesFoldersMergeNote" class="duplicate-review-tip" style="display: none;"></div>
+             </div>
+             <div class="modal-footer">
+                 <button class="btn" id="seriesFoldersMergeBtn" onclick="openMergeForSeriesFolders()" disabled>📁 Merge Folders</button>
+                 <button class="btn" onclick="closeSeriesFoldersModal()">Close</button>
+             </div>
+         </div>
+     </div>
+
      <!-- Manage Series Names Modal -->
      <div class="modal" id="manageSeriesNamesModal">
          <div class="modal-content" style="max-width: 720px;">

@@ -49,5 +49,17 @@ public interface ISeriesLibraryService
         string seriesId,
         string? filter = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the distinct on-disk folders that contribute files to the
+    /// given series card, with per-folder file counts and total sizes. Used
+    /// by the per-series "Manage Folders" view so users can see how many
+    /// folders back a series and decide whether to merge them. Returns null
+    /// when the series id is not currently visible in the library.
+    /// </summary>
+    Task<SeriesFoldersResult?> GetFoldersForSeriesIdAsync(
+        string seriesId,
+        string? filter = null,
+        CancellationToken cancellationToken = default);
 }
 

@@ -341,6 +341,71 @@ public class SeriesLibraryService : ISeriesLibraryService
         return titles;
     }
 
+    public async Task<SeriesFoldersResult?> GetFoldersForSeriesIdAsync(
+        string seriesId,
+        string? filter = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesId))
+        {
+            return null;
+        }
+
+        var (fileFilter, _) = SplitFilter(filter);
+        var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
+        if (!groups.TryGetValue(seriesId, out var accumulator))
+        {
+            return null;
+        }
+
+        // Bucket the series's issues by their parent directory. We use an
+        // ordinal (case-sensitive) comparer because on case-sensitive
+        // filesystems (Linux/Docker bind mounts) two folders that differ only
+        // by capitalisation are genuinely distinct on disk, and the user
+        // should see both so they can decide whether to combine them.
+        var byDirectory = new Dictionary<string, (int Count, long Size)>(StringComparer.Ordinal);
+        foreach (var issue in accumulator.Issues)
+        {
+            if (string.IsNullOrWhiteSpace(issue.FilePath))
+            {
+                continue;
+            }
+
+            var directory = Path.GetDirectoryName(issue.FilePath);
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                continue;
+            }
+
+            if (byDirectory.TryGetValue(directory, out var existing))
+            {
+                byDirectory[directory] = (existing.Count + 1, existing.Size + issue.Size);
+            }
+            else
+            {
+                byDirectory[directory] = (1, issue.Size);
+            }
+        }
+
+        var folders = byDirectory
+            .Select(kvp => new SeriesFolderDto
+            {
+                Directory = kvp.Key,
+                FileCount = kvp.Value.Count,
+                TotalSize = kvp.Value.Size
+            })
+            .OrderByDescending(folder => folder.FileCount)
+            .ThenBy(folder => folder.Directory, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new SeriesFoldersResult
+        {
+            Id = accumulator.Id,
+            Title = accumulator.DisplayTitle,
+            Folders = folders
+        };
+    }
+
     /// <summary>
     /// Loads the file store, resolves grouping titles and external cache info,
     /// and returns a dictionary of series accumulators keyed by their union-find
@@ -512,7 +577,152 @@ public class SeriesLibraryService : ISeriesLibraryService
             });
         }
 
-        return groups;
+        // Final safety net: collapse any accumulators that ended up with the
+        // same canonical title (case-insensitive, after normalization). This
+        // handles the case where two cache records share a canonical title but
+        // have different NormalizedKeys — for example when the user matched
+        // two distinct source folders to the same external series. Without
+        // this pass the series view renders two cards labelled identically,
+        // which is what users perceive as "duplicate series".
+        return CollapseDuplicateAccumulators(groups);
+    }
+
+    /// <summary>
+    /// Merges accumulators whose normalized canonical title is identical (and
+    /// non-ambiguous) into a single series card. The primary survivor is
+    /// chosen by issue count (most files wins), then by lookup-status rank,
+    /// then by most recent lookup. Issues, sizes, aliases, and the latest
+    /// modified timestamp are merged into the survivor; the secondary
+    /// accumulators are dropped. The survivor's id is preserved so its
+    /// series-detail URL stays stable across reloads.
+    /// </summary>
+    private Dictionary<string, SeriesAccumulator> CollapseDuplicateAccumulators(
+        Dictionary<string, SeriesAccumulator> groups)
+    {
+        if (groups.Count < 2)
+        {
+            return groups;
+        }
+
+        var byCanonical = new Dictionary<string, List<SeriesAccumulator>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var accumulator in groups.Values)
+        {
+            // Prefer the canonical title (source-of-truth) for de-dup; fall
+            // back to the display title when canonical is missing.
+            var titleForDedup = !string.IsNullOrWhiteSpace(accumulator.CanonicalTitle)
+                ? accumulator.CanonicalTitle
+                : accumulator.DisplayTitle;
+            var key = NormalizeKey(titleForDedup);
+            if (IsAmbiguousNormalizedKey(key))
+            {
+                // Don't merge on degenerate keys (e.g. "unknown-series" or
+                // digit-only normalized titles); that would risk false
+                // positives across unrelated series.
+                continue;
+            }
+
+            if (!byCanonical.TryGetValue(key, out var bucket))
+            {
+                bucket = new List<SeriesAccumulator>();
+                byCanonical[key] = bucket;
+            }
+            bucket.Add(accumulator);
+        }
+
+        var dropped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var bucket in byCanonical.Values)
+        {
+            if (bucket.Count < 2)
+            {
+                continue;
+            }
+
+            // Pick the survivor: most issues wins, then highest lookup-status
+            // rank, then most recent lookup. Ties break by the existing Id so
+            // the choice is deterministic across requests.
+            var survivor = bucket
+                .OrderByDescending(a => a.Issues.Count)
+                .ThenByDescending(a => RankLookupStatus(a.LookupStatus))
+                .ThenByDescending(a => a.LastLookupUtc ?? DateTime.MinValue)
+                .ThenBy(a => a.Id, StringComparer.OrdinalIgnoreCase)
+                .First();
+
+            foreach (var other in bucket)
+            {
+                if (ReferenceEquals(other, survivor))
+                {
+                    continue;
+                }
+
+                // Merge issues (de-dup by file path so a file that somehow
+                // ended up in both groups is not counted twice).
+                foreach (var issue in other.Issues)
+                {
+                    if (string.IsNullOrEmpty(issue.FilePath)
+                        || !survivor.Issues.Any(existing => string.Equals(existing.FilePath, issue.FilePath, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        survivor.Issues.Add(issue);
+                    }
+                }
+
+                survivor.TotalSize += other.TotalSize;
+                if (survivor.LatestModified < other.LatestModified)
+                {
+                    survivor.LatestModified = other.LatestModified;
+                }
+
+                // Merge aliases — include the dropped group's display /
+                // canonical title as an alias when it differs, so the user
+                // still sees where the merged folders came from.
+                AddAliasIfNew(survivor, other.Aliases, survivor.CanonicalTitle);
+                if (!string.IsNullOrWhiteSpace(other.CanonicalTitle))
+                {
+                    AddAliasIfNew(survivor, new[] { other.CanonicalTitle }, survivor.CanonicalTitle);
+                }
+                if (!string.IsNullOrWhiteSpace(other.DisplayTitle))
+                {
+                    AddAliasIfNew(survivor, new[] { other.DisplayTitle }, survivor.CanonicalTitle);
+                }
+
+                // Promote any external image / metadata source if the
+                // survivor doesn't already have one.
+                if (!survivor.HasExternalImage && other.HasExternalImage)
+                {
+                    survivor.HasExternalImage = true;
+                    survivor.ImageNormalizedKey = other.ImageNormalizedKey;
+                }
+                if (string.IsNullOrWhiteSpace(survivor.MetadataSource)
+                    && !string.IsNullOrWhiteSpace(other.MetadataSource))
+                {
+                    survivor.MetadataSource = other.MetadataSource;
+                }
+
+                dropped.Add(other.Id);
+
+                _logger.LogDebug(
+                    "Collapsed duplicate series card '{DroppedTitle}' (id={DroppedId}, {DroppedCount} issues) into '{SurvivorTitle}' (id={SurvivorId}) — same canonical title",
+                    LoggingHelper.SanitizeForLog(other.DisplayTitle),
+                    LoggingHelper.SanitizeForLog(other.Id),
+                    other.Issues.Count,
+                    LoggingHelper.SanitizeForLog(survivor.DisplayTitle),
+                    LoggingHelper.SanitizeForLog(survivor.Id));
+            }
+        }
+
+        if (dropped.Count == 0)
+        {
+            return groups;
+        }
+
+        var collapsed = new Dictionary<string, SeriesAccumulator>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in groups)
+        {
+            if (!dropped.Contains(kvp.Key))
+            {
+                collapsed[kvp.Key] = kvp.Value;
+            }
+        }
+        return collapsed;
     }
 
     /// <summary>

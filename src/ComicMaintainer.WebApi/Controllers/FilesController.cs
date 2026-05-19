@@ -370,6 +370,75 @@ public class FilesController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Returns the distinct on-disk folders that contain files attributed to
+    /// the given series, plus (when the folders form a combinable group) the
+    /// group key that can be passed to <c>POST /api/files/combine-folders</c>
+    /// to merge them. Used by the per-series "Manage Folders" UI so users
+    /// can see at a glance whether a series spans multiple folders and merge
+    /// them without leaving the series detail view.
+    /// </summary>
+    [HttpGet("series/{seriesId}/folders")]
+    public async Task<ActionResult<object>> GetSeriesFolders(
+        string seriesId,
+        [FromQuery] string? filter = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var mappedFilter = MapFilter(filter);
+            var result = await _seriesLibrary.GetFoldersForSeriesIdAsync(seriesId, mappedFilter, cancellationToken);
+            if (result is null)
+            {
+                return NotFound(new { error = "Series not found" });
+            }
+
+            // When the series spans two or more folders, see whether they
+            // form an existing combinable-folder group. If so, return that
+            // group's key (and suggested destination) so the front-end can
+            // hand off to the existing combine-folders modal without an
+            // extra round-trip.
+            string? combineGroupKey = null;
+            string? suggestedDestination = null;
+            if (result.Folders.Count >= 2)
+            {
+                try
+                {
+                    var seriesDirs = new HashSet<string>(
+                        result.Folders.Select(f => f.Directory),
+                        StringComparer.OrdinalIgnoreCase);
+                    var groups = await BuildCombinableFolderGroupsAsync(cancellationToken);
+                    var match = groups.FirstOrDefault(g =>
+                        g.Folders.Count(f => seriesDirs.Contains(f.Directory)) >= 2);
+                    if (match is not null)
+                    {
+                        combineGroupKey = match.GroupKey;
+                        suggestedDestination = match.SuggestedDestinationDirectory;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Failed to resolve combine group for series {SeriesId}",
+                        LoggingHelper.SanitizeForLog(seriesId));
+                }
+            }
+
+            return Ok(new
+            {
+                id = result.Id,
+                title = result.Title,
+                folders = result.Folders,
+                combine_group_key = combineGroupKey,
+                suggested_destination_directory = suggestedDestination
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting folders for series {SeriesId}", LoggingHelper.SanitizeForLog(seriesId));
+            return StatusCode(500, "Error retrieving series folders");
+        }
+    }
+
     [HttpGet("counts")]
     public async Task<ActionResult<object>> GetFileCounts()
     {

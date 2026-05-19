@@ -161,6 +161,31 @@ public class SeriesSummaryResult
     public int Offset { get; set; }
 }
 
+/// <summary>
+/// A single folder (directory) that contains files attributed to a series.
+/// Returned by the per-series folder listing endpoint so users can see how
+/// many on-disk folders contribute to a series card and decide whether to
+/// merge them into one.
+/// </summary>
+public class SeriesFolderDto
+{
+    [JsonPropertyName("directory")]
+    public string Directory { get; set; } = string.Empty;
+
+    [JsonPropertyName("file_count")]
+    public int FileCount { get; set; }
+
+    [JsonPropertyName("total_size")]
+    public long TotalSize { get; set; }
+}
+
+public class SeriesFoldersResult
+{
+    public string Id { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public List<SeriesFolderDto> Folders { get; set; } = new();
+}
+
 public class SeriesIssuesResult
 {
     public string Id { get; set; } = string.Empty;

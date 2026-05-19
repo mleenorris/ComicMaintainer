@@ -221,13 +221,30 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
 
             var (imageUrl, thumbnailUrl) = ExtractImageUrls(item);
 
+            // ComicVine catalogs the English title of a volume; tag every
+            // entry as English so it participates in the preferred-language
+            // resolver when the user picks "en".
+            var localizedTitles = new List<LocalizedTitle>
+            {
+                new LocalizedTitle(canonicalTitle, "en")
+            };
+            foreach (var alias in aliases)
+            {
+                if (!string.IsNullOrWhiteSpace(alias)
+                    && !localizedTitles.Any(lt => string.Equals(lt.Title, alias, StringComparison.OrdinalIgnoreCase)))
+                {
+                    localizedTitles.Add(new LocalizedTitle(alias, "en"));
+                }
+            }
+
             output.Add(new ExternalSeriesMetadata
             {
                 CanonicalTitle = canonicalTitle,
                 Aliases = aliases,
                 Source = "ComicVine",
                 ImageUrl = imageUrl,
-                ThumbnailUrl = thumbnailUrl
+                ThumbnailUrl = thumbnailUrl,
+                LocalizedTitles = localizedTitles
             });
         }
 

@@ -168,6 +168,15 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("AniListBaseUrl", baseUrl, cancellationToken);
     }
 
+    public async Task UpdateDefaultPreferredLanguageAsync(string? language, CancellationToken cancellationToken = default)
+    {
+        // Null/empty is allowed (clears the default); otherwise validate
+        // against the same allow-list the per-series API uses so the JSON
+        // file never persists a code that no one will honour at read time.
+        var normalized = Models.SeriesLanguagePreference.ValidateOrThrow(language);
+        await UpdateSettingAsync("DefaultPreferredLanguage", normalized, cancellationToken);
+    }
+
     private async Task UpdateSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);

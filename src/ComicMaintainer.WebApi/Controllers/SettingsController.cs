@@ -63,7 +63,8 @@ public class SettingsController : ControllerBase
             mangadex_base_url = _appSettings.CurrentValue.MangaDexBaseUrl,
             enable_anilist_metadata = _appSettings.CurrentValue.EnableAniListMetadata,
             anilist_base_url = _appSettings.CurrentValue.AniListBaseUrl,
-            default_library_view = _appSettings.CurrentValue.DefaultLibraryView
+            default_library_view = _appSettings.CurrentValue.DefaultLibraryView,
+            default_preferred_language = _appSettings.CurrentValue.DefaultPreferredLanguage
         };
         
         _logger.LogDebug("Returning settings: FilenameFormat={FilenameFormat}, IssueNumberPadding={IssueNumberPadding}, WatcherEnableRename={WatcherEnableRename}, WatcherEnableNormalize={WatcherEnableNormalize}, LogMaxBytes={LogMaxBytes}, DatabaseCleanupIntervalHours={DatabaseCleanupIntervalHours}",
@@ -298,6 +299,31 @@ public class SettingsController : ControllerBase
     public Task<ActionResult> SetDefaultLibraryView([FromBody] DefaultLibraryViewRequest request, CancellationToken cancellationToken = default)
         => UpdateDefaultLibraryView(request, cancellationToken);
 
+    [HttpGet("default-preferred-language")]
+    public ActionResult<object> GetDefaultPreferredLanguage()
+    {
+        return Ok(new { language = _appSettings.CurrentValue.DefaultPreferredLanguage });
+    }
+
+    [HttpPut("default-preferred-language")]
+    public async Task<ActionResult> UpdateDefaultPreferredLanguage([FromBody] DefaultPreferredLanguageRequest request, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _settingsService.UpdateDefaultPreferredLanguageAsync(request?.Language, cancellationToken);
+            return Ok(new { message = "Default preferred language updated successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update default preferred language");
+            return StatusCode(500, new { error = "Failed to update default preferred language" });
+        }
+    }
+
     [HttpPut("external-series-metadata")]
     public async Task<ActionResult> UpdateExternalSeriesMetadata([FromBody] ExternalSeriesMetadataSettingsRequest request, CancellationToken cancellationToken = default)
     {
@@ -469,6 +495,12 @@ public class SettingsController : ControllerBase
     public class DefaultLibraryViewRequest
     {
         public string? View { get; set; }
+    }
+
+    public class DefaultPreferredLanguageRequest
+    {
+        /// <summary>One of <c>en</c>, <c>ja</c>, <c>ko</c>, <c>zh</c>, or null/empty to clear.</summary>
+        public string? Language { get; set; }
     }
 
     public class ExternalSeriesMetadataSettingsRequest

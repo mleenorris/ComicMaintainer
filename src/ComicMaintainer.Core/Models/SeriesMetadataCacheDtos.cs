@@ -46,6 +46,22 @@ public class SeriesMetadataCacheRecord
     [JsonPropertyName("image_status")]
     public string? ImageStatus { get; set; }
 
+    /// <summary>
+    /// User's preferred language for the displayed series name (one of
+    /// <c>en</c>, <c>ja</c>, <c>ko</c>, <c>zh</c>), or null to fall back to
+    /// the global default / canonical title.
+    /// </summary>
+    [JsonPropertyName("preferred_language")]
+    public string? PreferredLanguage { get; set; }
+
+    /// <summary>
+    /// Provider-supplied titles tagged with their language. Used by the
+    /// display-title resolver and surfaced to the UI so users can see which
+    /// alternatives exist and in which language.
+    /// </summary>
+    [JsonPropertyName("localized_titles")]
+    public List<LocalizedTitle> LocalizedTitles { get; set; } = new();
+
     /// <summary>True when an image (downloaded or user-uploaded) is available locally.</summary>
     [JsonPropertyName("has_image")]
     public bool HasImage =>

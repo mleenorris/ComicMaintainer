@@ -592,4 +592,77 @@ public class SeriesMetadataCacheServiceTests
         var result = await _service.ClearExternalMetadataAsync("does-not-exist");
         Assert.Null(result);
     }
+
+    [Fact]
+    public async Task RefreshAsync_PersistsLocalizedTitles_FromProvider()
+    {
+        _external.Setup(e => e.LookupSeriesAsync("One Piece", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "One Piece",
+                Aliases = new List<string> { "ワンピース" },
+                Source = "AniListManga",
+                LocalizedTitles = new List<LocalizedTitle>
+                {
+                    new LocalizedTitle("One Piece", "en"),
+                    new LocalizedTitle("ワンピース", "ja")
+                }
+            });
+
+        var record = await _service.RefreshAsync("One Piece");
+
+        Assert.Equal(2, record.LocalizedTitles.Count);
+        Assert.Equal("en", record.LocalizedTitles[0].Language);
+        Assert.Equal("ja", record.LocalizedTitles[1].Language);
+        Assert.Equal("ワンピース", record.LocalizedTitles[1].Title);
+    }
+
+    [Fact]
+    public async Task SetPreferredLanguageAsync_UpsertsRecord_WithNormalizedLanguage()
+    {
+        var record = await _service.SetPreferredLanguageAsync("Berserk", "JA");
+
+        Assert.Equal("berserk", record.NormalizedKey);
+        Assert.Equal("ja", record.PreferredLanguage);
+    }
+
+    [Fact]
+    public async Task SetPreferredLanguageAsync_ClearsPreference_WhenLanguageIsNullOrEmpty()
+    {
+        await _service.SetPreferredLanguageAsync("Berserk", "ja");
+        var cleared = await _service.SetPreferredLanguageAsync("Berserk", null);
+
+        Assert.Null(cleared.PreferredLanguage);
+    }
+
+    [Fact]
+    public async Task SetPreferredLanguageAsync_ThrowsArgumentException_ForUnknownLanguage()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.SetPreferredLanguageAsync("Berserk", "fr"));
+    }
+
+    [Fact]
+    public async Task SetPreferredLanguageAsync_PreservesPreferenceAcrossRefresh()
+    {
+        await _service.SetPreferredLanguageAsync("Bleach", "ja");
+
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Bleach",
+                Aliases = new List<string>(),
+                Source = "AniListManga",
+                LocalizedTitles = new List<LocalizedTitle>
+                {
+                    new LocalizedTitle("Bleach", "en"),
+                    new LocalizedTitle("ブリーチ", "ja")
+                }
+            });
+
+        var refreshed = await _service.RefreshAsync("Bleach");
+
+        Assert.Equal("ja", refreshed.PreferredLanguage);
+        Assert.NotEmpty(refreshed.LocalizedTitles);
+    }
 }

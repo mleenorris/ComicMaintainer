@@ -258,13 +258,14 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
                 continue;
             }
 
-            var canonicalTitle = ExtractCanonicalTitle(attributes);
+            var localizedTitles = ExtractLocalizedTitles(attributes);
+            var canonicalTitle = localizedTitles.FirstOrDefault()?.Title;
             if (string.IsNullOrWhiteSpace(canonicalTitle))
             {
                 continue;
             }
 
-            var aliases = ExtractAliases(attributes);
+            var aliases = localizedTitles.Skip(1).Select(lt => lt.Title).ToList();
             var (imageUrl, thumbnailUrl) = ExtractCoverUrls(item);
 
             output.Add(new ExternalSeriesMetadata
@@ -273,7 +274,8 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
                 Aliases = aliases,
                 Source = "MangaDex",
                 ImageUrl = imageUrl,
-                ThumbnailUrl = thumbnailUrl
+                ThumbnailUrl = thumbnailUrl,
+                LocalizedTitles = localizedTitles
             });
         }
 
@@ -368,59 +370,58 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
         return bestExact ?? bestAlias ?? candidates.FirstOrDefault();
     }
 
-    private static string? ExtractCanonicalTitle(JsonElement attributes)
+    /// <summary>
+    /// Build a language-tagged title list from a MangaDex manga attributes
+    /// object. The MangaDex API keys both <c>title</c> and <c>altTitles</c>
+    /// entries by BCP-47 language code (e.g. <c>en</c>, <c>ja</c>,
+    /// <c>ja-ro</c>, <c>ko</c>, <c>zh</c>, <c>zh-hk</c>). We preserve those
+    /// codes verbatim; the preferred-language matcher collapses regional
+    /// variants to their primary subtag.
+    /// </summary>
+    private static List<LocalizedTitle> ExtractLocalizedTitles(JsonElement attributes)
     {
-        if (!attributes.TryGetProperty("title", out var titleObj) || titleObj.ValueKind != JsonValueKind.Object)
-        {
-            return null;
-        }
-
-        // Prefer English title, then fall back to first available
-        if (titleObj.TryGetProperty("en", out var enTitle) && enTitle.ValueKind == JsonValueKind.String)
-        {
-            return enTitle.GetString();
-        }
-
-        foreach (var property in titleObj.EnumerateObject())
-        {
-            var value = property.Value.GetString();
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-        }
-
-        return null;
-    }
-
-    private static List<string> ExtractAliases(JsonElement attributes)
-    {
+        var result = new List<LocalizedTitle>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var aliases = new List<string>();
 
-        if (!attributes.TryGetProperty("altTitles", out var altTitles) || altTitles.ValueKind != JsonValueKind.Array)
+        void AddIfNew(string? value, string? language)
         {
-            return aliases;
+            if (string.IsNullOrWhiteSpace(value)) return;
+            if (seen.Add(value))
+            {
+                result.Add(new LocalizedTitle(value, language));
+            }
         }
 
-        foreach (var altTitleObj in altTitles.EnumerateArray())
+        // Prefer the English title as the canonical first entry (matching
+        // historical behaviour); fall back to whatever language the provider
+        // returns first.
+        if (attributes.TryGetProperty("title", out var titleObj) && titleObj.ValueKind == JsonValueKind.Object)
         {
-            if (altTitleObj.ValueKind != JsonValueKind.Object)
+            if (titleObj.TryGetProperty("en", out var enTitle) && enTitle.ValueKind == JsonValueKind.String)
             {
-                continue;
+                AddIfNew(enTitle.GetString(), "en");
             }
-
-            foreach (var property in altTitleObj.EnumerateObject())
+            foreach (var property in titleObj.EnumerateObject())
             {
-                var value = property.Value.GetString();
-                if (!string.IsNullOrWhiteSpace(value) && seen.Add(value))
+                if (property.Value.ValueKind != JsonValueKind.String) continue;
+                AddIfNew(property.Value.GetString(), property.Name);
+            }
+        }
+
+        if (attributes.TryGetProperty("altTitles", out var altTitles) && altTitles.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var altTitleObj in altTitles.EnumerateArray())
+            {
+                if (altTitleObj.ValueKind != JsonValueKind.Object) continue;
+                foreach (var property in altTitleObj.EnumerateObject())
                 {
-                    aliases.Add(value);
+                    if (property.Value.ValueKind != JsonValueKind.String) continue;
+                    AddIfNew(property.Value.GetString(), property.Name);
                 }
             }
         }
 
-        return aliases;
+        return result;
     }
 
     private static string Normalize(string value)

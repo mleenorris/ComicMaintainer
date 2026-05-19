@@ -68,4 +68,11 @@ public interface ISettingsService
     Task UpdateMangaDexBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
     Task UpdateAniListEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task UpdateAniListBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the global default preferred language used as a fallback when a
+    /// series has no per-series language override. Accepts one of <c>en</c>,
+    /// <c>ja</c>, <c>ko</c>, <c>zh</c>, or null/empty to clear.
+    /// </summary>
+    Task UpdateDefaultPreferredLanguageAsync(string? language, CancellationToken cancellationToken = default);
 }

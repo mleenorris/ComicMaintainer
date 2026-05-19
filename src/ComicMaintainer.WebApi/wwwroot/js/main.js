@@ -1037,6 +1037,38 @@
                 showMessage('Failed to update default library view: ' + error.message, 'error');
             }
         }
+
+        // Update the global default preferred series-name language. Posting
+        // an empty string clears the default and reverts to the canonical
+        // title for any series that doesn't have its own override.
+        async function updateDefaultPreferredLanguageFromSettings() {
+            const select = document.getElementById('defaultPreferredLanguageSelect');
+            if (!select) return;
+            const value = select.value || null;
+            try {
+                const response = await fetch(apiUrl('/api/settings/default-preferred-language'), {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ language: value })
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    let msg = `HTTP error! status: ${response.status}`;
+                    try { const j = await response.json(); if (j && j.error) msg = j.error; } catch {}
+                    throw new Error(msg);
+                }
+                showMessage('Default preferred language updated', 'success');
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
+            } catch (error) {
+                console.error('Failed to update default preferred language:', error);
+                showMessage('Failed to update default preferred language: ' + error.message, 'error');
+            }
+        }
         
         // Note: Watcher is now automatically enabled/disabled based on rename and normalize settings
         // No need for explicit watcher toggle
@@ -4691,6 +4723,13 @@
                     const defaultView = settingsData.default_library_view === 'series' ? 'series' : 'files';
                     defaultLibraryViewSelect.value = defaultView;
                 }
+
+                // Load default preferred-language fallback. Server returns
+                // null/empty when no global default is configured.
+                const defaultPreferredLanguageSelect = document.getElementById('defaultPreferredLanguageSelect');
+                if (defaultPreferredLanguageSelect) {
+                    defaultPreferredLanguageSelect.value = settingsData.default_preferred_language || '';
+                }
                 
                 console.log('[SETTINGS] All settings loaded successfully, opening modal');
                 document.getElementById('settingsModal').classList.add('active');
@@ -6115,6 +6154,10 @@
                 const record = await response.json();
                 manageSeriesState.record = record;
                 document.getElementById('manageSeriesCanonical').value = record.is_user_canonical && record.canonical_title ? record.canonical_title : '';
+                const prefSelect = document.getElementById('manageSeriesPreferredLanguage');
+                if (prefSelect) {
+                    prefSelect.value = record.preferred_language || '';
+                }
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
                 renderManageSeriesImage(record);
@@ -6355,10 +6398,24 @@
         function renderManageSeriesProviderAliases(record) {
             const container = document.getElementById('manageSeriesProviderAliases');
             const aliases = record.aliases || [];
+            // Build a lookup of alias -> language from localized_titles so we
+            // can render a small language badge next to each alias.
+            const langByTitle = new Map();
+            (record.localized_titles || []).forEach(lt => {
+                if (lt && lt.title && lt.language) {
+                    langByTitle.set(lt.title.toLowerCase(), lt.language);
+                }
+            });
             if (!aliases.length) {
                 container.textContent = 'None';
             } else {
-                container.innerHTML = aliases.map(a => `<span class="badge" style="display: inline-block; padding: 4px 8px; margin: 2px; background: var(--bg-secondary); border-radius: 12px; font-size: 13px;">${escapeHtml(a)}</span>`).join('');
+                container.innerHTML = aliases.map(a => {
+                    const lang = langByTitle.get(a.toLowerCase());
+                    const langBadge = lang
+                        ? ` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${escapeHtml(lang)}</span>`
+                        : '';
+                    return `<span class="badge" style="display: inline-block; padding: 4px 8px; margin: 2px; background: var(--bg-secondary); border-radius: 12px; font-size: 13px;">${escapeHtml(a)}${langBadge}</span>`;
+                }).join('');
             }
             const sourceLabel = document.getElementById('manageSeriesProviderSource');
             if (record.source) {
@@ -6366,6 +6423,40 @@
                 sourceLabel.textContent = `Source: ${record.source} · Last lookup: ${ts} · Status: ${record.lookup_status || 'unknown'}`;
             } else {
                 sourceLabel.textContent = 'No external lookup yet — use "Refresh from Provider" to populate.';
+            }
+        }
+
+        // Save just the per-series preferred language (called on the select's
+        // change event so users see the effect immediately without having to
+        // hit the modal-wide "Save" button).
+        async function saveManageSeriesPreferredLanguage() {
+            const { seriesTitle } = manageSeriesState;
+            if (!seriesTitle) return;
+            const select = document.getElementById('manageSeriesPreferredLanguage');
+            if (!select) return;
+            const value = select.value || null;
+            try {
+                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/preferred-language`), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ language: value })
+                });
+                if (!response.ok) {
+                    let msg = 'Failed to update preferred language';
+                    try { const j = await response.json(); if (j && (j.error || typeof j === 'string')) msg = j.error || j; } catch {}
+                    showMessage(msg, 'error');
+                    return;
+                }
+                const record = await response.json();
+                manageSeriesState.record = record;
+                showMessage(value ? `Preferred language set to ${value}` : 'Preferred language cleared', 'success');
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
+            } catch (err) {
+                console.error('saveManageSeriesPreferredLanguage failed', err);
+                showMessage('Failed to update preferred language', 'error');
             }
         }
 

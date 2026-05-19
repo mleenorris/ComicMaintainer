@@ -1222,7 +1222,14 @@ public class FilesController : ControllerBase
             foreach (var candidate in EnumerateSeriesNameCandidates(file))
             {
                 var key = NormalizeFolderCombineKey(candidate);
-                if (key is not null && aliasIndex.TryGetValue(key, out var entry))
+                // Skip degenerate keys (e.g. CJK-only titles that collapse to a
+                // bare number) so we don't accidentally cross-resolve to an
+                // unrelated record whose canonical key happens to share that digit.
+                if (key is null || IsAmbiguousNormalizedKey(key))
+                {
+                    continue;
+                }
+                if (aliasIndex.TryGetValue(key, out var entry))
                 {
                     normalizedSeries = entry.CanonicalKey;
                     break;
@@ -1245,6 +1252,35 @@ public class FilesController : ControllerBase
 
         var normalized = FolderCombineKeySanitizer.Replace(value.Trim().ToLowerInvariant(), "-").Trim('-');
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    /// <summary>
+    /// Returns true if a normalized folder-combine key carries no real identifying
+    /// signal and therefore must not be used to bridge two different cache records.
+    /// The sanitizer strips every non-ASCII-letter/digit character, which collapses
+    /// CJK titles like "怪獣8号" or "モブサイコ100" down to just "8" or "100".
+    /// Allowing such keys into the cross-record union-find merges unrelated series
+    /// that only share a number, producing the false-positive groups users see.
+    /// A key is ambiguous when it is empty, shorter than two characters, or
+    /// contains no ASCII letters (a–z).
+    /// </summary>
+    private static bool IsAmbiguousNormalizedKey(string? normalized)
+    {
+        if (string.IsNullOrEmpty(normalized) || normalized.Length < 2)
+        {
+            return true;
+        }
+
+        for (var i = 0; i < normalized.Length; i++)
+        {
+            var c = normalized[i];
+            if (c >= 'a' && c <= 'z')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static IEnumerable<string> EnumerateSeriesNameCandidates(ComicFile file)
@@ -1324,8 +1360,21 @@ public class FilesController : ControllerBase
                 .Select(NormalizeFolderCombineKey)
                 .Where(k => k is not null)
                 .Select(k => k!)
+                .Where(k => !IsAmbiguousNormalizedKey(k))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
+
+            // If the record's own canonical key is degenerate (e.g. a record
+            // whose only title is CJK and collapses to a bare digit), skip
+            // it entirely from the cross-record bridge. Otherwise two such
+            // records would share the same canonical-key string in the union-
+            // find and get falsely merged. The record's files will still group
+            // together on their own via NormalizeFolderCombineKey returning
+            // the same string outside the alias-index path.
+            if (IsAmbiguousNormalizedKey(canonicalKey))
+            {
+                continue;
+            }
 
             unionFind.Add(canonicalKey);
             foreach (var key in titleKeys)

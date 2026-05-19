@@ -616,6 +616,36 @@ public class SeriesLibraryService : ISeriesLibraryService
         return string.IsNullOrWhiteSpace(normalized) ? "unknown-series" : normalized;
     }
 
+    /// <summary>
+    /// Returns true if a normalized series key carries no real identifying
+    /// signal and therefore must not be used to bridge two different cache
+    /// records. SeriesKeySanitizer strips every non-ASCII-letter/digit char,
+    /// which collapses CJK titles like "怪獣8号" down to "8", producing false
+    /// merges with any other series whose alias also reduces to "8". A key is
+    /// ambiguous when it is empty, "unknown-series", shorter than two chars,
+    /// or contains no ASCII letters.
+    /// </summary>
+    private static bool IsAmbiguousNormalizedKey(string? normalized)
+    {
+        if (string.IsNullOrEmpty(normalized)
+            || normalized.Length < 2
+            || string.Equals(normalized, "unknown-series", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        for (var i = 0; i < normalized.Length; i++)
+        {
+            var c = normalized[i];
+            if (c >= 'a' && c <= 'z')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static bool Contains(string? value, string search)
         => !string.IsNullOrWhiteSpace(value) && value.Contains(search, StringComparison.OrdinalIgnoreCase);
 
@@ -656,10 +686,20 @@ public class SeriesLibraryService : ISeriesLibraryService
         // Pass 1: canonical titles and record keys.
         foreach (var record in records)
         {
+            // The record's own normalized key is always addressable so the
+            // record can still group its own files; we deliberately do not
+            // filter it here even if it happens to be degenerate.
             index.TryAdd(record.NormalizedKey, record.NormalizedKey);
             if (!string.IsNullOrWhiteSpace(record.CanonicalTitle))
             {
-                index.TryAdd(NormalizeKey(record.CanonicalTitle), record.NormalizedKey);
+                var canonicalKey = NormalizeKey(record.CanonicalTitle);
+                // Skip degenerate canonical-title keys (e.g. CJK-only titles
+                // that collapse to a bare digit) so they cannot bridge to
+                // another record whose alias also reduces to the same digit.
+                if (!IsAmbiguousNormalizedKey(canonicalKey))
+                {
+                    index.TryAdd(canonicalKey, record.NormalizedKey);
+                }
             }
         }
 
@@ -669,7 +709,9 @@ public class SeriesLibraryService : ISeriesLibraryService
             foreach (var alias in record.UserAliases ?? Enumerable.Empty<string>())
             {
                 if (string.IsNullOrWhiteSpace(alias)) continue;
-                index.TryAdd(NormalizeKey(alias), record.NormalizedKey);
+                var aliasKey = NormalizeKey(alias);
+                if (IsAmbiguousNormalizedKey(aliasKey)) continue;
+                index.TryAdd(aliasKey, record.NormalizedKey);
             }
         }
 
@@ -679,7 +721,9 @@ public class SeriesLibraryService : ISeriesLibraryService
             foreach (var alias in record.Aliases ?? Enumerable.Empty<string>())
             {
                 if (string.IsNullOrWhiteSpace(alias)) continue;
-                index.TryAdd(NormalizeKey(alias), record.NormalizedKey);
+                var aliasKey = NormalizeKey(alias);
+                if (IsAmbiguousNormalizedKey(aliasKey)) continue;
+                index.TryAdd(aliasKey, record.NormalizedKey);
             }
         }
 
@@ -708,7 +752,11 @@ public class SeriesLibraryService : ISeriesLibraryService
         var titleKey = NormalizeKey(title);
         unionFind.Add(titleKey);
         unionFind.Union(fileKey, titleKey);
-        if (aliasIndex.TryGetValue(titleKey, out var recordKey))
+        // Only use the alias index to bridge to a cache record when the title
+        // key is not degenerate. Otherwise a CJK-only file title that collapses
+        // to a bare digit could resolve to whichever record happened to seed
+        // that digit in the index, falsely merging unrelated series.
+        if (!IsAmbiguousNormalizedKey(titleKey) && aliasIndex.TryGetValue(titleKey, out var recordKey))
         {
             unionFind.Add(recordKey);
             unionFind.Union(fileKey, recordKey);

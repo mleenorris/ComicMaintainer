@@ -570,6 +570,54 @@ public class SeriesLibraryServiceTests
         Assert.Equal(1, result.TotalSeries);
     }
 
+    [Fact]
+    public async Task GetSeriesAsync_DoesNotMergeUnrelatedSeriesSharingOnlyDigitFromCjkAlias()
+    {
+        // Regression: two unrelated series whose only "shared" normalized
+        // alias is a number stripped from a CJK title (e.g. "怪獣8号" and
+        // "8階級魔法使い" both reduce to "8" after the [^a-z0-9]+ sanitizer)
+        // must NOT be merged into a single library card.
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = "/library/kaiju/Kaiju No 8 001.cbz", FileName = "Kaiju No 8 001.cbz", Directory = "/library/kaiju", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
+            new() { FilePath = "/library/mage8/8th Class Mage 002.cbz", FileName = "8th Class Mage 002.cbz", Directory = "/library/mage8", FileSize = 200, LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc) }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _processor.Setup(p => p.GetSeriesMetadataAsync(files[0].FilePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadata { Series = "Kaiju No. 8", Issue = "1" });
+        _processor.Setup(p => p.GetSeriesMetadataAsync(files[1].FilePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadata { Series = "Return of the 8th Class Mage", Issue = "2" });
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "kaiju-no-8",
+                    CanonicalTitle = "Kaiju No. 8",
+                    Aliases = new List<string> { "怪獣8号" }, // collapses to "8"
+                    UserAliases = new List<string>()
+                },
+                new()
+                {
+                    NormalizedKey = "return-of-the-8th-class-mage",
+                    CanonicalTitle = "Return of the 8th Class Mage",
+                    Aliases = new List<string> { "帰還した8階級魔法使い" }, // also collapses to "8"
+                    UserAliases = new List<string>()
+                }
+            });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _logger.Object);
+
+        var result = await service.GetSeriesAsync();
+
+        // Two separate cards, not one merged.
+        Assert.Equal(2, result.Series.Count);
+    }
+
     private static string NormalizeKey(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))

@@ -661,6 +661,197 @@ public class FilesControllerTests
     }
 
     [Fact]
+    public async Task GetCombinableFolders_DoesNotMergeUnrelatedSeriesSharingOnlyDigitFromCjkAlias()
+    {
+        // Regression: two unrelated series whose only "shared" normalized
+        // alias is a number stripped from a CJK title (e.g. "怪獣8号" and
+        // "8階級魔法使い" both reduce to "8" after the [^a-z0-9]+ sanitizer)
+        // must NOT be grouped into a combinable-folder suggestion.
+        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        await using (var dbContext = new ComicMaintainerDbContext(options))
+        {
+            dbContext.ComicFiles.AddRange(
+                new ComicFileEntity
+                {
+                    FilePath = "/library/kaiju/Kaiju No 8 001.cbz",
+                    FileName = "Kaiju No 8 001.cbz",
+                    Directory = "/library/kaiju",
+                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new ComicFileEntity
+                {
+                    FilePath = "/library/mage8/8th Class Mage 002.cbz",
+                    FileName = "8th Class Mage 002.cbz",
+                    Directory = "/library/mage8",
+                    CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc)
+                });
+            await dbContext.SaveChangesAsync();
+        }
+
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/kaiju/Kaiju No 8 001.cbz",
+                FileName = "Kaiju No 8 001.cbz",
+                Directory = "/library/kaiju",
+                LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Kaiju No. 8" }
+            },
+            new()
+            {
+                FilePath = "/library/mage8/8th Class Mage 002.cbz",
+                FileName = "8th Class Mage 002.cbz",
+                Directory = "/library/mage8",
+                LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Return of the 8th Class Mage" }
+            }
+        };
+
+        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var mockCache = new Mock<ISeriesMetadataCacheService>();
+        mockCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "kaiju-no-8",
+                    CanonicalTitle = "Kaiju No. 8",
+                    Aliases = new List<string> { "怪獣8号" }, // collapses to "8"
+                    UserAliases = new List<string>()
+                },
+                new()
+                {
+                    NormalizedKey = "return-of-the-8th-class-mage",
+                    CanonicalTitle = "Return of the 8th Class Mage",
+                    Aliases = new List<string> { "帰還した8階級魔法使い" }, // also collapses to "8"
+                    UserAliases = new List<string>()
+                }
+            });
+
+        var controller = new FilesController(
+            _mockFileStore.Object,
+            _mockProcessor.Object,
+            _mockHistoryService.Object,
+            _mockSeriesLibrary.Object,
+            _mockLogger.Object,
+            _mockSettings.Object,
+            new TestDbContextFactory(options),
+            null,
+            mockCache.Object);
+
+        var result = await controller.GetCombinableFolders();
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var groupsProperty = okResult.Value!.GetType().GetProperty("groups");
+        Assert.NotNull(groupsProperty);
+        var groups = Assert.IsAssignableFrom<IEnumerable<FilesController.CombinableFolderGroupDto>>(
+            groupsProperty!.GetValue(okResult.Value));
+        Assert.Empty(groups);
+    }
+
+    [Fact]
+    public async Task GetCombinableFolders_DoesNotMergeUnrelatedSeriesSharing100FromCjkAlias()
+    {
+        // Regression: same false-positive shape as the "8" case but with
+        // "100" — two series whose only shared normalized key is "100"
+        // (stripped from "モブサイコ100" / "100カノジョ") must NOT merge.
+        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        await using (var dbContext = new ComicMaintainerDbContext(options))
+        {
+            dbContext.ComicFiles.AddRange(
+                new ComicFileEntity
+                {
+                    FilePath = "/library/mob/Mob Psycho 100 001.cbz",
+                    FileName = "Mob Psycho 100 001.cbz",
+                    Directory = "/library/mob",
+                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new ComicFileEntity
+                {
+                    FilePath = "/library/100gf/100 Girlfriends 002.cbz",
+                    FileName = "100 Girlfriends 002.cbz",
+                    Directory = "/library/100gf",
+                    CreatedAt = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc)
+                });
+            await dbContext.SaveChangesAsync();
+        }
+
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/mob/Mob Psycho 100 001.cbz",
+                FileName = "Mob Psycho 100 001.cbz",
+                Directory = "/library/mob",
+                LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Mob Psycho 100" }
+            },
+            new()
+            {
+                FilePath = "/library/100gf/100 Girlfriends 002.cbz",
+                FileName = "100 Girlfriends 002.cbz",
+                Directory = "/library/100gf",
+                LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "The 100 Girlfriends Who Really Love You" }
+            }
+        };
+
+        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var mockCache = new Mock<ISeriesMetadataCacheService>();
+        mockCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "mob-psycho-100",
+                    CanonicalTitle = "Mob Psycho 100",
+                    Aliases = new List<string> { "モブサイコ100" }, // collapses to "100"
+                    UserAliases = new List<string>()
+                },
+                new()
+                {
+                    NormalizedKey = "the-100-girlfriends-who-really-love-you",
+                    CanonicalTitle = "The 100 Girlfriends Who Really Love You",
+                    Aliases = new List<string> { "100カノジョ" }, // also collapses to "100"
+                    UserAliases = new List<string>()
+                }
+            });
+
+        var controller = new FilesController(
+            _mockFileStore.Object,
+            _mockProcessor.Object,
+            _mockHistoryService.Object,
+            _mockSeriesLibrary.Object,
+            _mockLogger.Object,
+            _mockSettings.Object,
+            new TestDbContextFactory(options),
+            null,
+            mockCache.Object);
+
+        var result = await controller.GetCombinableFolders();
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var groupsProperty = okResult.Value!.GetType().GetProperty("groups");
+        Assert.NotNull(groupsProperty);
+        var groups = Assert.IsAssignableFrom<IEnumerable<FilesController.CombinableFolderGroupDto>>(
+            groupsProperty!.GetValue(okResult.Value));
+        Assert.Empty(groups);
+    }
+
+    [Fact]
     public async Task GetMetadata_WithValidPath_ReturnsOkWithMetadata()
     {
         // Arrange

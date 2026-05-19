@@ -5913,6 +5913,37 @@
             }
         }
 
+        async function matchAllUnmatchedSeries() {
+            if (!confirm('Queue an external metadata lookup for every series that is not yet matched? Lookups happen in the background and progress is reported as a job.')) {
+                return;
+            }
+            try {
+                const response = await fetch(apiUrl('/api/metadata/match-unmatched'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) {
+                    const error = await response.text();
+                    showMessage('Failed to queue match-unmatched: ' + error, 'error');
+                    return;
+                }
+                const data = await response.json();
+                const total = data.totalSeries || 0;
+                if (total === 0) {
+                    showMessage('No unmatched series to process.', 'info');
+                    return;
+                }
+                showMessage(`Match job queued for ${total} unmatched series.`, 'success');
+                if (data.jobId) {
+                    trackMetadataRefreshJob(data.jobId, `Unmatched Series (${total})`);
+                }
+            } catch (err) {
+                console.error('matchAllUnmatchedSeries failed', err);
+                showMessage('Failed to queue match-unmatched', 'error');
+            }
+        }
+
         async function refreshSeriesMetadataDirect(seriesTitle) {
             if (!seriesTitle) return;
             try {

@@ -62,6 +62,45 @@ public class MetadataController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Queue an external metadata lookup for every series that does not yet
+    /// have a provider match. The job runs in the background using the same
+    /// pipeline as <c>refresh-all</c>; this endpoint returns immediately with
+    /// the queued job id so the UI is never blocked while the (potentially
+    /// slow) lookups run.
+    /// </summary>
+    [HttpPost("match-unmatched")]
+    public async Task<ActionResult<object>> MatchUnmatched(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var library = await _library.GetSeriesAsync(
+                filter: "unmatched",
+                perPage: -1,
+                cancellationToken: cancellationToken);
+            var titles = library.Series
+                .Select(s => s.CanonicalTitle)
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (titles.Count == 0)
+            {
+                _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Metadata match-unmatched requested but no unmatched series were found"));
+                return Ok(new { jobId = (Guid?)null, totalSeries = 0 });
+            }
+
+            var jobId = await _refreshJobs.StartAsync(titles, cancellationToken);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Metadata match-unmatched queued for {Count} series (job {JobId})"), titles.Count, jobId);
+            return Ok(new { jobId, totalSeries = titles.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error queuing metadata match-unmatched"));
+            return StatusCode(500, "Error queuing metadata match");
+        }
+    }
+
     /// <summary>Queue an external metadata refresh for a specific set of series titles.</summary>
     [HttpPost("refresh-selected")]
     public async Task<ActionResult<object>> RefreshSelected([FromBody] RefreshSelectedRequest request, CancellationToken cancellationToken)

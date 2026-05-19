@@ -494,6 +494,90 @@ public class FilesControllerTests
     }
 
     [Fact]
+    public async Task GetCombinableFolders_TreatsCaseDifferentFoldersAsDistinctSourcesInSameGroup()
+    {
+        // Regression: two on-disk folders that differ only by capitalization
+        // (a common scenario on case-sensitive filesystems such as Linux/Docker
+        // bind mounts) must be reported as two distinct folders within the same
+        // combinable group so the user can consolidate them. Previously the
+        // directory bucket used a case-insensitive comparer, which collapsed
+        // both folders into one bucket and silently dropped the group.
+        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        await using (var dbContext = new ComicMaintainerDbContext(options))
+        {
+            dbContext.ComicFiles.AddRange(
+                new ComicFileEntity
+                {
+                    FilePath = "/library/Manga A/Batman-001.cbz",
+                    FileName = "Batman-001.cbz",
+                    Directory = "/library/Manga A",
+                    CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new ComicFileEntity
+                {
+                    FilePath = "/library/manga a/Batman-002.cbz",
+                    FileName = "Batman-002.cbz",
+                    Directory = "/library/manga a",
+                    CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc)
+                });
+
+            await dbContext.SaveChangesAsync();
+        }
+
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Manga A/Batman-001.cbz",
+                FileName = "Batman-001.cbz",
+                Directory = "/library/Manga A",
+                LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Batman" }
+            },
+            new()
+            {
+                FilePath = "/library/manga a/Batman-002.cbz",
+                FileName = "Batman-002.cbz",
+                Directory = "/library/manga a",
+                LastModified = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Batman" }
+            }
+        };
+
+        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var controller = new FilesController(
+            _mockFileStore.Object,
+            _mockProcessor.Object,
+            _mockHistoryService.Object,
+            _mockSeriesLibrary.Object,
+            _mockLogger.Object,
+            _mockSettings.Object,
+            new TestDbContextFactory(options));
+
+        var result = await controller.GetCombinableFolders();
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+
+        var groupsProperty = okResult.Value!.GetType().GetProperty("groups");
+        Assert.NotNull(groupsProperty);
+        var groups = Assert.IsAssignableFrom<IEnumerable<FilesController.CombinableFolderGroupDto>>(
+            groupsProperty!.GetValue(okResult.Value));
+
+        var groupList = groups.ToList();
+        Assert.Single(groupList);
+        Assert.Equal(2, groupList[0].Folders.Count);
+        var directories = groupList[0].Folders.Select(f => f.Directory).ToList();
+        Assert.Contains("/library/Manga A", directories);
+        Assert.Contains("/library/manga a", directories);
+    }
+
+    [Fact]
     public async Task GetCombinableFolders_TreatsAliasesAsSameSeries_WhenAliasHasOwnCacheRecord()
     {
         // Regression: when the user adds an alias linking series "X" → "Y" but

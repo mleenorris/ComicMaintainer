@@ -424,7 +424,15 @@ public class FilesController : ControllerBase
         // the same series.
         var aliasIndex = await BuildFolderCombineAliasIndexAsync(cancellationToken);
 
-        // Bucket files by (groupKey -> directory -> list of files)
+        // Bucket files by (groupKey -> directory -> list of files). The
+        // directory bucket uses an ordinal (case-sensitive) comparer so that
+        // two on-disk folders that differ only by capitalization (which is a
+        // common scenario on case-sensitive filesystems such as Linux/Docker
+        // bind mounts) are recognised as distinct folders within the same
+        // series group, making them eligible for consolidation. Using a
+        // case-insensitive comparer here would collapse such folders into a
+        // single bucket and silently drop the group (dirMap.Count < 2),
+        // which is exactly the bug this comment guards against.
         var byGroup = new Dictionary<string, Dictionary<string, List<(ComicFile File, DateTime AddedAt)>>>(StringComparer.OrdinalIgnoreCase);
         var groupDisplay = new Dictionary<string, (string SeriesName, string? Volume)>(StringComparer.OrdinalIgnoreCase);
 
@@ -451,7 +459,9 @@ public class FilesController : ControllerBase
 
             if (!byGroup.TryGetValue(groupKey, out var dirMap))
             {
-                dirMap = new Dictionary<string, List<(ComicFile, DateTime)>>(StringComparer.OrdinalIgnoreCase);
+                // The directory bucket uses an ordinal (case-sensitive)
+                // comparer; see the comment on byGroup above for why.
+                dirMap = new Dictionary<string, List<(ComicFile, DateTime)>>(StringComparer.Ordinal);
                 byGroup[groupKey] = dirMap;
                 groupDisplay[groupKey] = (
                     BuildFolderCombineSeriesDisplayName(file, aliasIndex) ?? groupKey,
@@ -783,12 +793,16 @@ public class FilesController : ControllerBase
         else
         {
             // Infer group from destination + sources by finding a group that contains all directories.
-            var allDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { destination };
+            // Directory comparisons here are case-sensitive (ordinal) so that two
+            // on-disk folders differing only by capitalization (possible on
+            // case-sensitive filesystems) are treated as distinct paths and the
+            // right group is selected.
+            var allDirs = new HashSet<string>(StringComparer.Ordinal) { destination };
             foreach (var src in request.SourceDirectories ?? new List<string>())
             {
                 allDirs.Add(Path.GetFullPath(src));
             }
-            group = groups.FirstOrDefault(g => allDirs.All(d => g.Folders.Any(f => string.Equals(f.Directory, d, StringComparison.OrdinalIgnoreCase))));
+            group = groups.FirstOrDefault(g => allDirs.All(d => g.Folders.Any(f => string.Equals(f.Directory, d, StringComparison.Ordinal))));
         }
 
         if (group == null)
@@ -810,11 +824,11 @@ public class FilesController : ControllerBase
                         LoggingHelper.SanitizePathForLog(srcFull));
                     return ("One or more source directories are outside the allowed directory.", null);
                 }
-                if (string.Equals(srcFull, destination, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(srcFull, destination, StringComparison.Ordinal))
                 {
                     continue;
                 }
-                var folder = group.Folders.FirstOrDefault(f => string.Equals(f.Directory, srcFull, StringComparison.OrdinalIgnoreCase));
+                var folder = group.Folders.FirstOrDefault(f => string.Equals(f.Directory, srcFull, StringComparison.Ordinal));
                 if (folder == null)
                 {
                     return ($"Source directory '{src}' is not part of this group.", null);
@@ -825,7 +839,7 @@ public class FilesController : ControllerBase
         else
         {
             sourceFolders = group.Folders
-                .Where(f => !string.Equals(f.Directory, destination, StringComparison.OrdinalIgnoreCase))
+                .Where(f => !string.Equals(f.Directory, destination, StringComparison.Ordinal))
                 .ToList();
         }
 
@@ -835,7 +849,7 @@ public class FilesController : ControllerBase
         }
 
         // Verify destination belongs to the group.
-        if (!group.Folders.Any(f => string.Equals(f.Directory, destination, StringComparison.OrdinalIgnoreCase)))
+        if (!group.Folders.Any(f => string.Equals(f.Directory, destination, StringComparison.Ordinal)))
         {
             return ("Destination directory is not part of this group.", null);
         }
@@ -883,7 +897,10 @@ public class FilesController : ControllerBase
                 }
                 reservedNames.Add(finalName);
                 var destPath = Path.Combine(destination, finalName);
-                var skipped = string.Equals(sourcePath, destPath, StringComparison.OrdinalIgnoreCase);
+                // Use an ordinal (case-sensitive) comparison so we don't
+                // skip moves between two folders that differ only by
+                // capitalization on case-sensitive filesystems.
+                var skipped = string.Equals(sourcePath, destPath, StringComparison.Ordinal);
                 moves.Add(new CombineFoldersMove
                 {
                     SourcePath = sourcePath,

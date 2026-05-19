@@ -53,6 +53,54 @@ public class MetadataControllerTests
     }
 
     [Fact]
+    public async Task MatchUnmatched_QueuesJobForOnlyUnmatchedSeries()
+    {
+        _library.Setup(l => l.GetSeriesAsync("unmatched", null, 1, -1, "name", "asc", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesLibraryResult
+            {
+                Series = new List<SeriesLibraryDto>
+                {
+                    new() { CanonicalTitle = "Unknown One" },
+                    new() { CanonicalTitle = "Unknown Two" }
+                }
+            });
+
+        var jobId = Guid.NewGuid();
+        IEnumerable<string>? capturedTitles = null;
+        _refreshJobs.Setup(j => j.StartAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, CancellationToken>((titles, _) => capturedTitles = titles.ToList())
+            .ReturnsAsync(jobId);
+
+        var result = await _controller.MatchUnmatched(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var idProp = ok.Value!.GetType().GetProperty("jobId");
+        var totalProp = ok.Value.GetType().GetProperty("totalSeries");
+        Assert.Equal(jobId, idProp!.GetValue(ok.Value));
+        Assert.Equal(2, totalProp!.GetValue(ok.Value));
+        Assert.NotNull(capturedTitles);
+        Assert.Equal(new[] { "Unknown One", "Unknown Two" }, capturedTitles!.ToArray());
+        // Only the unmatched-filtered query should have been issued.
+        _library.Verify(l => l.GetSeriesAsync("unmatched", null, 1, -1, "name", "asc", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task MatchUnmatched_ReturnsZeroWhenNoUnmatchedSeries()
+    {
+        _library.Setup(l => l.GetSeriesAsync("unmatched", null, 1, -1, "name", "asc", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesLibraryResult { Series = new List<SeriesLibraryDto>() });
+
+        var result = await _controller.MatchUnmatched(CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var idProp = ok.Value!.GetType().GetProperty("jobId");
+        var totalProp = ok.Value.GetType().GetProperty("totalSeries");
+        Assert.Null(idProp!.GetValue(ok.Value));
+        Assert.Equal(0, totalProp!.GetValue(ok.Value));
+        _refreshJobs.Verify(j => j.StartAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task RefreshSelected_RejectsEmptyBody()
     {
         var result = await _controller.RefreshSelected(new MetadataController.RefreshSelectedRequest(), CancellationToken.None);

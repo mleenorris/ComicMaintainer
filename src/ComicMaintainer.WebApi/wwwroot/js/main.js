@@ -1468,13 +1468,13 @@
         function updateLibraryViewLayout() {
             const controlsWrapper = document.querySelector('#libraryFilesView .controls-wrapper');
             const pagination = document.getElementById('pagination');
-            const isFileMode = libraryViewMode === 'files';
+            const showBulkActions = libraryViewMode === 'files' || (libraryViewMode === 'series' && !!currentSeriesDetailId);
 
             if (controlsWrapper) {
-                controlsWrapper.style.display = isFileMode ? '' : 'none';
+                controlsWrapper.style.display = showBulkActions ? '' : 'none';
             }
 
-            if (!isFileMode && currentSeriesDetailId && pagination) {
+            if (libraryViewMode === 'series' && currentSeriesDetailId && pagination) {
                 pagination.style.display = 'none';
             }
         }
@@ -1699,6 +1699,7 @@
             const normalizeUnmarkedBtn = document.querySelector('button[onclick="normalizeUnmarkedFiles()"]');
             const filterUnmarkedBtn = document.getElementById('filterUnmarked');
             const controlsWrapper = document.querySelector('#libraryFilesView .controls-wrapper');
+            const showBulkActions = libraryViewMode === 'files' || (libraryViewMode === 'series' && !!currentSeriesDetailId);
             
             // Show or hide buttons based on whether there are unmarked files
             const hasUnmarkedFiles = unmarkedCount > 0;
@@ -1708,7 +1709,7 @@
             if (renameUnmarkedBtn) renameUnmarkedBtn.style.display = displayStyle;
             if (normalizeUnmarkedBtn) normalizeUnmarkedBtn.style.display = displayStyle;
             if (filterUnmarkedBtn) filterUnmarkedBtn.style.display = displayStyle;
-            if (controlsWrapper) controlsWrapper.style.display = libraryViewMode === 'files' ? '' : 'none';
+            if (controlsWrapper) controlsWrapper.style.display = showBulkActions ? '' : 'none';
         }
         
         async function changePerPage() {
@@ -2206,6 +2207,11 @@
             const issueCount = cached ? cached.total : (series.issue_count || 0);
             const issuesLoading = !cached;
             const issuesFailed = cached && cached.error;
+            const selectableIssuePaths = issues
+                .map(issue => issue.file_path)
+                .filter(path => typeof path === 'string' && path.length > 0);
+            const allIssuesSelected = selectableIssuePaths.length > 0 && selectableIssuePaths.every(path => selectedFiles.has(path));
+            const someIssuesSelected = selectableIssuePaths.some(path => selectedFiles.has(path));
 
             fileList.innerHTML = `
                 <div class="series-detail" id="seriesDetailPanel">
@@ -2227,6 +2233,18 @@
                             </div>
                         </div>
                     </div>
+                    ${!issuesLoading && !issuesFailed && issues.length ? `
+                        <div class="series-detail-selection-bar">
+                            <label class="series-detail-select-all" for="selectAll">
+                                <input type="checkbox"
+                                       id="selectAll"
+                                       onchange="toggleSelectAll(this.checked)"
+                                       ${allIssuesSelected ? 'checked' : ''}>
+                                <span>Select all issues</span>
+                            </label>
+                            <span class="series-detail-selection-meta">${issues.length} issue${issues.length === 1 ? '' : 's'} in this series</span>
+                        </div>
+                    ` : ''}
                     ${issuesLoading ? `
                         <div class="loading">
                             <div class="spinner"></div>
@@ -2237,7 +2255,12 @@
                     ` : `
                         <div class="series-issues-grid">
                             ${issues.map(issue => `
-                                <div class="series-issue-card">
+                                <div class="series-issue-card ${selectedFiles.has(issue.file_path) ? 'series-issue-card--selected' : ''}" data-file-path="${escapeHtml(issue.file_path)}">
+                                    <label class="series-issue-select" aria-label="Select ${escapeHtml(issue.title || issue.file_name)}" onclick="event.stopPropagation()">
+                                        <input type="checkbox"
+                                               ${selectedFiles.has(issue.file_path) ? 'checked' : ''}
+                                               onchange="toggleFileSelection('${escapeJs(issue.file_path)}', this.checked)">
+                                    </label>
                                     <button type="button" class="series-issue-cover-button" aria-label="Read ${escapeHtml(issue.title || issue.file_name)}" onclick="readComic('${escapeJs(issue.file_path)}')">
                                         <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy">
                                         <div class="series-issue-cover-overlay"></div>
@@ -2255,6 +2278,12 @@
                 </div>
             `;
 
+            const selectAllCheckbox = document.getElementById('selectAll');
+            if (selectAllCheckbox) {
+                selectAllCheckbox.indeterminate = someIssuesSelected && !allIssuesSelected;
+            }
+            updateSelectInfo();
+            updateSelectAllCheckbox();
             updateLibraryViewLayout();
             hydrateProtectedImages(fileList);
         }
@@ -2573,6 +2602,31 @@
             return out;
         }
 
+        function getCurrentSelectableFilePaths() {
+            if (libraryViewMode === 'series' && currentSeriesDetailId) {
+                const cached = seriesIssuesCache.get(currentSeriesDetailId);
+                if (!cached || !Array.isArray(cached.issues)) {
+                    return [];
+                }
+
+                return cached.issues
+                    .map(issue => issue.file_path)
+                    .filter(path => typeof path === 'string' && path.length > 0);
+            }
+
+            return getAllLoadedFiles()
+                .map(file => file.relative_path)
+                .filter(path => typeof path === 'string' && path.length > 0);
+        }
+
+        function updateSeriesIssueSelectionState(filepath, checked) {
+            document.querySelectorAll('.series-issue-card[data-file-path]').forEach(card => {
+                if (card.dataset.filePath === filepath) {
+                    card.classList.toggle('series-issue-card--selected', checked);
+                }
+            });
+        }
+
         function getFolderForRelativePath(relativePath) {
             if (!relativePath) return '';
             const idx = Math.max(relativePath.lastIndexOf('/'), relativePath.lastIndexOf('\\'));
@@ -2717,13 +2771,17 @@
         }
         
         function toggleSelectAll(checked) {
-            const allLoaded = getAllLoadedFiles();
+            const visibleFilePaths = getCurrentSelectableFilePaths();
             if (checked) {
-                allLoaded.forEach(file => selectedFiles.add(file.relative_path));
+                visibleFilePaths.forEach(filepath => selectedFiles.add(filepath));
             } else {
-                allLoaded.forEach(file => selectedFiles.delete(file.relative_path));
+                visibleFilePaths.forEach(filepath => selectedFiles.delete(filepath));
             }
-            renderFileList();
+            if (libraryViewMode === 'series' && currentSeriesDetailId) {
+                renderSeriesDetail(currentSeriesDetailId);
+            } else {
+                renderFileList();
+            }
         }
         
         function toggleFileSelection(filepath, checked) {
@@ -2732,6 +2790,7 @@
             } else {
                 selectedFiles.delete(filepath);
             }
+            updateSeriesIssueSelectionState(filepath, checked);
             updateSelectInfo();
             updateSelectAllCheckbox();
         }
@@ -2772,13 +2831,13 @@
             const selectAllCheckbox = document.getElementById('selectAll');
             if (!selectAllCheckbox) return;
 
-            const allLoaded = getAllLoadedFiles();
-            if (allLoaded.length === 0) {
+            const visibleFilePaths = getCurrentSelectableFilePaths();
+            if (visibleFilePaths.length === 0) {
                 selectAllCheckbox.checked = false;
                 selectAllCheckbox.indeterminate = false;
             } else {
-                const allSelected = allLoaded.every(file => selectedFiles.has(file.relative_path));
-                const someSelected = allLoaded.some(file => selectedFiles.has(file.relative_path));
+                const allSelected = visibleFilePaths.every(filepath => selectedFiles.has(filepath));
+                const someSelected = visibleFilePaths.some(filepath => selectedFiles.has(filepath));
 
                 selectAllCheckbox.checked = allSelected;
                 selectAllCheckbox.indeterminate = someSelected && !allSelected;

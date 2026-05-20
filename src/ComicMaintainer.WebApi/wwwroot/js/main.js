@@ -1508,8 +1508,12 @@
             return confirm(`${actionDescription}\n\nClick OK to include files already marked as ${statusDescription}, or Cancel to skip them.`);
         }
 
-        async function loadSeriesLibrary(opts) {
+        async function loadSeriesLibrary(opts, legacyRefresh) {
             // Backwards-compat: callers used to pass (page, refresh) numerically.
+            // The page argument is ignored — pagination is now offset-based and
+            // a refresh always resets to offset 0 — but the refresh flag still
+            // controls whether we reset state, add the cache-busting
+            // ?refresh=true query, and re-trigger library-health stats.
             let append = false;
             let refresh = false;
             if (typeof opts === 'object' && opts !== null) {
@@ -1517,6 +1521,8 @@
                 refresh = !!opts.refresh;
             } else if (typeof opts === 'boolean') {
                 refresh = opts;
+            } else if (typeof opts === 'number') {
+                refresh = !!legacyRefresh;
             }
 
             if (seriesLoading) return;

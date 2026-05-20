@@ -406,6 +406,65 @@ public class SeriesLibraryService : ISeriesLibraryService
         };
     }
 
+    public async Task<IReadOnlyList<SeriesFoldersResult>> GetAllSeriesFolderGroupsAsync(
+        string? filter = null,
+        CancellationToken cancellationToken = default)
+    {
+        var (fileFilter, _) = SplitFilter(filter);
+        var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
+
+        var results = new List<SeriesFoldersResult>(groups.Count);
+        foreach (var accumulator in groups.Values)
+        {
+            // Same per-directory bucketing as GetFoldersForSeriesIdAsync; use
+            // an ordinal comparer so case-distinct on-disk folders remain
+            // separate entries on case-sensitive filesystems.
+            var byDirectory = new Dictionary<string, (int Count, long Size)>(StringComparer.Ordinal);
+            foreach (var issue in accumulator.Issues)
+            {
+                if (string.IsNullOrWhiteSpace(issue.FilePath))
+                {
+                    continue;
+                }
+
+                var directory = Path.GetDirectoryName(issue.FilePath);
+                if (string.IsNullOrWhiteSpace(directory))
+                {
+                    continue;
+                }
+
+                if (byDirectory.TryGetValue(directory, out var existing))
+                {
+                    byDirectory[directory] = (existing.Count + 1, existing.Size + issue.Size);
+                }
+                else
+                {
+                    byDirectory[directory] = (1, issue.Size);
+                }
+            }
+
+            var folders = byDirectory
+                .Select(kvp => new SeriesFolderDto
+                {
+                    Directory = kvp.Key,
+                    FileCount = kvp.Value.Count,
+                    TotalSize = kvp.Value.Size
+                })
+                .OrderByDescending(folder => folder.FileCount)
+                .ThenBy(folder => folder.Directory, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            results.Add(new SeriesFoldersResult
+            {
+                Id = accumulator.Id,
+                Title = accumulator.DisplayTitle,
+                Folders = folders
+            });
+        }
+
+        return results;
+    }
+
     /// <summary>
     /// Loads the file store, resolves grouping titles and external cache info,
     /// and returns a dictionary of series accumulators keyed by their union-find

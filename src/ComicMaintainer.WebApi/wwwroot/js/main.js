@@ -3188,13 +3188,12 @@
                     mergeNote.style.display = 'block';
                     mergeNote.textContent = 'Click "Merge Folders" to combine these folders into one on disk.';
                 } else {
-                    // The folders aren't currently recognised as a combinable
-                    // group (e.g., the series matches via aliases that don't
-                    // line up with the global folder grouper). Surface this
-                    // clearly so the user understands why the action is off.
+                    // The API didn't return a combine group key for some
+                    // reason (older server, unexpected error). Fall back to
+                    // the global combine flow rather than blocking the user.
                     mergeBtn.disabled = true;
                     mergeNote.style.display = 'block';
-                    mergeNote.textContent = 'These folders are tracked as the same series but the automatic folder combiner can\'t group them. Use the global "Combine Folders" tool from the toolbar to merge manually.';
+                    mergeNote.textContent = 'Use the global "Combine Folders" tool from the toolbar to merge these folders.';
                 }
             } catch (error) {
                 console.error('Failed to load series folders:', error);

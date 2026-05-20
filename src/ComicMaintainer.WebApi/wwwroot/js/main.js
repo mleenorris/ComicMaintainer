@@ -246,6 +246,13 @@
         let seriesLoading = false;
         let scrollObserver = null;
         let currentSeriesDetailId = null;
+        // Title-based identity for the open series detail. The series id is a
+        // union-find representative key whose value can change when an external
+        // metadata refresh introduces new aliases — when that happens we use
+        // these title keys to find the same series under its new id so the user
+        // stays inside the detail view instead of getting kicked back to the
+        // library list.
+        let currentSeriesDetailTitleKeys = null;
         const seriesIssuesCache = new Map();        // seriesId -> { issues: [], total: n }
         const metadataRefreshJobs = new Map();     // jobId -> { seriesIds, label }
         let providerHealthRefreshTimer = null;
@@ -1498,6 +1505,7 @@
 
             libraryViewMode = mode;
             currentSeriesDetailId = null;
+            currentSeriesDetailTitleKeys = null;
             updateLibraryViewButtons();
             updateLibraryViewLayout();
             await setPreferences({ libraryViewMode: mode });
@@ -1729,6 +1737,7 @@
             searchQuery = document.getElementById('headerSearchInput').value;
             // Reload from page 1 with new search query
             currentSeriesDetailId = null;
+            currentSeriesDetailTitleKeys = null;
             loadActiveLibraryView(1);
         }
         
@@ -1777,6 +1786,7 @@
             
             // Reload from page 1 with new filter
             currentSeriesDetailId = null;
+            currentSeriesDetailTitleKeys = null;
             loadActiveLibraryView(1);
         }
         
@@ -1813,6 +1823,7 @@
             
             // Reload from page 1 with new sort order
             currentSeriesDetailId = null;
+            currentSeriesDetailTitleKeys = null;
             loadActiveLibraryView(1);
         }
         
@@ -2153,6 +2164,7 @@
 
         function openSeriesDetail(seriesId) {
             currentSeriesDetailId = seriesId;
+            captureSeriesDetailIdentity(seriesLibrary.find(item => item && item.id === seriesId));
             renderSeriesDetail(seriesId);
             // Kick off the issues fetch right away so the detail content
             // appears as soon as it's available.
@@ -2161,9 +2173,75 @@
 
         function closeSeriesDetail() {
             currentSeriesDetailId = null;
+            currentSeriesDetailTitleKeys = null;
             renderSeriesLibrary();
             updatePagination();
             updateLibraryViewLayout();
+        }
+
+        // Normalize a title-like value for case-insensitive comparison.
+        function normalizeSeriesTitleKey(value) {
+            return typeof value === 'string' ? value.trim().toLowerCase() : '';
+        }
+
+        // Record the set of titles/aliases for the currently open series so we
+        // can remap the detail id if an external metadata refresh causes the
+        // backend's series id (union-find representative) to change.
+        function captureSeriesDetailIdentity(series) {
+            if (!series) {
+                currentSeriesDetailTitleKeys = null;
+                return;
+            }
+            const keys = new Set();
+            const add = (v) => {
+                const k = normalizeSeriesTitleKey(v);
+                if (k) keys.add(k);
+            };
+            add(series.title);
+            add(series.canonical_title);
+            if (Array.isArray(series.aliases)) {
+                series.aliases.forEach(add);
+            }
+            currentSeriesDetailTitleKeys = keys.size ? keys : null;
+        }
+
+        // Find a series in the current library whose title/canonical/aliases
+        // overlap with the given set of normalized keys.
+        function findSeriesByTitleKeys(keys) {
+            if (!keys || !keys.size) return null;
+            for (const series of seriesLibrary) {
+                if (!series) continue;
+                const titleKey = normalizeSeriesTitleKey(series.title);
+                if (titleKey && keys.has(titleKey)) return series;
+                const canonicalKey = normalizeSeriesTitleKey(series.canonical_title);
+                if (canonicalKey && keys.has(canonicalKey)) return series;
+                if (Array.isArray(series.aliases)) {
+                    for (const alias of series.aliases) {
+                        const aliasKey = normalizeSeriesTitleKey(alias);
+                        if (aliasKey && keys.has(aliasKey)) return series;
+                    }
+                }
+            }
+            return null;
+        }
+
+        // When the open series can't be found by its id (typically because a
+        // metadata refresh changed the union-find representative), try to
+        // remap currentSeriesDetailId by matching the previously-captured
+        // title/alias keys against the freshly-loaded library. Returns the
+        // remapped series object, or null when no match is found.
+        function remapCurrentSeriesDetailId() {
+            if (!currentSeriesDetailId) return null;
+            const remapped = findSeriesByTitleKeys(currentSeriesDetailTitleKeys);
+            if (!remapped || remapped.id === currentSeriesDetailId) return null;
+            // Migrate cached issues to the new id so we don't refetch when
+            // the underlying content hasn't changed. Drop the old key.
+            if (seriesIssuesCache.has(currentSeriesDetailId) && !seriesIssuesCache.has(remapped.id)) {
+                seriesIssuesCache.set(remapped.id, seriesIssuesCache.get(currentSeriesDetailId));
+            }
+            seriesIssuesCache.delete(currentSeriesDetailId);
+            currentSeriesDetailId = remapped.id;
+            return remapped;
         }
 
         async function loadSeriesIssues(seriesId, force = false) {
@@ -2202,11 +2280,27 @@
 
         function renderSeriesDetail(seriesId) {
             const fileList = document.getElementById('fileList');
-            const series = seriesLibrary.find(item => item.id === seriesId);
+            let series = seriesLibrary.find(item => item.id === seriesId);
+            if (!series && seriesId === currentSeriesDetailId) {
+                // A metadata refresh may have changed the union-find
+                // representative used as the series id. Try to remap to the
+                // same series under its new id (matching by title / canonical
+                // title / aliases) instead of closing the detail view.
+                const remapped = remapCurrentSeriesDetailId();
+                if (remapped) {
+                    series = remapped;
+                    seriesId = remapped.id;
+                    if (!seriesIssuesCache.has(seriesId)) {
+                        loadSeriesIssues(seriesId);
+                    }
+                }
+            }
             if (!series) {
                 closeSeriesDetail();
                 return;
             }
+            // Keep title-based identity fresh in case aliases changed.
+            captureSeriesDetailIdentity(series);
 
             const cached = seriesIssuesCache.get(seriesId);
             const issues = cached ? cached.issues : [];

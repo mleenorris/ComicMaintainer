@@ -61,5 +61,16 @@ public interface ISeriesLibraryService
         string seriesId,
         string? filter = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Bulk variant of <see cref="GetFoldersForSeriesIdAsync"/> that returns
+    /// the on-disk folder set for every series currently visible in the
+    /// library, keyed by series id. Used by the folder-combine pipeline to
+    /// reconcile its own grouping with the authoritative series-card grouping
+    /// without paying the cost of one library build per series.
+    /// </summary>
+    Task<IReadOnlyList<SeriesFoldersResult>> GetAllSeriesFolderGroupsAsync(
+        string? filter = null,
+        CancellationToken cancellationToken = default);
 }
 

@@ -2333,6 +2333,323 @@ public class FilesControllerTests
         Assert.Single(files!);
         Assert.Equal(rootFile, files![0].RelativePath);
     }
+
+    [Fact]
+    public async Task GetCombinableFolders_IncludesSeriesLibraryGroupingsWithoutAliasMatch()
+    {
+        // Regression for issue 1: when SeriesLibraryService groups two folders
+        // into a single series card (e.g. via file-level metadata aliases)
+        // but the alias-index pass doesn't, the folder-combine listing should
+        // still report them as a combinable group via the series-library pass.
+        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/folderA/Series-001.cbz",
+                FileName = "Series-001.cbz",
+                Directory = "/library/folderA",
+                LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Series A" }
+            },
+            new()
+            {
+                FilePath = "/library/folderB/Series-002.cbz",
+                FileName = "Series-002.cbz",
+                Directory = "/library/folderB",
+                LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Series B" }
+            }
+        };
+
+        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var mockCache = new Mock<ISeriesMetadataCacheService>();
+        mockCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+
+        // SeriesLibraryService reports a single series spanning both folders.
+        _mockSeriesLibrary.Setup(s => s.GetAllSeriesFolderGroupsAsync(
+                It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesFoldersResult>
+            {
+                new()
+                {
+                    Id = "merged-series",
+                    Title = "Merged Series",
+                    Folders = new List<SeriesFolderDto>
+                    {
+                        new() { Directory = "/library/folderA", FileCount = 1, TotalSize = 0 },
+                        new() { Directory = "/library/folderB", FileCount = 1, TotalSize = 0 }
+                    }
+                }
+            });
+
+        var controller = new FilesController(
+            _mockFileStore.Object,
+            _mockProcessor.Object,
+            _mockHistoryService.Object,
+            _mockSeriesLibrary.Object,
+            _mockLogger.Object,
+            _mockSettings.Object,
+            new TestDbContextFactory(options),
+            null,
+            mockCache.Object);
+
+        var result = await controller.GetCombinableFolders();
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var groupsProperty = okResult.Value!.GetType().GetProperty("groups");
+        Assert.NotNull(groupsProperty);
+        var groups = Assert.IsAssignableFrom<IEnumerable<FilesController.CombinableFolderGroupDto>>(
+            groupsProperty!.GetValue(okResult.Value));
+        var groupList = groups.ToList();
+        Assert.Single(groupList);
+        Assert.Equal(2, groupList[0].Folders.Count);
+        Assert.StartsWith("series:", groupList[0].GroupKey);
+        Assert.Equal("Merged Series", groupList[0].SeriesName);
+    }
+
+    [Fact]
+    public async Task GetCombinableFolders_SuggestsParentheticalOfficialSuffix()
+    {
+        // Regression for issue 2: "Tomb Raider King" and "Tomb Raider King (Official)"
+        // are different folder names (no alias bridge) but the parenthetical-
+        // suffix pass should recommend merging them.
+        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Tomb Raider King/001.cbz",
+                FileName = "001.cbz",
+                Directory = "/library/Tomb Raider King",
+                LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Tomb Raider King" }
+            },
+            new()
+            {
+                FilePath = "/library/Tomb Raider King (Official)/002.cbz",
+                FileName = "002.cbz",
+                Directory = "/library/Tomb Raider King (Official)",
+                LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Tomb Raider King (Official)" }
+            }
+        };
+
+        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var mockCache = new Mock<ISeriesMetadataCacheService>();
+        mockCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+
+        var controller = new FilesController(
+            _mockFileStore.Object,
+            _mockProcessor.Object,
+            _mockHistoryService.Object,
+            _mockSeriesLibrary.Object,
+            _mockLogger.Object,
+            _mockSettings.Object,
+            new TestDbContextFactory(options),
+            null,
+            mockCache.Object);
+
+        var result = await controller.GetCombinableFolders();
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var groupsProperty = okResult.Value!.GetType().GetProperty("groups");
+        var groups = Assert.IsAssignableFrom<IEnumerable<FilesController.CombinableFolderGroupDto>>(
+            groupsProperty!.GetValue(okResult.Value));
+        var groupList = groups.ToList();
+        Assert.Single(groupList);
+        Assert.Equal(2, groupList[0].Folders.Count);
+        Assert.Contains("(Official)", groupList[0].SuggestionReason);
+    }
+
+    [Fact]
+    public async Task GetCombinableFolders_DoesNotMergeWhenParentheticalIsYear()
+    {
+        // Guard: parenthetical year suffixes (e.g. "(2018)") are NOT in the
+        // non-distinguishing whitelist and must NOT collapse legitimately
+        // distinct print runs into one group.
+        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Spider-Man (1990)/001.cbz",
+                FileName = "001.cbz",
+                Directory = "/library/Spider-Man (1990)",
+                LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Spider-Man (1990)" }
+            },
+            new()
+            {
+                FilePath = "/library/Spider-Man (2018)/002.cbz",
+                FileName = "002.cbz",
+                Directory = "/library/Spider-Man (2018)",
+                LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Spider-Man (2018)" }
+            }
+        };
+
+        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var mockCache = new Mock<ISeriesMetadataCacheService>();
+        mockCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+
+        var controller = new FilesController(
+            _mockFileStore.Object,
+            _mockProcessor.Object,
+            _mockHistoryService.Object,
+            _mockSeriesLibrary.Object,
+            _mockLogger.Object,
+            _mockSettings.Object,
+            new TestDbContextFactory(options),
+            null,
+            mockCache.Object);
+
+        var result = await controller.GetCombinableFolders();
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var groupsProperty = okResult.Value!.GetType().GetProperty("groups");
+        var groups = Assert.IsAssignableFrom<IEnumerable<FilesController.CombinableFolderGroupDto>>(
+            groupsProperty!.GetValue(okResult.Value));
+        Assert.Empty(groups);
+    }
+
+    [Fact]
+    public async Task GetSeriesFolders_ReturnsSyntheticGroupKey_WhenSeriesSpansMultipleFolders()
+    {
+        // Even when BuildCombinableFolderGroupsAsync produces nothing for the
+        // series (e.g. the series-library says they're one series but the
+        // mock series-library returns no folder groups), GetSeriesFolders
+        // returns a synthetic `series:<id>` combine_group_key so the per-
+        // series Manage Folders UI can still hand off to the combine flow.
+        _mockSeriesLibrary.Setup(s => s.GetFoldersForSeriesIdAsync(
+                "series-x", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesFoldersResult
+            {
+                Id = "series-x",
+                Title = "Series X",
+                Folders = new List<SeriesFolderDto>
+                {
+                    new() { Directory = "/library/X1", FileCount = 5, TotalSize = 100 },
+                    new() { Directory = "/library/X2", FileCount = 3, TotalSize = 50 }
+                }
+            });
+
+        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        var result = await _controller.GetSeriesFolders("series-x");
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var keyProp = okResult.Value!.GetType().GetProperty("combine_group_key");
+        Assert.NotNull(keyProp);
+        var key = keyProp!.GetValue(okResult.Value) as string;
+        Assert.Equal("series:series-x", key);
+
+        var destProp = okResult.Value.GetType().GetProperty("suggested_destination_directory");
+        Assert.NotNull(destProp);
+        var dest = destProp!.GetValue(okResult.Value) as string;
+        // Highest file count wins as the default suggestion.
+        Assert.Equal("/library/X1", dest);
+    }
+
+    [Fact]
+    public async Task CombineFolders_AcceptsSyntheticSeriesGroupKey()
+    {
+        // The synthetic `series:<id>` group key is resolved via the series
+        // library when no matching alias-index group exists. PreviewCombineFolders
+        // must produce a plan that moves the source folder's files to the
+        // destination.
+        var watched = Path.GetTempPath();
+        var canonical = Path.GetFullPath(watched);
+        _mockSettings.Setup(s => s.CurrentValue).Returns(new AppSettings { WatchedDirectory = canonical });
+
+        var destDir = Path.Combine(canonical, "DestSeries");
+        var srcDir = Path.Combine(canonical, "SrcSeries");
+        var destFile = Path.Combine(destDir, "dest-001.cbz");
+        var srcFile = Path.Combine(srcDir, "src-001.cbz");
+
+        _mockSeriesLibrary.Setup(s => s.GetFoldersForSeriesIdAsync(
+                "synth-id", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesFoldersResult
+            {
+                Id = "synth-id",
+                Title = "Synthesized",
+                Folders = new List<SeriesFolderDto>
+                {
+                    new() { Directory = destDir, FileCount = 1, TotalSize = 0 },
+                    new() { Directory = srcDir, FileCount = 1, TotalSize = 0 }
+                }
+            });
+
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = destFile, FileName = "dest-001.cbz", Directory = destDir, LastModified = DateTime.UtcNow },
+            new() { FilePath = srcFile, FileName = "src-001.cbz", Directory = srcDir, LastModified = DateTime.UtcNow }
+        };
+        _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var mockCache = new Mock<ISeriesMetadataCacheService>();
+        mockCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+
+        var controller = new FilesController(
+            _mockFileStore.Object,
+            _mockProcessor.Object,
+            _mockHistoryService.Object,
+            _mockSeriesLibrary.Object,
+            _mockLogger.Object,
+            _mockSettings.Object,
+            null,
+            null,
+            mockCache.Object);
+
+        var request = new FilesController.CombineFoldersRequest
+        {
+            GroupKey = "series:synth-id",
+            DestinationDirectory = destDir,
+            SourceDirectories = new List<string> { srcDir }
+        };
+
+        var result = await controller.PreviewCombineFolders(request);
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var movesProp = okResult.Value!.GetType().GetProperty("moves");
+        Assert.NotNull(movesProp);
+        var moves = movesProp!.GetValue(okResult.Value) as System.Collections.IEnumerable;
+        Assert.NotNull(moves);
+        var moveList = moves!.Cast<object>().ToList();
+        Assert.Single(moveList);
+
+        var moveType = moveList[0].GetType();
+        var sourcePath = moveType.GetProperty("sourcePath")!.GetValue(moveList[0]) as string;
+        var destinationPath = moveType.GetProperty("destinationPath")!.GetValue(moveList[0]) as string;
+        Assert.Equal(srcFile, sourcePath);
+        Assert.Equal(Path.Combine(destDir, "src-001.cbz"), destinationPath);
+    }
 }
 
 internal sealed class TestDbContextFactory : IDbContextFactory<ComicMaintainerDbContext>

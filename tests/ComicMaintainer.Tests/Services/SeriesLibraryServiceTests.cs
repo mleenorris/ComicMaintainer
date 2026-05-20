@@ -218,6 +218,43 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
+    public async Task GetSeriesSummariesAsync_AppliesGlobalDefaultPreferredLanguage()
+    {
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = "/library/Naruto/Naruto 001.cbz", FileName = "Naruto 001.cbz", Directory = "/library/Naruto", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Naruto", Issue = "1" } }
+        };
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "naruto",
+                    CanonicalTitle = "Naruto",
+                    PreferredLanguage = null,
+                    LocalizedTitles = new List<LocalizedTitle>
+                    {
+                        new("Naruto", "en"),
+                        new("ナルト", "ja")
+                    }
+                }
+            });
+
+        var monitor = new Mock<IOptionsMonitor<AppSettings>>();
+        monitor.Setup(m => m.CurrentValue).Returns(new AppSettings { DefaultPreferredLanguage = "ja" });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, monitor.Object, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync();
+
+        Assert.Single(result.Series);
+        Assert.Equal("ナルト", result.Series[0].Title);
+        Assert.Equal("Naruto", result.Series[0].CanonicalTitle);
+    }
+
+    [Fact]
     public async Task GetSeriesSummariesAsync_DoesNotIncludeIssuesAndDoesNotOpenArchives()
     {
         var files = new List<ComicFile>

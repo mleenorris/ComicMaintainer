@@ -1542,12 +1542,28 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             // Series exists but doesn't match folder name - not normalized
             return false;
         }
+        // Compute the expected title using the same logic as NormalizeMetadataAsync:
+        // if the ComicInfo issue is missing, fall back to parsing the chapter
+        // number from the filename so the expected title becomes "Chapter <n>"
+        // instead of "Chapter Unknown" (which would incorrectly mark files with
+        // a discoverable chapter number in their filename as already normalized).
+        var expectedIssue = metadata.Issue;
+        if (string.IsNullOrEmpty(expectedIssue))
+        {
+            var parsedIssue = ComicFileProcessor.ParseChapterNumber(Path.GetFileNameWithoutExtension(filePath));
+            if (!string.IsNullOrEmpty(parsedIssue))
+            {
+                expectedIssue = parsedIssue;
+            }
+        }
+
+        var expectedTitle = CreateNormalizedTitle(expectedIssue);
         _logger.LogInformation(
             "Checking title normalization for file: {FilePath}, Current metadata {title} Expected {expectedTitle}",
             LoggingHelper.SanitizePathForLog(filePath),
             LoggingHelper.SanitizeForLog(metadata.Title),
-            LoggingHelper.SanitizeForLog(CreateNormalizedTitle(metadata.Issue)));
-        if (!string.IsNullOrEmpty(metadata.Title) && !metadata.Title.Equals(CreateNormalizedTitle(metadata.Issue)))
+            LoggingHelper.SanitizeForLog(expectedTitle));
+        if (!string.Equals(metadata.Title, expectedTitle, StringComparison.Ordinal))
         {
             return false;
         }

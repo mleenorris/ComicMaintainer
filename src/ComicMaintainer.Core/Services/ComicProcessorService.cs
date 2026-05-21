@@ -1355,6 +1355,19 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                 filename = filename.Substring(0, filename.Length - extension.Length);
             }
             
+            // Defensive safety net: ensure the chapter number that exists in
+            // the original filename is never lost during rename. This protects
+            // against:
+            //   * Custom FilenameFormat templates that omit "{issue}" (e.g.
+            //     "{series} - {title}").
+            //   * Files whose ComicInfo.xml is present but has an empty or
+            //     missing <Number>, leaving metadata.Issue null even though
+            //     the original filename clearly contains a chapter number.
+            // One-shots / volume-only files (no chapter in metadata and no
+            // explicit "Ch/Chapter" keyword in the original filename) are
+            // intentionally left untouched.
+            filename = EnsureChapterNumberPreserved(filename, metadata.Issue, originalPath);
+
             filename = ComicFileProcessor.SanitizeFileName(filename);
             
             return Path.Combine(directory, filename + extension);
@@ -1364,6 +1377,78 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             _logger.LogError(ex, "Error generating filename");
             return originalPath;
         }
+    }
+
+    /// <summary>
+    /// Ensures the chapter number from the original filename (or from
+    /// <paramref name="metadataIssue"/>) is present in the new filename
+    /// stem. Appends " - Chapter &lt;n&gt;" when it is missing so the
+    /// chapter number is never silently dropped during rename.
+    /// </summary>
+    private string EnsureChapterNumberPreserved(string filenameStem, string? metadataIssue, string originalPath)
+    {
+        // Preferred chapter source: the authoritative metadata.Issue.
+        // Secondary: an explicit "Ch/Chapter <n>" token in the original filename
+        // (the strict pattern avoids false-positives on volume-only filenames).
+        var originalNameStem = Path.GetFileNameWithoutExtension(originalPath);
+        var chapterToPreserve = !string.IsNullOrEmpty(metadataIssue)
+            ? metadataIssue
+            : ComicFileProcessor.ParseChapterKeyword(originalNameStem);
+
+        if (string.IsNullOrEmpty(chapterToPreserve))
+        {
+            return filenameStem;
+        }
+
+        // Check whether the rendered filename already contains an equivalent
+        // chapter number. ParseChapterNumber prefers the chapter keyword and
+        // otherwise picks the first non-bracketed number, which mirrors the
+        // way the rendered template typically encodes the issue number.
+        var renderedChapter = ComicFileProcessor.ParseChapterNumber(filenameStem);
+        if (!string.IsNullOrEmpty(renderedChapter) &&
+            ComicFileProcessor.ChapterNumbersEquivalent(renderedChapter, chapterToPreserve))
+        {
+            return filenameStem;
+        }
+
+        // Format the chapter number with the configured padding so the
+        // appended value is consistent with how the rest of the codebase
+        // renders chapter numbers.
+        var formattedChapter = FormatChapterForFilename(chapterToPreserve, _settings.IssueNumberPadding);
+
+        _logger.LogWarning(
+            "Chapter number '{Chapter}' would be lost from filename during rename of {OriginalPath}; appending it to preserve the chapter.",
+            chapterToPreserve,
+            LoggingHelper.SanitizePathForLog(originalPath));
+
+        var separator = string.IsNullOrEmpty(filenameStem) ? string.Empty : " - ";
+        return $"{filenameStem}{separator}Chapter {formattedChapter}";
+    }
+
+    private static string FormatChapterForFilename(string chapter, int padding)
+    {
+        if (!float.TryParse(chapter, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var asFloat))
+        {
+            return chapter;
+        }
+
+        var integerPart = (int)asFloat;
+        var formatString = $"D{Math.Max(0, padding)}";
+        var integerFormatted = integerPart.ToString(formatString,
+            System.Globalization.CultureInfo.InvariantCulture);
+
+        if (chapter.Contains('.'))
+        {
+            var parts = chapter.Split('.');
+            var decimalPart = parts.Length > 1 ? parts[1].TrimEnd('0') : string.Empty;
+            if (!string.IsNullOrEmpty(decimalPart))
+            {
+                return $"{integerFormatted}.{decimalPart}";
+            }
+        }
+
+        return integerFormatted;
     }
 
     private bool TargetFileExists(string targetPath, string? sourcePath = null)

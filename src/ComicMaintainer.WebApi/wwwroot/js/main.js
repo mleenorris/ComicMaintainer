@@ -2811,10 +2811,19 @@
         }
         
         function escapeJs(text) {
-            // Escape single quotes, double quotes, backslashes, and other special characters for JavaScript strings
+            // Produce a value safe for use inside a single-quoted JavaScript string
+            // that is itself embedded in a double-quoted HTML attribute (e.g.
+            // onclick="doStuff('${escapeJs(value)}')"). Backslashes, single quotes,
+            // and control characters are JS-escaped. The double-quote character must
+            // be HTML-entity-encoded — not JS-escaped — because the browser parses
+            // the attribute value before handing it to the JS parser, so a literal
+            // " would otherwise terminate the attribute and break the markup
+            // (e.g. for series titles like: Hazure Zokusei "Hikari Mahou" ga ...).
+            // After HTML decoding the JS sees a plain " inside a single-quoted
+            // string, which is valid.
             return text.replace(/\\/g, '\\\\')
                        .replace(/'/g, "\\'")
-                       .replace(/"/g, '\\"')
+                       .replace(/"/g, '&quot;')
                        .replace(/\n/g, '\\n')
                        .replace(/\r/g, '\\r')
                        .replace(/\t/g, '\\t');

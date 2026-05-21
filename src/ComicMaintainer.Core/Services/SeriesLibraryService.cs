@@ -465,6 +465,68 @@ public class SeriesLibraryService : ISeriesLibraryService
         return results;
     }
 
+    public async Task<IReadOnlyList<SeriesFolderDto>> GetFoldersForNormalizedKeyAsync(
+        string normalizedKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            return Array.Empty<SeriesFolderDto>();
+        }
+
+        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+
+        // Match by ImageNormalizedKey first (the authoritative cache key for
+        // the cover image); fall back to a case-insensitive match against the
+        // accumulator id so callers that pass an unmatched series key still
+        // find the right folders in libraries that haven't been linked to
+        // external metadata yet.
+        var byDirectory = new Dictionary<string, (int Count, long Size)>(StringComparer.Ordinal);
+        foreach (var accumulator in groups.Values)
+        {
+            var matchesImageKey = !string.IsNullOrEmpty(accumulator.ImageNormalizedKey)
+                && string.Equals(accumulator.ImageNormalizedKey, normalizedKey, StringComparison.OrdinalIgnoreCase);
+            var matchesId = !matchesImageKey
+                && string.Equals(accumulator.Id, normalizedKey, StringComparison.OrdinalIgnoreCase);
+            if (!matchesImageKey && !matchesId)
+            {
+                continue;
+            }
+
+            foreach (var issue in accumulator.Issues)
+            {
+                if (string.IsNullOrWhiteSpace(issue.FilePath))
+                {
+                    continue;
+                }
+                var directory = Path.GetDirectoryName(issue.FilePath);
+                if (string.IsNullOrWhiteSpace(directory))
+                {
+                    continue;
+                }
+                if (byDirectory.TryGetValue(directory, out var existing))
+                {
+                    byDirectory[directory] = (existing.Count + 1, existing.Size + issue.Size);
+                }
+                else
+                {
+                    byDirectory[directory] = (1, issue.Size);
+                }
+            }
+        }
+
+        return byDirectory
+            .Select(kvp => new SeriesFolderDto
+            {
+                Directory = kvp.Key,
+                FileCount = kvp.Value.Count,
+                TotalSize = kvp.Value.Size
+            })
+            .OrderByDescending(folder => folder.FileCount)
+            .ThenBy(folder => folder.Directory, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     /// <summary>
     /// Loads the file store, resolves grouping titles and external cache info,
     /// and returns a dictionary of series accumulators keyed by their union-find

@@ -72,5 +72,16 @@ public interface ISeriesLibraryService
     Task<IReadOnlyList<SeriesFoldersResult>> GetAllSeriesFolderGroupsAsync(
         string? filter = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the distinct on-disk folders that back the series whose
+    /// external-image cache key matches <paramref name="normalizedKey"/>.
+    /// Returns an empty list when no series currently in the library is
+    /// associated with that key. Used by <see cref="ISeriesFolderCoverWriter"/>
+    /// to push a copy of the cover image into each series folder on disk.
+    /// </summary>
+    Task<IReadOnlyList<SeriesFolderDto>> GetFoldersForNormalizedKeyAsync(
+        string normalizedKey,
+        CancellationToken cancellationToken = default);
 }
 

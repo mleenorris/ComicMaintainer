@@ -17,6 +17,7 @@ public class SeriesMetadataCacheServiceTests
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly Mock<IExternalSeriesMetadataService> _external = new();
     private readonly Mock<ISeriesImageStore> _imageStore = new();
+    private readonly Mock<ISeriesFolderCoverWriter> _folderCoverWriter = new();
 
     public SeriesMetadataCacheServiceTests()
     {
@@ -35,6 +36,7 @@ public class SeriesMetadataCacheServiceTests
             _dbContextFactory,
             _external.Object,
             _imageStore.Object,
+            _folderCoverWriter.Object,
             settingsMonitor.Object,
             new Mock<ILogger<SeriesMetadataCacheService>>().Object);
     }

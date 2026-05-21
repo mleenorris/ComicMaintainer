@@ -162,6 +162,40 @@ public class MetadataControllerTests
     }
 
     [Fact]
+    public async Task SetPreferredLanguage_TriggersPerSeriesRetag()
+    {
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "batman",
+            CanonicalTitle = "Batman",
+            PreferredLanguage = "ja"
+        };
+        _cache.Setup(c => c.SetPreferredLanguageAsync("Batman", "ja", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(record);
+
+        var retag = new Mock<ISeriesLanguagePreferenceRetagService>();
+        retag.Setup(r => r.QueueRetagForSeriesAsync(record, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+
+        var controller = new MetadataController(
+            _library.Object,
+            _cache.Object,
+            _refreshJobs.Object,
+            _external.Object,
+            new Mock<ILogger<MetadataController>>().Object,
+            languageRetag: retag.Object);
+
+        var result = await controller.SetPreferredLanguage(
+            "Batman",
+            new MetadataController.PreferredLanguageRequest { Language = "ja" },
+            CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Same(record, ok.Value);
+        retag.Verify(r => r.QueueRetagForSeriesAsync(record, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task RemoveAlias_DelegatesToCacheService()
     {
         var record = new SeriesMetadataCacheRecord { NormalizedKey = "batman", CanonicalTitle = "Batman" };

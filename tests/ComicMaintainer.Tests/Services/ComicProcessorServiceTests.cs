@@ -1273,6 +1273,357 @@ public class ComicProcessorServiceTests : IDisposable
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Preferred-language normalization tests
+    // ---------------------------------------------------------------------
+    // These verify that ResolveNormalizedSeriesAsync honors the per-series
+    // and global default preferred-language settings via the
+    // SeriesDisplayTitleResolver — i.e. that on-disk ComicInfo.xml <Series>
+    // is rewritten to the localized title (not just the canonical title).
+    // The behaviour is exercised indirectly through ProcessFileAsync, which
+    // ultimately calls NormalizeMetadataAsync → ResolveNormalizedSeriesAsync.
+    // ---------------------------------------------------------------------
+
+    private string CreateLocalizedComicArchive(string folderName, string seriesInMetadata, string issue)
+    {
+        var seriesFolder = Path.Combine(_testDirectory, folderName);
+        Directory.CreateDirectory(seriesFolder);
+        var filePath = Path.Combine(seriesFolder, $"Chapter {issue}.cbz");
+        var comicInfoXml = $@"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>{seriesInMetadata}</Series>
+    <Number>{issue}</Number>
+    <Title>Chapter {issue}</Title>
+</ComicInfo>";
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy");
+            }
+        }
+        return filePath;
+    }
+
+    private Mock<ISeriesMetadataCacheService> BuildLocalizedCache(SeriesMetadataCacheRecord record)
+    {
+        var mock = new Mock<ISeriesMetadataCacheService>();
+        mock.Setup(c => c.NormalizeKey(It.IsAny<string>()))
+            .Returns<string>(s => (s ?? string.Empty).ToLowerInvariant());
+
+        // Match any key derived from the canonical title, an alias, or a
+        // localized title — that way the lookup succeeds whether we key off
+        // the folder name or the value already in ComicInfo.xml.
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            (record.CanonicalTitle ?? string.Empty).ToLowerInvariant()
+        };
+        foreach (var alias in record.Aliases ?? new List<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(alias)) keys.Add(alias.ToLowerInvariant());
+        }
+        foreach (var alias in record.UserAliases ?? new List<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(alias)) keys.Add(alias.ToLowerInvariant());
+        }
+
+        mock.Setup(c => c.GetAsync(It.Is<string>(k => keys.Contains(k)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(record);
+        mock.Setup(c => c.GetAsync(It.Is<string>(k => !keys.Contains(k)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        mock.Setup(c => c.SetUserAliasesAsync(
+                It.IsAny<string>(),
+                It.IsAny<IEnumerable<string>>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord());
+        return mock;
+    }
+
+    [Fact]
+    public async Task NormalizeFileAsync_PerSeriesPreferredLanguage_WritesLocalizedSeries()
+    {
+        var filePath = CreateLocalizedComicArchive("One Piece", "One Piece", "1");
+
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+        _settings.DefaultPreferredLanguage = null;
+
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "one piece",
+            CanonicalTitle = "One Piece",
+            LookupStatus = "success",
+            PreferredLanguage = "ja",
+            LocalizedTitles = new List<LocalizedTitle>
+            {
+                new("One Piece", "en"),
+                new("ワンピース", "ja"),
+            }
+        };
+        var cache = BuildLocalizedCache(record);
+
+        using var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            seriesMetadataCache: cache.Object);
+
+        var ok = await service.ProcessFileAsync(filePath);
+        Assert.True(ok);
+
+        var updated = await service.GetMetadataAsync(filePath);
+        Assert.NotNull(updated);
+        Assert.Equal("ワンピース", updated!.Series);
+    }
+
+    [Fact]
+    public async Task NormalizeFileAsync_GlobalDefaultPreferredLanguage_WritesLocalizedSeries()
+    {
+        var filePath = CreateLocalizedComicArchive("One Piece", "One Piece", "1");
+
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+        _settings.DefaultPreferredLanguage = "en";
+
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "one piece",
+            CanonicalTitle = "ワンピース",
+            LookupStatus = "success",
+            PreferredLanguage = null,
+            LocalizedTitles = new List<LocalizedTitle>
+            {
+                new("ワンピース", "ja"),
+                new("One Piece", "en"),
+            }
+        };
+        var cache = BuildLocalizedCache(record);
+
+        using var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            seriesMetadataCache: cache.Object);
+
+        var ok = await service.ProcessFileAsync(filePath);
+        Assert.True(ok);
+
+        var updated = await service.GetMetadataAsync(filePath);
+        Assert.NotNull(updated);
+        Assert.Equal("One Piece", updated!.Series);
+    }
+
+    [Fact]
+    public async Task NormalizeFileAsync_UserCanonical_BeatsLanguagePreference()
+    {
+        var filePath = CreateLocalizedComicArchive("One Piece", "One Piece", "1");
+
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+        _settings.DefaultPreferredLanguage = "ja";
+
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "one piece",
+            CanonicalTitle = "My One Piece",
+            IsUserCanonical = true,
+            LookupStatus = "manual",
+            PreferredLanguage = "ja",
+            UserAliases = new List<string> { "One Piece" },
+            LocalizedTitles = new List<LocalizedTitle>
+            {
+                new("ワンピース", "ja"),
+                new("One Piece", "en"),
+            }
+        };
+        var cache = BuildLocalizedCache(record);
+
+        using var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            seriesMetadataCache: cache.Object);
+
+        var ok = await service.ProcessFileAsync(filePath);
+        Assert.True(ok);
+
+        var updated = await service.GetMetadataAsync(filePath);
+        Assert.NotNull(updated);
+        Assert.Equal("My One Piece", updated!.Series);
+    }
+
+    [Fact]
+    public async Task NormalizeFileAsync_PreferredLanguageWithoutLocalizedTitle_FallsBackToCanonical()
+    {
+        var filePath = CreateLocalizedComicArchive("Batman", "Batman", "1");
+
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+        _settings.DefaultPreferredLanguage = null;
+
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "batman",
+            CanonicalTitle = "Batman",
+            LookupStatus = "success",
+            // Per-series preference is Korean but there is no Korean
+            // localized title on the record — must fall back to canonical.
+            PreferredLanguage = "ko",
+            LocalizedTitles = new List<LocalizedTitle>
+            {
+                new("Batman", "en"),
+            }
+        };
+        var cache = BuildLocalizedCache(record);
+
+        using var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            seriesMetadataCache: cache.Object);
+
+        var ok = await service.ProcessFileAsync(filePath);
+        Assert.True(ok);
+
+        var updated = await service.GetMetadataAsync(filePath);
+        Assert.NotNull(updated);
+        Assert.Equal("Batman", updated!.Series);
+    }
+
+    [Fact]
+    public async Task NormalizeFileAsync_ExternalLookupOnly_UsesGlobalPreferredLanguage()
+    {
+        // No cache record exists yet; the external lookup returns a localized
+        // title list. The global default preferred language should still be
+        // applied to the transient lookup result.
+        var filePath = CreateLocalizedComicArchive("ワンピース", "ワンピース", "1");
+
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+        _settings.DefaultPreferredLanguage = "en";
+
+        _mockExternalSeriesMetadata
+            .Setup(s => s.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "ワンピース",
+                Source = "Test",
+                LocalizedTitles = new List<LocalizedTitle>
+                {
+                    new("ワンピース", "ja"),
+                    new("One Piece", "en"),
+                }
+            });
+
+        var cache = new Mock<ISeriesMetadataCacheService>();
+        cache.Setup(c => c.NormalizeKey(It.IsAny<string>()))
+            .Returns<string>(s => (s ?? string.Empty).ToLowerInvariant());
+        cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        cache.Setup(c => c.SetUserAliasesAsync(
+                It.IsAny<string>(),
+                It.IsAny<IEnumerable<string>>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord());
+
+        using var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            seriesMetadataCache: cache.Object);
+
+        var ok = await service.ProcessFileAsync(filePath);
+        Assert.True(ok);
+
+        var updated = await service.GetMetadataAsync(filePath);
+        Assert.NotNull(updated);
+        Assert.Equal("One Piece", updated!.Series);
+    }
+
+    [Fact]
+    public async Task NormalizeFileAsync_AlreadyLocalizedSeries_StillFindsRecordViaFolder()
+    {
+        // Defensive lookup: a previous normalize pass has already written the
+        // Japanese localized title into <Series>. The cache record is keyed
+        // off the canonical (English) title, but it's still reachable via
+        // the folder name. Verify the file isn't lost (the same localized
+        // title should remain after another normalize cycle).
+        var filePath = CreateLocalizedComicArchive("One Piece", "ワンピース", "1");
+
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+        _settings.DefaultPreferredLanguage = "ja";
+
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "one piece",
+            CanonicalTitle = "One Piece",
+            LookupStatus = "success",
+            PreferredLanguage = null,
+            LocalizedTitles = new List<LocalizedTitle>
+            {
+                new("One Piece", "en"),
+                new("ワンピース", "ja"),
+            }
+        };
+
+        // Only the folder-name key resolves; the localized title key returns
+        // null — this is the scenario the defensive lookup is designed for.
+        var cache = new Mock<ISeriesMetadataCacheService>();
+        cache.Setup(c => c.NormalizeKey(It.IsAny<string>()))
+            .Returns<string>(s => (s ?? string.Empty).ToLowerInvariant());
+        cache.Setup(c => c.GetAsync(It.Is<string>(k => k == "one piece"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(record);
+        cache.Setup(c => c.GetAsync(It.Is<string>(k => k != "one piece"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        cache.Setup(c => c.SetUserAliasesAsync(
+                It.IsAny<string>(),
+                It.IsAny<IEnumerable<string>>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord());
+
+        using var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            seriesMetadataCache: cache.Object);
+
+        var ok = await service.ProcessFileAsync(filePath);
+        Assert.True(ok);
+
+        var updated = await service.GetMetadataAsync(filePath);
+        Assert.NotNull(updated);
+        // Global default is "ja"; the Japanese localized title should remain.
+        Assert.Equal("ワンピース", updated!.Series);
+
+        // External lookup must NOT have been consulted — the defensive
+        // lookup found the record via the folder name.
+        _mockExternalSeriesMetadata.Verify(
+            s => s.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     [Fact]
     public async Task ProcessFileAsync_WithDecimalIssueNumber_RenamesCorrectly()
     {

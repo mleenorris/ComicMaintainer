@@ -17,12 +17,35 @@
          contains the correct versioned URL. -->
     <link rel="stylesheet" href="/css/main.css?v=__APP_VERSION__" id="mainCss">
     <style>
+        /* Reader-local tokens. These intentionally override the app palette
+           because the reader is always dark for comfortable reading regardless
+           of the app's light/dark theme. They still reference shared tokens
+           where it makes sense (focus rings, accent) so future theme work
+           cascades into the reader. */
+        :root {
+            --reader-bg: #0b0b0e;
+            --reader-bg-elevated: rgba(15, 17, 22, 0.85);
+            --reader-border: rgba(255, 255, 255, 0.08);
+            --reader-text: #f3f4f6;
+            --reader-text-muted: #9ca3af;
+            --reader-text-dim: #6b7280;
+            --reader-accent: #3b82f6;
+            --reader-accent-hover: #2563eb;
+            --reader-surface: rgba(255, 255, 255, 0.06);
+            --reader-surface-hover: rgba(255, 255, 255, 0.12);
+            --reader-radius: 8px;
+            --reader-radius-sm: 6px;
+            --reader-control-h: 36px;
+            --reader-focus-ring: 0 0 0 2px rgba(59, 130, 246, 0.55);
+        }
+
         body.reader-mode {
             margin: 0;
             padding: 0;
             overflow: hidden;
-            background: #000;
-            color: #fff;
+            background: var(--reader-bg);
+            color: var(--reader-text);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
         }
 
         .reader-container {
@@ -30,59 +53,129 @@
             flex-direction: column;
             height: 100vh;
             width: 100vw;
+            position: relative;
+        }
+
+        /* Thin progress bar pinned to the very top of the reader */
+        .reader-progress {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: rgba(255, 255, 255, 0.05);
+            z-index: 1001;
+            pointer-events: none;
+        }
+
+        .reader-progress-bar {
+            height: 100%;
+            width: 0;
+            background: var(--reader-accent);
+            transition: width 0.2s ease-out;
         }
 
         .reader-header {
-            background: rgba(0, 0, 0, 0.9);
+            background: var(--reader-bg-elevated);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
             padding: 0.5rem 1rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid #333;
+            gap: 0.75rem;
+            border-bottom: 1px solid var(--reader-border);
             z-index: 1000;
+            min-height: calc(var(--reader-control-h) + 1rem);
+            transition: opacity 0.25s ease, transform 0.25s ease;
         }
 
         .reader-header h1 {
-            font-size: 1rem;
+            font-size: 1.05rem;
             margin: 0;
-            font-weight: normal;
+            font-weight: 500;
             flex: 1;
+            min-width: 0;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+            color: var(--reader-text);
+        }
+
+        .reader-header h1 .subtitle {
+            color: var(--reader-text-muted);
+            font-weight: 400;
+            font-size: 0.85rem;
+            margin-left: 0.5rem;
         }
 
         .reader-controls {
             display: flex;
             gap: 0.5rem;
             align-items: center;
+            flex-wrap: nowrap;
         }
 
+        .reader-btn,
         .reader-controls button,
         .reader-controls select {
-            background: #333;
-            color: #fff;
-            border: 1px solid #555;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
+            background: var(--reader-surface);
+            color: var(--reader-text);
+            border: 1px solid var(--reader-border);
+            padding: 0 0.85rem;
+            height: var(--reader-control-h);
+            border-radius: var(--reader-radius-sm);
             cursor: pointer;
             font-size: 0.9rem;
+            font-family: inherit;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            transition: background 0.15s ease, border-color 0.15s ease;
         }
 
+        .reader-btn:hover,
         .reader-controls button:hover,
         .reader-controls select:hover {
-            background: #444;
+            background: var(--reader-surface-hover);
+            border-color: rgba(255, 255, 255, 0.18);
         }
 
-        .reader-controls button:disabled {
-            opacity: 0.5;
+        .reader-btn:focus-visible,
+        .reader-controls button:focus-visible,
+        .reader-controls select:focus-visible {
+            outline: none;
+            box-shadow: var(--reader-focus-ring);
+        }
+
+        .reader-controls button:disabled,
+        .reader-btn:disabled {
+            opacity: 0.4;
             cursor: not-allowed;
+        }
+
+        .reader-btn--icon {
+            padding: 0;
+            width: var(--reader-control-h);
+        }
+
+        .reader-btn--primary {
+            background: var(--reader-accent);
+            border-color: var(--reader-accent);
+            color: #fff;
+        }
+
+        .reader-btn--primary:hover {
+            background: var(--reader-accent-hover);
+            border-color: var(--reader-accent-hover);
         }
 
         .page-info {
             font-size: 0.9rem;
-            color: #aaa;
+            color: var(--reader-text-muted);
             white-space: nowrap;
+            font-variant-numeric: tabular-nums;
         }
 
         .reader-content {
@@ -92,6 +185,33 @@
             align-items: center;
             overflow: hidden;
             position: relative;
+            user-select: none;
+        }
+
+        /* Tap zones (manga mode only). Sit above the page image but below
+           the chrome so clicks paginate by default and middle-tap toggles. */
+        .tap-zones {
+            position: absolute;
+            inset: 0;
+            display: none;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .reader-mode-manga .tap-zones {
+            display: flex;
+        }
+
+        .tap-zone {
+            flex: 1;
+            pointer-events: auto;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .tap-zone--middle {
+            flex: 0 0 24%;
+            cursor: default;
         }
 
         .page-image {
@@ -99,48 +219,158 @@
             max-height: 100%;
             object-fit: contain;
             display: block;
+            transition: opacity 0.15s ease;
         }
 
-        .loading {
-            color: #fff;
-            font-size: 1.2rem;
+        .page-image.page-fade {
+            opacity: 0;
         }
 
-        .error {
-            color: #f44;
-            font-size: 1.2rem;
+        .loading-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            color: var(--reader-text);
             padding: 2rem;
             text-align: center;
         }
 
-        .reader-footer {
-            background: rgba(0, 0, 0, 0.9);
-            padding: 1rem;
-            border-top: 1px solid #333;
+        .loading-state .reader-spinner {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            border: 3px solid rgba(255, 255, 255, 0.15);
+            border-top-color: var(--reader-accent);
+            animation: reader-spin 0.9s linear infinite;
+        }
+
+        @keyframes reader-spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading {
+            color: var(--reader-text);
+            font-size: 1.05rem;
             display: flex;
-            justify-content: center;
+            flex-direction: column;
+            align-items: center;
             gap: 1rem;
         }
 
-        .reader-footer button {
-            background: #333;
-            color: #fff;
-            border: 1px solid #555;
-            padding: 0.75rem 1.5rem;
-            border-radius: 4px;
-            cursor: pointer;
+        .loading::before {
+            content: '';
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: 3px solid rgba(255, 255, 255, 0.15);
+            border-top-color: var(--reader-accent);
+            animation: reader-spin 0.9s linear infinite;
+        }
+
+        .error {
+            color: var(--reader-text);
             font-size: 1rem;
+            padding: 2rem;
+            text-align: center;
+            max-width: 460px;
+            background: var(--reader-bg-elevated);
+            border: 1px solid var(--reader-border);
+            border-radius: var(--reader-radius);
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            align-items: center;
         }
 
-        .reader-footer button:hover {
-            background: #444;
+        .error .error-icon {
+            font-size: 2rem;
         }
 
-        .reader-footer button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
+        .error .error-title {
+            font-weight: 600;
+            font-size: 1.1rem;
         }
 
+        .error .error-message {
+            color: var(--reader-text-muted);
+            font-size: 0.95rem;
+        }
+
+        .reader-footer {
+            background: var(--reader-bg-elevated);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            padding: 0.65rem 1rem;
+            border-top: 1px solid var(--reader-border);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.75rem;
+            transition: opacity 0.25s ease, transform 0.25s ease;
+        }
+
+        .reader-footer .reader-btn {
+            height: var(--reader-control-h);
+        }
+
+        /* Page slider — replaces the tiny <select>. Grows to fill the footer
+           on desktop, hugs the controls on mobile. */
+        .page-slider-wrap {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            max-width: 640px;
+        }
+
+        .page-slider {
+            flex: 1;
+            -webkit-appearance: none;
+            appearance: none;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.12);
+            border-radius: 999px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        .page-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--reader-accent);
+            border: 2px solid #fff;
+            cursor: grab;
+            transition: transform 0.1s ease;
+        }
+
+        .page-slider::-webkit-slider-thumb:active { cursor: grabbing; transform: scale(1.15); }
+
+        .page-slider::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--reader-accent);
+            border: 2px solid #fff;
+            cursor: grab;
+        }
+
+        .page-slider:focus-visible {
+            box-shadow: var(--reader-focus-ring);
+            border-radius: 999px;
+        }
+
+        .reader-mode-webcomic .reader-footer .reader-nav-btn,
+        .reader-mode-webcomic .reader-footer .page-slider-wrap {
+            display: none;
+        }
+
+        /* Auto-hide chrome — applies in fullscreen AND after idle in windowed
+           mode. The container hovers/taps reset the timer (handled in JS). */
         .fullscreen-mode {
             position: fixed;
             top: 0;
@@ -150,36 +380,58 @@
             z-index: 9999;
         }
 
-        .fullscreen-mode .reader-header,
-        .fullscreen-mode .reader-footer {
-            transition: opacity 0.3s;
-        }
-
-        .fullscreen-mode.auto-hide .reader-header,
-        .fullscreen-mode.auto-hide .reader-footer {
+        .reader-container.chrome-hidden .reader-header {
             opacity: 0;
             pointer-events: none;
+            transform: translateY(-100%);
         }
 
-        .fullscreen-mode.auto-hide:hover .reader-header,
-        .fullscreen-mode.auto-hide:hover .reader-footer {
+        .reader-container.chrome-hidden .reader-footer {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateY(100%);
+        }
+
+        /* "Show controls" hint that appears once when chrome auto-hides. */
+        .chrome-hint {
+            position: absolute;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--reader-bg-elevated);
+            backdrop-filter: blur(10px);
+            color: var(--reader-text-muted);
+            border: 1px solid var(--reader-border);
+            border-radius: 999px;
+            padding: 0.3rem 0.9rem;
+            font-size: 0.8rem;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            z-index: 1002;
+        }
+
+        .reader-container.chrome-hidden .chrome-hint.show-once {
             opacity: 1;
-            pointer-events: all;
         }
 
-        /* Keyboard shortcuts help */
+        /* Keyboard shortcuts help — uses reader tokens for cohesion. */
         .shortcuts-help {
             position: fixed;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.95);
-            border: 1px solid #555;
-            border-radius: 8px;
-            padding: 2rem;
+            background: var(--reader-bg-elevated);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid var(--reader-border);
+            border-radius: var(--reader-radius);
+            padding: 1.5rem 1.75rem;
             z-index: 10000;
-            max-width: 400px;
+            max-width: 420px;
+            width: calc(100% - 2rem);
             display: none;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
         }
 
         .shortcuts-help.show {
@@ -188,38 +440,103 @@
 
         .shortcuts-help h2 {
             margin-top: 0;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            color: var(--reader-text);
         }
 
         .shortcuts-help ul {
             list-style: none;
             padding: 0;
+            margin: 0;
         }
 
         .shortcuts-help li {
-            padding: 0.5rem 0;
+            padding: 0.45rem 0;
             display: flex;
             justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            color: var(--reader-text-muted);
+            font-size: 0.9rem;
         }
 
         .shortcuts-help kbd {
-            background: #333;
-            padding: 0.25rem 0.5rem;
-            border-radius: 3px;
-            font-family: monospace;
+            background: var(--reader-surface);
+            color: var(--reader-text);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.8rem;
+            border: 1px solid var(--reader-border);
+        }
+
+        .shortcuts-help-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.55);
+            z-index: 9999;
+            display: none;
+        }
+
+        .shortcuts-help-backdrop.show {
+            display: block;
         }
 
         .close-help {
             position: absolute;
-            top: 1rem;
-            right: 1rem;
+            top: 0.6rem;
+            right: 0.6rem;
             background: transparent;
             border: none;
-            color: #fff;
+            color: var(--reader-text-muted);
             font-size: 1.5rem;
             cursor: pointer;
             padding: 0;
             width: 2rem;
             height: 2rem;
+            line-height: 1;
+            border-radius: 4px;
+        }
+
+        .close-help:hover {
+            color: var(--reader-text);
+            background: var(--reader-surface);
+        }
+
+        /* "Jump to page" inline prompt (triggered by G shortcut). */
+        .goto-prompt {
+            position: fixed;
+            top: 30%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--reader-bg-elevated);
+            backdrop-filter: blur(14px);
+            border: 1px solid var(--reader-border);
+            border-radius: var(--reader-radius);
+            padding: 1rem 1.25rem;
+            z-index: 10000;
+            display: none;
+            gap: 0.5rem;
+            align-items: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+        }
+
+        .goto-prompt.show { display: flex; }
+
+        .goto-prompt input {
+            background: var(--reader-surface);
+            border: 1px solid var(--reader-border);
+            color: var(--reader-text);
+            border-radius: var(--reader-radius-sm);
+            padding: 0.4rem 0.6rem;
+            font-size: 0.95rem;
+            width: 100px;
+        }
+
+        .goto-prompt input:focus-visible {
+            outline: none;
+            box-shadow: var(--reader-focus-ring);
         }
 
         /* Continuous scroll mode styles */
@@ -227,13 +544,12 @@
             overflow-y: auto;
             overflow-x: hidden;
             align-items: flex-start;
-            /* Hide scrollbar for Chrome, Safari and Opera */
-            scrollbar-width: none; /* Firefox */
-            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;
+            -ms-overflow-style: none;
         }
-        
+
         .reader-content.webcomic-mode::-webkit-scrollbar {
-            display: none; /* Chrome, Safari and Opera */
+            display: none;
         }
 
         .webcomic-container {
@@ -253,27 +569,13 @@
         .loading-indicator {
             padding: 2rem;
             text-align: center;
-            color: #aaa;
+            color: var(--reader-text-muted);
         }
 
-        .mode-toggle {
-            background: #444;
-            color: #fff;
-            border: 1px solid #666;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.9rem;
-        }
-
-        .mode-toggle:hover {
-            background: #555;
-        }
-
-        /* Toast notification styles */
+        /* Toast notification styles — reader-scoped. */
         .toast-container {
             position: fixed;
-            bottom: 20px;
+            bottom: 80px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 10001;
@@ -284,16 +586,18 @@
         }
 
         .toast {
-            background: rgba(0, 0, 0, 0.9);
-            color: #fff;
-            padding: 12px 20px;
-            border-radius: 6px;
+            background: var(--reader-bg-elevated);
+            backdrop-filter: blur(10px);
+            color: var(--reader-text);
+            padding: 12px 18px;
+            border-radius: var(--reader-radius-sm);
             font-size: 14px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
             opacity: 0;
             transform: translateY(20px);
             transition: opacity 0.3s, transform 0.3s;
             pointer-events: auto;
+            border-left: 4px solid var(--reader-accent);
         }
 
         .toast.show {
@@ -302,22 +606,24 @@
         }
 
         .toast.info {
-            border-left: 4px solid #3b82f6;
+            border-left-color: #3b82f6;
         }
 
         .toast.error {
-            border-left: 4px solid #ef4444;
+            border-left-color: #ef4444;
         }
 
         .toast.success {
-            border-left: 4px solid #10b981;
+            border-left-color: #10b981;
+        }
+
         /* Comic transition separator */
         .comic-transition {
             width: 100%;
             padding: 1.5rem 1rem;
             background: linear-gradient(180deg, #000 0%, #111 50%, #000 100%);
-            border-top: 1px solid #222;
-            border-bottom: 1px solid #222;
+            border-top: 1px solid var(--reader-border);
+            border-bottom: 1px solid var(--reader-border);
             text-align: center;
             display: flex;
             flex-direction: column;
@@ -329,7 +635,7 @@
         .comic-transition-title {
             font-size: 1.2rem;
             font-weight: 600;
-            color: #888;
+            color: var(--reader-text-muted);
             margin: 0;
             text-transform: uppercase;
             letter-spacing: 0.1em;
@@ -337,13 +643,13 @@
 
         .comic-transition-subtitle {
             font-size: 0.85rem;
-            color: #666;
+            color: var(--reader-text-dim);
             margin: 0;
         }
 
         .comic-transition-arrow {
             font-size: 1.5rem;
-            color: #444;
+            color: var(--reader-text-dim);
         }
 
         .comic-transition-info {
@@ -352,66 +658,113 @@
             gap: 0.5rem;
             padding: 1rem 1.5rem;
             background: rgba(0,0,0,0.3);
-            border-radius: 4px;
+            border-radius: var(--reader-radius-sm);
             min-width: 250px;
             max-width: 90%;
         }
 
         .comic-transition-leaving {
-            color: #666;
+            color: var(--reader-text-dim);
             font-size: 0.85rem;
         }
 
         .comic-transition-entering {
-            color: #999;
+            color: var(--reader-text-muted);
             font-size: 0.95rem;
             font-weight: 600;
+        }
+
+        /* Mobile tweaks: less padding, hide non-essential controls. */
+        @media (max-width: 600px) {
+            .reader-header { padding: 0.4rem 0.6rem; gap: 0.4rem; }
+            .reader-controls { gap: 0.35rem; }
+            .reader-controls .hide-on-mobile { display: none; }
+            .reader-footer { padding: 0.5rem 0.6rem; gap: 0.5rem; }
+            .reader-footer .reader-btn span.btn-label { display: none; }
+            .page-slider-wrap { gap: 0.4rem; }
+            .shortcuts-help { padding: 1.25rem; }
         }
     </style>
 </head>
 <body class="reader-mode">
-    <div class="reader-container" id="readerContainer">
-        <div class="reader-header">
-            <button onclick="goBack()" title="Back to files">← Back</button>
-            <h1 id="comicTitle">Loading...</h1>
+    <div class="reader-container reader-mode-manga" id="readerContainer" role="application" aria-label="Comic reader">
+        <div class="reader-progress" aria-hidden="true">
+            <div class="reader-progress-bar" id="readerProgressBar"></div>
+        </div>
+        <div class="chrome-hint show-once" id="chromeHint" aria-hidden="true">Move mouse or tap to show controls</div>
+        <div class="reader-header" id="readerHeader">
+            <button class="reader-btn" onclick="goBack()" title="Back to library" aria-label="Back to library">
+                <span aria-hidden="true">←</span>
+                <span class="btn-label">Back</span>
+            </button>
+            <h1 id="comicTitle">Loading…</h1>
             <div class="reader-controls">
-                <button class="mode-toggle" onclick="toggleReadingMode()" id="modeToggleBtn" title="Toggle reading mode">Mode: Manga</button>
-                <span class="page-info" id="pageInfo">Page 1 / 1</span>
-                <select id="pageSelect" name="pageSelect" onchange="goToPage(this.value)">
-                    <option value="1">Page 1</option>
-                </select>
-                <button onclick="toggleFullscreen()" id="fullscreenBtn">Fullscreen</button>
-                <button onclick="showHelp()" title="Keyboard shortcuts">?</button>
+                <button class="reader-btn hide-on-mobile" onclick="toggleReadingDirection()" id="directionToggleBtn" title="Toggle reading direction" aria-label="Toggle reading direction">
+                    <span id="directionToggleLabel">LTR</span>
+                </button>
+                <button class="reader-btn" onclick="toggleReadingMode()" id="modeToggleBtn" title="Toggle reading mode (M)" aria-label="Toggle reading mode">
+                    <span id="modeToggleLabel">Manga</span>
+                </button>
+                <span class="page-info hide-on-mobile" id="pageInfo" aria-live="polite">Page 1 / 1</span>
+                <button class="reader-btn reader-btn--icon" onclick="toggleFullscreen()" id="fullscreenBtn" title="Toggle fullscreen (F)" aria-label="Toggle fullscreen">
+                    <span id="fullscreenIcon" aria-hidden="true">⛶</span>
+                </button>
+                <button class="reader-btn reader-btn--icon" onclick="showHelp()" title="Keyboard shortcuts (?)" aria-label="Show keyboard shortcuts">?</button>
             </div>
         </div>
-        
+
         <div class="reader-content" id="readerContent">
-            <div class="loading">Loading comic...</div>
+            <div class="loading-state"><div class="reader-spinner" aria-hidden="true"></div><div>Loading comic…</div></div>
+            <div class="tap-zones" id="tapZones" aria-hidden="true">
+                <div class="tap-zone tap-zone--left" id="tapZoneLeft"></div>
+                <div class="tap-zone tap-zone--middle" id="tapZoneMiddle"></div>
+                <div class="tap-zone tap-zone--right" id="tapZoneRight"></div>
+            </div>
         </div>
-        
-        <div class="reader-footer">
-            <button id="prevBtn" onclick="previousPage()" disabled>← Previous</button>
-            <button onclick="toggleFullscreen()">Toggle Fullscreen</button>
-            <button id="nextBtn" onclick="nextPage()" disabled>Next →</button>
+
+        <div class="reader-footer" id="readerFooter">
+            <button id="prevBtn" class="reader-btn reader-nav-btn" onclick="previousPage()" aria-label="Previous page">
+                <span aria-hidden="true">←</span>
+                <span class="btn-label">Previous</span>
+            </button>
+            <div class="page-slider-wrap reader-nav-btn">
+                <span class="page-info" id="footerPageInfo" aria-hidden="true">1 / 1</span>
+                <input type="range" class="page-slider" id="pageSlider" min="1" max="1" value="1"
+                       aria-label="Jump to page" oninput="handleSliderInput(event)" onchange="handleSliderChange(event)">
+            </div>
+            <button id="nextBtn" class="reader-btn reader-nav-btn reader-btn--primary" onclick="nextPage()" aria-label="Next page">
+                <span class="btn-label">Next</span>
+                <span aria-hidden="true">→</span>
+            </button>
         </div>
     </div>
 
-    <div class="shortcuts-help" id="shortcutsHelp">
-        <button class="close-help" onclick="hideHelp()">×</button>
-        <h2>Keyboard Shortcuts</h2>
+    <div class="shortcuts-help-backdrop" id="shortcutsHelpBackdrop" onclick="hideHelp()"></div>
+    <div class="shortcuts-help" id="shortcutsHelp" role="dialog" aria-modal="true" aria-labelledby="shortcutsHelpTitle" tabindex="-1">
+        <button class="close-help" onclick="hideHelp()" aria-label="Close help">×</button>
+        <h2 id="shortcutsHelpTitle">Keyboard Shortcuts</h2>
         <ul>
-            <li><span>Previous Page</span> <kbd>←</kbd> or <kbd>A</kbd></li>
-            <li><span>Next Page</span> <kbd>→</kbd> or <kbd>D</kbd></li>
+            <li><span>Previous Page</span> <kbd>←</kbd> / <kbd>A</kbd> / <kbd>Shift</kbd>+<kbd>Space</kbd></li>
+            <li><span>Next Page</span> <kbd>→</kbd> / <kbd>D</kbd> / <kbd>Space</kbd></li>
             <li><span>First Page</span> <kbd>Home</kbd></li>
             <li><span>Last Page</span> <kbd>End</kbd></li>
+            <li><span>Jump to Page</span> <kbd>G</kbd></li>
             <li><span>Toggle Reading Mode</span> <kbd>M</kbd></li>
+            <li><span>Toggle Reading Direction</span> <kbd>R</kbd></li>
             <li><span>Toggle Fullscreen</span> <kbd>F</kbd></li>
             <li><span>Show Help</span> <kbd>?</kbd></li>
             <li><span>Exit Reader</span> <kbd>Esc</kbd></li>
         </ul>
     </div>
 
-    <div class="toast-container" id="toastContainer"></div>
+    <div class="goto-prompt" id="gotoPrompt" role="dialog" aria-modal="true" aria-label="Jump to page">
+        <label for="gotoPromptInput">Go to page:</label>
+        <input type="number" id="gotoPromptInput" min="1" inputmode="numeric">
+        <button class="reader-btn reader-btn--primary" onclick="submitGotoPage()">Go</button>
+        <button class="reader-btn" onclick="hideGotoPrompt()">Cancel</button>
+    </div>
+
+    <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="false"></div>
 
     <script>
         let currentPage = 1;
@@ -432,11 +785,32 @@
         let isScrolling = false; // Whether a scrollTo() operation is in progress
         let prevScrollPosition = 0; // Track scroll position to determine direction
         let scrollDirection = 'forward'; // 'forward' or 'backward'
+        let readingDirection = 'ltr'; // 'ltr' or 'rtl'
+        let chromeHidden = false;
+        let chromeIdleTimer = null;
+        const CHROME_IDLE_MS = 3000;
+        let chromeHintShown = false;
+        // Cache of preloaded manga-mode page Blob URLs keyed by page number.
+        // Lets us flip pages instantly instead of waiting on the network.
+        const mangaPageCache = new Map();
+        const MANGA_PRELOAD_AHEAD = 2;
+        const MANGA_PRELOAD_BEHIND = 1;
 
         // Get parameters from URL
         function getQueryParam(param) {
             const urlParams = new URLSearchParams(window.location.search);
             return urlParams.get(param);
+        }
+
+        function buildFetchOptions(extra) {
+            const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+            const opts = Object.assign({ credentials: 'include' }, extra || {});
+            if (!isAutheliaAuth && token) {
+                opts.headers = Object.assign({}, opts.headers || {}, {
+                    'Authorization': `Bearer ${token}`
+                });
+            }
+            return opts;
         }
 
         // Initialize reader
@@ -456,21 +830,18 @@
                 return;
             }
 
+            // Restore saved reading direction (per-user, all comics).
             try {
-                // Prepare fetch options with proper authentication
-                const fetchOptions = {
-                    credentials: 'include' // Important for Authelia cookies
-                };
-                
-                // Add Authorization header only for JWT authentication
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
-                }
+                const savedDir = localStorage.getItem('readingDirection');
+                if (savedDir === 'rtl' || savedDir === 'ltr') readingDirection = savedDir;
+            } catch (_e) { /* localStorage may be unavailable */ }
 
+            try {
                 // Get comic info
-                const response = await fetch(`/api/ComicReader/info?filePath=${encodeURIComponent(comicFilePath)}`, fetchOptions);
+                const response = await fetch(
+                    `/api/ComicReader/info?filePath=${encodeURIComponent(comicFilePath)}`,
+                    buildFetchOptions()
+                );
 
                 if (!response.ok) {
                     if (response.status === 401) {
@@ -483,28 +854,27 @@
                 const data = await response.json();
                 totalPages = data.pageCount;
                 currentComicName = data.fileName;
-                
+
                 document.getElementById('comicTitle').textContent = data.fileName;
                 document.title = `${data.fileName} - Comic Reader`;
-                
-                // Populate page select
-                const pageSelect = document.getElementById('pageSelect');
-                pageSelect.innerHTML = '';
-                for (let i = 1; i <= totalPages; i++) {
-                    const option = document.createElement('option');
-                    option.value = i;
-                    option.textContent = `Page ${i}`;
-                    pageSelect.appendChild(option);
+
+                // Populate page slider range
+                const slider = document.getElementById('pageSlider');
+                if (slider) {
+                    slider.max = String(totalPages);
+                    slider.min = '1';
+                    slider.value = '1';
                 }
 
                 // Load saved reading mode preference
                 readingMode = localStorage.getItem('readingMode') || 'manga';
                 updateModeUI();
+                updateDirectionUI();
 
                 // Check if URL hash indicates we should go to last page
                 const urlHash = window.location.hash;
                 let initialPage = 1;
-                
+
                 if (urlHash === '#lastpage') {
                     // Navigate to last page (for previous comic navigation)
                     initialPage = totalPages;
@@ -515,7 +885,7 @@
                     const savedPage = await loadReadingProgress();
                     initialPage = Math.min(savedPage, totalPages); // Ensure page is within bounds
                 }
-                
+
                 currentPage = initialPage;
 
                 // Load first page or all pages depending on mode
@@ -527,6 +897,10 @@
 
                 // Prefetch next comic info for seamless transition
                 await prefetchNextComic();
+
+                // Wire up interactive UI helpers
+                setupTapZones();
+                setupChromeAutoHide();
             } catch (error) {
                 console.error('Error initializing reader:', error);
                 showError('Failed to load comic: ' + error.message);
@@ -537,20 +911,24 @@
         async function toggleReadingMode() {
             // Store the current page before switching modes
             const pageBeforeSwitch = currentPage;
-            
+
             readingMode = readingMode === 'manga' ? 'webcomic' : 'manga';
             localStorage.setItem('readingMode', readingMode);
             updateModeUI();
-            
+
             // Reload content in new mode
             const content = document.getElementById('readerContent');
-            content.innerHTML = '<div class="loading">Switching mode...</div>';
-            
+            content.innerHTML = '<div class="loading-state"><div class="reader-spinner" aria-hidden="true"></div><div>Switching mode…</div></div>'
+                + tapZonesHtml();
+
             // Reset state for mode switch
             isScrolling = true;
             allImagesLoaded = false;
             prevScrollPosition = 0;
-            
+            // Clear manga page cache when switching out of manga mode so we
+            // don't hold blob URLs for pages we won't reuse.
+            clearMangaPageCache();
+
             if (readingMode === 'webcomic') {
                 await loadWebcomicMode(pageBeforeSwitch);
             } else {
@@ -558,28 +936,53 @@
             }
         }
 
+        function tapZonesHtml() {
+            return '<div class="tap-zones" id="tapZones" aria-hidden="true">'
+                + '<div class="tap-zone tap-zone--left" id="tapZoneLeft"></div>'
+                + '<div class="tap-zone tap-zone--middle" id="tapZoneMiddle"></div>'
+                + '<div class="tap-zone tap-zone--right" id="tapZoneRight"></div>'
+                + '</div>';
+        }
+
         // Update UI based on reading mode
         function updateModeUI() {
-            const modeBtn = document.getElementById('modeToggleBtn');
+            const modeLabel = document.getElementById('modeToggleLabel');
             const content = document.getElementById('readerContent');
-            const footer = document.querySelector('.reader-footer');
+            const footer = document.getElementById('readerFooter');
             const pageInfo = document.getElementById('pageInfo');
-            const pageSelect = document.getElementById('pageSelect');
-            
+            const container = document.getElementById('readerContainer');
+
             if (readingMode === 'webcomic') {
-                modeBtn.textContent = 'Mode: Webcomic';
+                if (modeLabel) modeLabel.textContent = 'Webcomic';
                 content.classList.add('webcomic-mode');
+                container.classList.remove('reader-mode-manga');
+                container.classList.add('reader-mode-webcomic');
+                // The footer only contains the manga slider / nav; hide it
+                // entirely in webcomic mode to avoid an empty bar.
                 footer.style.display = 'none';
-                // Keep page info visible in webcomic mode to show current page
-                pageInfo.style.display = 'inline';
-                pageSelect.style.display = 'none';
+                if (pageInfo) pageInfo.style.display = 'inline';
             } else {
-                modeBtn.textContent = 'Mode: Manga';
+                if (modeLabel) modeLabel.textContent = 'Manga';
                 content.classList.remove('webcomic-mode');
+                container.classList.remove('reader-mode-webcomic');
+                container.classList.add('reader-mode-manga');
                 footer.style.display = 'flex';
-                pageInfo.style.display = 'inline';
-                pageSelect.style.display = 'inline';
+                if (pageInfo) pageInfo.style.display = 'inline';
             }
+        }
+
+        function updateDirectionUI() {
+            const lbl = document.getElementById('directionToggleLabel');
+            if (lbl) lbl.textContent = readingDirection === 'rtl' ? 'RTL' : 'LTR';
+            const btn = document.getElementById('directionToggleBtn');
+            if (btn) btn.title = readingDirection === 'rtl' ? 'Reading right-to-left (R)' : 'Reading left-to-right (R)';
+        }
+
+        function toggleReadingDirection() {
+            readingDirection = readingDirection === 'ltr' ? 'rtl' : 'ltr';
+            try { localStorage.setItem('readingDirection', readingDirection); } catch (_e) { /* noop */ }
+            updateDirectionUI();
+            showMessage(`Reading direction: ${readingDirection.toUpperCase()}`, 'info');
         }
 
         // Load pages in continuous scroll mode with buffering (Kavita-style)
@@ -1127,7 +1530,91 @@
             return div.innerHTML;
         }
 
-        // Load a specific page
+        // Reverse the meaning of prev/next when reading right-to-left so the
+        // arrows / tap-zones / footer buttons feel natural for manga.
+        function effectivePrev() {
+            return readingDirection === 'rtl' ? _navNext() : _navPrev();
+        }
+        function effectiveNext() {
+            return readingDirection === 'rtl' ? _navPrev() : _navNext();
+        }
+
+        // Internal "go one page back / forward" helpers shared by prev/next
+        // buttons, keyboard shortcuts, and tap zones.
+        async function _navPrev() {
+            if (currentPage > 1) {
+                loadPage(currentPage - 1);
+            } else if (readingMode === 'manga') {
+                await navigateToPreviousComic();
+            }
+        }
+        async function _navNext() {
+            if (currentPage < totalPages) {
+                loadPage(currentPage + 1);
+            } else if (readingMode === 'manga') {
+                await navigateToNextComic();
+            }
+        }
+
+        // Fetch a manga page Blob, caching the resulting Blob URL so subsequent
+        // visits / preloads are instant. Returns the blob URL on success or
+        // null on failure (the caller handles UI / error messages).
+        async function fetchMangaPageUrl(pageNum) {
+            if (pageNum < 1 || pageNum > totalPages) return null;
+            if (mangaPageCache.has(pageNum)) return mangaPageCache.get(pageNum);
+            try {
+                const response = await fetch(
+                    `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
+                    buildFetchOptions()
+                );
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        window.location.href = '/login.html';
+                    }
+                    return null;
+                }
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                mangaPageCache.set(pageNum, url);
+                return url;
+            } catch (e) {
+                console.error('fetchMangaPageUrl failed for page', pageNum, e);
+                return null;
+            }
+        }
+
+        function clearMangaPageCache() {
+            for (const url of mangaPageCache.values()) {
+                try { URL.revokeObjectURL(url); } catch (_e) { /* noop */ }
+            }
+            mangaPageCache.clear();
+        }
+
+        // Trim the cache so we only keep ~6 nearby pages around `centerPage`.
+        function trimMangaPageCache(centerPage) {
+            const keep = MANGA_PRELOAD_AHEAD + MANGA_PRELOAD_BEHIND + 1;
+            if (mangaPageCache.size <= keep + 4) return; // small slack
+            for (const key of Array.from(mangaPageCache.keys())) {
+                if (Math.abs(key - centerPage) > MANGA_PRELOAD_AHEAD + MANGA_PRELOAD_BEHIND + 1) {
+                    try { URL.revokeObjectURL(mangaPageCache.get(key)); } catch (_e) { /* noop */ }
+                    mangaPageCache.delete(key);
+                }
+            }
+        }
+
+        function preloadAdjacentMangaPages(pageNum) {
+            const targets = [];
+            for (let i = 1; i <= MANGA_PRELOAD_AHEAD; i++) targets.push(pageNum + i);
+            for (let i = 1; i <= MANGA_PRELOAD_BEHIND; i++) targets.push(pageNum - i);
+            for (const p of targets) {
+                if (p >= 1 && p <= totalPages && !mangaPageCache.has(p)) {
+                    // Fire-and-forget; errors are logged inside fetchMangaPageUrl.
+                    fetchMangaPageUrl(p);
+                }
+            }
+        }
+
+        // Load a specific page (manga mode)
         async function loadPage(pageNum) {
             if (pageNum < 1 || pageNum > totalPages) {
                 return;
@@ -1137,48 +1624,40 @@
             updateUI();
 
             const content = document.getElementById('readerContent');
-            content.innerHTML = '<div class="loading">Loading page...</div>';
+            // Only show the spinner if we'll need to actually fetch — cached
+            // pages should appear instantly.
+            if (!mangaPageCache.has(pageNum)) {
+                content.innerHTML = '<div class="loading-state"><div class="reader-spinner" aria-hidden="true"></div><div>Loading page…</div></div>'
+                    + tapZonesHtml();
+                setupTapZones();
+            }
 
             try {
-                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
-                
-                // Prepare fetch options with proper authentication
-                const fetchOptions = {
-                    credentials: 'include' // Important for Authelia cookies
-                };
-                
-                // Add Authorization header only for JWT authentication
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
-                }
-                
-                const response = await fetch(
-                    `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
-                    fetchOptions
-                );
-
-                if (!response.ok) {
-                    if (response.status === 401) {
-                        window.location.href = '/login.html';
-                        return;
-                    }
+                const imageUrl = await fetchMangaPageUrl(pageNum);
+                if (!imageUrl) {
                     throw new Error('Failed to load page');
                 }
 
-                const blob = await response.blob();
-                const imageUrl = URL.createObjectURL(blob);
-                
-                content.innerHTML = `<img src="${imageUrl}" class="page-image" alt="Page ${pageNum}">`;
-                
+                content.innerHTML = `<img src="${imageUrl}" class="page-image page-fade" alt="Page ${pageNum}">`
+                    + tapZonesHtml();
+                setupTapZones();
+                // Fade in once the browser has painted the new src.
+                requestAnimationFrame(() => {
+                    const img = content.querySelector('.page-image');
+                    if (img) img.classList.remove('page-fade');
+                });
+
                 // Save reading progress
-                await saveReadingProgress(pageNum);
-                
+                saveReadingProgress(pageNum);
+
                 // Mark as read when reaching last page in manga mode
                 if (pageNum === totalPages && !hasMarkedAsRead) {
                     await markFileAsRead();
                 }
+
+                // Prefetch neighbours so the next page change is instant.
+                preloadAdjacentMangaPages(pageNum);
+                trimMangaPageCache(pageNum);
             } catch (error) {
                 console.error('Error loading page:', error);
                 showError('Failed to load page: ' + error.message);
@@ -1187,9 +1666,19 @@
 
         // Update UI elements
         function updateUI() {
-            document.getElementById('pageInfo').textContent = `Page ${currentPage} / ${totalPages}`;
-            document.getElementById('pageSelect').value = currentPage;
-            
+            const pageInfoText = `Page ${currentPage} / ${totalPages}`;
+            const pageInfo = document.getElementById('pageInfo');
+            if (pageInfo) pageInfo.textContent = pageInfoText;
+            const footerPageInfo = document.getElementById('footerPageInfo');
+            if (footerPageInfo) footerPageInfo.textContent = `${currentPage} / ${totalPages}`;
+            const slider = document.getElementById('pageSlider');
+            if (slider) slider.value = String(currentPage);
+            const progressBar = document.getElementById('readerProgressBar');
+            if (progressBar && totalPages > 0) {
+                const pct = Math.min(100, Math.max(0, (currentPage / totalPages) * 100));
+                progressBar.style.width = pct + '%';
+            }
+
             // In manga mode, keep navigation buttons enabled at boundaries to allow comic navigation
             // In webcomic mode, buttons are hidden anyway by updateModeUI()
             if (readingMode === 'manga') {
@@ -1203,55 +1692,46 @@
             }
         }
 
-        // Navigation functions
-        async function previousPage() {
-            if (currentPage > 1) {
-                loadPage(currentPage - 1);
-            } else if (currentPage === 1 && readingMode === 'manga') {
-                // On first page in manga mode, try to go to previous comic
-                await navigateToPreviousComic();
+        // Navigation functions (wired to footer Prev/Next buttons in the
+        // visible reading direction).
+        async function previousPage() { return effectivePrev(); }
+        async function nextPage() { return effectiveNext(); }
+
+        // Slider handlers — `input` is fired while dragging (live page-info
+        // update), `change` is fired on release and triggers the actual load.
+        function handleSliderInput(event) {
+            const v = parseInt(event.target.value, 10);
+            if (!isNaN(v)) {
+                const footerPageInfo = document.getElementById('footerPageInfo');
+                if (footerPageInfo) footerPageInfo.textContent = `${v} / ${totalPages}`;
+            }
+        }
+        function handleSliderChange(event) {
+            const v = parseInt(event.target.value, 10);
+            if (!isNaN(v)) {
+                if (readingMode === 'manga') {
+                    loadPage(v);
+                } else {
+                    const img = document.querySelector(`img[data-page="${v}"]`);
+                    if (img) img.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
             }
         }
 
-        async function nextPage() {
-            if (currentPage < totalPages) {
-                loadPage(currentPage + 1);
-            } else if (currentPage === totalPages && readingMode === 'manga') {
-                // On last page in manga mode, try to go to next comic
-                await navigateToNextComic();
-            }
-        }
-        
-        // Navigate to the next comic in the list
+        // Navigate to the next comic in the list. Uses location.replace so
+        // history.back() from anywhere inside a multi-comic reading session
+        // still returns to the page the user came from originally.
         async function navigateToNextComic() {
             try {
-                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
-                const fetchOptions = {
-                    credentials: 'include'
-                };
-                
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
-                }
-                
                 const response = await fetch(
                     `/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=next`,
-                    fetchOptions
+                    buildFetchOptions()
                 );
-
-                if (!response.ok) {
-                    throw new Error('Failed to fetch next comic info');
-                }
-                
+                if (!response.ok) throw new Error('Failed to fetch next comic info');
                 const nextInfo = await response.json();
-                
                 if (nextInfo.hasAdjacent && nextInfo.filePath) {
-                    // Navigate to the first page of the next comic
-                    window.location.href = `/reader.html?file=${encodeURIComponent(nextInfo.filePath)}`;
+                    window.location.replace(`/reader.html?file=${encodeURIComponent(nextInfo.filePath)}`);
                 } else {
-                    // No next comic available
                     showMessage('You are at the last comic in the list', 'info');
                 }
             } catch (error) {
@@ -1259,50 +1739,20 @@
                 showMessage('Failed to load next comic', 'error');
             }
         }
-        
-        // Navigate to the previous comic in the list
+
+        // Navigate to the previous comic in the list. Uses location.replace
+        // so a single Back press still leaves the reader.
         async function navigateToPreviousComic() {
             try {
-                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
-                const fetchOptions = {
-                    credentials: 'include'
-                };
-                
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
-                }
-                
                 const response = await fetch(
                     `/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=prev`,
-                    fetchOptions
+                    buildFetchOptions()
                 );
-
-                if (!response.ok) {
-                    throw new Error('Failed to fetch previous comic info');
-                }
-                
+                if (!response.ok) throw new Error('Failed to fetch previous comic info');
                 const prevInfo = await response.json();
-                
                 if (prevInfo.hasAdjacent && prevInfo.filePath) {
-                    // Get the page count of the previous comic to navigate to its last page
-                    const infoResponse = await fetch(
-                        `/api/ComicReader/info?filePath=${encodeURIComponent(prevInfo.filePath)}`,
-                        fetchOptions
-                    );
-                    
-                    if (infoResponse.ok) {
-                        const comicInfo = await infoResponse.json();
-                        // Navigate to the last page of the previous comic
-                        // We'll use URL hash to indicate we should start at the last page
-                        window.location.href = `/reader.html?file=${encodeURIComponent(prevInfo.filePath)}#lastpage`;
-                    } else {
-                        // If we can't get page count, just navigate to the comic (will start at page 1)
-                        window.location.href = `/reader.html?file=${encodeURIComponent(prevInfo.filePath)}`;
-                    }
+                    window.location.replace(`/reader.html?file=${encodeURIComponent(prevInfo.filePath)}#lastpage`);
                 } else {
-                    // No previous comic available
                     showMessage('You are at the first comic in the list', 'info');
                 }
             } catch (error) {
@@ -1315,25 +1765,66 @@
             loadPage(parseInt(pageNum));
         }
 
+        // Exit the reader. Strategy:
+        //   1. Prefer back/forward navigation when we have a stored snapshot
+        //      AND a same-origin referrer pointing at the home page — browsers
+        //      restore native scroll position and any "bfcache" instantly.
+        //   2. Otherwise navigate to the saved origin URL from sessionStorage
+        //      so the caller page can rehydrate from its snapshot.
+        //   3. Fallback: navigate to /.
         function goBack() {
+            let snapshot = null;
+            try {
+                const raw = sessionStorage.getItem('comicReaderReturnState');
+                if (raw) snapshot = JSON.parse(raw);
+            } catch (_e) { /* ignore */ }
+
+            const sameOriginReferrer = (() => {
+                try {
+                    if (!document.referrer) return null;
+                    const ref = new URL(document.referrer);
+                    return ref.origin === window.location.origin ? ref : null;
+                } catch (_e) { return null; }
+            })();
+
+            // If the referrer is the home page on the same origin, history.back()
+            // restores native scroll/state better than any URL navigation.
+            if (sameOriginReferrer
+                && (sameOriginReferrer.pathname === '/' || sameOriginReferrer.pathname.endsWith('/index.html'))) {
+                window.history.back();
+                return;
+            }
+
+            if (snapshot && snapshot.originUrl) {
+                try {
+                    const origin = new URL(snapshot.originUrl, window.location.origin);
+                    if (origin.origin === window.location.origin) {
+                        window.location.href = origin.toString();
+                        return;
+                    }
+                } catch (_e) { /* fall through */ }
+            }
+
             window.location.href = '/';
         }
 
         // Fullscreen functionality
         function toggleFullscreen() {
             const container = document.getElementById('readerContainer');
-            
+            const icon = document.getElementById('fullscreenIcon');
+
             if (!document.fullscreenElement) {
                 container.requestFullscreen().then(() => {
-                    container.classList.add('fullscreen-mode', 'auto-hide');
-                    document.getElementById('fullscreenBtn').textContent = 'Exit Fullscreen';
+                    container.classList.add('fullscreen-mode');
+                    if (icon) icon.textContent = '⮽';
+                    resetChromeIdleTimer();
                 }).catch(err => {
                     console.error('Error entering fullscreen:', err);
                 });
             } else {
                 document.exitFullscreen().then(() => {
-                    container.classList.remove('fullscreen-mode', 'auto-hide');
-                    document.getElementById('fullscreenBtn').textContent = 'Fullscreen';
+                    container.classList.remove('fullscreen-mode');
+                    if (icon) icon.textContent = '⛶';
                 });
             }
         }
@@ -1341,25 +1832,72 @@
         // Listen for fullscreen changes
         document.addEventListener('fullscreenchange', () => {
             const container = document.getElementById('readerContainer');
+            const icon = document.getElementById('fullscreenIcon');
             if (!document.fullscreenElement) {
-                container.classList.remove('fullscreen-mode', 'auto-hide');
-                document.getElementById('fullscreenBtn').textContent = 'Fullscreen';
+                container.classList.remove('fullscreen-mode');
+                if (icon) icon.textContent = '⛶';
             }
         });
 
-        // Help dialog
+        // Help dialog (with focus trap + body-scroll lock)
+        let helpPreviousFocus = null;
         function showHelp() {
-            document.getElementById('shortcutsHelp').classList.add('show');
+            const dlg = document.getElementById('shortcutsHelp');
+            const backdrop = document.getElementById('shortcutsHelpBackdrop');
+            helpPreviousFocus = document.activeElement;
+            dlg.classList.add('show');
+            backdrop.classList.add('show');
+            dlg.focus();
         }
-
         function hideHelp() {
             document.getElementById('shortcutsHelp').classList.remove('show');
+            document.getElementById('shortcutsHelpBackdrop').classList.remove('show');
+            if (helpPreviousFocus && typeof helpPreviousFocus.focus === 'function') {
+                helpPreviousFocus.focus();
+                helpPreviousFocus = null;
+            }
         }
 
-        // Show error
+        // Go-to-page inline prompt (triggered by the 'G' shortcut)
+        function showGotoPrompt() {
+            const dlg = document.getElementById('gotoPrompt');
+            const input = document.getElementById('gotoPromptInput');
+            if (!dlg || !input) return;
+            input.max = String(totalPages);
+            input.value = String(currentPage);
+            dlg.classList.add('show');
+            setTimeout(() => { input.focus(); input.select(); }, 0);
+        }
+        function hideGotoPrompt() {
+            const dlg = document.getElementById('gotoPrompt');
+            if (dlg) dlg.classList.remove('show');
+        }
+        function submitGotoPage() {
+            const input = document.getElementById('gotoPromptInput');
+            if (!input) return;
+            const v = parseInt(input.value, 10);
+            hideGotoPrompt();
+            if (!isNaN(v) && v >= 1 && v <= totalPages) {
+                if (readingMode === 'manga') {
+                    loadPage(v);
+                } else {
+                    const img = document.querySelector(`img[data-page="${v}"]`);
+                    if (img) img.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }
+        }
+
+        // Show a friendlier error state with a "Back to library" button.
         function showError(message) {
             const content = document.getElementById('readerContent');
-            content.innerHTML = `<div class="error">${message}</div>`;
+            const safeMsg = escapeHtml(String(message || 'Something went wrong.'));
+            content.innerHTML =
+                `<div class="error">
+                    <div class="error-icon" aria-hidden="true">⚠️</div>
+                    <div class="error-title">Couldn't load this comic</div>
+                    <div class="error-message">${safeMsg}</div>
+                    <button class="reader-btn reader-btn--primary" onclick="goBack()">← Back to library</button>
+                </div>`;
         }
 
         // Show toast notification
@@ -1368,14 +1906,14 @@
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
             toast.textContent = message;
-            
+
             container.appendChild(toast);
-            
+
             // Trigger animation
             setTimeout(() => {
                 toast.classList.add('show');
             }, 10);
-            
+
             // Remove after 3 seconds
             setTimeout(() => {
                 toast.classList.remove('show');
@@ -1383,6 +1921,74 @@
                     toast.remove();
                 }, 300);
             }, 3000);
+        }
+
+        // Tap zones: left = prev, right = next (or reversed in RTL), middle = toggle chrome.
+        function setupTapZones() {
+            const left = document.getElementById('tapZoneLeft');
+            const middle = document.getElementById('tapZoneMiddle');
+            const right = document.getElementById('tapZoneRight');
+            if (left && !left._wired) {
+                left.addEventListener('click', () => { if (readingMode === 'manga') effectivePrev(); });
+                left._wired = true;
+            }
+            if (right && !right._wired) {
+                right.addEventListener('click', () => { if (readingMode === 'manga') effectiveNext(); });
+                right._wired = true;
+            }
+            if (middle && !middle._wired) {
+                middle.addEventListener('click', () => { toggleChromeHidden(); });
+                middle._wired = true;
+            }
+        }
+
+        // Auto-hide chrome after a few seconds of inactivity. Any mouse move,
+        // tap, or key press resets the timer and re-shows the chrome.
+        function setupChromeAutoHide() {
+            const container = document.getElementById('readerContainer');
+            const reset = () => resetChromeIdleTimer();
+            ['mousemove', 'touchstart', 'pointerdown', 'keydown'].forEach(ev => {
+                document.addEventListener(ev, reset, { passive: true });
+            });
+            container.addEventListener('focusin', reset);
+            resetChromeIdleTimer();
+        }
+
+        function resetChromeIdleTimer() {
+            if (chromeHidden) {
+                setChromeHidden(false);
+            }
+            if (chromeIdleTimer) clearTimeout(chromeIdleTimer);
+            chromeIdleTimer = setTimeout(() => {
+                // Only auto-hide if no modal is open and the user isn't
+                // interacting with a form control.
+                const help = document.getElementById('shortcutsHelp');
+                const goto = document.getElementById('gotoPrompt');
+                if (help && help.classList.contains('show')) return;
+                if (goto && goto.classList.contains('show')) return;
+                setChromeHidden(true);
+            }, CHROME_IDLE_MS);
+        }
+
+        function setChromeHidden(hidden) {
+            chromeHidden = hidden;
+            const container = document.getElementById('readerContainer');
+            container.classList.toggle('chrome-hidden', hidden);
+            // Show the hint exactly once per session when chrome first hides.
+            if (hidden && !chromeHintShown) {
+                chromeHintShown = true;
+                const hint = document.getElementById('chromeHint');
+                if (hint) {
+                    setTimeout(() => { hint.classList.remove('show-once'); }, 2500);
+                }
+            }
+        }
+
+        function toggleChromeHidden() {
+            if (chromeIdleTimer) clearTimeout(chromeIdleTimer);
+            setChromeHidden(!chromeHidden);
+            // If we just showed it, start the idle countdown again.
+            if (!chromeHidden) resetChromeIdleTimer();
         }
 
         // Keyboard shortcuts
@@ -1394,24 +2000,45 @@
                 }
                 return;
             }
+            // Don't intercept keys while typing in the goto prompt.
+            const goto = document.getElementById('gotoPrompt');
+            if (goto && goto.classList.contains('show')) {
+                if (e.key === 'Enter') { e.preventDefault(); submitGotoPage(); }
+                else if (e.key === 'Escape') { e.preventDefault(); hideGotoPrompt(); }
+                return;
+            }
+            // Ignore shortcuts when focus is in any other input/textarea.
+            const tag = (document.activeElement && document.activeElement.tagName) || '';
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+                return;
+            }
 
             switch (e.key) {
                 case 'ArrowLeft':
                 case 'a':
                 case 'A':
                     if (readingMode === 'manga') {
-                        previousPage();
+                        e.preventDefault();
+                        effectivePrev();
                     }
                     break;
                 case 'ArrowRight':
                 case 'd':
                 case 'D':
                     if (readingMode === 'manga') {
-                        nextPage();
+                        e.preventDefault();
+                        effectiveNext();
+                    }
+                    break;
+                case ' ': // Space
+                    if (readingMode === 'manga') {
+                        e.preventDefault();
+                        if (e.shiftKey) _navPrev(); else _navNext();
                     }
                     break;
                 case 'Home':
                     if (readingMode === 'manga') {
+                        e.preventDefault();
                         loadPage(1);
                     } else {
                         document.getElementById('readerContent').scrollTop = 0;
@@ -1419,21 +2046,35 @@
                     break;
                 case 'End':
                     if (readingMode === 'manga') {
+                        e.preventDefault();
                         loadPage(totalPages);
                     } else {
                         const content = document.getElementById('readerContent');
                         content.scrollTop = content.scrollHeight;
                     }
                     break;
+                case 'g':
+                case 'G':
+                    e.preventDefault();
+                    showGotoPrompt();
+                    break;
                 case 'm':
                 case 'M':
+                    e.preventDefault();
                     toggleReadingMode();
+                    break;
+                case 'r':
+                case 'R':
+                    e.preventDefault();
+                    toggleReadingDirection();
                     break;
                 case 'f':
                 case 'F':
+                    e.preventDefault();
                     toggleFullscreen();
                     break;
                 case '?':
+                    e.preventDefault();
                     showHelp();
                     break;
                 case 'Escape':

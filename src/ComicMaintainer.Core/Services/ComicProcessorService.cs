@@ -1480,6 +1480,19 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             normalizedMetadata.Series = normalizedSeries;
         }
 
+        // If the ComicInfo metadata is missing the issue/chapter number, fall back
+        // to parsing it from the filename so the chapter number isn't lost and the
+        // normalized title becomes "Chapter <n>" instead of "Chapter Unknown".
+        if (string.IsNullOrEmpty(normalizedMetadata.Issue))
+        {
+            var parsedIssue = ComicFileProcessor.ParseChapterNumber(Path.GetFileNameWithoutExtension(filePath));
+            if (!string.IsNullOrEmpty(parsedIssue))
+            {
+                _logger.LogDebug("Setting issue number from filename: {Issue}", LoggingHelper.SanitizeForLog(parsedIssue));
+                normalizedMetadata.Issue = parsedIssue;
+            }
+        }
+
         // Set title to standard format
         string normalizedTitle = CreateNormalizedTitle(normalizedMetadata.Issue);
         if(!normalizedTitle.Equals(normalizedMetadata.Title))

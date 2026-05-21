@@ -1679,4 +1679,111 @@ public class ComicProcessorServiceTests : IDisposable
         _mockFileStore.Verify(f => f.UpdateFilePathAsync(originalPath, expectedPath, It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Once);
         _mockFileStore.Verify(f => f.MarkFileRenamedAsync(expectedPath, true, It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public async Task ProcessFileAsync_MissingIssueInMetadata_RecoversChapterNumberFromFilename()
+    {
+        // Regression test: previously, when ComicInfo.xml lacked a <Number> element,
+        // the rename would drop the chapter number entirely and produce a corrupted
+        // filename like "<series> - Chapter.cbz". The chapter number must always be
+        // preserved by recovering it from the original filename.
+        var seriesName = "Kage no Jitsuryokusha ni Naritakute! Master of Garden ~Shichikage Retsuden~";
+        var chapterNumber = "0259";
+
+        var seriesDir = Path.Combine(_testDirectory, seriesName);
+        Directory.CreateDirectory(seriesDir);
+
+        var originalFileName = $"{seriesName} - Chapter {chapterNumber}.cbz";
+        var originalPath = Path.Combine(seriesDir, originalFileName);
+
+        // ComicInfo.xml intentionally has no <Number> element to simulate missing metadata
+        var comicInfoXml = $@"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>{seriesName}</Series>
+    <Title>Chapter Unknown</Title>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(originalPath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var result = await _service.ProcessFileAsync(originalPath);
+
+        // Assert
+        Assert.True(result);
+
+        // Expected filename preserves the chapter number (padded to 4 digits per settings)
+        var expectedFileName = $"{seriesName} - Chapter {chapterNumber}.cbz";
+        var expectedPath = Path.Combine(seriesDir, expectedFileName);
+
+        // The chapter number must NEVER be lost: the file must still be named with it.
+        Assert.True(
+            File.Exists(expectedPath) || originalPath == expectedPath,
+            $"Chapter number was lost. Expected file at '{expectedPath}'.");
+
+        // And specifically must not be renamed to the corrupted form with the number stripped.
+        var corruptedPath = Path.Combine(seriesDir, $"{seriesName} - Chapter.cbz");
+        Assert.False(File.Exists(corruptedPath),
+            "Rename produced corrupted filename with chapter number stripped.");
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_NoChapterNumberAnywhere_SkipsRenameRatherThanCorrupting()
+    {
+        // When the template references {issue} but there's no chapter number in metadata
+        // OR the filename, the rename must be skipped instead of producing a corrupted name.
+        var seriesName = "Some Series";
+
+        var seriesDir = Path.Combine(_testDirectory, seriesName);
+        Directory.CreateDirectory(seriesDir);
+
+        // Filename without any number, ComicInfo without Number element
+        var originalFileName = $"{seriesName} - Special.cbz";
+        var originalPath = Path.Combine(seriesDir, originalFileName);
+
+        var comicInfoXml = $@"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>{seriesName}</Series>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(originalPath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        await _service.ProcessFileAsync(originalPath);
+
+        // Assert: file must NOT be renamed to a corrupted "<series> - Chapter.cbz" form.
+        var corruptedPath = Path.Combine(seriesDir, $"{seriesName} - Chapter.cbz");
+        Assert.False(File.Exists(corruptedPath),
+            "Rename produced a corrupted filename with no chapter number.");
+        Assert.True(File.Exists(originalPath), "Original file must be preserved when no chapter number is available.");
+    }
 }

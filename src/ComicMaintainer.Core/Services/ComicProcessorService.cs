@@ -1337,15 +1337,51 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         {
             var directory = Path.GetDirectoryName(originalPath) ?? _settings.WatchedDirectory;
             var extension = Path.GetExtension(originalPath);
-            
+
+            // Determine the issue/chapter number to use in the filename. If metadata
+            // does not have one, fall back to parsing it from the original filename so
+            // the chapter number is preserved instead of being silently dropped (which
+            // previously produced filenames like "<series> - Chapter.cbz" when the
+            // template referenced {issue}).
+            var issueNumber = metadata.Issue;
+            if (string.IsNullOrWhiteSpace(issueNumber))
+            {
+                var parsedFromFilename = ComicFileProcessor.ParseChapterNumber(
+                    Path.GetFileNameWithoutExtension(originalPath));
+                if (!string.IsNullOrWhiteSpace(parsedFromFilename))
+                {
+                    _logger.LogWarning(
+                        "GenerateFileName: Metadata is missing Issue number for {FilePath}; recovered chapter number '{Issue}' from filename to avoid losing it.",
+                        LoggingHelper.SanitizePathForLog(originalPath),
+                        LoggingHelper.SanitizeForLog(parsedFromFilename));
+                    issueNumber = parsedFromFilename;
+                    // Preserve recovered chapter number on the metadata object so any
+                    // subsequent metadata write (e.g. NormalizeMetadataAsync) persists it.
+                    metadata.Issue = parsedFromFilename;
+                }
+            }
+
+            // Safety guard: if the template references {issue} or {issue_no_pad} but
+            // we still have no chapter number, refuse to rename rather than produce a
+            // corrupted filename with the chapter number stripped out.
+            if (string.IsNullOrWhiteSpace(issueNumber) &&
+                (_settings.FilenameFormat.Contains("{issue}", StringComparison.Ordinal) ||
+                 _settings.FilenameFormat.Contains("{issue_no_pad}", StringComparison.Ordinal)))
+            {
+                _logger.LogWarning(
+                    "GenerateFileName: Skipping rename for {FilePath} because no chapter number is available (would have produced a filename with the chapter number missing).",
+                    LoggingHelper.SanitizePathForLog(originalPath));
+                return originalPath;
+            }
+
             // Convert ComicMetadata to ComicInfo for use with ComicFileProcessor
             var comicInfo = ComicInfo.FromMetadata(metadata);
-            
+
             // Use ComicFileProcessor.FormatFilename to properly handle decimal issue numbers
             var filename = ComicFileProcessor.FormatFilename(
                 _settings.FilenameFormat,
                 comicInfo,
-                metadata.Issue ?? "",
+                issueNumber ?? "",
                 extension,
                 _settings.IssueNumberPadding);
             
@@ -1478,6 +1514,23 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         {
             _logger.LogDebug("Setting normalized series name: {SeriesName}", LoggingHelper.SanitizeForLog(normalizedSeries));
             normalizedMetadata.Series = normalizedSeries;
+        }
+
+        // Recover chapter number from filename when it's missing from metadata so
+        // that it is preserved when ComicInfo.xml is (re)written. Without this the
+        // chapter number can be lost permanently after a rename + normalize cycle.
+        if (string.IsNullOrWhiteSpace(normalizedMetadata.Issue))
+        {
+            var parsedFromFilename = ComicFileProcessor.ParseChapterNumber(
+                Path.GetFileNameWithoutExtension(filePath));
+            if (!string.IsNullOrWhiteSpace(parsedFromFilename))
+            {
+                _logger.LogWarning(
+                    "NormalizeMetadataAsync: Metadata is missing Issue number for {FilePath}; recovered chapter number '{Issue}' from filename to preserve it.",
+                    LoggingHelper.SanitizePathForLog(filePath),
+                    LoggingHelper.SanitizeForLog(parsedFromFilename));
+                normalizedMetadata.Issue = parsedFromFilename;
+            }
         }
 
         // Set title to standard format

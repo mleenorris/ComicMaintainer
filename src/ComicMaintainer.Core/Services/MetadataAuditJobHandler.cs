@@ -45,7 +45,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
     public string JobKey => Key;
     public string DisplayName => "Metadata Audit";
     public string Description =>
-        "Scans every tracked comic file and reports any with a missing chapter/issue number or a series tag that doesn't match the expected series name.";
+        "Scans every tracked comic file and reports any with a missing chapter/issue number (and no issue number in the title) or a series tag that doesn't match the expected series name.";
 
     // Default: disabled (so it doesn't run unprompted on existing installs) and weekly when enabled.
     public ScheduledJobDefaults Defaults =>
@@ -91,8 +91,12 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
                 continue;
             }
 
-            // Check 1: Issue / chapter number must be set.
-            if (string.IsNullOrWhiteSpace(metadata.Issue))
+            // Check 1: Issue / chapter number must be set. Only flag when the
+            // ComicInfo <Title> tag also lacks a parseable issue number, so files
+            // whose chapter is encoded in the title (e.g. "Chapter 5: ...") are
+            // not reported as missing.
+            if (string.IsNullOrWhiteSpace(metadata.Issue)
+                && string.IsNullOrWhiteSpace(ComicFileProcessor.ParseChapterNumber(metadata.Title ?? string.Empty)))
             {
                 missingChapter++;
                 findings.Add(new MetadataAuditFindingEntity
@@ -101,7 +105,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
                     FindingType = MetadataAuditFindingType.MissingChapter.ToString(),
                     ActualSeries = metadata.Series,
                     ActualIssue = null,
-                    Details = "ComicInfo <Number> tag is empty.",
+                    Details = "ComicInfo <Number> tag is empty and <Title> contains no issue number.",
                 });
                 continue;
             }

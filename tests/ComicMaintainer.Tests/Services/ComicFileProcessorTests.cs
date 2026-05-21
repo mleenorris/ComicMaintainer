@@ -246,4 +246,34 @@ public class ComicFileProcessorTests
         Assert.NotNull(result);
         Assert.EndsWith(".cbz", result);
     }
+
+    [Theory]
+    [InlineData("Series - Chapter 5", "5")]
+    [InlineData("Series Ch.10", "10")]
+    [InlineData("Series ch_3.5", "3.5")]
+    [InlineData("Series Vol 2", null)]
+    [InlineData("Series 042", null)]
+    [InlineData("Series Name (2023)", null)]
+    public void ParseChapterKeyword_ReturnsKeywordMatchedNumberOnly(string filename, string? expected)
+    {
+        var result = ComicFileProcessor.ParseChapterKeyword(filename);
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("1", "1", true)]
+    [InlineData("1", "0001", true)]
+    [InlineData("0001", "0001.0", true)]
+    [InlineData("12.5", "0012.5", true)]
+    [InlineData("1", "2", false)]
+    [InlineData("1.0", "1.5", false)]
+    [InlineData("", "", true)]
+    [InlineData("", "1", false)]
+    [InlineData("abc", "abc", true)]
+    [InlineData("abc", "def", false)]
+    public void ChapterNumbersEquivalent_ComparesNumericValues(string? a, string? b, bool expected)
+    {
+        var result = ComicFileProcessor.ChapterNumbersEquivalent(a, b);
+        Assert.Equal(expected, result);
+    }
 }

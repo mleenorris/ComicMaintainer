@@ -1733,4 +1733,117 @@ public class ComicProcessorServiceTests : IDisposable
         _mockFileStore.Verify(f => f.UpdateFilePathAsync(originalPath, expectedPath, It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Once);
         _mockFileStore.Verify(f => f.MarkFileRenamedAsync(expectedPath, true, It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public async Task ProcessFileAsync_TemplateOmitsIssue_StillPreservesChapterInFilename()
+    {
+        // Regression: even when the user-configured FilenameFormat omits the
+        // {issue} placeholder (e.g. "{series} - {title}"), the chapter number
+        // must not be silently dropped from the renamed filename.
+        _settings.FilenameFormat = "{series} - {title}";
+
+        var originalPath = CreateTestComicArchive("Batman", "7");
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        var result = await _service.ProcessFileAsync(originalPath);
+
+        Assert.True(result);
+
+        // The new filename must still contain the chapter number from
+        // metadata.Issue; the safety net appends "Chapter 0007" when the
+        // template would otherwise have rendered it without the chapter.
+        _mockFileStore.Verify(
+            f => f.UpdateFilePathAsync(
+                originalPath,
+                It.Is<string>(p => Path.GetFileName(p).Contains("0007")),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<bool>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_ComicInfoMissingNumber_PreservesChapterFromOriginalFilename()
+    {
+        // Regression: ComicInfo.xml is present but <Number> is empty, so
+        // metadata.Issue is null. The original filename clearly contains
+        // a "Chapter <n>" token, which must be preserved on rename.
+        var fileName = "Batman - Chapter 7.cbz";
+        var filePath = Path.Combine(_testDirectory, fileName);
+
+        var comicInfoXml = @"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>Batman</Series>
+    <Title>The Dark Knight</Title>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry("ComicInfo.xml");
+            using var w = new StreamWriter(entry.Open());
+            w.Write(comicInfoXml);
+        }
+
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        var result = await _service.ProcessFileAsync(filePath);
+
+        Assert.True(result);
+
+        // The "7" chapter from the original filename must survive even though
+        // the template's {issue} placeholder rendered to an empty string. The
+        // safety net appends a "Chapter <padded>" token so the chapter
+        // number cannot be lost.
+        _mockFileStore.Verify(
+            f => f.MarkFileRenamedAsync(
+                It.Is<string>(p => ComicFileProcessor.ChapterNumbersEquivalent(
+                    ComicFileProcessor.ParseChapterNumber(Path.GetFileNameWithoutExtension(p)),
+                    "7")),
+                true,
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_OneShotWithoutChapter_DoesNotInventChapterNumber()
+    {
+        // A file with no chapter keyword in the original filename and no
+        // metadata.Issue (a one-shot) must NOT have a spurious chapter
+        // number appended by the safety net.
+        _settings.FilenameFormat = "{series}";
+
+        var fileName = "OneShotSeries.cbz";
+        var filePath = Path.Combine(_testDirectory, fileName);
+
+        var comicInfoXml = @"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>OneShotSeries</Series>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var entry = archive.CreateEntry("ComicInfo.xml");
+            using var w = new StreamWriter(entry.Open());
+            w.Write(comicInfoXml);
+        }
+
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        var result = await _service.ProcessFileAsync(filePath);
+
+        Assert.True(result);
+
+        // No rename to a different path should occur (file already matches
+        // template "OneShotSeries.cbz") and certainly no chapter token should
+        // be invented.
+        _mockFileStore.Verify(
+            f => f.UpdateFilePathAsync(
+                It.IsAny<string>(),
+                It.Is<string>(p => Path.GetFileNameWithoutExtension(p).Contains("Chapter")),
+                It.IsAny<CancellationToken>(),
+                It.IsAny<bool>()),
+            Times.Never);
+    }
 }

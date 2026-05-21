@@ -68,6 +68,47 @@ public class ComicFileProcessor
     }
 
     /// <summary>
+    /// Parse a chapter number from a filename only when an explicit
+    /// "Ch"/"Chapter" keyword is present. This is a stricter variant of
+    /// <see cref="ParseChapterNumber"/> that avoids false-positives on
+    /// volume-only filenames where the only numeric token is a volume
+    /// number, year, or part of a title.
+    /// </summary>
+    public static string? ParseChapterKeyword(string filename)
+    {
+        var match = ChapterKeywordPattern.Match(filename);
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
+    /// <summary>
+    /// Returns true when two chapter-number strings represent the same
+    /// numeric value (e.g. "1", "0001" and "0001.0" are all equivalent).
+    /// Falls back to ordinal string comparison for non-numeric values.
+    /// </summary>
+    public static bool ChapterNumbersEquivalent(string? a, string? b)
+    {
+        if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b))
+        {
+            return string.IsNullOrEmpty(a) && string.IsNullOrEmpty(b);
+        }
+
+        if (string.Equals(a, b, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (decimal.TryParse(a, System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var da) &&
+            decimal.TryParse(b, System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture, out var db))
+        {
+            return da == db;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Format filename based on template and tags
     /// Converted from Python's format_filename function
     /// </summary>

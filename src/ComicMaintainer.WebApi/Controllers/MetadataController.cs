@@ -18,6 +18,7 @@ public class MetadataController : ControllerBase
     private readonly IExternalSeriesMetadataService _externalMetadata;
     private readonly IComicProcessorService? _processor;
     private readonly IFileStoreService? _fileStore;
+    private readonly ISeriesLanguagePreferenceRetagService? _languageRetag;
     private readonly ILogger<MetadataController> _logger;
 
     public MetadataController(
@@ -27,7 +28,8 @@ public class MetadataController : ControllerBase
         IExternalSeriesMetadataService externalMetadata,
         ILogger<MetadataController> logger,
         IComicProcessorService? processor = null,
-        IFileStoreService? fileStore = null)
+        IFileStoreService? fileStore = null,
+        ISeriesLanguagePreferenceRetagService? languageRetag = null)
     {
         _library = library;
         _cache = cache;
@@ -36,6 +38,7 @@ public class MetadataController : ControllerBase
         _logger = logger;
         _processor = processor;
         _fileStore = fileStore;
+        _languageRetag = languageRetag;
     }
 
     /// <summary>Queue an external metadata refresh for every series in the library.</summary>
@@ -559,6 +562,32 @@ public class MetadataController : ControllerBase
                 seriesTitle,
                 request?.Language,
                 cancellationToken);
+
+            // Fire-and-forget: enqueue per-file re-normalization so every
+            // ComicInfo.xml in this series gets its <Series> rewritten to
+            // match the new language preference. We do not block the API
+            // response on the job; the standard processing-job/SSE pipeline
+            // surfaces progress.
+            if (_languageRetag is not null)
+            {
+                try
+                {
+                    var retagJobId = await _languageRetag.QueueRetagForSeriesAsync(record, cancellationToken);
+                    if (retagJobId is not null)
+                    {
+                        _logger.LogInformation(
+                            LoggingHelper.WithWebsitePrefix("Queued per-file retag job {JobId} after preferred-language change for {SeriesTitle}"),
+                            retagJobId.Value, LoggingHelper.SanitizeForLog(seriesTitle));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        LoggingHelper.WithWebsitePrefix("Failed to queue per-file retag after preferred-language change for {SeriesTitle}"),
+                        LoggingHelper.SanitizeForLog(seriesTitle));
+                }
+            }
+
             return Ok(record);
         }
         catch (ArgumentException ex)

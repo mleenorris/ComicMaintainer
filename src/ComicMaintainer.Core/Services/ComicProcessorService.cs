@@ -1500,17 +1500,22 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        var globalPreferredLanguage = _settings.DefaultPreferredLanguage;
+
         // First pass: if any candidate has a user-canonical cache record, honor it
         // immediately without falling through to external lookups. This guarantees
         // that a user's explicit canonical choice (e.g. set via folder-combine)
-        // wins over whatever an external provider returns.
+        // wins over whatever an external provider returns. The
+        // SeriesDisplayTitleResolver still applies, but with IsUserCanonical=true
+        // the resolver returns the canonical title unconditionally — preserving
+        // existing behaviour for that case.
         foreach (var candidate in candidateSeries)
         {
-            var userCanonical = await LookupUserCanonicalSeriesAsync(candidate, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(userCanonical))
+            var userCanonicalRecord = await LookupUserCanonicalRecordAsync(candidate, cancellationToken);
+            if (userCanonicalRecord is not null && !string.IsNullOrWhiteSpace(userCanonicalRecord.CanonicalTitle))
             {
-                var resolved = userCanonical!.Trim();
-                await EnsureFolderNameIsAliasAsync(fallbackSeries, resolved, cancellationToken);
+                var resolved = ResolveDisplayTitle(userCanonicalRecord, globalPreferredLanguage);
+                await EnsureFolderNameIsAliasAsync(fallbackSeries, userCanonicalRecord.CanonicalTitle, cancellationToken);
                 return resolved;
             }
         }
@@ -1519,14 +1524,40 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         // provider (or a previously-applied manual match), prefer that canonical
         // title over the folder-derived name. This ensures that once a series
         // has been matched, every subsequent normalization writes the matched
-        // name into the file's metadata instead of the raw folder name.
+        // name into the file's metadata instead of the raw folder name. The
+        // resolver picks the localized variant when a language preference is set.
         foreach (var candidate in candidateSeries)
         {
-            var matched = await LookupMatchedSeriesAsync(candidate, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(matched))
+            var matchedRecord = await LookupMatchedRecordAsync(candidate, cancellationToken);
+            if (matchedRecord is not null && !string.IsNullOrWhiteSpace(matchedRecord.CanonicalTitle))
             {
-                var resolved = matched!.Trim();
-                await EnsureFolderNameIsAliasAsync(fallbackSeries, resolved, cancellationToken);
+                var resolved = ResolveDisplayTitle(matchedRecord, globalPreferredLanguage);
+                await EnsureFolderNameIsAliasAsync(fallbackSeries, matchedRecord.CanonicalTitle, cancellationToken);
+                return resolved;
+            }
+        }
+
+        // Defensive lookup: if `<Series>` already holds a localized title that
+        // isn't separately indexed under the normalized-key map, fall back to
+        // searching the cache record reachable via the folder name and see
+        // whether the metadata.Series matches one of its LocalizedTitles. This
+        // avoids losing the record once an earlier pass rewrote `<Series>` to
+        // a non-canonical language variant.
+        if (_seriesMetadataCache is not null
+            && !string.IsNullOrWhiteSpace(metadata.Series)
+            && !string.IsNullOrWhiteSpace(fallbackSeries)
+            && !string.Equals(metadata.Series, fallbackSeries, StringComparison.OrdinalIgnoreCase))
+        {
+            var folderRecord = await LookupMatchedRecordAsync(fallbackSeries, cancellationToken)
+                               ?? await LookupUserCanonicalRecordAsync(fallbackSeries, cancellationToken);
+            if (folderRecord is not null
+                && folderRecord.LocalizedTitles is { Count: > 0 }
+                && folderRecord.LocalizedTitles.Any(lt =>
+                    !string.IsNullOrWhiteSpace(lt?.Title)
+                    && string.Equals(lt!.Title, metadata.Series, StringComparison.OrdinalIgnoreCase)))
+            {
+                var resolved = ResolveDisplayTitle(folderRecord, globalPreferredLanguage);
+                await EnsureFolderNameIsAliasAsync(fallbackSeries, folderRecord.CanonicalTitle, cancellationToken);
                 return resolved;
             }
         }
@@ -1536,13 +1567,53 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             var externalMetadata = await LookupExternalSeriesMetadataAsync(candidate, cancellationToken);
             if (!string.IsNullOrWhiteSpace(externalMetadata?.CanonicalTitle))
             {
-                var resolved = externalMetadata!.CanonicalTitle.Trim();
-                await EnsureFolderNameIsAliasAsync(fallbackSeries, resolved, cancellationToken);
+                var canonical = externalMetadata!.CanonicalTitle.Trim();
+
+                // Wrap the external lookup in a transient cache-record-like
+                // object so the same resolver is used for the language rules.
+                // PreferredLanguage is left null (the per-series override only
+                // exists once the user has explicitly set it on a cached
+                // record); the global default applies.
+                var transient = new SeriesMetadataCacheRecord
+                {
+                    CanonicalTitle = canonical,
+                    LocalizedTitles = externalMetadata.LocalizedTitles is { Count: > 0 }
+                        ? externalMetadata.LocalizedTitles
+                            .Where(t => t is not null && !string.IsNullOrWhiteSpace(t.Title))
+                            .Select(t => new LocalizedTitle(t.Title, t.Language))
+                            .ToList()
+                        : new List<LocalizedTitle>(),
+                    PreferredLanguage = null,
+                    IsUserCanonical = false
+                };
+
+                var resolved = ResolveDisplayTitle(transient, globalPreferredLanguage);
+                await EnsureFolderNameIsAliasAsync(fallbackSeries, canonical, cancellationToken);
                 return resolved;
             }
         }
 
         return candidateSeries.FirstOrDefault() ?? UnknownSeries;
+    }
+
+    /// <summary>
+    /// Run a cache record through <see cref="SeriesDisplayTitleResolver"/> to
+    /// apply the per-series / global language preference rules, defending
+    /// against an unexpectedly empty result by falling back to the canonical
+    /// title (and ultimately <see cref="UnknownSeries"/>).
+    /// </summary>
+    private static string ResolveDisplayTitle(SeriesMetadataCacheRecord record, string? globalPreferredLanguage)
+    {
+        var resolved = SeriesDisplayTitleResolver.Resolve(record, globalPreferredLanguage);
+        if (!string.IsNullOrWhiteSpace(resolved))
+        {
+            return resolved.Trim();
+        }
+        if (!string.IsNullOrWhiteSpace(record.CanonicalTitle))
+        {
+            return record.CanonicalTitle.Trim();
+        }
+        return UnknownSeries;
     }
 
     /// <summary>
@@ -1627,7 +1698,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
     }
 
-    private async Task<string?> LookupUserCanonicalSeriesAsync(string seriesName, CancellationToken cancellationToken)
+    private async Task<SeriesMetadataCacheRecord?> LookupUserCanonicalRecordAsync(string seriesName, CancellationToken cancellationToken)
     {
         if (_seriesMetadataCache is null || string.IsNullOrWhiteSpace(seriesName))
         {
@@ -1645,7 +1716,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             var record = await _seriesMetadataCache.GetAsync(key, cancellationToken);
             if (record is { IsUserCanonical: true } && !string.IsNullOrWhiteSpace(record.CanonicalTitle))
             {
-                return record.CanonicalTitle;
+                return record;
             }
         }
         catch (Exception ex)
@@ -1658,15 +1729,17 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     }
 
     /// <summary>
-    /// Returns the cached canonical title for a series when the cache record
-    /// represents a confirmed match — either an external provider lookup that
-    /// succeeded or a manually-applied match. Differs from
-    /// <see cref="LookupUserCanonicalSeriesAsync"/> in that it does not require
+    /// Returns the cached record for a series when it represents a confirmed
+    /// match — either an external provider lookup that succeeded or a manually
+    /// applied match. Differs from
+    /// <see cref="LookupUserCanonicalRecordAsync"/> in that it does not require
     /// the record to be flagged as user-canonical; any successful match is
     /// considered authoritative for normalization so that the matched name
-    /// (rather than the raw folder name) ends up in file metadata.
+    /// (rather than the raw folder name) ends up in file metadata. The full
+    /// record is returned so the caller can apply language preference rules
+    /// via <see cref="SeriesDisplayTitleResolver"/>.
     /// </summary>
-    private async Task<string?> LookupMatchedSeriesAsync(string seriesName, CancellationToken cancellationToken)
+    private async Task<SeriesMetadataCacheRecord?> LookupMatchedRecordAsync(string seriesName, CancellationToken cancellationToken)
     {
         if (_seriesMetadataCache is null || string.IsNullOrWhiteSpace(seriesName))
         {
@@ -1691,14 +1764,14 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             // "success" comes from a provider lookup that returned a hit;
             // "manual_match" is set when the user explicitly picked a candidate.
             // A user-canonical override is already handled by
-            // LookupUserCanonicalSeriesAsync but we accept it here too so callers
-            // can use this method in isolation.
+            // LookupUserCanonicalRecordAsync but we accept it here too so
+            // callers can use this method in isolation.
             var status = record.LookupStatus;
             var isMatched = record.IsUserCanonical
                 || string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(status, "manual_match", StringComparison.OrdinalIgnoreCase);
 
-            return isMatched ? record.CanonicalTitle : null;
+            return isMatched ? record : null;
         }
         catch (Exception ex)
         {

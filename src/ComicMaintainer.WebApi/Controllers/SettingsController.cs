@@ -23,6 +23,7 @@ public class SettingsController : ControllerBase
     private readonly IFileStoreService _fileStore;
     private readonly ISettingsService _settingsService;
     private readonly IHostApplicationLifetime _applicationLifetime;
+    private readonly ISeriesLanguagePreferenceRetagService? _languageRetag;
 
     public SettingsController(
         IOptionsMonitor<AppSettings> appSettings, 
@@ -31,7 +32,8 @@ public class SettingsController : ControllerBase
         IComicProcessorService processorService,
         IFileStoreService fileStore,
         ISettingsService settingsService,
-        IHostApplicationLifetime applicationLifetime)
+        IHostApplicationLifetime applicationLifetime,
+        ISeriesLanguagePreferenceRetagService? languageRetag = null)
     {
         _appSettings = appSettings;
         _logger = logger;
@@ -40,6 +42,7 @@ public class SettingsController : ControllerBase
         _fileStore = fileStore;
         _settingsService = settingsService;
         _applicationLifetime = applicationLifetime;
+        _languageRetag = languageRetag;
     }
 
     // RESTful endpoint: GET /api/settings - Get all settings
@@ -310,7 +313,36 @@ public class SettingsController : ControllerBase
     {
         try
         {
+            var previous = Core.Models.SeriesLanguagePreference.Normalize(_appSettings.CurrentValue.DefaultPreferredLanguage);
+            var requested = Core.Models.SeriesLanguagePreference.Normalize(request?.Language);
+
             await _settingsService.UpdateDefaultPreferredLanguageAsync(request?.Language, cancellationToken);
+
+            // If the effective default actually changed, fire-and-forget a
+            // re-normalization sweep over every series that does NOT have a
+            // per-series override (those are unaffected by the global default).
+            if (!string.Equals(previous, requested, StringComparison.OrdinalIgnoreCase)
+                && _languageRetag is not null)
+            {
+                try
+                {
+                    var retagJobId = await _languageRetag.QueueRetagForGlobalDefaultAsync(cancellationToken);
+                    if (retagJobId is not null)
+                    {
+                        _logger.LogInformation(
+                            "Queued per-file retag job {JobId} after global default preferred-language change from '{Previous}' to '{Updated}'",
+                            retagJobId.Value,
+                            LoggingHelper.SanitizeForLog(previous),
+                            LoggingHelper.SanitizeForLog(requested));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "Failed to queue per-file retag after global default preferred-language change");
+                }
+            }
+
             return Ok(new { message = "Default preferred language updated successfully" });
         }
         catch (ArgumentException ex)

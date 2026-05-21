@@ -477,6 +477,7 @@ builder.Services.AddSingleton<IComicReaderService, ComicReaderService>();
 builder.Services.AddSingleton<ISeriesLibraryService, SeriesLibraryService>();
 builder.Services.AddSingleton<ISeriesMetadataCacheService, SeriesMetadataCacheService>();
 builder.Services.AddSingleton<ISeriesMetadataRefreshJobService, SeriesMetadataRefreshJobService>();
+builder.Services.AddSingleton<ISeriesLanguagePreferenceRetagService, SeriesLanguagePreferenceRetagService>();
 builder.Services.AddSingleton<ISeriesImageStore, SeriesImageStore>();
 builder.Services.AddHttpClient(SeriesImageStore.HttpClientName)
     .ConfigureHttpClient(client =>

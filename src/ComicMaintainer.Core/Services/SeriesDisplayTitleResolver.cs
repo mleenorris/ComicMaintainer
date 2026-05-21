@@ -14,6 +14,11 @@ namespace ComicMaintainer.Core.Services;
 ///         return the first matching title.</item>
 ///   <item>Otherwise fall back to <see cref="SeriesMetadataCacheRecord.CanonicalTitle"/>.</item>
 /// </list>
+/// <para>
+/// The same resolver is used by <see cref="ComicProcessorService"/> when
+/// rewriting per-file ComicInfo.xml <c>&lt;Series&gt;</c> metadata, so the
+/// on-disk value stays in sync with the library's displayed title.
+/// </para>
 /// </summary>
 public static class SeriesDisplayTitleResolver
 {

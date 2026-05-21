@@ -320,19 +320,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic version bump on merge to master
 
 
-## [1.0.43] - 2025-10-31
-
-### Changed
-- Automatic version bump on merge to master
-
-
 ## [2.0.1] - 2025-11-02
-
-### Changed
-- Automatic version bump on merge to master
-
-
-## [1.0.44] - 2025-10-31
 
 ### Changed
 - Automatic version bump on merge to master
@@ -1406,13 +1394,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic version bump on merge to master
 
 
-## [1.0.45] - 2025-11-01
+## [2.0.180] - 2026-05-21
 
 ### Changed
 - Automatic version bump on merge to master
 
 
-## [2.0.180] - 2026-05-21
+## [2.0.181] - 2026-05-21
 
 ### Changed
 - Automatic version bump on merge to master

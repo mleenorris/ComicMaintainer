@@ -1516,20 +1516,16 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             normalizedMetadata.Series = normalizedSeries;
         }
 
-        // Recover chapter number from filename when it's missing from metadata so
-        // that it is preserved when ComicInfo.xml is (re)written. Without this the
-        // chapter number can be lost permanently after a rename + normalize cycle.
-        if (string.IsNullOrWhiteSpace(normalizedMetadata.Issue))
+        // If the ComicInfo metadata is missing the issue/chapter number, fall back
+        // to parsing it from the filename so the chapter number isn't lost and the
+        // normalized title becomes "Chapter <n>" instead of "Chapter Unknown".
+        if (string.IsNullOrEmpty(normalizedMetadata.Issue))
         {
-            var parsedFromFilename = ComicFileProcessor.ParseChapterNumber(
-                Path.GetFileNameWithoutExtension(filePath));
-            if (!string.IsNullOrWhiteSpace(parsedFromFilename))
+            var parsedIssue = ComicFileProcessor.ParseChapterNumber(Path.GetFileNameWithoutExtension(filePath));
+            if (!string.IsNullOrEmpty(parsedIssue))
             {
-                _logger.LogWarning(
-                    "NormalizeMetadataAsync: Metadata is missing Issue number for {FilePath}; recovered chapter number '{Issue}' from filename to preserve it.",
-                    LoggingHelper.SanitizePathForLog(filePath),
-                    LoggingHelper.SanitizeForLog(parsedFromFilename));
-                normalizedMetadata.Issue = parsedFromFilename;
+                _logger.LogDebug("Setting issue number from filename: {Issue}", LoggingHelper.SanitizeForLog(parsedIssue));
+                normalizedMetadata.Issue = parsedIssue;
             }
         }
 

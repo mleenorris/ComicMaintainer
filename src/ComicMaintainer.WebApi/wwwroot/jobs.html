@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scheduled Jobs - Comic Maintainer</title>
+    <meta name="description" content="Manage recurring background jobs for Comic Maintainer">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+    <link rel="stylesheet" href="/css/main.css?v=__APP_VERSION__">
+    <style>
+        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .jobs-page { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+        .jobs-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        .jobs-header h1 { margin: 0; font-size: 1.5rem; }
+        .jobs-header a { color: var(--primary-color, #3498db); text-decoration: none; }
+        .jobs-card { background: var(--bg-secondary, #fff); border: 1px solid var(--border-input, #e1e4e8); border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+        .jobs-card h2 { margin: 0 0 0.25rem 0; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem; }
+        .jobs-card .desc { color: var(--text-muted, #6a737d); margin-bottom: 0.75rem; }
+        .jobs-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem 1rem; align-items: end; margin-top: 0.5rem; }
+        .jobs-row label { display: flex; flex-direction: column; font-size: 0.85rem; color: var(--text-muted, #6a737d); gap: 0.25rem; }
+        .jobs-row input[type="number"] { padding: 0.4rem 0.5rem; font-size: 0.95rem; border: 1px solid var(--border-input, #ccc); border-radius: 4px; background: var(--bg-primary, #fff); color: var(--text-primary, #222); }
+        .jobs-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
+        .jobs-actions button { padding: 0.45rem 0.9rem; font-size: 0.9rem; border-radius: 4px; cursor: pointer; border: 1px solid transparent; }
+        .btn-primary { background: var(--primary-color, #3498db); color: #fff; }
+        .btn-primary:hover { background: var(--primary-hover, #2980b9); }
+        .btn-secondary { background: transparent; border-color: var(--border-input, #ccc); color: var(--text-primary, #222); }
+        .btn-secondary:hover { background: rgba(0,0,0,0.04); }
+        .status-pill { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        .status-success { background: #d4edda; color: #155724; }
+        .status-failed { background: #f8d7da; color: #721c24; }
+        .status-running { background: #fff3cd; color: #856404; }
+        .status-skipped, .status-cancelled { background: #e2e3e5; color: #383d41; }
+        .status-neverrun { background: #d1ecf1; color: #0c5460; }
+        .meta { font-size: 0.8rem; color: var(--text-muted, #6a737d); }
+        .findings { margin-top: 0.75rem; }
+        .findings-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .findings-table th, .findings-table td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border-input, #eee); vertical-align: top; }
+        .findings-table th { background: var(--bg-primary, #f6f8fa); }
+        .empty { text-align: center; color: var(--text-muted, #6a737d); padding: 1.5rem; }
+        .toggle { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="jobs-page">
+        <div class="jobs-header">
+            <h1>⏰ Scheduled Jobs</h1>
+            <a href="/">← Back to Library</a>
+        </div>
+        <p class="meta">Recurring background jobs the server can run for you. Enable a job and set how often it should run; trigger an ad-hoc run any time with <strong>Run now</strong>.</p>
+
+        <div id="jobsContainer"><div class="empty">Loading…</div></div>
+    </div>
+
+    <script>
+        const BASE_PATH = '';
+        function apiUrl(path) { return BASE_PATH + (path.startsWith('/') ? path : '/' + path); }
+
+        function authHeaders(extra) {
+            const headers = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
+            const token = localStorage.getItem('jwt_token');
+            if (token) {
+                headers['Authorization'] = 'Bearer ' + token;
+            }
+            return headers;
+        }
+
+        async function apiFetch(path, options) {
+            const opts = Object.assign({ credentials: 'include' }, options || {});
+            opts.headers = authHeaders(opts.headers);
+            const resp = await fetch(apiUrl(path), opts);
+            if (resp.status === 401) {
+                localStorage.removeItem('jwt_token');
+                window.location.href = '/login.html';
+                throw new Error('unauthorized');
+            }
+            return resp;
+        }
+
+        function statusClass(status) {
+            const s = (status || '').toLowerCase();
+            return 'status-' + (s || 'neverrun');
+        }
+
+        function formatDate(iso) {
+            if (!iso) return '—';
+            try { return new Date(iso).toLocaleString(); } catch { return iso; }
+        }
+
+        function formatDuration(ms) {
+            if (ms == null) return '—';
+            if (ms < 1000) return ms + ' ms';
+            const s = Math.floor(ms / 1000);
+            if (s < 60) return s + ' s';
+            const m = Math.floor(s / 60);
+            const rem = s % 60;
+            return m + 'm ' + rem + 's';
+        }
+
+        function escapeHtml(value) {
+            if (value == null) return '';
+            return String(value).replace(/[&<>"']/g, ch => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+            })[ch]);
+        }
+
+        function renderJob(job) {
+            const opts = (() => { try { return job.optionsJson ? JSON.parse(job.optionsJson) : {}; } catch { return {}; } })();
+            const isMetadataAudit = job.jobKey === 'metadata-audit';
+            const findingsId = 'findings-' + job.jobKey.replace(/[^a-z0-9]/gi, '-');
+            return `
+                <div class="jobs-card" data-key="${escapeHtml(job.jobKey)}">
+                    <h2>
+                        ${escapeHtml(job.displayName)}
+                        <span class="status-pill ${statusClass(job.lastStatus)}">${escapeHtml(job.lastStatus || 'NeverRun')}</span>
+                    </h2>
+                    <div class="desc">${escapeHtml(job.description)}</div>
+                    <div class="jobs-row">
+                        <label class="toggle">
+                            <input type="checkbox" data-field="enabled" ${job.enabled ? 'checked' : ''}>
+                            <span>Enabled</span>
+                        </label>
+                        <label>
+                            Interval (minutes)
+                            <input type="number" min="1" data-field="intervalMinutes" value="${job.intervalMinutes || 60}">
+                        </label>
+                        <label>
+                            Last run
+                            <span class="meta">${formatDate(job.lastRunUtc)} · ${formatDuration(job.lastDurationMs)}</span>
+                        </label>
+                        <label>
+                            Next run
+                            <span class="meta">${formatDate(job.nextRunUtc)}</span>
+                        </label>
+                    </div>
+                    ${isMetadataAudit ? `
+                        <div class="jobs-row">
+                            <label class="toggle">
+                                <input type="checkbox" data-option="autoCorrect" ${opts.autoCorrect ? 'checked' : ''}>
+                                <span>Auto-correct findings (re-normalizes offending files)</span>
+                            </label>
+                        </div>
+                    ` : ''}
+                    ${job.lastMessage ? `<div class="meta" style="margin-top:0.5rem;">Last message: ${escapeHtml(job.lastMessage)}</div>` : ''}
+                    <div class="jobs-actions">
+                        <button class="btn-primary" data-action="save">💾 Save</button>
+                        <button class="btn-primary" data-action="run">▶ Run now</button>
+                        ${isMetadataAudit ? `<button class="btn-secondary" data-action="findings">📋 View findings</button>` : ''}
+                    </div>
+                    ${isMetadataAudit ? `<div class="findings" id="${findingsId}"></div>` : ''}
+                </div>
+            `;
+        }
+
+        async function loadJobs() {
+            const container = document.getElementById('jobsContainer');
+            try {
+                const resp = await apiFetch('/api/scheduled-jobs');
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                const jobs = await resp.json();
+                if (!jobs.length) {
+                    container.innerHTML = '<div class="empty">No scheduled jobs are registered.</div>';
+                    return;
+                }
+                container.innerHTML = jobs.map(renderJob).join('');
+                jobs.forEach(j => bindJobCard(j));
+            } catch (e) {
+                container.innerHTML = '<div class="empty">Failed to load jobs: ' + escapeHtml(e.message) + '</div>';
+            }
+        }
+
+        function bindJobCard(job) {
+            const card = document.querySelector(`.jobs-card[data-key="${CSS.escape(job.jobKey)}"]`);
+            if (!card) return;
+
+            const saveBtn = card.querySelector('[data-action="save"]');
+            const runBtn = card.querySelector('[data-action="run"]');
+            const findingsBtn = card.querySelector('[data-action="findings"]');
+
+            saveBtn.addEventListener('click', async () => {
+                const enabled = card.querySelector('[data-field="enabled"]').checked;
+                const intervalMinutes = parseInt(card.querySelector('[data-field="intervalMinutes"]').value, 10) || 1;
+                const optionInputs = card.querySelectorAll('[data-option]');
+                let optionsJson = null;
+                if (optionInputs.length) {
+                    const opts = {};
+                    optionInputs.forEach(el => {
+                        const name = el.getAttribute('data-option');
+                        opts[name] = el.type === 'checkbox' ? el.checked : el.value;
+                    });
+                    optionsJson = JSON.stringify(opts);
+                }
+                saveBtn.disabled = true;
+                try {
+                    const resp = await apiFetch(`/api/scheduled-jobs/${encodeURIComponent(job.jobKey)}`, {
+                        method: 'PUT',
+                        body: JSON.stringify({ enabled, intervalMinutes, optionsJson })
+                    });
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({}));
+                        alert('Save failed: ' + (err.error || resp.status));
+                    } else {
+                        await loadJobs();
+                    }
+                } finally {
+                    saveBtn.disabled = false;
+                }
+            });
+
+            runBtn.addEventListener('click', async () => {
+                runBtn.disabled = true;
+                try {
+                    const resp = await apiFetch(`/api/scheduled-jobs/${encodeURIComponent(job.jobKey)}/run`, { method: 'POST' });
+                    if (resp.ok || resp.status === 202) {
+                        runBtn.textContent = '▶ Running…';
+                        // Reload status periodically until the job is no longer "running"
+                        const poll = setInterval(async () => {
+                            try {
+                                const r = await apiFetch(`/api/scheduled-jobs/${encodeURIComponent(job.jobKey)}`);
+                                if (!r.ok) return;
+                                const fresh = await r.json();
+                                if ((fresh.lastStatus || '').toLowerCase() !== 'running') {
+                                    clearInterval(poll);
+                                    await loadJobs();
+                                }
+                            } catch { /* ignore */ }
+                        }, 2000);
+                    } else {
+                        alert('Run failed: ' + resp.status);
+                    }
+                } finally {
+                    setTimeout(() => { runBtn.disabled = false; }, 500);
+                }
+            });
+
+            if (findingsBtn) {
+                findingsBtn.addEventListener('click', async () => {
+                    const target = card.querySelector('.findings');
+                    target.innerHTML = '<div class="meta">Loading findings…</div>';
+                    try {
+                        const resp = await apiFetch('/api/scheduled-jobs/metadata-audit/findings?limit=200');
+                        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                        const data = await resp.json();
+                        if (!data.findings || !data.findings.length) {
+                            target.innerHTML = '<div class="meta">No findings recorded yet. Run the metadata audit to populate this list.</div>';
+                            return;
+                        }
+                        const rows = data.findings.map(f => `
+                            <tr>
+                                <td>${escapeHtml(f.findingType)}</td>
+                                <td>${escapeHtml(f.filePath)}</td>
+                                <td>${escapeHtml(f.expectedSeries || '')}</td>
+                                <td>${escapeHtml(f.actualSeries || '')}</td>
+                                <td>${escapeHtml(f.details || '')}</td>
+                            </tr>
+                        `).join('');
+                        target.innerHTML = `
+                            <div class="meta">${data.total} finding(s) recorded. Showing ${data.findings.length}.</div>
+                            <table class="findings-table">
+                                <thead>
+                                    <tr><th>Type</th><th>File</th><th>Expected series</th><th>Actual series</th><th>Details</th></tr>
+                                </thead>
+                                <tbody>${rows}</tbody>
+                            </table>`;
+                    } catch (e) {
+                        target.innerHTML = '<div class="meta">Failed to load findings: ' + escapeHtml(e.message) + '</div>';
+                    }
+                });
+            }
+        }
+
+        // Auto-refresh every 30s so timer-based status changes show up without manual reloads.
+        loadJobs();
+        setInterval(loadJobs, 30000);
+    </script>
+</body>
+</html>

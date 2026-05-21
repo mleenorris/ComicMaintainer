@@ -3,6 +3,7 @@ using System.Diagnostics;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -131,7 +132,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Failed to re-arm timer for {JobKey}", e.JobKey);
+                _logger.LogError(ex, "Failed to re-arm timer for {JobKey}", LoggingHelper.SanitizeForLog(e.JobKey));
             }
         });
     }
@@ -145,7 +146,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
 
         if (!view.Enabled || view.IntervalMinutes <= 0)
         {
-            _logger.LogDebug("Job {JobKey} disabled; timer not armed", view.JobKey);
+            _logger.LogDebug("Job {JobKey} disabled; timer not armed", LoggingHelper.SanitizeForLog(view.JobKey));
             return;
         }
 
@@ -166,7 +167,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
 
         _logger.LogInformation(
             "Scheduled job {JobKey} armed: first run in {DueSec:F0}s, interval {IntervalMin}m",
-            view.JobKey, dueTime.TotalSeconds, view.IntervalMinutes);
+            LoggingHelper.SanitizeForLog(view.JobKey), dueTime.TotalSeconds, view.IntervalMinutes);
     }
 
     private async Task ExecuteJobAsync(string jobKey, bool fromTimer)
@@ -177,11 +178,15 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             return;
         }
         var slot = _slots.GetOrAdd(jobKey, _ => new JobSlot());
+        // jobKey has been validated against the registry above, but it
+        // originates from user input via the controller, so we still scrub
+        // it before sending to the structured logger to avoid log forging.
+        var safeKey = LoggingHelper.SanitizeForLog(jobKey);
 
         // Single-flight: skip overlapping runs rather than queue them up.
         if (!await slot.SingleFlight.WaitAsync(0))
         {
-            _logger.LogInformation("Skipping {JobKey} run because previous run still in progress", jobKey);
+            _logger.LogInformation("Skipping {JobKey} run because previous run still in progress", safeKey);
             if (fromTimer)
             {
                 await _service.RecordCompletionAsync(jobKey, ScheduledJobStatus.Skipped,
@@ -198,27 +203,27 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             var view = await _service.GetAsync(jobKey, token);
             var optionsJson = view?.OptionsJson;
 
-            _logger.LogInformation("Scheduled job {JobKey} starting", jobKey);
+            _logger.LogInformation("Scheduled job {JobKey} starting", safeKey);
             var summary = await handler.ExecuteAsync(optionsJson, token);
             stopwatch.Stop();
             await _service.RecordCompletionAsync(
                 jobKey, ScheduledJobStatus.Success, summary, stopwatch.ElapsedMilliseconds, token);
             _logger.LogInformation("Scheduled job {JobKey} completed in {Ms}ms: {Summary}",
-                jobKey, stopwatch.ElapsedMilliseconds, summary);
+                safeKey, stopwatch.ElapsedMilliseconds, LoggingHelper.SanitizeForLog(summary));
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             stopwatch.Stop();
             await _service.RecordCompletionAsync(
                 jobKey, ScheduledJobStatus.Cancelled, "Run cancelled.", stopwatch.ElapsedMilliseconds);
-            _logger.LogInformation("Scheduled job {JobKey} was cancelled", jobKey);
+            _logger.LogInformation("Scheduled job {JobKey} was cancelled", safeKey);
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
             await _service.RecordCompletionAsync(
                 jobKey, ScheduledJobStatus.Failed, ex.Message, stopwatch.ElapsedMilliseconds);
-            _logger.LogError(ex, "Scheduled job {JobKey} failed", jobKey);
+            _logger.LogError(ex, "Scheduled job {JobKey} failed", safeKey);
         }
         finally
         {

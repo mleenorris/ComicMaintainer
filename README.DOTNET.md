@@ -13,6 +13,7 @@ ComicMaintainer is a service that automatically watches a directory for new or c
 - **File Watching**: Automatically monitors directories for comic file changes
 - **Comic Processing**: Processes `.cbz` and `.cbr` files
 - **Web Interface**: Full-featured web UI for managing comics
+- **Scheduled Jobs**: Manage recurring background jobs (interval, enable/disable, run now) from a dedicated UI page. Ships with a *Metadata Audit* job that walks every tracked file and reports any with a missing chapter/issue number or a series tag that doesn't match the expected resolved series name. New jobs can be added by registering a class that implements `IScheduledJobHandler`.
 - **Batch Processing**: Process multiple files at once
 - **Metadata Management**: View and edit comic metadata
 - **Series Library View**: Browse comics as cover-based series cards and drill into issue lists

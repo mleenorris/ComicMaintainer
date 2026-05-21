@@ -702,6 +702,70 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RenameFilesAsync_OnlySeriesTagSet_PreservesChapterNumberInMetadata()
+    {
+        // Arrange: a file whose ComicInfo.xml has only <Series> set (no
+        // <Number> / <Title>), but whose original filename contains an
+        // explicit "Chapter <n>" token. After rename, the chapter number
+        // and a "Chapter <n>" title should be written into ComicInfo.xml.
+        var series = "My Series";
+        var originalFileName = $"{series} - Chapter 5.cbz";
+        var originalFilePath = Path.Combine(_testDirectory, originalFileName);
+
+        var comicInfoXml = $@"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>{series}</Series>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(originalFilePath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Sanity check: before rename, metadata has only Series set.
+        var beforeMetadata = await _service.GetMetadataAsync(originalFilePath);
+        Assert.NotNull(beforeMetadata);
+        Assert.Equal(series, beforeMetadata!.Series);
+        Assert.True(string.IsNullOrEmpty(beforeMetadata.Issue));
+        Assert.True(string.IsNullOrEmpty(beforeMetadata.Title));
+
+        // Act
+        var jobId = await _service.RenameFilesAsync(new[] { originalFilePath });
+        var job = await WaitForJobCompletionAsync(jobId);
+
+        // Assert: job completed successfully.
+        Assert.NotNull(job);
+        Assert.Equal(1, job!.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+
+        // Locate the renamed file (filename template applies issue padding=4).
+        var expectedRenamedFile = Path.Combine(_testDirectory, $"{series} - Chapter 0005.cbz");
+        Assert.True(File.Exists(expectedRenamedFile),
+            $"Expected renamed file '{expectedRenamedFile}' not found. Files present: " +
+            string.Join(", ", Directory.GetFiles(_testDirectory).Select(Path.GetFileName)));
+
+        // Assert: chapter number is now persisted in metadata, and Title is "Chapter 5".
+        var afterMetadata = await _service.GetMetadataAsync(expectedRenamedFile);
+        Assert.NotNull(afterMetadata);
+        Assert.Equal(series, afterMetadata!.Series);
+        Assert.Equal("5", afterMetadata.Issue);
+        Assert.Equal("Chapter 5", afterMetadata.Title);
+    }
+
+    [Fact]
     public async Task NormalizeFilesAsync_FileAlreadyNormalized_CompletesSuccessfully()
     {
         // Arrange

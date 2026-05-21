@@ -143,6 +143,14 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             // Rename file based on template if metadata is available and rename is enabled
             if (_settings.WatcherEnableRename && metadata != null && !string.IsNullOrEmpty(metadata.Series))
             {
+                // If only the series tag is set on the file, recover an explicit
+                // "Ch/Chapter <n>" chapter number from the original filename into
+                // the metadata's Issue field (and set Title="Chapter <n>") before
+                // generating the new filename. This guarantees that when rename
+                // preserves the chapter number in the filename, it also preserves
+                // it in the file's metadata.
+                await EnsureChapterMetadataPreservedAsync(filePath, metadata, cancellationToken);
+
                 _logger.LogDebug("ProcessFileAsync: Attempting to rename file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 var newFilePath = GenerateFileName(metadata, filePath);
                 if (newFilePath == filePath)
@@ -573,6 +581,13 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             // Rename file based on template if metadata is available
             if (metadata != null && !string.IsNullOrEmpty(metadata.Series))
             {
+                // If the metadata has only the series tag set (no Issue/Number),
+                // but the original filename contains an explicit "Ch/Chapter <n>"
+                // token, recover that chapter number into the metadata so the
+                // rename preserves it not only in the filename but also in
+                // ComicInfo.xml.
+                await EnsureChapterMetadataPreservedAsync(filePath, metadata, cancellationToken);
+
                 _logger.LogDebug("RenameFileAsync: Generating new filename for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 var newFilePath = GenerateFileName(metadata, filePath);
                 _logger.LogDebug("RenameFileAsync: Generated filename: {NewFilePath} (Original: {OriginalFilePath})", 
@@ -1549,6 +1564,57 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             return "Chapter Unknown";
         
         return $"Chapter {issueNumber}";
+    }
+
+    /// <summary>
+    /// When a file's metadata is missing the issue/chapter number but the
+    /// original filename contains an explicit "Ch"/"Chapter &lt;n&gt;" token,
+    /// recover the chapter number into the metadata's <c>Issue</c> field and
+    /// set <c>Title</c> to "Chapter &lt;n&gt;", then persist the updated
+    /// metadata back to the archive's ComicInfo.xml. This ensures the chapter
+    /// number is preserved in metadata (not just in the filename) during
+    /// rename operations on files that only have the series tag set.
+    /// Returns the (possibly updated) metadata instance and a flag indicating
+    /// whether metadata was modified.
+    /// </summary>
+    private async Task<bool> EnsureChapterMetadataPreservedAsync(
+        string filePath,
+        ComicMetadata metadata,
+        CancellationToken cancellationToken)
+    {
+        if (metadata == null || !string.IsNullOrEmpty(metadata.Issue))
+        {
+            return false;
+        }
+
+        var originalNameStem = Path.GetFileNameWithoutExtension(filePath);
+        var parsedChapter = ComicFileProcessor.ParseChapterKeyword(originalNameStem);
+        if (string.IsNullOrEmpty(parsedChapter))
+        {
+            return false;
+        }
+
+        var normalizedTitle = CreateNormalizedTitle(parsedChapter);
+
+        _logger.LogInformation(
+            "Recovering chapter number '{Chapter}' from filename into metadata for {FilePath}; setting Issue and Title='{Title}'.",
+            parsedChapter,
+            LoggingHelper.SanitizePathForLog(filePath),
+            LoggingHelper.SanitizeForLog(normalizedTitle));
+
+        metadata.Issue = parsedChapter;
+        metadata.Title = normalizedTitle;
+
+        var success = await UpdateMetadataCoreAsync(filePath, metadata, cancellationToken);
+        if (!success)
+        {
+            _logger.LogWarning(
+                "Failed to write recovered chapter number '{Chapter}' to metadata for {FilePath}.",
+                parsedChapter,
+                LoggingHelper.SanitizePathForLog(filePath));
+        }
+
+        return success;
     }
 
     ///<summary>

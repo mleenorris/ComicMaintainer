@@ -86,6 +86,17 @@ public class AppSettings
     public int SeriesImageMaxBytes { get; set; } = 5 * 1024 * 1024;
 
     /// <summary>
+    /// When true (the default), every time a series cover image is set
+    /// (user upload, provider apply, or background refresh download) a copy
+    /// is also written into each on-disk folder that contains files for
+    /// the series, named <c>cover.&lt;ext&gt;</c>. This lets external
+    /// readers (Komga, Kavita, Calibre, file managers) display the same
+    /// cover ComicMaintainer's UI shows. Set to false to leave series
+    /// folders untouched.
+    /// </summary>
+    public bool WriteCoverToSeriesFolder { get; set; } = true;
+
+    /// <summary>
     /// Default preferred language (one of <c>en</c>, <c>ja</c>, <c>ko</c>,
     /// <c>zh</c>, or null/empty for "no preference") applied when a series
     /// has no per-series override. When a matching localized title is

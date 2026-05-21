@@ -478,6 +478,7 @@ builder.Services.AddSingleton<ISeriesLibraryService, SeriesLibraryService>();
 builder.Services.AddSingleton<ISeriesMetadataCacheService, SeriesMetadataCacheService>();
 builder.Services.AddSingleton<ISeriesMetadataRefreshJobService, SeriesMetadataRefreshJobService>();
 builder.Services.AddSingleton<ISeriesImageStore, SeriesImageStore>();
+builder.Services.AddSingleton<ISeriesFolderCoverWriter, SeriesFolderCoverWriter>();
 builder.Services.AddHttpClient(SeriesImageStore.HttpClientName)
     .ConfigureHttpClient(client =>
     {

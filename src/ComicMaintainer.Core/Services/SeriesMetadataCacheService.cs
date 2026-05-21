@@ -26,6 +26,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IExternalSeriesMetadataService _externalMetadata;
     private readonly ISeriesImageStore _imageStore;
+    private readonly ISeriesFolderCoverWriter _folderCoverWriter;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesMetadataCacheService> _logger;
 
@@ -33,12 +34,14 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         IExternalSeriesMetadataService externalMetadata,
         ISeriesImageStore imageStore,
+        ISeriesFolderCoverWriter folderCoverWriter,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesMetadataCacheService> logger)
     {
         _dbContextFactory = dbContextFactory;
         _externalMetadata = externalMetadata;
         _imageStore = imageStore;
+        _folderCoverWriter = folderCoverWriter;
         _settings = settings;
         _logger = logger;
     }
@@ -298,6 +301,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             entity.ImageContentType = result.ContentType;
             entity.ImageDownloadedUtc = DateTime.UtcNow;
             entity.ImageStatus = "downloaded";
+
+            await TryWriteFolderCoverAsync(entity, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -366,6 +371,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         entity.ImageStatus = "user";
         entity.RemoteImageUrl = "user-upload";
         entity.UpdatedAt = now;
+
+        await TryWriteFolderCoverAsync(entity, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
@@ -440,6 +447,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         }
         entity.UpdatedAt = now;
 
+        await TryWriteFolderCoverAsync(entity, cancellationToken);
+
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -475,8 +484,58 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         entity.RemoteImageUrl = null;
         entity.UpdatedAt = DateTime.UtcNow;
 
+        try
+        {
+            await _folderCoverWriter.RemoveAsync(entity.NormalizedKey, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "Failed to remove on-disk series cover for {Key}",
+                LoggingHelper.SanitizeForLog(entity.NormalizedKey));
+        }
+
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
+    }
+
+    /// <summary>
+    /// Best-effort: copy the freshly-persisted cached cover image into each
+    /// on-disk folder that backs the series, as <c>cover.&lt;ext&gt;</c>. The
+    /// writer itself is guarded by a feature flag and swallows per-folder
+    /// failures; this wrapper exists only to translate the persisted
+    /// LocalImageFile into an absolute path and to ensure any unexpected
+    /// throw never bubbles into the metadata update.
+    /// </summary>
+    private async Task TryWriteFolderCoverAsync(
+        SeriesMetadataCacheEntity entity,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(entity.LocalImageFile)
+            || string.IsNullOrEmpty(entity.ImageContentType))
+        {
+            return;
+        }
+
+        try
+        {
+            var sourcePath = _imageStore.ResolveAbsolutePath(entity.LocalImageFile);
+            if (string.IsNullOrEmpty(sourcePath))
+            {
+                return;
+            }
+            await _folderCoverWriter.WriteAsync(
+                entity.NormalizedKey,
+                sourcePath,
+                entity.ImageContentType,
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "Failed to write on-disk series cover for {Key}",
+                LoggingHelper.SanitizeForLog(entity.NormalizedKey));
+        }
     }
 
     /// <summary>

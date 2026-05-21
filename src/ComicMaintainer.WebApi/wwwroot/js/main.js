@@ -1908,6 +1908,18 @@
             const imageQueue = Array.from(images);
             const batchSize = 8;
 
+            // Outcome codes returned by tryLoad:
+            //   'ok'       — image successfully fetched and assigned
+            //   'missing'  — server returned 404, the image genuinely does
+            //                not exist and the fallback should be used
+            //   'failed'   — transient failure (network error, 5xx, abort);
+            //                substituting the fallback would display the
+            //                *wrong* image (e.g. a comic-page cover instead
+            //                of the cached series cover) so we leave the
+            //                element alone and rely on the next render or
+            //                a manual refresh.
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
             for (let index = 0; index < imageQueue.length; index += batchSize) {
                 const batch = imageQueue.slice(index, index + batchSize);
                 await Promise.all(batch.map(async image => {
@@ -1917,17 +1929,51 @@
                         return;
                     }
 
-                    const tryLoad = async (token) => {
-                        if (!token) return false;
-                        if (protectedImageUrls.has(token)) {
-                            image.src = protectedImageUrls.get(token);
-                            return true;
-                        }
-                        const url = resolveProtectedImageUrl(token);
-                        if (!url) return false;
+                    const fetchOnce = async (url) => {
                         try {
                             const response = await fetch(url, { headers: getAuthHeaders() });
-                            if (!response.ok) return false;
+                            return { response, errored: false };
+                        } catch (error) {
+                            return { response: null, errored: true, error };
+                        }
+                    };
+
+                    const tryLoad = async (token) => {
+                        if (!token) return 'missing';
+                        if (protectedImageUrls.has(token)) {
+                            image.src = protectedImageUrls.get(token);
+                            return 'ok';
+                        }
+                        const url = resolveProtectedImageUrl(token);
+                        if (!url) return 'missing';
+
+                        // One immediate attempt + one retry after a short
+                        // delay on transient failures (network error or
+                        // 5xx). This eliminates the "occasionally shows
+                        // the wrong cover" symptom caused by a single
+                        // hiccup falling through to the file-based cover.
+                        let attempt = await fetchOnce(url);
+                        let response = attempt.response;
+                        const isTransient = attempt.errored
+                            || (response && response.status >= 500);
+                        if (isTransient) {
+                            await sleep(250);
+                            attempt = await fetchOnce(url);
+                            response = attempt.response;
+                        }
+
+                        if (attempt.errored || !response) {
+                            console.warn('Protected image fetch failed', attempt.error);
+                            return 'failed';
+                        }
+                        if (response.status === 404) {
+                            return 'missing';
+                        }
+                        if (!response.ok) {
+                            return 'failed';
+                        }
+
+                        try {
                             const blob = await response.blob();
                             const objectUrl = URL.createObjectURL(blob);
                             if (protectedImageUrls.size >= MAX_PROTECTED_IMAGE_CACHE_ENTRIES) {
@@ -1939,17 +1985,19 @@
                             }
                             protectedImageUrls.set(token, objectUrl);
                             image.src = objectUrl;
-                            return true;
+                            return 'ok';
                         } catch (error) {
-                            console.error('Failed to load protected image', error);
-                            return false;
+                            console.error('Failed to decode protected image', error);
+                            return 'failed';
                         }
                     };
 
-                    // Try the primary (e.g. external series image); on any
-                    // failure fall back to the file-based cover so users
-                    // never see a broken image when one source is unavailable.
-                    if (!(await tryLoad(primary)) && fallback && fallback !== primary) {
+                    // Only substitute the file-based fallback when the
+                    // primary is *known* to be missing (HTTP 404). On a
+                    // transient failure we deliberately leave the slot
+                    // empty rather than display a different image.
+                    const primaryResult = await tryLoad(primary);
+                    if (primaryResult === 'missing' && fallback && fallback !== primary) {
                         await tryLoad(fallback);
                     }
                 }));

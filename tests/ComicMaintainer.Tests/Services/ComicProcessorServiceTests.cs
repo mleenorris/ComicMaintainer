@@ -891,6 +891,60 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task NormalizeFileAsync_MissingIssueNumber_ParsesFromFilename()
+    {
+        // Arrange - ComicInfo.xml has no <Number> element, but the filename
+        // contains a chapter number. After normalization the issue number
+        // should be populated from the filename and the title should become
+        // "Chapter <n>" instead of "Chapter Unknown".
+        var seriesFolder = Path.Combine(_testDirectory, "Spider-Man");
+        Directory.CreateDirectory(seriesFolder);
+
+        var fileName = "Spider-Man - Chapter 7.cbz";
+        var filePath = Path.Combine(seriesFolder, fileName);
+
+        var comicInfoXml = @"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>Spider-Man</Series>
+    <Title>Some Old Title</Title>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+
+        // Act
+        var result = await _service.ProcessFileAsync(filePath);
+
+        // Assert
+        Assert.True(result);
+        _mockFileStore.Verify(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
+
+        var updatedMetadata = await _service.GetMetadataAsync(filePath);
+        Assert.NotNull(updatedMetadata);
+        Assert.Equal("Spider-Man", updatedMetadata.Series);
+        Assert.Equal("7", updatedMetadata.Issue);
+        Assert.Equal("Chapter 7", updatedMetadata.Title);
+    }
+
+    [Fact]
     public async Task NormalizeFileAsync_WithFolderUnderscores_SetsSeriesNameWithColons()
     {
         // Arrange - Create a folder with underscores

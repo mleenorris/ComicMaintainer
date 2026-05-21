@@ -544,6 +544,7 @@ builder.Services.AddHostedService<DatabaseCleanupHostedService>();
 // Scheduled-jobs framework: handlers + service + hosted runner.
 builder.Services.AddSingleton<IScheduledJobHandler, MetadataAuditJobHandler>();
 builder.Services.AddSingleton<IScheduledJobHandler, FileNamingAuditJobHandler>();
+builder.Services.AddSingleton<IScheduledJobHandler, SeriesLanguageAuditJobHandler>();
 builder.Services.AddSingleton<ScheduledJobService>();
 builder.Services.AddSingleton<IScheduledJobService>(sp => sp.GetRequiredService<ScheduledJobService>());
 builder.Services.AddSingleton<ScheduledJobsHostedService>();

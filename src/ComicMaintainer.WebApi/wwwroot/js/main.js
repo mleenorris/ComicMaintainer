@@ -3815,9 +3815,21 @@
             const formData = new FormData(form);
             const metadata = {};
             
+            // Only include non-empty fields. Empty inputs (e.g. an empty Year)
+            // would fail JSON deserialization on the server because
+            // ComicMetadata.Year is int? — sending "" would cause a 400 and
+            // the file's tags would never get written.
             for (let [key, value] of formData.entries()) {
+                if (typeof value !== 'string' || !value.trim()) continue;
                 // Capitalize first letter to match ComicMetadata property names
                 const propertyName = key.charAt(0).toUpperCase() + key.slice(1);
+                if (propertyName === 'Year') {
+                    const parsedYear = parseInt(value, 10);
+                    if (!isNaN(parsedYear)) {
+                        metadata[propertyName] = parsedYear;
+                    }
+                    continue;
+                }
                 metadata[propertyName] = value;
             }
             
@@ -3887,6 +3899,13 @@
                 if (value.trim()) {
                     // Capitalize first letter to match ComicMetadata property names
                     const propertyName = key.charAt(0).toUpperCase() + key.slice(1);
+                    if (propertyName === 'Year') {
+                        const parsedYear = parseInt(value, 10);
+                        if (!isNaN(parsedYear)) {
+                            metadata[propertyName] = parsedYear;
+                        }
+                        continue;
+                    }
                     metadata[propertyName] = value;
                 }
             }

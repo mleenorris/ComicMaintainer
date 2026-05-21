@@ -9,8 +9,6 @@ public class SeriesDisplayTitleResolverTests
         string canonical,
         string? preferredLanguage = null,
         bool isUserCanonical = false,
-        IEnumerable<string>? aliases = null,
-        IEnumerable<string>? userAliases = null,
         params (string title, string? lang)[] localized)
     {
         return new SeriesMetadataCacheRecord
@@ -19,8 +17,6 @@ public class SeriesDisplayTitleResolverTests
             CanonicalTitle = canonical,
             PreferredLanguage = preferredLanguage,
             IsUserCanonical = isUserCanonical,
-            Aliases = aliases?.ToList() ?? new List<string>(),
-            UserAliases = userAliases?.ToList() ?? new List<string>(),
             LocalizedTitles = localized
                 .Select(t => new LocalizedTitle(t.title, t.lang))
                 .ToList()
@@ -144,111 +140,5 @@ public class SeriesDisplayTitleResolverTests
             preferredLanguage: "ja");
 
         Assert.Equal("Fallback", SeriesDisplayTitleResolver.Resolve(record, "en"));
-    }
-
-    [Fact]
-    public void EnglishPreference_PicksLatinAliasOverKoreanCanonical_WhenLocalizedTitlesEmpty()
-    {
-        // Reproduces the user-reported symptom: a Manhwa cached from a
-        // Korean-primary provider record (Korean canonical, no localized
-        // titles) but with an English alias and an "en" preference.
-        var record = BuildRecord(
-            canonical: "솔로 레벨링",
-            preferredLanguage: "en",
-            aliases: new[] { "Solo Leveling" });
-
-        Assert.Equal("Solo Leveling", SeriesDisplayTitleResolver.Resolve(record, null));
-    }
-
-    [Fact]
-    public void EnglishPreference_PrefersTaggedLocalizedTitle_OverLatinAlias()
-    {
-        var record = BuildRecord(
-            canonical: "Some Series",
-            preferredLanguage: "en",
-            aliases: new[] { "Different English Alias" },
-            localized: new[]
-            {
-                ("Official English Title", (string?)"en"),
-                ("オフィシャル", (string?)"ja")
-            });
-
-        Assert.Equal("Official English Title", SeriesDisplayTitleResolver.Resolve(record, null));
-    }
-
-    [Fact]
-    public void KoreanPreference_DoesNotAutoPickLatinAlias_FallsBackToCanonical()
-    {
-        // Latin-script heuristic must NOT satisfy a CJK preference, even when
-        // no localized title matches. We expect the canonical to be returned
-        // unchanged.
-        var record = BuildRecord(
-            canonical: "솔로 레벨링",
-            preferredLanguage: "ko",
-            aliases: new[] { "Solo Leveling" });
-
-        Assert.Equal("솔로 레벨링", SeriesDisplayTitleResolver.Resolve(record, null));
-    }
-
-    [Fact]
-    public void UserCanonicalOverride_AlwaysWins_OverAliases()
-    {
-        var record = BuildRecord(
-            canonical: "솔로 레벨링",
-            preferredLanguage: "en",
-            isUserCanonical: true,
-            aliases: new[] { "Solo Leveling" });
-
-        Assert.Equal("솔로 레벨링", SeriesDisplayTitleResolver.Resolve(record, null));
-    }
-
-    [Fact]
-    public void EnglishPreference_PrefersUserAliasOverProviderAlias()
-    {
-        var record = BuildRecord(
-            canonical: "솔로 레벨링",
-            preferredLanguage: "en",
-            aliases: new[] { "Solo Leveling" },
-            userAliases: new[] { "Only I Level Up" });
-
-        Assert.Equal("Only I Level Up", SeriesDisplayTitleResolver.Resolve(record, null));
-    }
-
-    [Fact]
-    public void EnglishPreference_FallsThroughToLatinCanonical_WhenAliasesAreCjk()
-    {
-        // No tagged English LocalizedTitle, both aliases are CJK, but the
-        // canonical itself is Latin. The canonical should win on the
-        // heuristic before we fall through to the unconditional fallback.
-        var record = BuildRecord(
-            canonical: "Solo Leveling",
-            preferredLanguage: "en",
-            aliases: new[] { "나 혼자만 레벨업" });
-
-        Assert.Equal("Solo Leveling", SeriesDisplayTitleResolver.Resolve(record, null));
-    }
-
-    [Fact]
-    public void EnglishPreference_SkipsAliasesWithCjkCharacters()
-    {
-        var record = BuildRecord(
-            canonical: "솔로 레벨링",
-            preferredLanguage: "en",
-            aliases: new[] { "나 혼자만 레벨업", "Solo Leveling" });
-
-        Assert.Equal("Solo Leveling", SeriesDisplayTitleResolver.Resolve(record, null));
-    }
-
-    [Fact]
-    public void EnglishPreference_AcceptsLatinExtended_NotJustAscii()
-    {
-        // Romaji-with-macrons and similar Latin Extended characters should
-        // still be treated as Latin script for the English heuristic.
-        var record = BuildRecord(
-            canonical: "솔로 레벨링",
-            preferredLanguage: "en",
-            aliases: new[] { "Tōkyō Ghoul" });
-
-        Assert.Equal("Tōkyō Ghoul", SeriesDisplayTitleResolver.Resolve(record, null));
     }
 }

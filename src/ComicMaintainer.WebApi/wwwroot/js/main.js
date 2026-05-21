@@ -7032,7 +7032,33 @@
                     return;
                 }
                 container.innerHTML = results.map((r, idx) => {
-                    const aliases = (r.aliases || []).map(a => escapeHtml(a)).join(', ') || '<em>none</em>';
+                    // Build a lookup of alias -> language from the provider's
+                    // localized titles so each alias can be rendered with a
+                    // small language badge ("en", "ja", "ko", ...). Without
+                    // this the manual-match list shows bare strings and the
+                    // user can't tell which alias is English.
+                    const langByTitle = new Map();
+                    (r.localized_titles || []).forEach(lt => {
+                        if (lt && lt.title && lt.language) {
+                            langByTitle.set(lt.title.toLowerCase(), lt.language);
+                        }
+                    });
+                    const aliasList = r.aliases || [];
+                    const aliases = aliasList.length
+                        ? aliasList.map(a => {
+                            const lang = langByTitle.get(a.toLowerCase());
+                            const langBadge = lang
+                                ? ` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${escapeHtml(lang)}</span>`
+                                : '';
+                            return `<span style="display: inline-block; margin-right: 4px;">${escapeHtml(a)}${langBadge}</span>`;
+                        }).join(', ')
+                        : '<em>none</em>';
+                    // Show the canonical title's language too so the user can
+                    // see that (for example) the chosen canonical is English.
+                    const canonicalLang = langByTitle.get((r.canonical_title || '').toLowerCase());
+                    const canonicalLangBadge = canonicalLang
+                        ? ` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${escapeHtml(canonicalLang)}</span>`
+                        : '';
                     // Server returns match_score on [0,100]. Render a colour
                     // hint so the user can see at a glance which candidate is
                     // the most-likely match when the automatic pick was wrong.
@@ -7047,7 +7073,7 @@
                     return `
                         <div style="border: 1px solid var(--border-primary); border-radius: 5px; padding: 10px; margin-bottom: 8px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                <strong>${escapeHtml(r.canonical_title || '')}</strong>
+                                <strong>${escapeHtml(r.canonical_title || '')}${canonicalLangBadge}</strong>
                                 <div style="display: flex; gap: 6px; align-items: center;">
                                     ${scoreBadge}
                                     <span style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(r.source || '')}</span>
@@ -7121,7 +7147,14 @@
                         aliases: result.aliases || [],
                         source: result.source || null,
                         imageUrl: result.image_url || null,
-                        thumbnailUrl: result.thumbnail_url || null
+                        thumbnailUrl: result.thumbnail_url || null,
+                        // Forward the provider's per-title language tags so
+                        // the cached record preserves them and the per-series
+                        // preferred-language resolver can later swap the
+                        // display title to the user's chosen language.
+                        localizedTitles: (result.localized_titles || [])
+                            .filter(lt => lt && lt.title)
+                            .map(lt => ({ title: lt.title, language: lt.language || null }))
                     })
                 });
                 if (!response.ok) {

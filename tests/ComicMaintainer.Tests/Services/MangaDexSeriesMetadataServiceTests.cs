@@ -164,7 +164,7 @@ public class MangaDexSeriesMetadataServiceTests
     }
 
     [Fact]
-    public async Task LookupSeriesAsync_FallsBackToFirstAvailableTitle_WhenNoEnglishTitle()
+    public async Task LookupSeriesAsync_PromotesEnglishAltTitle_WhenNoEnglishPrimaryTitle()
     {
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
         {
@@ -193,9 +193,65 @@ public class MangaDexSeriesMetadataServiceTests
         var result = await service.LookupSeriesAsync("신의 탑");
 
         Assert.NotNull(result);
-        Assert.Equal("신의 탑", result!.CanonicalTitle);
-        Assert.Contains("Tower of God", result.Aliases);
+        // When the primary title is non-English but an English alt-title is
+        // available, the English alt-title is promoted to be the canonical
+        // title so the series defaults to English in the library.
+        Assert.Equal("Tower of God", result!.CanonicalTitle);
+        Assert.Contains("신의 탑", result.Aliases);
         Assert.Equal("MangaDex", result.Source);
+
+        // Both titles should still be present in the localized list with
+        // their language tags preserved.
+        Assert.Contains(result.LocalizedTitles, t => t.Title == "Tower of God" && t.Language == "en");
+        Assert.Contains(result.LocalizedTitles, t => t.Title == "신의 탑" && t.Language == "ko");
+        // English entry must come first so that downstream consumers
+        // treating the first entry as canonical see the English title.
+        Assert.Equal("Tower of God", result.LocalizedTitles[0].Title);
+    }
+
+    [Fact]
+    public async Task LookupSeriesAsync_PromotesEnglishAltTitle_WhenPrimaryIsRomanization()
+    {
+        // Real-world MangaDex shape for "家族影子的背叛": primary title is a
+        // Chinese pinyin romanization (no `en` field on `title`) but the
+        // altTitles list carries the English title. The provider should
+        // surface the English alt-title as the canonical so the series
+        // doesn't keep the romanized name.
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+            {
+              "data": [
+                {
+                  "attributes": {
+                    "title": { "zh-ro": "Jiā Zú Yǐng Zi de Bèi Pàn" },
+                    "altTitles": [
+                      { "zh": "家族影子的背叛" },
+                      { "en": "The Betrayal of the Family Shadow" }
+                    ]
+                  }
+                }
+              ]
+            }
+            """, Encoding.UTF8, "application/json")
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        var result = await service.LookupSeriesAsync("Jiā Zú Yǐng Zi de Bèi Pàn");
+
+        Assert.NotNull(result);
+        Assert.Equal("The Betrayal of the Family Shadow", result!.CanonicalTitle);
+        Assert.Contains("Jiā Zú Yǐng Zi de Bèi Pàn", result.Aliases);
+        Assert.Contains("家族影子的背叛", result.Aliases);
+
+        Assert.Contains(result.LocalizedTitles, t => t.Title == "The Betrayal of the Family Shadow" && t.Language == "en");
+        Assert.Contains(result.LocalizedTitles, t => t.Title == "Jiā Zú Yǐng Zi de Bèi Pàn" && t.Language == "zh-ro");
+        Assert.Contains(result.LocalizedTitles, t => t.Title == "家族影子的背叛" && t.Language == "zh");
     }
 
     [Fact]

@@ -365,7 +365,14 @@ public class MetadataController : ControllerBase
                     source = x.metadata.Source,
                     image_url = x.metadata.ImageUrl,
                     thumbnail_url = x.metadata.ThumbnailUrl,
-                    match_score = x.score
+                    match_score = x.score,
+                    // Surface the provider-supplied language tags so the
+                    // manual-match UI can render each alias alongside its
+                    // language (e.g. "en", "ja", "ko") and the user can
+                    // tell at a glance which provider alias is English.
+                    localized_titles = (x.metadata.LocalizedTitles ?? new List<LocalizedTitle>())
+                        .Where(lt => lt is not null && !string.IsNullOrWhiteSpace(lt.Title))
+                        .Select(lt => new { title = lt.Title, language = lt.Language })
                 })
             });
         }
@@ -475,7 +482,16 @@ public class MetadataController : ControllerBase
                               ?? new List<string>(),
                     Source = request.Source ?? string.Empty,
                     ImageUrl = string.IsNullOrWhiteSpace(request.ImageUrl) ? null : request.ImageUrl,
-                    ThumbnailUrl = string.IsNullOrWhiteSpace(request.ThumbnailUrl) ? null : request.ThumbnailUrl
+                    ThumbnailUrl = string.IsNullOrWhiteSpace(request.ThumbnailUrl) ? null : request.ThumbnailUrl,
+                    // Preserve provider-supplied language tags so the cached
+                    // record's LocalizedTitles list keeps per-alias language
+                    // info; without this the cache falls back to untagged
+                    // entries and the preferred-language resolver can't
+                    // promote (e.g.) the English alias as display title.
+                    LocalizedTitles = (request.LocalizedTitles ?? new List<LocalizedTitleDto>())
+                        .Where(lt => lt is not null && !string.IsNullOrWhiteSpace(lt.Title))
+                        .Select(lt => new LocalizedTitle(lt.Title.Trim(), string.IsNullOrWhiteSpace(lt.Language) ? null : lt.Language!.Trim()))
+                        .ToList()
                 },
                 cancellationToken);
 
@@ -641,6 +657,21 @@ public class MetadataController : ControllerBase
         public string? Source { get; set; }
         public string? ImageUrl { get; set; }
         public string? ThumbnailUrl { get; set; }
+
+        /// <summary>
+        /// Optional language-tagged titles to preserve from the candidate
+        /// shown in the manual-match UI. When supplied, these flow through
+        /// to the cached record so the per-series preferred-language
+        /// resolver can later swap the display title to the user's chosen
+        /// language without having to re-query the provider.
+        /// </summary>
+        public List<LocalizedTitleDto>? LocalizedTitles { get; set; }
+    }
+
+    public class LocalizedTitleDto
+    {
+        public string Title { get; set; } = string.Empty;
+        public string? Language { get; set; }
     }
 
     /// <summary>

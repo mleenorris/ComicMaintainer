@@ -377,26 +377,42 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
     /// <c>ja-ro</c>, <c>ko</c>, <c>zh</c>, <c>zh-hk</c>). We preserve those
     /// codes verbatim; the preferred-language matcher collapses regional
     /// variants to their primary subtag.
+    /// <para>
+    /// English titles are always promoted to the front of the list (whether
+    /// they come from <c>title.en</c> or from an <c>altTitles</c> entry).
+    /// Because <see cref="ParseResults"/> picks the first localized title as
+    /// the candidate's <see cref="ExternalSeriesMetadata.CanonicalTitle"/>,
+    /// this means a series whose primary MangaDex title is a romanization
+    /// (e.g. Chinese pinyin) but has an English alt-title will default to
+    /// the English alt-title as its display name.
+    /// </para>
     /// </summary>
     private static List<LocalizedTitle> ExtractLocalizedTitles(JsonElement attributes)
     {
-        var result = new List<LocalizedTitle>();
+        var englishTitles = new List<LocalizedTitle>();
+        var otherTitles = new List<LocalizedTitle>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         void AddIfNew(string? value, string? language)
         {
             if (string.IsNullOrWhiteSpace(value)) return;
-            if (seen.Add(value))
+            if (!seen.Add(value)) return;
+            var entry = new LocalizedTitle(value, language);
+            if (IsEnglish(language))
             {
-                result.Add(new LocalizedTitle(value, language));
+                englishTitles.Add(entry);
+            }
+            else
+            {
+                otherTitles.Add(entry);
             }
         }
 
-        // Prefer the English title as the canonical first entry (matching
-        // historical behaviour); fall back to whatever language the provider
-        // returns first.
         if (attributes.TryGetProperty("title", out var titleObj) && titleObj.ValueKind == JsonValueKind.Object)
         {
+            // Process the explicit English variant first so that, even if a
+            // provider quirk repeats the same string under another language,
+            // the English entry is the one we keep.
             if (titleObj.TryGetProperty("en", out var enTitle) && enTitle.ValueKind == JsonValueKind.String)
             {
                 AddIfNew(enTitle.GetString(), "en");
@@ -421,7 +437,24 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
             }
         }
 
+        // English first (preserving insertion order within each group) so the
+        // first entry — which becomes the candidate's CanonicalTitle — is the
+        // English title whenever the provider supplied one.
+        var result = new List<LocalizedTitle>(englishTitles.Count + otherTitles.Count);
+        result.AddRange(englishTitles);
+        result.AddRange(otherTitles);
         return result;
+    }
+
+    /// <summary>
+    /// Returns true when the BCP-47 language tag represents English (primary
+    /// subtag <c>en</c>), e.g. <c>en</c>, <c>en-US</c>, <c>en-GB</c>.
+    /// </summary>
+    private static bool IsEnglish(string? language)
+    {
+        if (string.IsNullOrWhiteSpace(language)) return false;
+        var primary = language.Split('-', 2)[0];
+        return string.Equals(primary, "en", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string Normalize(string value)

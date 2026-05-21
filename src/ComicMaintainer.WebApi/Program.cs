@@ -541,6 +541,13 @@ builder.Services.AddHostedService<FileWatcherHostedService>();
 // Add hosted service for database cleanup
 builder.Services.AddHostedService<DatabaseCleanupHostedService>();
 
+// Scheduled-jobs framework: handlers + service + hosted runner.
+builder.Services.AddSingleton<IScheduledJobHandler, MetadataAuditJobHandler>();
+builder.Services.AddSingleton<ScheduledJobService>();
+builder.Services.AddSingleton<IScheduledJobService>(sp => sp.GetRequiredService<ScheduledJobService>());
+builder.Services.AddSingleton<ScheduledJobsHostedService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ScheduledJobsHostedService>());
+
 var app = builder.Build();
 
 // Print startup banner

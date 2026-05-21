@@ -23,6 +23,8 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<ReaderPreferencesEntity> ReaderPreferences { get; set; } = null!;
     public DbSet<ReadingSessionEntity> ReadingSessions { get; set; } = null!;
     public DbSet<SeriesMetadataCacheEntity> SeriesMetadataCache { get; set; } = null!;
+    public DbSet<ScheduledJobEntity> ScheduledJobs { get; set; } = null!;
+    public DbSet<MetadataAuditFindingEntity> MetadataAuditFindings { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -170,6 +172,31 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.PreferredLanguage).HasMaxLength(16);
             // LocalizedTitlesJson is opaque JSON; no max length so it can
             // accommodate long alias lists from providers like MangaDex.
+        });
+
+        // Configure ScheduledJobEntity
+        modelBuilder.Entity<ScheduledJobEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.JobKey).IsRequired().HasMaxLength(64);
+            entity.HasIndex(e => e.JobKey).IsUnique();
+            entity.Property(e => e.LastStatus).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.LastMessage).HasMaxLength(1024);
+            entity.Property(e => e.CronExpression).HasMaxLength(128);
+        });
+
+        // Configure MetadataAuditFindingEntity
+        modelBuilder.Entity<MetadataAuditFindingEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.FilePath).IsRequired().HasMaxLength(2048);
+            entity.Property(e => e.FindingType).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.ExpectedSeries).HasMaxLength(512);
+            entity.Property(e => e.ActualSeries).HasMaxLength(512);
+            entity.Property(e => e.ActualIssue).HasMaxLength(50);
+            entity.Property(e => e.Details).HasMaxLength(1024);
+            entity.HasIndex(e => e.FindingType);
+            entity.HasIndex(e => e.FilePath);
         });
     }
 }

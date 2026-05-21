@@ -37,6 +37,9 @@ public class ComicFileProcessorTests
     [InlineData("ch 5", "5")]
     [InlineData("ch.10", "10")]
     [InlineData("Ch-3.5", "3.5")]
+    [InlineData("Batman - Ch 0004.5", "4.5")]
+    [InlineData("Series - Chapter 0042", "42")]
+    [InlineData("Series - Chapter 0000", "0")]
     public void ParseChapterNumber_WithChapterKeyword_ReturnsNumber(string filename, string expected)
     {
         // Act
@@ -47,8 +50,9 @@ public class ComicFileProcessorTests
     }
 
     [Theory]
-    [InlineData("Series Name 042", "042")]
+    [InlineData("Series Name 042", "42")]
     [InlineData("Test 12.5 Extra", "12.5")]
+    [InlineData("Series Name 0004.5", "4.5")]
     public void ParseChapterNumber_WithoutKeyword_FindsNumber(string filename, string expected)
     {
         // Act
@@ -251,6 +255,8 @@ public class ComicFileProcessorTests
     [InlineData("Series - Chapter 5", "5")]
     [InlineData("Series Ch.10", "10")]
     [InlineData("Series ch_3.5", "3.5")]
+    [InlineData("Batman - Ch 0004.5", "4.5")]
+    [InlineData("Series Ch 0042", "42")]
     [InlineData("Series Vol 2", null)]
     [InlineData("Series 042", null)]
     [InlineData("Series Name (2023)", null)]

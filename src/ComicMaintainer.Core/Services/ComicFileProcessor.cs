@@ -37,8 +37,10 @@ public class ComicFileProcessor
         new(@"\s+", RegexOptions.Compiled);
 
     /// <summary>
-    /// Parse chapter number from filename
-    /// Converted from Python's parse_chapter_number function
+    /// Parse chapter number from filename. Leading zeros are stripped from
+    /// the integer part while any decimal portion is preserved
+    /// (e.g. "0004" → "4", "0004.5" → "4.5").
+    /// Converted from Python's parse_chapter_number function.
     /// </summary>
     public static string? ParseChapterNumber(string filename)
     {
@@ -46,7 +48,7 @@ public class ComicFileProcessor
         var match = ChapterKeywordPattern.Match(filename);
         if (match.Success)
         {
-            return match.Groups[1].Value;
+            return StripLeadingZeros(match.Groups[1].Value);
         }
 
         // Look for numbers not in brackets
@@ -60,11 +62,36 @@ public class ComicFileProcessor
 
             if (!BracketStartPattern.IsMatch(before) && !BracketEndPattern.IsMatch(after))
             {
-                return m.Value;
+                return StripLeadingZeros(m.Value);
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Strip leading zeros from the integer part of a numeric chapter/issue
+    /// string while preserving the decimal portion. Returns "0" for an
+    /// all-zero integer part and passes non-numeric values through unchanged.
+    /// </summary>
+    internal static string StripLeadingZeros(string number)
+    {
+        if (string.IsNullOrEmpty(number))
+        {
+            return number;
+        }
+
+        var dotIndex = number.IndexOf('.');
+        var integerPart = dotIndex >= 0 ? number[..dotIndex] : number;
+        var fractionalPart = dotIndex >= 0 ? number[dotIndex..] : string.Empty;
+
+        var trimmed = integerPart.TrimStart('0');
+        if (trimmed.Length == 0)
+        {
+            trimmed = "0";
+        }
+
+        return trimmed + fractionalPart;
     }
 
     /// <summary>
@@ -77,7 +104,7 @@ public class ComicFileProcessor
     public static string? ParseChapterKeyword(string filename)
     {
         var match = ChapterKeywordPattern.Match(filename);
-        return match.Success ? match.Groups[1].Value : null;
+        return match.Success ? StripLeadingZeros(match.Groups[1].Value) : null;
     }
 
     /// <summary>

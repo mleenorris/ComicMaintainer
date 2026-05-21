@@ -81,6 +81,20 @@ Func<Serilog.Events.LogEvent, bool> isMetadataSource = e =>
         || s.Contains("MetadataController");
 };
 
+// Auth-related sources: AuthController API surface, the AuthService that
+// performs credential validation / user CRUD / token issuance, and the
+// Authelia reverse-proxy authentication handler. Routes all of these to a
+// dedicated auth.log so authentication activity can be audited without
+// sifting through the general application log.
+Func<Serilog.Events.LogEvent, bool> isAuthSource = e =>
+{
+    if (!e.Properties.TryGetValue("SourceContext", out var ctx)) return false;
+    var s = ctx.ToString();
+    return s.Contains("AuthController")
+        || s.Contains("AuthService")
+        || s.Contains("AutheliaAuthenticationHandler");
+};
+
 builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
     .ReadFrom.Services(services)
@@ -90,9 +104,9 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
     .WriteTo.Console(
         restrictedToMinimumLevel: LogEventLevel.Information,
         outputTemplate: "[{Timestamp:HH:mm:ss}] [{Level:u3}] {Message:lj}{NewLine}{Exception}")
-    // Basic/Info log file - Information level and above, excluding watcher AND metadata logs
+    // Basic/Info log file - Information level and above, excluding watcher, metadata, AND auth logs
     .WriteTo.Logger(lc => lc
-        .Filter.ByExcluding(e => isWatcherSource(e) || isMetadataSource(e))
+        .Filter.ByExcluding(e => isWatcherSource(e) || isMetadataSource(e) || isAuthSource(e))
         .WriteTo.File(
             Path.Combine(configDir, "app.log"),
             restrictedToMinimumLevel: LogEventLevel.Information,
@@ -125,6 +139,18 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
         .Filter.ByIncludingOnly(e => isMetadataSource(e))
         .WriteTo.File(
             Path.Combine(configDir, "metadata.log"),
+            restrictedToMinimumLevel: LogEventLevel.Debug,
+            rollingInterval: RollingInterval.Day,
+            retainedFileCountLimit: 7,
+            fileSizeLimitBytes: logMaxBytes,
+            outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}"))
+    // Auth-specific log file - capture login attempts, token issuance,
+    // user CRUD, and Authelia reverse-proxy authentication. Kept separate
+    // from the general app log so authentication activity can be audited.
+    .WriteTo.Logger(lc => lc
+        .Filter.ByIncludingOnly(e => isAuthSource(e))
+        .WriteTo.File(
+            Path.Combine(configDir, "auth.log"),
             restrictedToMinimumLevel: LogEventLevel.Debug,
             rollingInterval: RollingInterval.Day,
             retainedFileCountLimit: 7,

@@ -1366,6 +1366,96 @@
             // Errors are handled here to avoid unhandled promise rejections.
             jobCheckPromise.catch(error => console.error('Failed to check active job:', error));
             libraryHealthPromise.catch(error => console.error('Failed to load library health:', error));
+
+            // Restore "where we were" if the user is coming back from the
+            // reader. Runs after the initial library view has had a chance
+            // to render so the target scroll position exists in the DOM.
+            tryRestoreReaderReturnState();
+        }
+
+        // Two-hour TTL: stale snapshots are silently ignored so we don't
+        // teleport users on a much later visit.
+        const READER_RETURN_STATE_TTL_MS = 2 * 60 * 60 * 1000;
+
+        function consumeReaderReturnState() {
+            try {
+                const raw = sessionStorage.getItem('comicReaderReturnState');
+                if (!raw) return null;
+                sessionStorage.removeItem('comicReaderReturnState');
+                const snap = JSON.parse(raw);
+                if (!snap || typeof snap !== 'object') return null;
+                if (!snap.timestamp || (Date.now() - snap.timestamp) > READER_RETURN_STATE_TTL_MS) return null;
+                return snap;
+            } catch (_e) {
+                return null;
+            }
+        }
+
+        async function tryRestoreReaderReturnState() {
+            const snap = consumeReaderReturnState();
+            if (!snap) return;
+            try {
+                // Apply search box value (no reload needed beyond the one that
+                // loadActiveLibraryView already triggered with the saved filter
+                // from preferences).
+                if (snap.searchQuery) {
+                    const input = document.getElementById('headerSearchInput');
+                    if (input) input.value = snap.searchQuery;
+                    searchQuery = snap.searchQuery;
+                    // Trigger a fresh load with the search applied. Tests for
+                    // emptiness avoid an unnecessary reload when nothing
+                    // changed.
+                    loadActiveLibraryView(1, false);
+                }
+                // Reopen the series detail panel if one was open.
+                if (snap.currentSeriesDetailId
+                    && typeof openSeriesDetail === 'function'
+                    && libraryViewMode === 'series') {
+                    // Wait briefly for the series list to populate before
+                    // reopening the detail panel.
+                    await waitForSeriesAvailable(snap.currentSeriesDetailId, 2500);
+                    if (currentSeriesDetailId !== snap.currentSeriesDetailId
+                        && seriesLibrary.some(s => s && s.id === snap.currentSeriesDetailId)) {
+                        openSeriesDetail(snap.currentSeriesDetailId);
+                    }
+                }
+                // Finally, restore scroll position. Wait for layout to settle
+                // — folder/series rendering is async — by polling for a few
+                // animation frames.
+                await restoreScrollPosition(snap.scrollY || 0);
+            } catch (e) {
+                console.error('Failed to restore reader return state:', e);
+            }
+        }
+
+        function waitForSeriesAvailable(seriesId, timeoutMs) {
+            return new Promise(resolve => {
+                const started = Date.now();
+                const check = () => {
+                    if (seriesLibrary.some(s => s && s.id === seriesId)) { resolve(true); return; }
+                    if (Date.now() - started > timeoutMs) { resolve(false); return; }
+                    setTimeout(check, 80);
+                };
+                check();
+            });
+        }
+
+        function restoreScrollPosition(targetY) {
+            return new Promise(resolve => {
+                if (!targetY || targetY <= 0) { resolve(); return; }
+                let attempts = 0;
+                const tick = () => {
+                    attempts++;
+                    // window.scroll(0, y) will be clamped to documentElement.scrollHeight,
+                    // so we keep trying until either the page has grown enough or
+                    // we exhaust retries (~1.5 s worst case).
+                    window.scrollTo(0, targetY);
+                    const actual = window.scrollY || document.documentElement.scrollTop || 0;
+                    if (Math.abs(actual - targetY) < 4 || attempts > 30) { resolve(); return; }
+                    setTimeout(tick, 50);
+                };
+                requestAnimationFrame(tick);
+            });
         }
         
         // Check if DOM is already loaded (script loaded after DOMContentLoaded fired)
@@ -3692,6 +3782,23 @@
         }
         
         function readComic(filepath) {
+            // Snapshot the current page state so the reader can return us to
+            // exactly where we came from when the user exits. Stored in
+            // sessionStorage (tab-scoped, auto-cleared when the tab closes).
+            try {
+                const snapshot = {
+                    originUrl: window.location.href,
+                    scrollY: window.scrollY || document.documentElement.scrollTop || 0,
+                    searchQuery: typeof searchQuery === 'string' ? searchQuery : '',
+                    filterMode: typeof filterMode === 'string' ? filterMode : 'all',
+                    libraryViewMode: typeof libraryViewMode === 'string' ? libraryViewMode : 'files',
+                    currentSeriesDetailId: typeof currentSeriesDetailId !== 'undefined' ? currentSeriesDetailId : null,
+                    timestamp: Date.now()
+                };
+                sessionStorage.setItem('comicReaderReturnState', JSON.stringify(snapshot));
+            } catch (_e) {
+                // sessionStorage can throw in private modes — ignore.
+            }
             // Open comic reader in the same window
             window.location.href = `/reader.html?file=${encodeURIComponent(filepath)}`;
         }

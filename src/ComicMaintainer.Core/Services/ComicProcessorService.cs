@@ -1942,14 +1942,24 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
 
             // Recognise any cache record whose status implies a positive match.
             // "success" comes from a provider lookup that returned a hit;
-            // "manual_match" is set when the user explicitly picked a candidate.
+            // "manual_match" is set when the user explicitly picked a candidate
+            // from the manual-match UI; "manual" is set when the user takes any
+            // direct action on the record (e.g. setting a preferred language,
+            // editing user aliases, or saving a canonical-title override) and
+            // therefore represents an explicit user decision that should be
+            // honoured when rewriting per-file <Series> metadata. Without
+            // including "manual" here, setting a per-series preferred language
+            // on a series that has never been externally matched would silently
+            // fall through to the external-lookup path (or the raw folder name)
+            // instead of running the cached record through SeriesDisplayTitleResolver.
             // A user-canonical override is already handled by
             // LookupUserCanonicalRecordAsync but we accept it here too so
             // callers can use this method in isolation.
             var status = record.LookupStatus;
             var isMatched = record.IsUserCanonical
                 || string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(status, "manual_match", StringComparison.OrdinalIgnoreCase);
+                || string.Equals(status, "manual_match", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(status, "manual", StringComparison.OrdinalIgnoreCase);
 
             return isMatched ? record : null;
         }

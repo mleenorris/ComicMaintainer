@@ -291,7 +291,7 @@ public class JobsController : ControllerBase
     }
 
     [HttpPost("normalize-unmarked")]
-    public async Task<ActionResult<object>> NormalizeUnmarked()
+    public async Task<ActionResult<object>> NormalizeUnmarked([FromQuery] bool forceReprocess = false)
     {
         try
         {
@@ -310,7 +310,7 @@ public class JobsController : ControllerBase
             }
             
             // Start the normalize job
-            var jobId = await _processor.NormalizeFilesAsync(filePaths);
+            var jobId = await _processor.NormalizeFilesAsync(filePaths, forceReprocess);
             _logger.LogInformation("NormalizeUnmarked: Normalize unmarked files requested, job ID: {JobId}, total files: {TotalFiles}", jobId, filePaths.Count);
             _logger.LogDebug("NormalizeUnmarked: Job created successfully with ID: {JobId}", jobId);
             

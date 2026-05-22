@@ -290,7 +290,7 @@ public class JobsControllerTests
             .ReturnsAsync(unprocessedFiles);
         
         _mockProcessor
-            .Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), default))
+            .Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), false, default))
             .ReturnsAsync(expectedJobId);
 
         // Act
@@ -319,6 +319,36 @@ public class JobsControllerTests
         var (jobId, totalItems) = GetJobResponse(okResult);
         Assert.Equal(Guid.Empty.ToString(), jobId);
         Assert.Equal(0, totalItems);
+    }
+
+    [Fact]
+    public async Task NormalizeUnmarked_WithForceReprocess_ForwardsFlagToProcessor()
+    {
+        // Arrange
+        var unprocessedFiles = new List<ComicFile>
+        {
+            new() { FilePath = "/path/file1.cbz", IsProcessed = false },
+        };
+        var expectedJobId = Guid.NewGuid();
+
+        _mockFileStore
+            .Setup(fs => fs.GetFilteredFilesAsync("unprocessed", default))
+            .ReturnsAsync(unprocessedFiles);
+
+        _mockProcessor
+            .Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, default))
+            .ReturnsAsync(expectedJobId);
+
+        // Act
+        var result = await _controller.NormalizeUnmarked(forceReprocess: true);
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var (jobId, _) = GetJobResponse(okResult);
+        Assert.Equal(expectedJobId.ToString(), jobId);
+        _mockProcessor.Verify(
+            p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, default),
+            Times.Once);
     }
 
     // New RESTful endpoint tests

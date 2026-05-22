@@ -131,4 +131,58 @@ public class SeriesLanguagePreferenceRetagServiceTests
         Assert.Single(captured!);
         Assert.Equal("/a/g.cbz", captured![0]);
     }
+
+    [Fact]
+    public async Task QueueRetagForSeriesAsync_MatchesByFolderNameWhenMetadataSeriesNotPopulated()
+    {
+        // Regression test for the case where ComicFile.Metadata is null
+        // (which is the production reality — that field is never populated).
+        // The retag scan must still pick up files whose parent folder name
+        // matches one of the record's titles via the cache's normalized key,
+        // otherwise a per-series preferred-language change silently queues
+        // zero work.
+        var record = new SeriesMetadataCacheRecord
+        {
+            CanonicalTitle = "One Piece",
+            LocalizedTitles = new List<LocalizedTitle>
+            {
+                new("One Piece", "en"),
+                new("ワンピース", "ja"),
+            }
+        };
+
+        _fileStore.Setup(s => s.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                // Metadata is null — production reality. Folder name matches
+                // the canonical title.
+                new ComicFile { FilePath = "/library/One Piece/One Piece - Chapter 1.cbz" },
+                // Folder name matches a localized title (alias-by-folder).
+                new ComicFile { FilePath = "/library/ワンピース/ワンピース - Chapter 1.cbz" },
+                // Different folder — must not be queued.
+                new ComicFile { FilePath = "/library/Naruto/Naruto - Chapter 1.cbz" },
+            });
+
+        _cache.Setup(c => c.NormalizeKey(It.IsAny<string>()))
+            .Returns<string>(s => (s ?? string.Empty).Trim().ToLowerInvariant());
+
+        var jobId = Guid.NewGuid();
+        List<string>? capturedFiles = null;
+        _processor.Setup(p => p.NormalizeFilesAsync(
+                It.IsAny<IEnumerable<string>>(),
+                true,
+                It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<string>, bool, CancellationToken>((f, _, _) => capturedFiles = f.ToList())
+            .ReturnsAsync(jobId);
+
+        var service = BuildService();
+        var result = await service.QueueRetagForSeriesAsync(record);
+
+        Assert.Equal(jobId, result);
+        Assert.NotNull(capturedFiles);
+        Assert.Equal(2, capturedFiles!.Count);
+        Assert.Contains("/library/One Piece/One Piece - Chapter 1.cbz", capturedFiles);
+        Assert.Contains("/library/ワンピース/ワンピース - Chapter 1.cbz", capturedFiles);
+        Assert.DoesNotContain("/library/Naruto/Naruto - Chapter 1.cbz", capturedFiles);
+    }
 }

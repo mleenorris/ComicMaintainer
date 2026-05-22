@@ -1504,6 +1504,59 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task NormalizeFileAsync_ManualLookupStatus_HonorsPreferredLanguage()
+    {
+        // Regression test: a cache record whose LookupStatus is "manual"
+        // (set by SetPreferredLanguageAsync / SetUserAliasesAsync when the
+        // user takes a direct action on a series that hasn't been externally
+        // matched yet) must still be honored when rewriting per-file <Series>.
+        // Previously LookupMatchedRecordAsync only accepted "success" /
+        // "manual_match" / IsUserCanonical records, so a "manual" record was
+        // silently skipped and the file's <Series> never reflected the
+        // user's preferred-language choice.
+        var filePath = CreateLocalizedComicArchive("One Piece", "One Piece", "1");
+
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+        _settings.DefaultPreferredLanguage = null;
+
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "one piece",
+            CanonicalTitle = "One Piece",
+            LookupStatus = "manual",
+            PreferredLanguage = "ja",
+            LocalizedTitles = new List<LocalizedTitle>
+            {
+                new("One Piece", "en"),
+                new("ワンピース", "ja"),
+            }
+        };
+        var cache = BuildLocalizedCache(record);
+
+        using var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            seriesMetadataCache: cache.Object);
+
+        var ok = await service.ProcessFileAsync(filePath);
+        Assert.True(ok);
+
+        var updated = await service.GetMetadataAsync(filePath);
+        Assert.NotNull(updated);
+        Assert.Equal("ワンピース", updated!.Series);
+
+        // External lookup must NOT have been consulted — the "manual" cache
+        // record should short-circuit the lookup chain.
+        _mockExternalSeriesMetadata.Verify(
+            s => s.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task NormalizeFileAsync_GlobalDefaultPreferredLanguage_WritesLocalizedSeries()
     {
         var filePath = CreateLocalizedComicArchive("One Piece", "One Piece", "1");

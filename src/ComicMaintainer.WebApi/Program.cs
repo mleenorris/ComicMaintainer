@@ -572,6 +572,7 @@ builder.Services.AddHostedService<DatabaseCleanupHostedService>();
 builder.Services.AddSingleton<IScheduledJobHandler, MetadataAuditJobHandler>();
 builder.Services.AddSingleton<IScheduledJobHandler, FileNamingAuditJobHandler>();
 builder.Services.AddSingleton<IScheduledJobHandler, SeriesLanguageAuditJobHandler>();
+builder.Services.AddSingleton<IScheduledJobHandler, LibraryScanJobHandler>();
 builder.Services.AddSingleton<ScheduledJobService>();
 builder.Services.AddSingleton<IScheduledJobService>(sp => sp.GetRequiredService<ScheduledJobService>());
 builder.Services.AddSingleton<ScheduledJobsHostedService>();

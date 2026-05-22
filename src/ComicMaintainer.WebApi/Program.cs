@@ -709,20 +709,22 @@ app.UseMiddleware<PathValidationMiddleware>();
 // unsubstituted placeholder.
 app.UseMiddleware<HtmlVersionInjectionMiddleware>();
 
-// Serve static files from wwwroot with cache control
-// Note: sw.js is served via ServiceWorkerController to prevent redirect issues
-app.UseStaticFiles(new StaticFileOptions
+// Serve static files from wwwroot with cache control.
+// sw.js is served via ServiceWorkerController (so that the response carries
+// the injected version comment, no-store cache headers, and no redirects).
+// We must skip the static-file middleware entirely for /sw.js because
+// StaticFileMiddleware short-circuits the pipeline as soon as it finds a
+// matching file on disk — using OnPrepareResponse to flip the status to
+// 404 there only changes the status code, the file body still gets written
+// AND the controller never runs, so the browser sees a 404 with the file
+// contents and refuses to register the service worker
+// ("A bad HTTP response code (404) was received when fetching the script").
+app.UseWhen(
+    ctx => !ctx.Request.Path.Equals("/sw.js", StringComparison.OrdinalIgnoreCase),
+    branch => branch.UseStaticFiles(new StaticFileOptions
 {
     OnPrepareResponse = ctx =>
     {
-        // Service worker files should not be served as static files
-        // They are served via the ServiceWorkerController to avoid redirect issues
-        if (ctx.File.Name.Equals("sw.js", StringComparison.OrdinalIgnoreCase))
-        {
-            ctx.Context.Response.StatusCode = 404;
-            return;
-        }
-        
         // Don't cache HTML files to ensure users always get the latest version.
         // (Normally these are served by HtmlVersionInjectionMiddleware above and
         // never reach the static file handler, but keep this as defense in depth.)
@@ -747,7 +749,7 @@ app.UseStaticFiles(new StaticFileOptions
             ctx.Context.Response.Headers["Cache-Control"] = "public, max-age=3600";
         }
     }
-});
+}));
 
 app.UseRouting();
 app.UseAuthentication();

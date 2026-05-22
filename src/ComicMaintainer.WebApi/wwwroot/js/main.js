@@ -6974,16 +6974,27 @@
             }
         }
 
-        async function refreshSeriesMetadata() {
+        async function refreshSeriesMetadata(options) {
             const { seriesTitle } = manageSeriesState;
             if (!seriesTitle) return;
+            const force = !!(options && options.force);
             try {
-                const response = await fetch(apiUrl(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}`), {
+                // ?force=true bypasses the manual-match lock: the server
+                // re-queries the provider using the original series title
+                // and replaces the cached canonical / aliases / localized
+                // titles with whatever the lookup returns. Used when an
+                // out-of-date manual-match is keeping a stale canonical
+                // around even though the provider now has better data
+                // (e.g. an English alt-title that wasn't being promoted).
+                const url = force
+                    ? `/api/metadata/refresh/${encodeURIComponent(seriesTitle)}?force=true`
+                    : `/api/metadata/refresh/${encodeURIComponent(seriesTitle)}`;
+                const response = await fetch(apiUrl(url), {
                     method: 'POST',
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    showMessage('Failed to refresh metadata', 'error');
+                    showMessage(force ? 'Failed to force-refresh metadata' : 'Failed to refresh metadata', 'error');
                     return;
                 }
                 const record = await response.json();
@@ -6992,11 +7003,27 @@
                 renderManageSeriesUserAliases(record);
                 const successStatuses = new Set(['success', 'manual_match']);
                 const isSuccess = successStatuses.has(record.lookup_status);
-                showMessage(isSuccess ? 'Metadata refreshed' : `Lookup status: ${record.lookup_status || 'unknown'}`, isSuccess ? 'success' : 'info');
+                let msg;
+                if (isSuccess) {
+                    msg = force ? 'Metadata force-refreshed' : 'Metadata refreshed';
+                } else {
+                    msg = `Lookup status: ${record.lookup_status || 'unknown'}`;
+                }
+                showMessage(msg, isSuccess ? 'success' : 'info');
+                // After a successful force-refresh the cached canonical may
+                // have changed, so reload the library to reflect the new
+                // display title on the series card.
+                if (force && isSuccess && typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
             } catch (err) {
                 console.error('refreshSeriesMetadata failed', err);
-                showMessage('Failed to refresh metadata', 'error');
+                showMessage(force ? 'Failed to force-refresh metadata' : 'Failed to refresh metadata', 'error');
             }
+        }
+
+        function forceRefreshSeriesMetadata() {
+            return refreshSeriesMetadata({ force: true });
         }
 
         // Manual trigger from the Manage Series Names modal: re-runs the

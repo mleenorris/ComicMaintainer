@@ -36,9 +36,23 @@ public interface ISeriesMetadataCacheService
     /// Performs an external lookup for <paramref name="seriesTitle"/> and upserts
     /// the result into the cache. Preserves any user-managed aliases / canonical
     /// title overrides.
+    /// <para>
+    /// When <paramref name="force"/> is <c>true</c> and the lookup succeeds, the
+    /// cached record's provider-derived fields (<c>CanonicalTitle</c>,
+    /// <c>Aliases</c>, <c>LocalizedTitles</c>, <c>Source</c>) are overwritten
+    /// from the fresh lookup result and the lookup status is reset to
+    /// <c>success</c> — clearing any prior <c>manual_match</c> lock. The
+    /// lookup uses the original <paramref name="seriesTitle"/> (not the
+    /// previously-cached canonical) so a stale manual match no longer
+    /// determines the query. A user-supplied canonical title (
+    /// <c>IsUserCanonical</c>) and the user-managed alias list are still
+    /// preserved. On lookup failure (<c>not_found</c> / error) the existing
+    /// record is left untouched.
+    /// </para>
     /// </summary>
     Task<SeriesMetadataCacheRecord> RefreshAsync(
         string seriesTitle,
+        bool force = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>

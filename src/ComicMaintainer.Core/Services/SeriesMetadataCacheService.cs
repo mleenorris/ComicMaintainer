@@ -160,7 +160,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         return ToRecord(entity);
     }
 
-    public async Task<SeriesMetadataCacheRecord> RefreshAsync(string seriesTitle, CancellationToken cancellationToken = default)
+    public async Task<SeriesMetadataCacheRecord> RefreshAsync(string seriesTitle, bool force = false, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
         {
@@ -175,9 +175,15 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         // that might pick a different result). We look up by the user-selected
         // canonical title and preserve the "manual_match" status so the
         // series stays marked as manually matched.
+        //
+        // A forced refresh deliberately bypasses this manual-match lock: the
+        // caller wants the cache replaced with whatever the provider returns
+        // for the original input title, including resetting the lookup status
+        // back to "success".
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
-        var wasManualMatch = string.Equals(entity?.LookupStatus, "manual_match", StringComparison.OrdinalIgnoreCase);
+        var wasManualMatch = !force
+            && string.Equals(entity?.LookupStatus, "manual_match", StringComparison.OrdinalIgnoreCase);
         var lookupQuery = wasManualMatch && !string.IsNullOrWhiteSpace(entity!.CanonicalTitle)
             ? entity.CanonicalTitle
             : trimmedTitle;

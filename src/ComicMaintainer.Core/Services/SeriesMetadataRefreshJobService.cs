@@ -86,7 +86,7 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
                 string? outcomeSource = null;
                 try
                 {
-                    var record = await _cache.RefreshAsync(title, cancellationToken);
+                    var record = await _cache.RefreshAsync(title, force: false, cancellationToken);
                     outcomeStatus = record.LookupStatus ?? "error";
                     outcomeSource = record.Source;
                     switch (record.LookupStatus)

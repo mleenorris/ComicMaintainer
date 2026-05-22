@@ -131,11 +131,17 @@ public class MetadataController : ControllerBase
     /// queue the lookup as a background job whose progress can be subscribed to
     /// via the existing job-update event stream — useful when the lookup is
     /// likely to be slow and the UI wants to render incremental status.
+    /// Pass <c>?force=true</c> to bypass the manual-match lock: on a
+    /// successful lookup the cached record's provider-derived fields are
+    /// replaced with the fresh result and the lookup status is reset to
+    /// <c>success</c>. The user's canonical-title override and user aliases
+    /// are still preserved; on failure the existing record is left untouched.
     /// </summary>
     [HttpPost("refresh/{seriesTitle}")]
     public async Task<ActionResult<object>> RefreshOne(
         string seriesTitle,
         [FromQuery] bool queue = false,
+        [FromQuery] bool force = false,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
@@ -151,7 +157,7 @@ public class MetadataController : ControllerBase
                 return Accepted(new { jobId, totalSeries = 1 });
             }
 
-            var record = await _cache.RefreshAsync(seriesTitle, cancellationToken);
+            var record = await _cache.RefreshAsync(seriesTitle, force, cancellationToken);
             return Ok(record);
         }
         catch (Exception ex)

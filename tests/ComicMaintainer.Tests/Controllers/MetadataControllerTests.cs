@@ -111,12 +111,25 @@ public class MetadataControllerTests
     public async Task RefreshOne_ReturnsCacheRecord()
     {
         var record = new SeriesMetadataCacheRecord { NormalizedKey = "batman", CanonicalTitle = "Batman", LookupStatus = "success" };
-        _cache.Setup(c => c.RefreshAsync("Batman", It.IsAny<CancellationToken>())).ReturnsAsync(record);
+        _cache.Setup(c => c.RefreshAsync("Batman", false, It.IsAny<CancellationToken>())).ReturnsAsync(record);
 
-        var result = await _controller.RefreshOne("Batman", queue: false, CancellationToken.None);
+        var result = await _controller.RefreshOne("Batman", queue: false, force: false, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Same(record, ok.Value);
+    }
+
+    [Fact]
+    public async Task RefreshOne_ForwardsForceFlagToCache()
+    {
+        var record = new SeriesMetadataCacheRecord { NormalizedKey = "batman", CanonicalTitle = "Batman", LookupStatus = "success" };
+        _cache.Setup(c => c.RefreshAsync("Batman", true, It.IsAny<CancellationToken>())).ReturnsAsync(record);
+
+        var result = await _controller.RefreshOne("Batman", queue: false, force: true, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Same(record, ok.Value);
+        _cache.Verify(c => c.RefreshAsync("Batman", true, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -215,12 +228,12 @@ public class MetadataControllerTests
         _refreshJobs.Setup(j => j.StartAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(jobId);
 
-        var result = await _controller.RefreshOne("Batman", queue: true, CancellationToken.None);
+        var result = await _controller.RefreshOne("Batman", queue: true, force: false, CancellationToken.None);
 
         var accepted = Assert.IsType<AcceptedResult>(result.Result);
         var idProp = accepted.Value!.GetType().GetProperty("jobId");
         Assert.Equal(jobId, idProp!.GetValue(accepted.Value));
-        _cache.Verify(c => c.RefreshAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _cache.Verify(c => c.RefreshAsync(It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

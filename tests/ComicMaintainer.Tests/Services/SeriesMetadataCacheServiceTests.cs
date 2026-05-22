@@ -507,6 +507,117 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
+    public async Task RefreshAsync_Force_OverridesManualMatchAndUsesOriginalTitleForLookup()
+    {
+        // User had previously manually matched "Batman" to a different series
+        // ("Batman: Year One"). The cache row now carries manual_match status
+        // and that adopted canonical title.
+        await _service.ApplyExternalMatchAsync(
+            "Batman",
+            new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman: Year One",
+                Aliases = new List<string> { "Year One" },
+                Source = "ComicVine",
+                LocalizedTitles = new List<LocalizedTitle>
+                {
+                    new("Batman: Year One", "en")
+                }
+            });
+
+        // A forced refresh must query the original input title (NOT the
+        // previously-matched canonical) and replace the cached provider fields
+        // with the fresh lookup result, resetting the status back to "success".
+        _external.Setup(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Aliases = new List<string> { "Dark Knight", "Caped Crusader" },
+                Source = "ComicVine",
+                LocalizedTitles = new List<LocalizedTitle>
+                {
+                    new("Batman", "en"),
+                    new("バットマン", "ja")
+                }
+            });
+
+        var refreshed = await _service.RefreshAsync("Batman", force: true);
+
+        Assert.Equal("success", refreshed.LookupStatus);
+        Assert.Equal("Batman", refreshed.CanonicalTitle);
+        Assert.Equal(new[] { "Dark Knight", "Caped Crusader" }, refreshed.Aliases);
+        Assert.Contains(refreshed.LocalizedTitles, t => t.Title == "Batman" && t.Language == "en");
+        Assert.Contains(refreshed.LocalizedTitles, t => t.Title == "バットマン" && t.Language == "ja");
+        // The stale manual-match canonical must not have been used as the
+        // lookup query when the caller asked for a forced refresh.
+        _external.Verify(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()), Times.Once);
+        _external.Verify(e => e.LookupSeriesAsync("Batman: Year One", It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_Force_PreservesUserCanonicalAndUserAliases()
+    {
+        _external.Setup(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Aliases = new List<string> { "Dark Knight" },
+                Source = "ComicVine"
+            });
+        await _service.RefreshAsync("Batman");
+        // User overrides the canonical title and adds a user alias.
+        await _service.SetUserAliasesAsync("Batman", new[] { "My Caped Crusader" }, "My Batman");
+
+        _external.Setup(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman: Reborn",
+                Aliases = new List<string> { "Reborn" },
+                Source = "ComicVine"
+            });
+
+        var refreshed = await _service.RefreshAsync("Batman", force: true);
+
+        // Force refresh must NOT overwrite a user-supplied canonical title.
+        Assert.True(refreshed.IsUserCanonical);
+        Assert.Equal("My Batman", refreshed.CanonicalTitle);
+        // Provider aliases are still replaced; user aliases are preserved.
+        Assert.Equal(new[] { "Reborn" }, refreshed.Aliases);
+        Assert.Contains("My Caped Crusader", refreshed.UserAliases);
+        Assert.Equal("success", refreshed.LookupStatus);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_Force_PreservesRecord_OnLookupFailure()
+    {
+        await _service.ApplyExternalMatchAsync(
+            "Batman",
+            new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman: Year One",
+                Aliases = new List<string> { "Year One" },
+                Source = "ComicVine"
+            });
+
+        // Provider can't find anything for the forced lookup. The existing
+        // record's data must be preserved (only status / timestamp updated).
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ExternalSeriesMetadata?)null);
+
+        var refreshed = await _service.RefreshAsync("Batman", force: true);
+
+        // Force surfaces the real outcome — manual_match lock is dropped and
+        // the status reflects that the lookup didn't find anything — but the
+        // previously-cached canonical and aliases are NOT clobbered so the
+        // user can still recover by retrying.
+        Assert.Equal("not_found", refreshed.LookupStatus);
+        Assert.Equal("Batman: Year One", refreshed.CanonicalTitle);
+        Assert.Contains("Year One", refreshed.Aliases);
+        Assert.Equal("ComicVine", refreshed.Source);
+    }
+
+
+    [Fact]
     public async Task ClearExternalMetadataAsync_DropsProviderFieldsAndKeepsUserAliases()
     {
         _external.Setup(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))

@@ -409,6 +409,8 @@ When a provider returns HTTP 429 the request is automatically retried once after
 
 When external metadata refreshes succeed, ComicMaintainer also tries to download a series-level cover image from the chosen provider (ComicVine `image.super_url`, MangaDex `cover_art`, AniList `coverImage.extraLarge`) and persist it under `{ConfigDirectory}/series-images/`. The downloaded image is rendered on series cards and the series detail view in place of the first-page-of-first-issue cover, with automatic fallback to the file-based cover when the external image fails to load.
 
+In addition to the cached external image, ComicMaintainer also picks up a **manually-placed `cover.jpg`, `cover.png`, or `cover.webp` sitting directly in a series folder** on disk. The series view will load this file automatically whenever no cached image is available (e.g. when the metadata cache has been cleared, when the cache directory was wiped, or when no external lookup has ever run for that series). This means you can drop a `cover.jpg` next to your comic files and it will show up in the UI on the next reload — no metadata refresh required. The on-disk cover takes second priority behind the cached image; if you want the folder file to win, clear the cached image via `DELETE /api/series-images/{normalizedKey}` first.
+
 **Configuration:**
 
 | Setting | Env var | Default | Description |
@@ -416,10 +418,11 @@ When external metadata refreshes succeed, ComicMaintainer also tries to download
 | `DownloadExternalSeriesImages` | `DOWNLOAD_EXTERNAL_SERIES_IMAGES` | `true` | Disable to keep metadata-only refreshes (no image download). |
 | `SeriesImageCacheDirectory` | `SERIES_IMAGE_CACHE_DIR` | `{ConfigDirectory}/series-images` | Directory where cached images are stored. |
 | `SeriesImageMaxBytes` | _(settings only)_ | `5242880` (5 MiB) | Per-image size cap for downloads and uploads. |
+| `WriteCoverToSeriesFolder` | `WRITE_COVER_TO_SERIES_FOLDER` | _(see settings)_ | When enabled, ComicMaintainer also copies the cached series image into each series folder on disk as `cover.<ext>` so external readers (Komga, Plex, file browsers) can pick it up. The same file is then re-read by the series view via the fallback described above. |
 
 **Endpoints:**
 
-- **GET** `/api/series-images/{normalizedKey}` — stream the cached series image (404 when none).
+- **GET** `/api/series-images/{normalizedKey}` — stream the cached series image. When no cached image is available, falls back to a manually-placed `cover.jpg`/`.png`/`.webp` in any on-disk folder that backs the series (resolved via `ISeriesLibraryService.GetFoldersForNormalizedKeyAsync`). Returns 404 only when neither source has an image.
 - **PUT** `/api/series-images/{seriesTitle}` — upload a user-supplied image (multipart form field `file`). User uploads are sticky and never overwritten by future external refreshes. Allowed types: `image/jpeg`, `image/png`, `image/webp`.
 - **GET** `/api/series-images/candidates?query={text}&limit={n}` — search every configured external provider for series whose records expose a cover image. Returns `{ "query": "...", "candidates": [{ "source": "ComicVine", "canonical_title": "...", "image_url": "...", "thumbnail_url": "..." }, ...] }`. Used by the Manage Names modal's "🌐 Fetch from Provider" picker.
 - **POST** `/api/series-images/{seriesTitle}/from-provider` — body `{ "imageUrl": "...", "source": "ComicVine" }`. Downloads the URL via `ISeriesImageStore` (same SSRF / content-type / magic-byte / size checks as auto-refresh), persists it, and marks the cached image as `downloaded`. Returns `409 Conflict` when a user-uploaded image is already set (clear it first), `400` on URL validation failure.

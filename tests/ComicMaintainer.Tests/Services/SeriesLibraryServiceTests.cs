@@ -930,6 +930,103 @@ public class SeriesLibraryServiceTests
         Assert.Null(result);
     }
 
+    [Fact]
+    public async Task GetSeriesAsync_OnDiskFolderCoverPromotesHasExternalImage()
+    {
+        // Arrange: a series with no cache record and no external metadata,
+        // but a manually-placed cover.png in its on-disk folder. The library
+        // service must promote HasExternalImage and emit an ExternalImageUrl
+        // pointing at the series-images endpoint (which itself falls back to
+        // the folder cover via the controller's Path B branch).
+        var tempRoot = Path.Combine(Path.GetTempPath(), "cm-series-lib-cover-" + Guid.NewGuid());
+        var folder = Path.Combine(tempRoot, "Watchmen");
+        Directory.CreateDirectory(folder);
+        // 8-byte PNG signature is enough for File.Exists; no decode happens here.
+        await File.WriteAllBytesAsync(
+            Path.Combine(folder, "cover.png"),
+            new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        try
+        {
+            var files = new List<ComicFile>
+            {
+                new()
+                {
+                    FilePath = Path.Combine(folder, "Watchmen 001.cbz"),
+                    FileName = "Watchmen 001.cbz",
+                    Directory = folder,
+                    FileSize = 100,
+                    LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                }
+            };
+
+            _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(files);
+            _processor.Setup(p => p.GetSeriesMetadataAsync(files[0].FilePath, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SeriesMetadata { Series = "Watchmen", Issue = "1" });
+
+            var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+            // Act
+            var result = await service.GetSeriesAsync();
+
+            // Assert
+            Assert.Single(result.Series);
+            var series = result.Series[0];
+            Assert.True(series.HasExternalImage,
+                "Folder-cover scan should have promoted HasExternalImage even without a cache record.");
+            Assert.False(string.IsNullOrEmpty(series.ExternalImageUrl),
+                "ExternalImageUrl must be populated so the front-end issues a GET /api/series-images/<key>.");
+            Assert.StartsWith("/api/series-images/", series.ExternalImageUrl!, StringComparison.Ordinal);
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, recursive: true); }
+            catch { /* best-effort */ }
+        }
+    }
+
+    [Fact]
+    public async Task GetSeriesAsync_NoFolderCover_LeavesHasExternalImageFalse()
+    {
+        // Negative control for the folder-cover promotion: a folder without
+        // any cover.<ext> must NOT cause HasExternalImage to flip on.
+        var tempRoot = Path.Combine(Path.GetTempPath(), "cm-series-lib-no-cover-" + Guid.NewGuid());
+        var folder = Path.Combine(tempRoot, "NoCover");
+        Directory.CreateDirectory(folder);
+        try
+        {
+            var files = new List<ComicFile>
+            {
+                new()
+                {
+                    FilePath = Path.Combine(folder, "NoCover 001.cbz"),
+                    FileName = "NoCover 001.cbz",
+                    Directory = folder,
+                    FileSize = 100,
+                    LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+                }
+            };
+
+            _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(files);
+            _processor.Setup(p => p.GetSeriesMetadataAsync(files[0].FilePath, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SeriesMetadata { Series = "NoCover", Issue = "1" });
+
+            var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+            var result = await service.GetSeriesAsync();
+
+            Assert.Single(result.Series);
+            Assert.False(result.Series[0].HasExternalImage);
+            Assert.Null(result.Series[0].ExternalImageUrl);
+        }
+        finally
+        {
+            try { if (Directory.Exists(tempRoot)) Directory.Delete(tempRoot, recursive: true); }
+            catch { /* best-effort */ }
+        }
+    }
+
     private static string NormalizeKey(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))

@@ -24,24 +24,40 @@ public class SeriesImagesController : ControllerBase
     private readonly ISeriesMetadataCacheService _cache;
     private readonly ISeriesImageStore _imageStore;
     private readonly IExternalSeriesMetadataService _externalMetadata;
+    private readonly ISeriesLibraryService _seriesLibrary;
     private readonly ILogger<SeriesImagesController> _logger;
 
     public SeriesImagesController(
         ISeriesMetadataCacheService cache,
         ISeriesImageStore imageStore,
         IExternalSeriesMetadataService externalMetadata,
+        ISeriesLibraryService seriesLibrary,
         ILogger<SeriesImagesController> logger)
     {
         _cache = cache;
         _imageStore = imageStore;
         _externalMetadata = externalMetadata;
+        _seriesLibrary = seriesLibrary;
         _logger = logger;
     }
 
+    // On-disk cover.<ext> filenames recognised in each series folder. Mirrors
+    // SeriesFolderCoverWriter.ManagedExtensions and SeriesLibraryService's
+    // ManagedCoverExtensions so the writer, library scan, and reader stay in
+    // sync.
+    private static readonly (string Extension, string ContentType)[] FolderCoverFiles =
+    {
+        (".jpg", "image/jpeg"),
+        (".png", "image/png"),
+        (".webp", "image/webp")
+    };
+
     /// <summary>
-    /// Stream the locally cached series image. Returns 404 when no image is
-    /// available so the front-end can fall back to the file-based first-page
-    /// cover.
+    /// Stream the locally cached series image. When no cached image is
+    /// available, falls back to a manually-placed
+    /// <c>cover.&lt;ext&gt;</c> in any on-disk folder that backs the series.
+    /// Returns 404 only when neither source has an image, so the front-end
+    /// can fall back to the file-based first-page cover.
     /// </summary>
     [HttpGet("{normalizedKey}")]
     public async Task<IActionResult> Get(string normalizedKey, CancellationToken cancellationToken)
@@ -52,23 +68,42 @@ public class SeriesImagesController : ControllerBase
         }
 
         var record = await _cache.GetAsync(normalizedKey, cancellationToken);
-        if (record is null
-            || string.IsNullOrEmpty(record.LocalImageFile)
-            || string.IsNullOrEmpty(record.ImageContentType)
-            || !record.HasImage)
+
+        // Path A: a cached image is on record AND its file is still on disk.
+        if (record is not null
+            && !string.IsNullOrEmpty(record.LocalImageFile)
+            && !string.IsNullOrEmpty(record.ImageContentType)
+            && record.HasImage)
         {
-            return NotFound();
+            var cachedPath = _imageStore.ResolveAbsolutePath(record.LocalImageFile);
+            if (cachedPath is not null)
+            {
+                return ServePhysicalImage(cachedPath, record.ImageContentType);
+            }
         }
 
-        var path = _imageStore.ResolveAbsolutePath(record.LocalImageFile);
-        if (path is null)
+        // Path B: fall back to <series-folder>/cover.<ext> for any folder that
+        // backs this series. This makes a manually-placed cover.jpg in a
+        // series folder authoritative whenever the metadata cache is empty,
+        // cleared, or its cached file has gone missing on disk.
+        var folders = await _seriesLibrary.GetFoldersForNormalizedKeyAsync(normalizedKey, cancellationToken);
+        foreach (var folder in folders)
         {
-            return NotFound();
+            var probe = ResolveFolderCoverPath(folder.Directory);
+            if (probe is null) continue;
+            return ServePhysicalImage(probe.Value.Path, probe.Value.ContentType);
         }
 
-        // Use the file's last-write time as a weak ETag so browsers can avoid
-        // re-downloading unchanged images. Image filenames already include a
-        // content hash, so the file mtime is a stable revalidation token.
+        return NotFound();
+    }
+
+    /// <summary>
+    /// Stream <paramref name="path"/> with a weak ETag derived from the
+    /// file's mtime + size so browsers can avoid re-downloading unchanged
+    /// images. Honors If-None-Match.
+    /// </summary>
+    private IActionResult ServePhysicalImage(string path, string contentType)
+    {
         var fileInfo = new FileInfo(path);
         var lastWriteUtc = fileInfo.LastWriteTimeUtc;
         var etag = $"\"{lastWriteUtc.Ticks:x}-{fileInfo.Length:x}\"";
@@ -83,7 +118,51 @@ public class SeriesImagesController : ControllerBase
 
         Response.Headers[HeaderNames.ETag] = etag;
         Response.Headers[HeaderNames.CacheControl] = "private, max-age=300";
-        return PhysicalFile(path, record.ImageContentType, enableRangeProcessing: false);
+        return PhysicalFile(path, contentType, enableRangeProcessing: false);
+    }
+
+    /// <summary>
+    /// Probe <paramref name="folder"/> for any of the managed
+    /// <c>cover.&lt;ext&gt;</c> files and return the first match. Re-validates
+    /// that the resolved file stays inside <paramref name="folder"/> as
+    /// defense in depth against malformed folder strings; returns null
+    /// otherwise. Content-type is derived from the extension allow-list so
+    /// provider-controlled data can never influence what is served.
+    /// </summary>
+    private static (string Path, string ContentType)? ResolveFolderCoverPath(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            return null;
+        }
+        try
+        {
+            if (!Directory.Exists(folder))
+            {
+                return null;
+            }
+            var fullFolder = Path.GetFullPath(folder);
+            var withSep = fullFolder.EndsWith(Path.DirectorySeparatorChar)
+                ? fullFolder
+                : fullFolder + Path.DirectorySeparatorChar;
+            foreach (var (ext, contentType) in FolderCoverFiles)
+            {
+                var candidate = Path.GetFullPath(Path.Combine(fullFolder, "cover" + ext));
+                if (!candidate.StartsWith(withSep, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                if (System.IO.File.Exists(candidate))
+                {
+                    return (candidate, contentType);
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort probe; treat any IO error as "no folder cover".
+        }
+        return null;
     }
 
     /// <summary>

@@ -23,6 +23,11 @@ public class SeriesLibraryService : ISeriesLibraryService
     private const string ProviderMatchedFilter = "matched";
     private const string ProviderUnmatchedFilter = "unmatched";
 
+    // On-disk cover.<ext> filenames recognised in each series folder.
+    // Mirrors SeriesFolderCoverWriter.ManagedExtensions so the two stay in
+    // sync: anything that writer can drop, this reader can pick up.
+    private static readonly string[] ManagedCoverExtensions = { ".jpg", ".png", ".webp" };
+
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly ISeriesMetadataCacheService _metadataCache;
@@ -705,7 +710,109 @@ public class SeriesLibraryService : ISeriesLibraryService
         // two distinct source folders to the same external series. Without
         // this pass the series view renders two cards labelled identically,
         // which is what users perceive as "duplicate series".
-        return CollapseDuplicateAccumulators(groups);
+        var collapsed = CollapseDuplicateAccumulators(groups);
+
+        // After collapsing, promote any group that has an on-disk
+        // <folder>/cover.<ext> to HasExternalImage=true. This makes a manually
+        // placed cover.jpg in a series folder a first-class source for the
+        // series view, even when no external metadata lookup has populated the
+        // cache. Memoised per-folder so the probe runs once per directory.
+        PromoteOnDiskFolderCovers(collapsed);
+
+        return collapsed;
+    }
+
+    /// <summary>
+    /// For each accumulator that does not already have a cached series image,
+    /// probe the distinct on-disk folders contributed by its issues for a
+    /// <c>cover.&lt;ext&gt;</c> file (mirroring the extensions written by
+    /// <see cref="SeriesFolderCoverWriter"/>). When found, mark the group as
+    /// having an external image so the front-end will request it via the
+    /// series-images endpoint (which itself falls back to the folder cover
+    /// when no cached file is present). Probe results are memoised per folder
+    /// so libraries with many issues per folder pay only one stat per ext.
+    /// </summary>
+    private static void PromoteOnDiskFolderCovers(Dictionary<string, SeriesAccumulator> groups)
+    {
+        if (groups.Count == 0)
+        {
+            return;
+        }
+
+        var folderHasCover = new Dictionary<string, bool>(StringComparer.Ordinal);
+
+        foreach (var accumulator in groups.Values)
+        {
+            if (accumulator.HasExternalImage)
+            {
+                continue;
+            }
+
+            var folders = accumulator.Issues
+                .Select(i => string.IsNullOrWhiteSpace(i.FilePath) ? null : Path.GetDirectoryName(i.FilePath))
+                .Where(d => !string.IsNullOrWhiteSpace(d))
+                .Select(d => d!)
+                .Distinct(StringComparer.Ordinal);
+
+            foreach (var folder in folders)
+            {
+                if (!folderHasCover.TryGetValue(folder, out var hasCover))
+                {
+                    hasCover = FolderHasOnDiskCover(folder);
+                    folderHasCover[folder] = hasCover;
+                }
+                if (hasCover)
+                {
+                    accumulator.HasExternalImage = true;
+                    // Use the accumulator's own id (already a normalized key)
+                    // when no metadata cache key is present. The series-images
+                    // controller resolves either form back to the folder set
+                    // via GetFoldersForNormalizedKeyAsync.
+                    if (string.IsNullOrEmpty(accumulator.ImageNormalizedKey))
+                    {
+                        accumulator.ImageNormalizedKey = accumulator.Id;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Probe a single folder for any of the managed <c>cover.&lt;ext&gt;</c>
+    /// filenames. Re-validates that the resolved file stays inside the folder
+    /// as defense in depth against malformed folder strings.
+    /// </summary>
+    private static bool FolderHasOnDiskCover(string folder)
+    {
+        try
+        {
+            if (!Directory.Exists(folder))
+            {
+                return false;
+            }
+            var fullFolder = Path.GetFullPath(folder);
+            var withSep = fullFolder.EndsWith(Path.DirectorySeparatorChar)
+                ? fullFolder
+                : fullFolder + Path.DirectorySeparatorChar;
+            foreach (var ext in ManagedCoverExtensions)
+            {
+                var candidate = Path.GetFullPath(Path.Combine(fullFolder, "cover" + ext));
+                if (!candidate.StartsWith(withSep, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                if (File.Exists(candidate))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort probe; never let an IO error break library rendering.
+        }
+        return false;
     }
 
     /// <summary>

@@ -1773,7 +1773,16 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             }
         }
 
-        return candidateSeries.FirstOrDefault() ?? UnknownSeries;
+        // No external/cache metadata exists for this series. Per project policy,
+        // only fall back to the folder-derived name when the file itself has no
+        // <Series> value — otherwise preserve whatever the file already contains
+        // so we don't overwrite a meaningful series with a folder name solely
+        // because we couldn't find external metadata for it.
+        if (!string.IsNullOrWhiteSpace(metadata.Series))
+        {
+            return metadata.Series.Trim();
+        }
+        return !string.IsNullOrWhiteSpace(fallbackSeries) ? fallbackSeries : UnknownSeries;
     }
 
     /// <summary>

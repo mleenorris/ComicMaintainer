@@ -394,6 +394,56 @@ public class JobsController : ControllerBase
         }
     }
 
+    [HttpPost("remove-metadata-selected")]
+    public async Task<ActionResult<object>> RemoveMetadataSelected([FromBody] ProcessSelectedRequest request)
+    {
+        try
+        {
+            if (request.Files == null || request.Files.Count == 0)
+            {
+                return BadRequest(new { error = "No files specified" });
+            }
+
+            var jobId = await _processor.RemoveMetadataFromFilesAsync(request.Files);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("RemoveMetadataSelected: Remove metadata from selected files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, request.Files.Count);
+
+            return Ok(new { job_id = jobId.ToString(), total_items = request.Files.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("RemoveMetadataSelected: Error starting remove metadata selected job"));
+            return StatusCode(500, new { error = "Error starting job" });
+        }
+    }
+
+    [HttpPost("remove-metadata-all")]
+    public async Task<ActionResult<object>> RemoveMetadataAll()
+    {
+        try
+        {
+            _logger.LogDebug(LoggingHelper.WithWebsitePrefix("RemoveMetadataAll: Starting remove metadata from all files request"));
+
+            var allFiles = await _fileStore.GetAllFilesAsync();
+            var filePaths = allFiles.Select(f => f.FilePath).ToList();
+
+            if (filePaths.Count == 0)
+            {
+                _logger.LogInformation(LoggingHelper.WithWebsitePrefix("RemoveMetadataAll: No files found"));
+                return Ok(new { job_id = Guid.Empty.ToString(), total_items = 0 });
+            }
+
+            var jobId = await _processor.RemoveMetadataFromFilesAsync(filePaths);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("RemoveMetadataAll: Remove metadata from all files requested, job ID: {JobId}, total files: {TotalFiles}"), jobId, filePaths.Count);
+
+            return Ok(new { job_id = jobId.ToString(), total_items = filePaths.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("RemoveMetadataAll: Error starting remove metadata all job"));
+            return StatusCode(500, new { error = "Error starting job" });
+        }
+    }
+
     // RESTful endpoint: GET /api/jobs - List all jobs
     [HttpGet]
     public ActionResult<object> ListJobs()

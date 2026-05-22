@@ -375,6 +375,41 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             cancellationToken);
     }
 
+    public Task<Guid> RemoveMetadataFromFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    {
+        return QueueBatchJobAsync(
+            filePaths,
+            "RemoveMetadataFromFilesAsync",
+            "removing metadata from",
+            async (filePath, token) =>
+            {
+                var removed = await RemoveMetadataCoreAsync(filePath, token);
+                if (!removed)
+                {
+                    return false;
+                }
+
+                // Mark the file as unprocessed so the rename/normalize pipeline
+                // will re-evaluate it on the next run, mirroring the per-file
+                // DELETE /api/files/{path}/metadata behavior.
+                try
+                {
+                    await _fileStore.ClearProcessedStatusAsync(new[] { filePath }, token);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "RemoveMetadataFromFilesAsync: failed to clear processed status for {FilePath}",
+                        LoggingHelper.SanitizePathForLog(filePath));
+                }
+
+                return true;
+            },
+            "Remove metadata failed",
+            cancellationToken);
+    }
+
     public Task<Guid> NormalizeAndRenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
     {
         // For each file, normalize first (so ComicInfo.xml has the series name derived

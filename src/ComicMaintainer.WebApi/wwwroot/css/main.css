@@ -1113,6 +1113,32 @@
             cursor: pointer;
         }
 
+        /* Per-issue actions menu, anchored to the top-left of the card so it
+           does not collide with the selection checkbox in the top-right. */
+        .series-issue-actions {
+            position: absolute;
+            top: 6px;
+            left: 6px;
+            z-index: 3;
+        }
+
+        .series-issue-actions .dropdown-toggle {
+            min-width: 0;
+            padding: 2px 8px;
+            font-size: 14px;
+            line-height: 1.2;
+            background: rgba(15, 23, 42, 0.82);
+            color: #fff;
+            border: 0;
+            border-radius: 999px;
+            box-shadow: var(--shadow-sm);
+            cursor: pointer;
+        }
+
+        .series-issue-actions .dropdown-toggle:hover {
+            background: rgba(15, 23, 42, 0.95);
+        }
+
         .series-issue-cover-button {
             position: relative;
             border: 0;

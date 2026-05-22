@@ -243,15 +243,7 @@
                             </button>
                         </div>
                     </div>
-                    <div class="header-view-toggle" role="group" aria-label="Library view mode">
-                        <button type="button" class="header-view-btn active" id="filesViewModeBtn" onclick="setLibraryViewMode('files')">
-                            📄 Files
-                        </button>
-                        <button type="button" class="header-view-btn" id="seriesViewModeBtn" onclick="setLibraryViewMode('series')">
-                            🖼️ Series
-                        </button>
-                    </div>
-                    <div class="header-view-toggle series-layout-toggle" id="seriesLayoutToggle" role="group" aria-label="Series layout" hidden>
+                    <div class="header-view-toggle series-layout-toggle" id="seriesLayoutToggle" role="group" aria-label="Series layout">
                         <button type="button" class="header-view-btn" id="seriesLayoutListBtn" onclick="setSeriesLayout('list')" title="List view — best for phones in portrait" aria-label="List layout">
                             ☰ List
                         </button>
@@ -270,14 +262,6 @@
      <div class="container">
          <div id="messageContainer"></div>
  
-         <div class="mobile-library-view-toggle" id="mobileLibraryViewToggle" hidden>
-             <button class="mobile-library-view-btn active" id="mobileFilesViewBtn" type="button" aria-controls="libraryFilesView" aria-label="Switch to files view" aria-pressed="true">
-                 📄 Files
-             </button>
-             <button class="mobile-library-view-btn" id="mobileSeriesViewBtn" type="button" aria-controls="libraryFilesView" aria-label="Switch to series view" aria-pressed="false">
-                 🖼️ Series
-             </button>
-         </div>
          <div class="visually-hidden" id="mobileLibraryViewStatus" aria-live="polite"></div>
 
          <section class="library-health-dashboard library-health-dashboard--collapsed" id="libraryHealthDashboard" aria-labelledby="libraryHealthTitle">
@@ -420,6 +404,13 @@
                             </button>
                             <button class="action-dropdown-item" onclick="matchAllUnmatchedSeries(); closeAllActionDropdowns();">
                                 🔍 Match All Unmatched Series
+                            </button>
+                            <div class="dropdown-divider"></div>
+                            <button class="action-dropdown-item" id="removeMetadataSelectedItem" onclick="removeMetadataSelected(); closeAllActionDropdowns();" disabled title="Strip the embedded ComicInfo.xml from each selected file and mark them unprocessed so they can be re-processed.">
+                                🧹 Remove Metadata Selected
+                            </button>
+                            <button class="action-dropdown-item" onclick="removeMetadataAll(); closeAllActionDropdowns();" title="Strip the embedded ComicInfo.xml from every file in the library and mark them unprocessed so they can be re-processed.">
+                                🧹 Remove Metadata All
                             </button>
                         </div>
                     </div>

@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -176,6 +177,14 @@ public class LogsController : ControllerBase
             
             linesToShow = queue.ToArray();
 
+            // Reverse the order so the newest log entries appear at the top
+            // of the viewer. Log entries can span multiple lines (e.g. exception
+            // stack traces), so group continuation lines with their owning entry
+            // by detecting the leading "[YYYY-MM-DD HH:MM:SS" timestamp prefix
+            // emitted by the Serilog file output template, then reverse entries
+            // while keeping the lines within each entry in their original order.
+            linesToShow = ReverseLogEntries(linesToShow);
+
             var content = string.Join(Environment.NewLine, linesToShow);
 
             return Ok(new
@@ -196,5 +205,41 @@ public class LogsController : ControllerBase
                 shown_lines = 0
             });
         }
+    }
+
+    // Matches the start of a Serilog file log entry, e.g.
+    //   [2025-05-22 16:13:39.673] [INF] ...
+    private static readonly Regex LogEntryStartPattern = new(
+        @"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// Reverses the order of log entries so the newest entry is first while
+    /// keeping the lines that belong to the same entry (e.g. exception stack
+    /// traces that follow a leading "[timestamp] [LEVEL] message" line) in
+    /// their original order.
+    /// </summary>
+    internal static string[] ReverseLogEntries(string[] lines)
+    {
+        if (lines.Length <= 1)
+        {
+            return lines;
+        }
+
+        var entries = new List<List<string>>();
+        foreach (var line in lines)
+        {
+            if (entries.Count == 0 || LogEntryStartPattern.IsMatch(line))
+            {
+                entries.Add(new List<string> { line });
+            }
+            else
+            {
+                entries[^1].Add(line);
+            }
+        }
+
+        entries.Reverse();
+        return entries.SelectMany(e => e).ToArray();
     }
 }

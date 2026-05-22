@@ -27,6 +27,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     private readonly IExternalSeriesMetadataService? _externalSeriesMetadata;
     private readonly ISeriesMetadataCacheService? _seriesMetadataCache;
     private readonly IProcessingHistoryService _historyService;
+    private readonly ISeriesNameResolver? _seriesNameResolver;
     private readonly ConcurrentDictionary<Guid, ProcessingJob> _jobs = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _jobCancellationTokens = new();
     private readonly ConcurrentDictionary<Guid, object> _jobSyncLocks = new();
@@ -50,7 +51,8 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         IProcessingHistoryService historyService,
         IEventBroadcaster? eventBroadcaster = null,
         IExternalSeriesMetadataService? externalSeriesMetadata = null,
-        ISeriesMetadataCacheService? seriesMetadataCache = null)
+        ISeriesMetadataCacheService? seriesMetadataCache = null,
+        ISeriesNameResolver? seriesNameResolver = null)
     {
         _settingsMonitor = settings;
         _logger = logger;
@@ -59,6 +61,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         _eventBroadcaster = eventBroadcaster;
         _externalSeriesMetadata = externalSeriesMetadata;
         _seriesMetadataCache = seriesMetadataCache;
+        _seriesNameResolver = seriesNameResolver;
         _maxWorkers = Math.Max(1, _settingsMonitor.CurrentValue.MaxWorkers);
         _processingSemaphore = new SemaphoreSlim(_maxWorkers, _maxWorkers);
     }
@@ -1704,6 +1707,17 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
 
     private async Task<string> ResolveNormalizedSeriesAsync(ComicMetadata metadata, string filePath, CancellationToken cancellationToken)
     {
+        // Delegate to ISeriesNameResolver when registered so the normalize
+        // pipeline, audit handlers, library-scan retag pass, and diagnostic
+        // endpoint all share the same documented priority. Falls back to
+        // the legacy in-process logic when the resolver hasn't been
+        // injected (e.g. in tests that construct the service directly).
+        if (_seriesNameResolver is not null)
+        {
+            var resolution = await _seriesNameResolver.ResolveAsync(filePath, metadata, mutateCache: true, cancellationToken);
+            return string.IsNullOrWhiteSpace(resolution.ResolvedSeries) ? UnknownSeries : resolution.ResolvedSeries;
+        }
+
         var fallbackSeries = ExtractSeriesFromFilename(filePath);
         var candidateSeries = new[] { fallbackSeries, metadata.Series }
             .Where(value => !string.IsNullOrWhiteSpace(value))

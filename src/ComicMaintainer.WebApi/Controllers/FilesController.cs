@@ -36,6 +36,7 @@ public class FilesController : ControllerBase
     private readonly IDbContextFactory<ComicMaintainerDbContext>? _dbContextFactory;
     private readonly IEventBroadcaster? _eventBroadcaster;
     private readonly ISeriesMetadataCacheService? _metadataCache;
+    private readonly ISeriesNameResolver? _seriesNameResolver;
 
     public FilesController(
         IFileStoreService fileStore,
@@ -46,7 +47,8 @@ public class FilesController : ControllerBase
         IOptionsMonitor<AppSettings> settings,
         IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null,
         IEventBroadcaster? eventBroadcaster = null,
-        ISeriesMetadataCacheService? metadataCache = null)
+        ISeriesMetadataCacheService? metadataCache = null,
+        ISeriesNameResolver? seriesNameResolver = null)
     {
         _fileStore = fileStore;
         _processor = processor;
@@ -57,6 +59,7 @@ public class FilesController : ControllerBase
         _dbContextFactory = dbContextFactory;
         _eventBroadcaster = eventBroadcaster;
         _metadataCache = metadataCache;
+        _seriesNameResolver = seriesNameResolver;
     }
 
     /// <summary>
@@ -2063,6 +2066,62 @@ public class FilesController : ControllerBase
         {
             _logger.LogError(ex, "Error getting metadata for {FilePath}", filePath);
             return StatusCode(500, "Error retrieving metadata");
+        }
+    }
+
+    [HttpGet("series-resolution")]
+    public async Task<ActionResult<object>> GetSeriesResolution([FromQuery] string filePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(filePath))
+                return BadRequest("File path is required");
+
+            if (!IsPathSafe(filePath))
+            {
+                _logger.LogWarning("Attempt to resolve series for file outside watched directory: {FilePath}",
+                    LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(filePath)));
+                return BadRequest("File path is outside the allowed directory");
+            }
+
+            if (_seriesNameResolver is null)
+            {
+                return StatusCode(503, "Series name resolver not available");
+            }
+
+            // Read the file's current metadata so the resolver can also
+            // evaluate the file's existing <Series> tag as a candidate.
+            // Missing/unreadable metadata is fine — the resolver falls back
+            // to the folder name in that case.
+            var metadata = await _processor.GetMetadataAsync(filePath, cancellationToken);
+
+            // mutateCache:false — this endpoint is a read-only preview and
+            // must not side-effect the alias index just by being polled.
+            var resolution = await _seriesNameResolver.ResolveAsync(
+                filePath,
+                metadata,
+                mutateCache: false,
+                cancellationToken);
+
+            return Ok(new
+            {
+                filePath,
+                actualSeries = metadata?.Series,
+                resolvedSeries = resolution.ResolvedSeries,
+                winningStep = resolution.WinningStep.ToString(),
+                candidates = resolution.Candidates,
+                folderSeries = resolution.FolderSeries,
+                matchedCacheKey = resolution.MatchedCacheKey,
+                appliedLanguage = resolution.AppliedLanguage,
+                explanation = resolution.Explanation,
+                matchesActual = !string.IsNullOrWhiteSpace(metadata?.Series)
+                    && string.Equals(metadata!.Series, resolution.ResolvedSeries, StringComparison.OrdinalIgnoreCase)
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error resolving series for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return StatusCode(500, "Error resolving series");
         }
     }
 

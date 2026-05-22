@@ -495,6 +495,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddSingleton<EventBroadcasterService>();
 builder.Services.AddSingleton<IEventBroadcaster>(sp => sp.GetRequiredService<EventBroadcasterService>());
 builder.Services.AddSingleton<IFileStoreService, FileStoreService>();
+builder.Services.AddSingleton<ISeriesNameResolver, SeriesNameResolver>();
 builder.Services.AddSingleton<IComicProcessorService, ComicProcessorService>();
 builder.Services.AddSingleton<IFileWatcherService, FileWatcherService>();
 builder.Services.AddSingleton<IProcessingHistoryService, ProcessingHistoryService>();

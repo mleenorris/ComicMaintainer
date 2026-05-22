@@ -27,6 +27,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
     private readonly IComicProcessorService _processor;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly ISeriesMetadataCacheService? _seriesCache;
+    private readonly ISeriesNameResolver? _seriesNameResolver;
     private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly ILogger<MetadataAuditJobHandler> _logger;
 
@@ -36,7 +37,8 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         IOptionsMonitor<AppSettings> appSettings,
         ILogger<MetadataAuditJobHandler> logger,
-        ISeriesMetadataCacheService? seriesCache = null)
+        ISeriesMetadataCacheService? seriesCache = null,
+        ISeriesNameResolver? seriesNameResolver = null)
     {
         _fileStore = fileStore;
         _processor = processor;
@@ -44,6 +46,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
         _appSettings = appSettings;
         _logger = logger;
         _seriesCache = seriesCache;
+        _seriesNameResolver = seriesNameResolver;
     }
 
     public string JobKey => Key;
@@ -111,12 +114,20 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
             }
 
             // Check 2: Series tag must match the expected resolved name.
-            var expected = await ResolveExpectedSeriesAsync(file.FilePath, globalPreferred, cancellationToken);
+            var (expected, explanation) = await ResolveExpectedSeriesWithExplanationAsync(file.FilePath, metadata, globalPreferred, cancellationToken);
             if (!string.IsNullOrWhiteSpace(expected)
                 && !string.IsNullOrWhiteSpace(metadata.Series)
                 && !string.Equals(metadata.Series, expected, StringComparison.OrdinalIgnoreCase))
             {
                 seriesMismatch++;
+                var details = $"Series '{metadata.Series}' does not match expected '{expected}'.";
+                if (!string.IsNullOrWhiteSpace(explanation))
+                {
+                    details += " " + explanation;
+                }
+                // Cap to the EF-mapped column length so a long resolver
+                // explanation doesn't cause a SaveChanges failure.
+                if (details.Length > 1024) details = details.Substring(0, 1024);
                 findings.Add(new MetadataAuditFindingEntity
                 {
                     FilePath = file.FilePath,
@@ -124,7 +135,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
                     ActualSeries = metadata.Series,
                     ExpectedSeries = expected,
                     ActualIssue = metadata.Issue,
-                    Details = $"Series '{metadata.Series}' does not match expected '{expected}'.",
+                    Details = details,
                 });
             }
         }
@@ -193,55 +204,69 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
     }
 
     /// <summary>
-    /// Compute the expected series name for an audited file. Mirrors the
-    /// "folder name + cache lookup" logic used by the normalize pipeline so a
-    /// matching cache record's resolved display title takes precedence over
-    /// the raw folder name.
+    /// Backward-compatible thin wrapper around
+    /// <see cref="ResolveExpectedSeriesWithExplanationAsync"/> that discards the
+    /// explanation. Retained because external callers (and tests) reference
+    /// this signature; new code should prefer the version that also returns
+    /// the explanation so it can be surfaced to the user.
     /// </summary>
     private async Task<string?> ResolveExpectedSeriesAsync(
         string filePath,
         string? globalPreferredLanguage,
         CancellationToken cancellationToken)
     {
-        var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
-        if (string.IsNullOrWhiteSpace(folderName))
+        var (expected, _) = await ResolveExpectedSeriesWithExplanationAsync(filePath, metadata: null, globalPreferredLanguage, cancellationToken);
+        return expected;
+    }
+
+    /// <summary>
+    /// Compute the expected series name for an audited file along with a
+    /// short explanation of which resolution step produced it. Prefers the
+    /// shared <see cref="ISeriesNameResolver"/> when available so the audit
+    /// uses the exact same priority chain as the normalize pipeline; falls
+    /// back to the legacy folder-name + cache-lookup logic when the resolver
+    /// isn't registered.
+    /// </summary>
+    private async Task<(string? Expected, string? Explanation)> ResolveExpectedSeriesWithExplanationAsync(
+        string filePath,
+        ComicMetadata? metadata,
+        string? globalPreferredLanguage,
+        CancellationToken cancellationToken)
+    {
+        if (_seriesNameResolver is not null)
         {
-            return null;
-        }
-        var folderSeries = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
-        if (string.IsNullOrWhiteSpace(folderSeries))
-        {
-            return null;
+            // mutateCache:false so the audit doesn't side-effect the alias
+            // index just by looking at files.
+            var resolution = await _seriesNameResolver.ResolveAsync(filePath, metadata, mutateCache: false, cancellationToken);
+            return (resolution.ResolvedSeries, resolution.Explanation);
         }
 
-        // When a series cache is available, prefer the resolved display title for the folder's series
-        // so the audit is consistent with what normalization writes into ComicInfo.xml.
+        // Legacy fallback used only when no ISeriesNameResolver is registered.
+        var folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
+        if (string.IsNullOrWhiteSpace(folderName)) return (null, null);
+        var folderSeries = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
+        if (string.IsNullOrWhiteSpace(folderSeries)) return (null, null);
+
         if (_seriesCache is not null)
         {
             try
             {
                 var key = _seriesCache.NormalizeKey(folderSeries);
-                var record = string.IsNullOrEmpty(key)
-                    ? null
-                    : await _seriesCache.GetAsync(key, cancellationToken);
+                var record = string.IsNullOrEmpty(key) ? null : await _seriesCache.GetAsync(key, cancellationToken);
                 if (record is not null && !string.IsNullOrWhiteSpace(record.CanonicalTitle))
                 {
                     var resolved = SeriesDisplayTitleResolver.Resolve(record, globalPreferredLanguage);
-                    if (!string.IsNullOrWhiteSpace(resolved))
-                    {
-                        return resolved.Trim();
-                    }
-                    return record.CanonicalTitle.Trim();
+                    if (!string.IsNullOrWhiteSpace(resolved)) return (resolved.Trim(), null);
+                    return (record.CanonicalTitle.Trim(), null);
                 }
             }
             catch (Exception ex)
             {
-                // Cache lookup failures are non-fatal for an audit; fall back to the folder name.
                 _logger.LogDebug(ex, "Series cache lookup failed for '{Folder}'", folderSeries);
             }
         }
 
-        return folderSeries;
+        return (folderSeries, null);
     }
 
     private static MetadataAuditOptions ParseOptions(string? optionsJson)

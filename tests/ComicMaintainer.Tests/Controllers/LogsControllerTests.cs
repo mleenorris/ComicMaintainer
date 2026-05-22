@@ -496,6 +496,67 @@ public class LogsControllerTests : IDisposable
         Assert.True(okOrErrorResult is OkObjectResult || okOrErrorResult is ObjectResult);
     }
 
+    [Fact]
+    public void GetLogs_WithTimestampedEntries_ReturnsNewestFirst()
+    {
+        // Arrange - use the real Serilog file output template format so the
+        // controller can detect entry boundaries.
+        var logFile = Path.Combine(_testLogDir, "debug.log");
+        File.WriteAllLines(logFile, new[]
+        {
+            "[2025-05-22 10:00:00.000] [INF] First entry",
+            "[2025-05-22 10:00:01.000] [INF] Second entry",
+            "[2025-05-22 10:00:02.000] [INF] Third entry",
+        });
+
+        // Act
+        var result = _controller.GetLogs(lines: 100, type: "debug");
+
+        // Assert - newest entry must come first in the rendered content.
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var content = okResult.Value.GetType().GetProperty("content")?.GetValue(okResult.Value) as string;
+        Assert.NotNull(content);
+        var indexFirst = content!.IndexOf("First entry", StringComparison.Ordinal);
+        var indexSecond = content.IndexOf("Second entry", StringComparison.Ordinal);
+        var indexThird = content.IndexOf("Third entry", StringComparison.Ordinal);
+        Assert.True(indexThird >= 0 && indexSecond > indexThird && indexFirst > indexSecond,
+            $"Expected newest-first ordering, got: {content}");
+    }
+
+    [Fact]
+    public void GetLogs_WithMultiLineException_KeepsContinuationLinesWithOwningEntry()
+    {
+        // Arrange - exception stack trace lines do not start with a timestamp
+        // and must travel with the preceding log entry when the order is reversed.
+        var logFile = Path.Combine(_testLogDir, "debug.log");
+        File.WriteAllLines(logFile, new[]
+        {
+            "[2025-05-22 10:00:00.000] [INF] Older entry",
+            "[2025-05-22 10:00:01.000] [ERR] Boom",
+            "System.Exception: Boom",
+            "   at Foo.Bar() in Foo.cs:line 42",
+            "[2025-05-22 10:00:02.000] [INF] Newest entry",
+        });
+
+        // Act
+        var result = _controller.GetLogs(lines: 100, type: "debug");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var content = okResult.Value!.GetType().GetProperty("content")!.GetValue(okResult.Value) as string;
+        Assert.NotNull(content);
+        var lines = content!.Split(Environment.NewLine);
+        // "Newest entry" should be first; the error entry should appear next
+        // with its exception lines intact and in original order.
+        Assert.StartsWith("[2025-05-22 10:00:02.000]", lines[0]);
+        var boomIndex = Array.FindIndex(lines, l => l.Contains("Boom", StringComparison.Ordinal) && l.StartsWith("["));
+        Assert.True(boomIndex > 0);
+        Assert.Equal("System.Exception: Boom", lines[boomIndex + 1]);
+        Assert.Equal("   at Foo.Bar() in Foo.cs:line 42", lines[boomIndex + 2]);
+        Assert.StartsWith("[2025-05-22 10:00:00.000]", lines[^1]);
+    }
+
     public void Dispose()
     {
         Dispose(true);

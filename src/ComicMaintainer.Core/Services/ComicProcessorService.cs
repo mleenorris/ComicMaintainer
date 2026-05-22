@@ -957,8 +957,21 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     {
         try
         {
-            if (!File.Exists(filePath) || !IsComicArchive(filePath))
+            if (!File.Exists(filePath))
+            {
+                _logger.LogWarning(
+                    "Cannot update metadata: file does not exist: {FilePath}",
+                    LoggingHelper.SanitizePathForLog(filePath));
                 return false;
+            }
+
+            if (!IsComicArchive(filePath))
+            {
+                _logger.LogWarning(
+                    "Cannot update metadata: file is not a supported comic archive: {FilePath}",
+                    LoggingHelper.SanitizePathForLog(filePath));
+                return false;
+            }
 
             _logger.LogInformation("Updating metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 

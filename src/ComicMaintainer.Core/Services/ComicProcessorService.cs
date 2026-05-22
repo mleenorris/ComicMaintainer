@@ -395,7 +395,25 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         CancellationToken cancellationToken)
     {
         var jobId = Guid.NewGuid();
-        var fileList = filePaths.ToList();
+        var rawList = filePaths?.ToList() ?? new List<string>();
+        var skippedInvalid = 0;
+        var fileList = new List<string>(rawList.Count);
+        foreach (var path in rawList)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                skippedInvalid++;
+                continue;
+            }
+            fileList.Add(path);
+        }
+
+        if (skippedInvalid > 0)
+        {
+            _logger.LogWarning(
+                "{OperationName}: Skipping {SkippedCount} null or empty file path(s) in job {JobId}",
+                operationName, skippedInvalid, jobId);
+        }
 
         _logger.LogDebug("{OperationName}: Creating new {ActionDescription} job {JobId} for {FileCount} files", operationName, actionDescription, jobId, fileList.Count);
 

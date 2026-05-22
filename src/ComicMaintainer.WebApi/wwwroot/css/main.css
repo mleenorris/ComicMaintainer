@@ -1019,6 +1019,11 @@
             font-size: 13px;
         }
 
+        .series-actions-dropdown .dropdown-toggle {
+            font-size: 13px;
+            padding: 6px 10px;
+        }
+
         .series-detail-back {
             align-self: flex-start;
         }

@@ -53,6 +53,14 @@ public interface IComicProcessorService
     Task<bool> UpdateMetadataAsync(string filePath, ComicMetadata metadata, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Remove the ComicInfo.xml entry from a comic archive, leaving the file
+    /// without any embedded metadata. Returns true on success (including when
+    /// the archive had no ComicInfo.xml to begin with — the file is rewritten
+    /// either way so callers can treat it as a no-op for the metadata layer).
+    /// </summary>
+    Task<bool> RemoveMetadataAsync(string filePath, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Rename multiple comic files based on metadata as a batch job
     /// </summary>
     Task<Guid> RenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);

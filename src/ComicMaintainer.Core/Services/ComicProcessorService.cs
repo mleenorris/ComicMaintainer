@@ -1121,15 +1121,128 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
     }
 
-    /// <summary>
-    /// Maximum number of retry attempts for file replacement operations
-    /// </summary>
-    private const int MaxFileReplaceRetries = 5;
+    public async Task<bool> RemoveMetadataAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        await _processingSemaphore.WaitAsync(cancellationToken);
+        try
+        {
+            return await RemoveMetadataCoreAsync(filePath, cancellationToken);
+        }
+        finally
+        {
+            _processingSemaphore.Release();
+        }
+    }
+
+    private async Task<bool> RemoveMetadataCoreAsync(string filePath, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!File.Exists(filePath))
+            {
+                _logger.LogWarning(
+                    "Cannot remove metadata: file does not exist: {FilePath}",
+                    LoggingHelper.SanitizePathForLog(filePath));
+                return false;
+            }
+
+            if (!IsComicArchive(filePath))
+            {
+                _logger.LogWarning(
+                    "Cannot remove metadata: file is not a supported comic archive: {FilePath}",
+                    LoggingHelper.SanitizePathForLog(filePath));
+                return false;
+            }
+
+            _logger.LogInformation("Removing metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+
+            // Ensure the temp directory exists
+            if (!Directory.Exists(_settings.TempFileDirectory))
+            {
+                Directory.CreateDirectory(_settings.TempFileDirectory);
+                _logger.LogInformation("Created temp directory: {TempDir}", LoggingHelper.SanitizePathForLog(_settings.TempFileDirectory));
+            }
+
+            var tempFile = Path.Combine(_settings.TempFileDirectory, $".tmp_{Guid.NewGuid()}.cbz");
+
+            try
+            {
+                // Rewrite the archive without ComicInfo.xml in a separate scope so all
+                // file handles are released before File.Replace.
+                {
+                    using var sourceArchive = ArchiveFactory.Open(filePath);
+                    using var writer = ZipArchive.Create();
+
+                    foreach (var entry in sourceArchive.Entries.Where(e => !e.IsDirectory))
+                    {
+                        if (entry.Key == null)
+                        {
+                            continue;
+                        }
+
+                        // Skip ComicInfo.xml — that is the entry we are removing.
+                        if (entry.Key.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        using var stream = entry.OpenEntryStream();
+                        const int maxBufferSize = 10 * 1024 * 1024; // 10MB limit per entry
+                        if (entry.Size > maxBufferSize)
+                        {
+                            _logger.LogWarning(
+                                "Skipping large entry {Entry} ({Size} bytes) to prevent memory issues",
+                                LoggingHelper.SanitizeForLog(entry.Key),
+                                entry.Size);
+                            continue;
+                        }
+                        var memStream = new MemoryStream();
+                        stream.CopyTo(memStream);
+                        memStream.Position = 0;
+                        writer.AddEntry(entry.Key, memStream, true, entry.Size, entry.LastModifiedTime);
+                    }
+
+                    writer.SaveTo(tempFile, new WriterOptions(CompressionType.Deflate));
+                }
+
+                await Task.Delay(FileHandleReleaseDelayMs, cancellationToken);
+
+                await ReplaceFileWithRetryAsync(tempFile, filePath, cancellationToken);
+
+                _logger.LogInformation("Successfully removed metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                return true;
+            }
+            finally
+            {
+                if (File.Exists(tempFile))
+                {
+                    try
+                    {
+                        File.Delete(tempFile);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to delete temp file: {TempFile}", LoggingHelper.SanitizePathForLog(tempFile));
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error removing metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return false;
+        }
+    }
     
     /// <summary>
     /// Delay in milliseconds to allow file handles to be fully released after archive disposal
     /// </summary>
     private const int FileHandleReleaseDelayMs = 100;
+    
+    /// <summary>
+    /// Maximum number of retry attempts for file replacement operations
+    /// </summary>
+    private const int MaxFileReplaceRetries = 5;
     
     /// <summary>
     /// Initial delay in milliseconds for exponential backoff retry logic

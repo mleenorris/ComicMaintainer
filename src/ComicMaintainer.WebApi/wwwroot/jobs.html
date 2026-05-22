@@ -111,6 +111,7 @@
             const opts = (() => { try { return job.optionsJson ? JSON.parse(job.optionsJson) : {}; } catch { return {}; } })();
             const isMetadataAudit = job.jobKey === 'metadata-audit';
             const isSeriesLanguageAudit = job.jobKey === 'series-language-audit';
+            const isFileNamingAudit = job.jobKey === 'file-naming-audit';
             const findingsId = 'findings-' + job.jobKey.replace(/[^a-z0-9]/gi, '-');
             return `
                 <div class="jobs-card" data-key="${escapeHtml(job.jobKey)}">
@@ -150,6 +151,18 @@
                             <label class="toggle">
                                 <input type="checkbox" data-option="autoCorrect" ${opts.autoCorrect ? 'checked' : ''}>
                                 <span>Auto-correct mismatches (queues affected series for retag)</span>
+                            </label>
+                        </div>
+                    ` : ''}
+                    ${isFileNamingAudit ? `
+                        <div class="jobs-row">
+                            <label class="toggle">
+                                <input type="checkbox" data-option="autoCorrect" ${opts.autoCorrect ? 'checked' : ''}>
+                                <span>Auto-correct filenames (renames mismatched files)</span>
+                            </label>
+                            <label class="toggle">
+                                <input type="checkbox" data-option="forceReprocess" ${opts.forceReprocess ? 'checked' : ''}>
+                                <span>Force reprocess (include files already marked as renamed)</span>
                             </label>
                         </div>
                     ` : ''}

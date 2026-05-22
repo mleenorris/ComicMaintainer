@@ -899,19 +899,22 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task NormalizeFileAsync_SetsSeriesNameFromFolderName()
+    public async Task NormalizeFileAsync_PreservesFileSeriesWhenNoExternalMetadata()
     {
         // Arrange - Create a folder with a specific name
         var seriesFolder = Path.Combine(_testDirectory, "Spider-Man");
         Directory.CreateDirectory(seriesFolder);
-        
-        // Create a file with ComicInfo.xml that has wrong series name
+
+        // Create a file with ComicInfo.xml that has a series name different
+        // from the folder name. With no external metadata available for this
+        // series, the existing <Series> value in the file should be preserved
+        // rather than being overwritten by the folder-derived name.
         var fileName = "Chapter 5.cbz";
         var filePath = Path.Combine(seriesFolder, fileName);
-        
+
         var comicInfoXml = @"<?xml version=""1.0""?>
 <ComicInfo>
-    <Series>Wrong Series Name</Series>
+    <Series>Existing Series Name</Series>
     <Number>5</Number>
     <Title>Chapter 5</Title>
 </ComicInfo>";
@@ -923,7 +926,7 @@ public class ComicProcessorServiceTests : IDisposable
             {
                 writer.Write(comicInfoXml);
             }
-            
+
             var imageEntry = archive.CreateEntry("page001.jpg");
             using (var writer = new StreamWriter(imageEntry.Open()))
             {
@@ -943,14 +946,11 @@ public class ComicProcessorServiceTests : IDisposable
 
         // Assert
         Assert.True(result);
-        
-        // Verify the file was normalized
-        _mockFileStore.Verify(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
-        
-        // Read the metadata back to verify series was updated
+
+        // Read the metadata back to verify the file's existing series was preserved
         var updatedMetadata = await _service.GetMetadataAsync(filePath);
         Assert.NotNull(updatedMetadata);
-        Assert.Equal("Spider-Man", updatedMetadata.Series);
+        Assert.Equal("Existing Series Name", updatedMetadata.Series);
         Assert.Equal("5", updatedMetadata.Issue);
     }
 

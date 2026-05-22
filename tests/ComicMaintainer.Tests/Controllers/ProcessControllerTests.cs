@@ -188,7 +188,7 @@ public class ProcessControllerTests
             .ReturnsAsync(testFiles);
             
         _processorMock
-            .Setup(x => x.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), default))
+            .Setup(x => x.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), false, default))
             .ReturnsAsync(expectedJobId);
 
         // Act
@@ -203,7 +203,48 @@ public class ProcessControllerTests
         Assert.Equal(expectedJobId, jobIdProperty?.GetValue(objectResult.Value));
         
         _fileStoreMock.Verify(x => x.GetAllFilesAsync(default), Times.Once);
-        _processorMock.Verify(x => x.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), default), Times.Once);
+        _processorMock.Verify(x => x.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), false, default), Times.Once);
+    }
+
+    [Fact]
+    public async Task NormalizeAll_WithForceReprocess_IncludesAlreadyNormalizedFiles()
+    {
+        // Arrange: half the files are already DB-marked normalized. Without
+        // force they would be filtered out; with force every non-duplicate
+        // file must be passed to the processor so callers can re-run
+        // normalization after a cache change.
+        var testFiles = new List<ComicFile>
+        {
+            new() { FilePath = "/test/file1.cbz", IsNormalized = true, IsDuplicate = false },
+            new() { FilePath = "/test/file2.cbz", IsNormalized = false, IsDuplicate = false },
+            new() { FilePath = "/test/dup.cbz", IsNormalized = false, IsDuplicate = true },
+        };
+        var expectedJobId = Guid.NewGuid();
+        List<string>? capturedFiles = null;
+
+        _fileStoreMock
+            .Setup(x => x.GetAllFilesAsync(default))
+            .ReturnsAsync(testFiles);
+
+        _processorMock
+            .Setup(x => x.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, default))
+            .Callback<IEnumerable<string>, bool, CancellationToken>((f, _, _) => capturedFiles = f.ToList())
+            .ReturnsAsync(expectedJobId);
+
+        // Act
+        var result = await _controller.NormalizeAll(stream: false, forceReprocess: true);
+
+        // Assert
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
+        var jobIdProperty = objectResult.Value!.GetType().GetProperty("jobId");
+        Assert.Equal(expectedJobId, jobIdProperty?.GetValue(objectResult.Value));
+
+        Assert.NotNull(capturedFiles);
+        Assert.Equal(2, capturedFiles!.Count);
+        Assert.Contains("/test/file1.cbz", capturedFiles);
+        Assert.Contains("/test/file2.cbz", capturedFiles);
+        Assert.DoesNotContain("/test/dup.cbz", capturedFiles);
     }
 
     [Fact]
@@ -215,7 +256,7 @@ public class ProcessControllerTests
         var expectedJobId = Guid.NewGuid();
         
         _processorMock
-            .Setup(x => x.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), default))
+            .Setup(x => x.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), false, default))
             .ReturnsAsync(expectedJobId);
 
         // Act
@@ -229,6 +270,6 @@ public class ProcessControllerTests
         var jobIdProperty = objectResult.Value.GetType().GetProperty("jobId");
         Assert.Equal(expectedJobId, jobIdProperty?.GetValue(objectResult.Value));
         
-        _processorMock.Verify(x => x.NormalizeFilesAsync(files, default), Times.Once);
+        _processorMock.Verify(x => x.NormalizeFilesAsync(files, false, default), Times.Once);
     }
 }

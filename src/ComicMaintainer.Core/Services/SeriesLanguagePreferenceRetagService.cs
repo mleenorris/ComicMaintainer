@@ -141,11 +141,20 @@ public class SeriesLanguagePreferenceRetagService : ISeriesLanguagePreferenceRet
         CancellationToken cancellationToken)
     {
         var files = await _fileStore.GetAllFilesAsync(cancellationToken);
+
+        // Build a case-insensitive set of normalized keys for the titles we
+        // care about so we can do a key-based comparison against folder names.
+        // The cache's NormalizeKey applies the same case/whitespace/punctuation
+        // folding the rest of the system uses, so a folder like "One_Piece"
+        // matches a record canonicalised as "One Piece".
+        var titleKeys = new HashSet<string>(
+            titles.Select(t => _cache.NormalizeKey(t))
+                  .Where(k => !string.IsNullOrWhiteSpace(k))!,
+            StringComparer.OrdinalIgnoreCase);
+
         var matchedPaths = files
-            .Where(f => !string.IsNullOrWhiteSpace(f.Metadata?.Series)
-                        && titles.Contains(f.Metadata!.Series!))
+            .Where(f => !string.IsNullOrWhiteSpace(f.FilePath) && MatchesAnyTitle(f, titles, titleKeys))
             .Select(f => f.FilePath)
-            .Where(p => !string.IsNullOrWhiteSpace(p))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
@@ -161,5 +170,40 @@ public class SeriesLanguagePreferenceRetagService : ISeriesLanguagePreferenceRet
             "Queued normalization job {JobId} for {FileCount} files to apply updated preferred-language metadata.",
             jobId, matchedPaths.Count);
         return jobId;
+    }
+
+    /// <summary>
+    /// Returns true when a tracked file should be considered part of the
+    /// series identified by <paramref name="titles"/>. We first try the file's
+    /// cached ComicInfo.xml <c>Series</c> value (when populated), then fall
+    /// back to the parent-folder-derived series name normalized via the cache
+    /// key so a folder rename / case difference / underscore-vs-colon doesn't
+    /// hide the match. The folder fallback is necessary because the
+    /// <see cref="ComicFile.Metadata"/> field is not currently populated for
+    /// most tracked files, which would otherwise cause the retag scan to find
+    /// zero matches and silently skip rewriting <c>&lt;Series&gt;</c>.
+    /// </summary>
+    private bool MatchesAnyTitle(ComicFile file, HashSet<string> titles, HashSet<string> titleKeys)
+    {
+        var metadataSeries = file.Metadata?.Series;
+        if (!string.IsNullOrWhiteSpace(metadataSeries) && titles.Contains(metadataSeries))
+        {
+            return true;
+        }
+
+        if (titleKeys.Count == 0)
+        {
+            return false;
+        }
+
+        var folderName = Path.GetFileName(Path.GetDirectoryName(file.FilePath));
+        if (string.IsNullOrWhiteSpace(folderName))
+        {
+            return false;
+        }
+
+        var folderSeries = ComicFileProcessor.NormalizeSeriesName(folderName, forComparison: false);
+        var folderKey = _cache.NormalizeKey(folderSeries);
+        return !string.IsNullOrWhiteSpace(folderKey) && titleKeys.Contains(folderKey);
     }
 }

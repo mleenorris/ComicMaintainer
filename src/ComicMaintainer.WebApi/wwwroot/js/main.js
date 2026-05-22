@@ -4514,13 +4514,17 @@
             if (!confirm('This will normalize metadata for all unmarked files in the watched directory. Continue?')) {
                 return;
             }
-            
+
+            const forceReprocess = promptForForceReprocess(
+                'This will normalize metadata for all unmarked files in the watched directory.',
+                'normalized');
+
             showProgressModal('Starting async normalizing...');
             
             try {
                 console.log('[BATCH] Starting normalize unmarked files request...');
                 // Start the job
-                const response = await fetch(apiUrl('/api/jobs/normalize-unmarked'), {
+                const response = await fetch(apiUrl(`/api/jobs/normalize-unmarked?forceReprocess=${forceReprocess}`), {
                     method: 'POST',
                     headers: getAuthHeaders()
                 });

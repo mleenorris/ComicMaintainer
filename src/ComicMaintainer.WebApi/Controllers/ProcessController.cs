@@ -116,21 +116,27 @@ public class ProcessController : ControllerBase
     }
 
     [HttpPost("normalize-all")]
-    public async Task<ActionResult<object>> NormalizeAll([FromQuery] bool stream = false, CancellationToken cancellationToken = default)
+    public async Task<ActionResult<object>> NormalizeAll([FromQuery] bool stream = false, [FromQuery] bool forceReprocess = false, CancellationToken cancellationToken = default)
     {
         try
         {
-            // Only queue files that have not yet been normalized (respects database state).
+            // When forceReprocess is true, include every tracked file (except
+            // duplicates) so callers can re-run normalization against files
+            // that are already DB-marked normalized — necessary after the
+            // series metadata cache has changed (e.g. a manual match was
+            // applied or a preferred-language setting changed) and the on-disk
+            // <Series> needs to catch up. Without the flag we keep the
+            // historical "skip already-normalized files" behaviour.
             var allFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
             var filePaths = allFiles
-                .Where(f => !f.IsNormalized && !f.IsDuplicate)
+                .Where(f => !f.IsDuplicate && (forceReprocess || !f.IsNormalized))
                 .Select(f => f.FilePath)
                 .ToList();
             
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Normalize all files requested, processing {Count} unnormalized files"), filePaths.Count);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Normalize all files requested, processing {Count} files (forceReprocess={Force})"), filePaths.Count, forceReprocess);
             
             // Start normalize job
-            var jobId = await _processor.NormalizeFilesAsync(filePaths, cancellationToken);
+            var jobId = await _processor.NormalizeFilesAsync(filePaths, forceReprocess, cancellationToken);
             
             return Ok(new { jobId, streaming = stream, totalFiles = filePaths.Count });
         }
@@ -142,7 +148,7 @@ public class ProcessController : ControllerBase
     }
 
     [HttpPost("normalize-selected")]
-    public async Task<ActionResult<object>> NormalizeSelected([FromBody] ProcessRequest request, [FromQuery] bool stream = false, CancellationToken cancellationToken = default)
+    public async Task<ActionResult<object>> NormalizeSelected([FromBody] ProcessRequest request, [FromQuery] bool stream = false, [FromQuery] bool forceReprocess = false, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -151,10 +157,10 @@ public class ProcessController : ControllerBase
                 return BadRequest("No files specified");
             }
             
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Normalize selected files requested, processing {Count} files"), request.Files.Count);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Normalize selected files requested, processing {Count} files (forceReprocess={Force})"), request.Files.Count, forceReprocess);
             
             // Start normalize job
-            var jobId = await _processor.NormalizeFilesAsync(request.Files, cancellationToken);
+            var jobId = await _processor.NormalizeFilesAsync(request.Files, forceReprocess, cancellationToken);
             
             return Ok(new { jobId, streaming = stream, totalFiles = request.Files.Count });
         }

@@ -128,6 +128,26 @@ public interface IFileStoreService
     Task<int> CleanupStaleEntriesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Stamp the given file with the series-metadata-cache version it was
+    /// most recently normalized against. The library-scan job compares this
+    /// against the current cache record's <c>MetadataVersion</c> to detect
+    /// stale files without re-reading every archive.
+    /// </summary>
+    Task SetFileSeriesMetadataVersionAsync(string filePath, int version, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the subset of <paramref name="filePaths"/> whose tracked
+    /// <c>SeriesMetadataVersion</c> stamp is strictly less than the supplied
+    /// <paramref name="currentVersion"/>. Used by the library-scan job to
+    /// identify files needing re-normalization without re-reading every
+    /// archive.
+    /// </summary>
+    Task<IReadOnlyList<string>> GetFilesWithStaleSeriesMetadataAsync(
+        IEnumerable<string> filePaths,
+        int currentVersion,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns aggregate folder summaries (one entry per directory) used by the
     /// incremental library view. Folders are sorted and paged using
     /// offset/limit semantics.

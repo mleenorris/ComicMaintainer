@@ -495,6 +495,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddSingleton<EventBroadcasterService>();
 builder.Services.AddSingleton<IEventBroadcaster>(sp => sp.GetRequiredService<EventBroadcasterService>());
 builder.Services.AddSingleton<IFileStoreService, FileStoreService>();
+builder.Services.AddSingleton<ISeriesNameResolver, SeriesNameResolver>();
 builder.Services.AddSingleton<IComicProcessorService, ComicProcessorService>();
 builder.Services.AddSingleton<IFileWatcherService, FileWatcherService>();
 builder.Services.AddSingleton<IProcessingHistoryService, ProcessingHistoryService>();
@@ -571,6 +572,7 @@ builder.Services.AddHostedService<DatabaseCleanupHostedService>();
 builder.Services.AddSingleton<IScheduledJobHandler, MetadataAuditJobHandler>();
 builder.Services.AddSingleton<IScheduledJobHandler, FileNamingAuditJobHandler>();
 builder.Services.AddSingleton<IScheduledJobHandler, SeriesLanguageAuditJobHandler>();
+builder.Services.AddSingleton<IScheduledJobHandler, LibraryScanJobHandler>();
 builder.Services.AddSingleton<ScheduledJobService>();
 builder.Services.AddSingleton<IScheduledJobService>(sp => sp.GetRequiredService<ScheduledJobService>());
 builder.Services.AddSingleton<ScheduledJobsHostedService>();

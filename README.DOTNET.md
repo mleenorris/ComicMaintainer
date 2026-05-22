@@ -13,7 +13,7 @@ ComicMaintainer is a service that automatically watches a directory for new or c
 - **File Watching**: Automatically monitors directories for comic file changes
 - **Comic Processing**: Processes `.cbz` and `.cbr` files
 - **Web Interface**: Full-featured web UI for managing comics
-- **Scheduled Jobs**: Manage recurring background jobs (interval, enable/disable, run now) from a dedicated UI page. Ships with a *Metadata Audit* job that walks every tracked file and reports any with a missing chapter/issue number or a series tag that doesn't match the expected resolved series name. New jobs can be added by registering a class that implements `IScheduledJobHandler`.
+- **Scheduled Jobs**: Manage recurring background jobs (interval, enable/disable, run now) from a dedicated UI page. Ships with a *Metadata Audit* job that walks every tracked file and reports any with a missing chapter/issue number or a series tag that doesn't match the expected resolved series name, plus a *Library Scan* job (`library-scan`) that reconciles additions/deletions and re-normalizes files whose series-metadata stamp is stale. New jobs can be added by registering a class that implements `IScheduledJobHandler`.
 - **Batch Processing**: Process multiple files at once
 - **Metadata Management**: View and edit comic metadata
 - **Series Library View**: Browse comics as cover-based series cards and drill into issue lists
@@ -34,8 +34,22 @@ Core business logic and domain models:
 - Interfaces for services
 - Service implementations:
   - `FileStoreService`: Manages file tracking
-  - `FileWatcherService`: Monitors directory changes
+  - `FileWatcherService`: Live filesystem watcher (legacy; see "Library scan" below)
   - `ComicProcessorService`: Processes comic files
+  - `SeriesNameResolver`: Single source of truth for the priority order used to
+    resolve the expected `<Series>` value for a file (user-canonical cache →
+    matched cache → localized-title back-reference → external lookup →
+    existing metadata → folder name → `"Unknown Series"`). Same resolver is
+    used by the normalize pipeline, the metadata audit, and the
+    `/api/files/series-resolution` diagnostic endpoint.
+  - `LibraryScanJobHandler`: Scheduled job (`library-scan`) that reconciles
+    additions/deletions and re-normalizes files whose stamped
+    `SeriesMetadataVersion` is older than the matching cache record's current
+    `MetadataVersion`. This is the recommended replacement for the live
+    filesystem watcher on volumes where inotify is unreliable (CIFS, some
+    Docker bind mounts) and the only mechanism that automatically picks up
+    metadata changes (canonical title edits, new aliases, language-preference
+    changes) without an explicit rebuild.
 
 ### ComicMaintainer.WebApi
 ASP.NET Core Web API application:
@@ -53,6 +67,54 @@ ASP.NET Core Web API application:
 - Native UI for mobile devices
 - Server connection configuration
 - Browse and manage files remotely
+
+## How per-file metadata is refreshed
+
+Per-file metadata (the `<Series>`, `<Title>`, `<Issue>` values written to
+`ComicInfo.xml` inside each archive) can be created or refreshed in four ways:
+
+| # | Trigger | When it fires | What it writes |
+|---|---------|---------------|----------------|
+| 1 | **Library Scan** scheduled job (`library-scan`, recommended) | On its configured cadence (default: hourly, disabled) | Adds new files; reconciles deletions; force-normalizes any file whose `SeriesMetadataVersion` stamp is older than the matching cache record's current `MetadataVersion` (a "metadata-changed → retag every affected file" pass that no other path performs automatically). |
+| 2 | Live FileSystemWatcher (legacy) | On OS filesystem events; only when `WatcherEnableRename` / `WatcherEnableNormalize` are true | Rename + normalize one file per event. **Does not** re-run when only metadata changes (no FS event is fired by an alias edit or language-preference change). Unreliable on CIFS / some Docker bind mounts where inotify isn't delivered. |
+| 3 | On-demand batch jobs from the UI / API | User clicks a button or hits the API; `forceReprocess` overrides the "already processed" gate | Same normalize pipeline as #1 / #2. |
+| 4 | Other scheduled audits (`metadata-audit`, `file-naming-audit`) | On their configured cadence | Only **records findings** unless `autoCorrect: true` is set, in which case the candidate files are queued through the normal normalize/rename pipeline. |
+
+**The library scan is the only path that picks up metadata-only changes
+automatically.** When a `SeriesMetadataCacheRecord` is mutated (canonical
+title edited, alias added/removed, language preference changed, fresh
+external match applied), its `MetadataVersion` is bumped. The next library
+scan compares each affected file's stamped `SeriesMetadataVersion` against
+the new value and force-normalizes any file whose stamp is lower. There is
+no need to manually open `ComicInfo.xml` or re-run a full library refresh.
+
+### Series-name resolution priority
+
+When a normalize is performed, the series name written to `<Series>` is
+resolved via `ISeriesNameResolver` using a single, documented priority list.
+The first step to produce a non-empty title wins:
+
+1. **UserCanonical** — a `SeriesMetadataCacheRecord` reachable from any
+   candidate key (file's `<Series>`, folder name, or any existing alias)
+   with `IsUserCanonical=true`. Wins unconditionally.
+2. **MatchedCache** — a cache record with a successful or manual match,
+   passed through `SeriesDisplayTitleResolver` so per-series
+   `PreferredLanguage` → global `DefaultPreferredLanguage` → `CanonicalTitle`
+   decides which string is emitted.
+3. **LocalizedTitleBackref** — file's `<Series>` is already a localized
+   variant present in the folder's record's `LocalizedTitles`.
+4. **ExternalLookup** — live external provider lookup (no cached match
+   yet); global preferred language applies.
+5. **ExistingMetadata** — preserve the file's non-empty `<Series>` rather
+   than overwriting with the folder name.
+6. **FolderName** — the immediate parent directory's normalized name.
+7. **UnknownSentinel** — `"Unknown Series"` final fallback.
+
+You can preview the outcome for any tracked file (which step won, which
+cache key matched, which language was applied) without modifying anything
+by calling `GET /api/files/series-resolution?filePath={path}`.
+
+## Architecture
 - Uses the same Core library as the web API
 
 ## Getting Started
@@ -203,6 +265,7 @@ For a complete, ready-to-use API collection with all endpoints, see:
 - `GET /api/files/counts` - Get file statistics
 - `GET /api/files/metadata?filePath={path}` - Get file metadata
 - `PUT /api/files/metadata?filePath={path}` - Update file metadata
+- `GET /api/files/series-resolution?filePath={path}` - Diagnostic: explain how the expected `<Series>` value for a file was resolved (which priority step in `ISeriesNameResolver` won, which cache key matched, which language was applied). Useful for investigating "stuck" series metadata.
 - `GET /api/files/series` - Get grouped series cards with issue lists for the library view
 - `POST /api/files/process?filePath={path}` - Process a single file
 - `POST /api/files/process-batch` - Process multiple files

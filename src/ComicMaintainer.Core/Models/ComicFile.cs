@@ -16,6 +16,14 @@ public class ComicFile
     public bool IsDuplicate { get; set; }
     public bool IsRead { get; set; }
     public ComicMetadata? Metadata { get; set; }
+
+    /// <summary>
+    /// Stamp of the series-metadata-cache record version that was used the
+    /// last time this file was normalized. Compared by the library-scan
+    /// job against the current cache record's MetadataVersion to detect
+    /// files that need re-normalization without re-reading every archive.
+    /// </summary>
+    public int SeriesMetadataVersion { get; set; }
 }
 
 /// <summary>

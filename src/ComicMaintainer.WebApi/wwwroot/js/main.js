@@ -2468,6 +2468,7 @@
                                     <button type="button" class="btn btn-small" onclick="openSeriesFoldersModal('${escapeJs(series.id)}','${escapeJs(series.title)}')" title="See the on-disk folders contributing to this series and merge them into one">📁 Manage Folders</button>
                                     <button type="button" class="btn btn-small" onclick="refreshSeriesMetadataDirect('${escapeJs(series.title)}')">🌐 Refresh Metadata</button>
                                     <button type="button" class="btn btn-small" onclick="refreshSeriesFolder('${escapeJs(series.id)}','${escapeJs(series.title)}')" title="Refresh metadata for every folder/alias that groups under this series">📁 Refresh Folder</button>
+                                    <button type="button" class="btn btn-small" onclick="resetSeriesProcessedStatus('${escapeJs(series.id)}','${escapeJs(series.title)}')" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">♻️ Reset Processed Status</button>
                                 </div>
                             </div>
                         </div>
@@ -3053,6 +3054,7 @@
             const normalizeSelectedItem = document.getElementById('normalizeSelectedItem');
             const markSelectedReadItem = document.getElementById('markSelectedReadItem');
             const markSelectedUnreadItem = document.getElementById('markSelectedUnreadItem');
+            const clearSelectedStatusItem = document.getElementById('clearSelectedStatusItem');
             
             if (count === 0) {
                 info.textContent = 'No files selected';
@@ -3063,6 +3065,7 @@
                 if (normalizeSelectedItem) normalizeSelectedItem.disabled = true;
                 if (markSelectedReadItem) markSelectedReadItem.disabled = true;
                 if (markSelectedUnreadItem) markSelectedUnreadItem.disabled = true;
+                if (clearSelectedStatusItem) clearSelectedStatusItem.disabled = true;
             } else {
                 info.textContent = `${count} file${count > 1 ? 's' : ''} selected`;
                 batchBtn.disabled = false;
@@ -3072,6 +3075,7 @@
                 if (normalizeSelectedItem) normalizeSelectedItem.disabled = false;
                 if (markSelectedReadItem) markSelectedReadItem.disabled = false;
                 if (markSelectedUnreadItem) markSelectedUnreadItem.disabled = false;
+                if (clearSelectedStatusItem) clearSelectedStatusItem.disabled = false;
             }
         }
         
@@ -4116,6 +4120,49 @@
             }
         }
         
+        async function clearSelectedProcessedStatus() {
+            if (selectedFiles.size === 0) {
+                showMessage('Please select at least one file', 'error');
+                return;
+            }
+            const count = selectedFiles.size;
+            if (!confirm(
+                `Clear the renamed/normalized flags on ${count} selected file${count > 1 ? 's' : ''}?\n\n` +
+                'The files will then be re-processed on the next Process / Rename / Normalize run.')) {
+                return;
+            }
+
+            const files = Array.from(selectedFiles);
+            try {
+                const response = await fetch(apiUrl('/api/status/clear-selected'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ Files: files })
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    showMessage('Failed to clear processed status', 'error');
+                    return;
+                }
+                const data = await response.json();
+                showMessage(
+                    `Cleared processed status on ${data.cleared} of ${data.requested} file(s). ` +
+                    'Run Process / Rename / Normalize to reapply.',
+                    'success');
+                // Refresh the file list so badges update.
+                if (typeof loadFiles === 'function') {
+                    loadFiles(true);
+                }
+            } catch (err) {
+                console.error('clearSelectedProcessedStatus failed', err);
+                showMessage('Failed to clear processed status: ' + err.message, 'error');
+            }
+        }
+
         async function pollJobStatusOnce(jobId) {
             // Poll job status once to catch up after SSE reconnection or to handle stuck jobs
             console.log(`[JOB ${jobId}] Polling job status once...`);
@@ -6488,6 +6535,44 @@
             } catch (err) {
                 console.error('refreshSeriesFolder failed', err);
                 showMessage('Failed to queue folder metadata refresh', 'error');
+            }
+        }
+
+        async function resetSeriesProcessedStatus(seriesId, seriesTitle) {
+            if (!seriesId) return;
+            const label = seriesTitle || seriesId;
+            const proceed = confirm(
+                `Reset the renamed/normalized flags on every file in "${label}"?\n\n` +
+                'The files will then be re-processed on the next Process / Rename / Normalize run. ' +
+                'Use this when a series metadata or filename change refuses to apply.');
+            if (!proceed) return;
+            try {
+                const response = await fetch(apiUrl(`/api/status/clear-series/${encodeURIComponent(seriesId)}`), {
+                    method: 'POST',
+                    headers: Object.assign(
+                        { 'Content-Type': 'application/json' },
+                        getAuthHeaders ? getAuthHeaders() : {}),
+                    credentials: 'same-origin'
+                });
+                if (response.status === 404) {
+                    showMessage(`Series "${label}" not found`, 'error');
+                    return;
+                }
+                if (!response.ok) {
+                    showMessage('Failed to reset processed status', 'error');
+                    return;
+                }
+                const data = await response.json();
+                showMessage(
+                    `Cleared processed status on ${data.cleared} of ${data.requested} file(s) in "${label}". ` +
+                    'Run Process / Rename / Normalize to reapply.',
+                    'success');
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary({ refresh: true });
+                }
+            } catch (err) {
+                console.error('resetSeriesProcessedStatus failed', err);
+                showMessage('Failed to reset processed status', 'error');
             }
         }
 

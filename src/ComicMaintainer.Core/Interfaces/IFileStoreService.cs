@@ -46,6 +46,15 @@ public interface IFileStoreService
     Task MarkFileNormalizedAsync(string filePath, bool normalized, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Clear the renamed/normalized/processed flags for the given files in a single
+    /// batched database update. Used to "un-mark" files so that subsequent rename
+    /// and normalize passes will reprocess them, without requiring a full database
+    /// reset. Files not present in the store are skipped silently. Returns the
+    /// number of database rows that were actually updated.
+    /// </summary>
+    Task<int> ClearProcessedStatusAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Mark a file as duplicate
     /// </summary>
     Task MarkFileDuplicateAsync(string filePath, bool duplicate, CancellationToken cancellationToken = default);

@@ -128,7 +128,7 @@ public class ProcessControllerTests
             .ReturnsAsync(testFiles);
             
         _processorMock
-            .Setup(x => x.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), default))
+            .Setup(x => x.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), false, default))
             .ReturnsAsync(expectedJobId);
 
         // Act
@@ -143,7 +143,7 @@ public class ProcessControllerTests
         Assert.Equal(expectedJobId, jobIdProperty?.GetValue(objectResult.Value));
         
         _fileStoreMock.Verify(x => x.GetAllFilesAsync(default), Times.Once);
-        _processorMock.Verify(x => x.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), default), Times.Once);
+        _processorMock.Verify(x => x.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), false, default), Times.Once);
     }
 
     [Fact]
@@ -155,7 +155,7 @@ public class ProcessControllerTests
         var expectedJobId = Guid.NewGuid();
         
         _processorMock
-            .Setup(x => x.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), default))
+            .Setup(x => x.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), false, default))
             .ReturnsAsync(expectedJobId);
 
         // Act
@@ -169,7 +169,61 @@ public class ProcessControllerTests
         var jobIdProperty = objectResult.Value.GetType().GetProperty("jobId");
         Assert.Equal(expectedJobId, jobIdProperty?.GetValue(objectResult.Value));
         
-        _processorMock.Verify(x => x.RenameFilesAsync(files, default), Times.Once);
+        _processorMock.Verify(x => x.RenameFilesAsync(files, false, default), Times.Once);
+    }
+
+    [Fact]
+    public async Task RenameSelected_WithForceReprocess_PropagatesFlag()
+    {
+        // Regression coverage for the new forceReprocess query parameter on
+        // rename-selected. Without this flag a file already DB-marked
+        // renamed will be skipped, which is exactly what the user hits when
+        // a series manual-match needs to be re-applied to disk.
+        var files = new List<string> { "test.cbz" };
+        var request = new ProcessController.ProcessRequest { Files = files };
+        var expectedJobId = Guid.NewGuid();
+
+        _processorMock
+            .Setup(x => x.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), true, default))
+            .ReturnsAsync(expectedJobId);
+
+        var result = await _controller.RenameSelected(request, stream: false, forceReprocess: true);
+
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        Assert.IsType<OkObjectResult>(okResult.Result);
+        _processorMock.Verify(x => x.RenameFilesAsync(files, true, default), Times.Once);
+    }
+
+    [Fact]
+    public async Task RenameAll_WithForceReprocess_IncludesAlreadyRenamedFiles()
+    {
+        var testFiles = new List<ComicFile>
+        {
+            new() { FilePath = "/test/file1.cbz", IsRenamed = true, IsDuplicate = false },
+            new() { FilePath = "/test/file2.cbz", IsRenamed = false, IsDuplicate = false },
+            new() { FilePath = "/test/dup.cbz", IsRenamed = false, IsDuplicate = true },
+        };
+        var expectedJobId = Guid.NewGuid();
+        List<string>? capturedFiles = null;
+
+        _fileStoreMock
+            .Setup(x => x.GetAllFilesAsync(default))
+            .ReturnsAsync(testFiles);
+
+        _processorMock
+            .Setup(x => x.RenameFilesAsync(It.IsAny<IEnumerable<string>>(), true, default))
+            .Callback<IEnumerable<string>, bool, CancellationToken>((f, _, _) => capturedFiles = f.ToList())
+            .ReturnsAsync(expectedJobId);
+
+        var result = await _controller.RenameAll(stream: false, forceReprocess: true);
+
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        Assert.IsType<OkObjectResult>(okResult.Result);
+        Assert.NotNull(capturedFiles);
+        Assert.Equal(2, capturedFiles!.Count);
+        Assert.Contains("/test/file1.cbz", capturedFiles);
+        Assert.Contains("/test/file2.cbz", capturedFiles);
+        Assert.DoesNotContain("/test/dup.cbz", capturedFiles);
     }
 
     [Fact]

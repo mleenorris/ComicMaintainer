@@ -891,6 +891,55 @@ public class FileStoreServiceTests
     }
 
     [Fact]
+    public async Task ClearProcessedStatusAsync_ResetsRenamedNormalizedAndProcessedFlags()
+    {
+        // Arrange: two files fully processed, one untouched.
+        var file1 = Path.Combine(_testDirectory, "clear1.cbz");
+        var file2 = Path.Combine(_testDirectory, "clear2.cbz");
+        var untouched = Path.Combine(_testDirectory, "untouched.cbz");
+        File.WriteAllText(file1, "x");
+        File.WriteAllText(file2, "x");
+        File.WriteAllText(untouched, "x");
+        await _service.AddFileAsync(file1);
+        await _service.AddFileAsync(file2);
+        await _service.AddFileAsync(untouched);
+        await _service.MarkFileRenamedAsync(file1, true);
+        await _service.MarkFileNormalizedAsync(file1, true);
+        await _service.MarkFileRenamedAsync(file2, true);
+        await _service.MarkFileNormalizedAsync(file2, true);
+
+        // Sanity check
+        Assert.True(await _service.IsFileProcessedAsync(file1));
+        Assert.True(await _service.IsFileProcessedAsync(file2));
+
+        // Act
+        var cleared = await _service.ClearProcessedStatusAsync(new[] { file1, file2, untouched });
+
+        // Assert: both processed files cleared; untouched (already false) not counted.
+        Assert.Equal(2, cleared);
+        Assert.False(await _service.IsFileRenamedAsync(file1));
+        Assert.False(await _service.IsFileNormalizedAsync(file1));
+        Assert.False(await _service.IsFileProcessedAsync(file1));
+        Assert.False(await _service.IsFileRenamedAsync(file2));
+        Assert.False(await _service.IsFileNormalizedAsync(file2));
+        Assert.False(await _service.IsFileProcessedAsync(file2));
+    }
+
+    [Fact]
+    public async Task ClearProcessedStatusAsync_WithEmptyList_ReturnsZero()
+    {
+        var cleared = await _service.ClearProcessedStatusAsync(Array.Empty<string>());
+        Assert.Equal(0, cleared);
+    }
+
+    [Fact]
+    public async Task ClearProcessedStatusAsync_SkipsUnknownPaths()
+    {
+        var cleared = await _service.ClearProcessedStatusAsync(new[] { "/does/not/exist.cbz" });
+        Assert.Equal(0, cleared);
+    }
+
+    [Fact]
     public async Task AddFileAsync_WithEventBroadcaster_BroadcastsFileListUpdate()
     {
         // Arrange

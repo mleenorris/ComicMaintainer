@@ -549,6 +549,96 @@ public class FileStoreService : IFileStoreService
         }
     }
 
+    public async Task<int> ClearProcessedStatusAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    {
+        if (filePaths == null)
+        {
+            return 0;
+        }
+
+        var pathList = filePaths
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (pathList.Count == 0)
+        {
+            return 0;
+        }
+
+        var updated = 0;
+        try
+        {
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+            // Chunk to keep the IN clause within SQLite's default limit (999).
+            const int chunkSize = 500;
+            var now = DateTime.UtcNow;
+            for (var offset = 0; offset < pathList.Count; offset += chunkSize)
+            {
+                var chunk = pathList.GetRange(offset, Math.Min(chunkSize, pathList.Count - offset));
+                var entities = await dbContext.ComicFiles
+                    .Where(e => chunk.Contains(e.FilePath))
+                    .ToListAsync(cancellationToken);
+
+                foreach (var entity in entities)
+                {
+                    if (entity.IsRenamed || entity.IsNormalized || entity.IsProcessed)
+                    {
+                        entity.IsRenamed = false;
+                        entity.IsNormalized = false;
+                        entity.IsProcessed = false;
+                        entity.UpdatedAt = now;
+                        updated++;
+                    }
+                }
+
+                if (entities.Count > 0)
+                {
+                    await dbContext.SaveChangesAsync(cancellationToken);
+                }
+            }
+
+            // Mirror the change into the in-memory snapshot so that subsequent
+            // GetAllFilesAsync()/IsFileRenamedAsync() calls reflect reality
+            // immediately (FileStoreService keeps a process-local cache that
+            // would otherwise return stale "renamed/normalized" flags).
+            foreach (var path in pathList)
+            {
+                if (_files.TryGetValue(path, out var file))
+                {
+                    file.IsRenamed = false;
+                    file.IsNormalized = false;
+                    file.IsProcessed = false;
+                }
+            }
+
+            if (updated > 0)
+            {
+                _logger.LogInformation(
+                    "ClearProcessedStatusAsync: Cleared renamed/normalized/processed flags on {Count} file(s)",
+                    updated);
+
+                if (_eventBroadcaster != null)
+                {
+                    try
+                    {
+                        await _eventBroadcaster.BroadcastFileListUpdateAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "ClearProcessedStatusAsync: file list broadcast failed");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error clearing processed status for {Count} file(s)", pathList.Count);
+        }
+
+        return updated;
+    }
+
     public Task<(int total, int processed, int unprocessed, int duplicates)> GetFileCountsAsync(CancellationToken cancellationToken = default)
     {
         var files = _files.Values.ToList();

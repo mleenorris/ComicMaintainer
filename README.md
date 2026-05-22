@@ -193,6 +193,7 @@ The service includes a web-based interface for managing your comic files:
 - **Duplicate File Tracking**: Files detected as duplicates are automatically marked with a 🔁 icon
 - **Filter by Status**: Easily filter files to show all files, only marked (processed), only unmarked (unprocessed), or only duplicates - filters work across all pages
 - **Scan for Unmarked Files**: Quickly identify how many files have not been processed yet
+- **Clear Processed Status**: When a series' metadata `<Series>` tag or filename refuses to update after a manual match or canonical-title change, use the **♻️ Reset Processed Status** button on the Series detail view (or **♻️ Clear Processed Status** in the Process dropdown for selected files) to clear the renamed/normalized flags so the next Process / Rename / Normalize run will re-apply them. This avoids a full database reset. The same operation is exposed in the API as `POST /api/status/clear-selected`, `POST /api/status/clear-series/{seriesId}`, and `POST /api/status/clear-folder`.
 
 ### Usage
 1. Access the web interface at `http://localhost:5000` (or your configured host/port)

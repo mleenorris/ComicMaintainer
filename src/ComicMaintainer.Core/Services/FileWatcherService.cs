@@ -146,56 +146,60 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
         bool shouldInitialize = false;
-        
+        bool watcherStarted = false;
+        bool watchedDirectoryExists = Directory.Exists(_settings.WatchedDirectory);
+
         lock (_lock)
         {
             // Watcher is enabled if either rename or normalize is enabled
             _enabled = _settings.WatcherEnableRename || _settings.WatcherEnableNormalize;
-            
-            if (!_enabled)
-            {
-                _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Watcher is disabled (both rename and normalize are disabled), not starting"));
-                return;
-            }
 
-            if (_watcher != null && _watcher.EnableRaisingEvents)
-            {
-                _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Watcher is already running"));
-                return;
-            }
-
-            if (!Directory.Exists(_settings.WatchedDirectory))
+            if (!watchedDirectoryExists)
             {
                 _logger.LogError(LoggingHelper.WithWatcherPrefix("Watched directory does not exist: {Directory}"), _settings.WatchedDirectory);
-                return;
+            }
+            else if (!_enabled)
+            {
+                _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
+                    "Watcher is disabled (both rename and normalize are disabled); skipping live file-system monitoring but still performing initial directory scan so on-demand features (e.g. Scan Unmarked) work."));
+            }
+            else if (_watcher != null && _watcher.EnableRaisingEvents)
+            {
+                _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Watcher is already running"));
+            }
+            else
+            {
+                _watcher = new FileSystemWatcher(_settings.WatchedDirectory)
+                {
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
+                    Filter = "*.*",
+                    IncludeSubdirectories = true
+                };
+                _activeWatchedDirectory = _settings.WatchedDirectory;
+
+                _watcher.Created += OnFileCreated;
+                _watcher.Changed += OnFileChanged;
+                _watcher.Renamed += OnFileRenamed;
+                _watcher.Deleted += OnFileDeleted;
+
+                _watcher.EnableRaisingEvents = true;
+                watcherStarted = true;
+                _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File watcher started for directory: {Directory}"), _settings.WatchedDirectory);
             }
 
-            _watcher = new FileSystemWatcher(_settings.WatchedDirectory)
-            {
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
-                Filter = "*.*",
-                IncludeSubdirectories = true
-            };
-            _activeWatchedDirectory = _settings.WatchedDirectory;
-
-            _watcher.Created += OnFileCreated;
-            _watcher.Changed += OnFileChanged;
-            _watcher.Renamed += OnFileRenamed;
-            _watcher.Deleted += OnFileDeleted;
-
-            _watcher.EnableRaisingEvents = true;
-            _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File watcher started for directory: {Directory}"), _settings.WatchedDirectory);
-            
-            // Set flag to initialize outside the lock
-            if (!_initialized)
+            // The file store inventory is used by features that don't depend on the live watcher
+            // (e.g. the "Scan Unmarked" endpoint, file listings, counts). Initialize it once per
+            // process whenever the watched directory exists, even if the watcher itself is disabled.
+            if (!_initialized && watchedDirectoryExists)
             {
                 shouldInitialize = true;
                 _initialized = true;
             }
         }
-        
-        // Broadcast watcher status change
-        if (_eventBroadcaster != null)
+
+        // Broadcast watcher status change (only when the watcher actually started this call;
+        // skipping when disabled preserves prior behaviour and avoids spurious status events).
+        if (watcherStarted && _eventBroadcaster != null)
         {
             try
             {
@@ -206,15 +210,18 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 _logger.LogWarning(ex, "Failed to broadcast watcher status change");
             }
         }
-        
-        // Initialize file store from database before scanning files (only once)
+
+        // Initialize file store from database before scanning files (only once).
+        // Runs regardless of whether the live watcher is enabled.
         if (shouldInitialize)
         {
             await _fileStore.InitializeFromDatabaseAsync(cancellationToken);
+
+            // Perform initial scan of existing files so the in-memory store reflects what's on
+            // disk even when the live watcher is disabled. Only runs once per process (gated by
+            // _initialized) to match the previous behaviour.
+            _ = Task.Run(async () => await ScanExistingFilesAsync(cancellationToken));
         }
-        
-        // Perform initial scan of existing files
-        _ = Task.Run(async () => await ScanExistingFilesAsync(cancellationToken));
     }
     
     /// <summary>

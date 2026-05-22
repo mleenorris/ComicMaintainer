@@ -682,7 +682,8 @@ public class FileStoreService : IFileStoreService
                         IsNormalized = entity.IsNormalized,
                         IsDuplicate = entity.IsDuplicate,
                         IsRead = entity.IsRead,
-                        Metadata = entity.Metadata
+                        Metadata = entity.Metadata,
+                        SeriesMetadataVersion = entity.SeriesMetadataVersion
                     };
                     
                     _files.AddOrUpdate(entity.FilePath, comicFile, (_, _) => comicFile);
@@ -857,6 +858,70 @@ public class FileStoreService : IFileStoreService
                 _logger.LogWarning(ex, "Failed to broadcast file list update after path update");
             }
         }
+    }
+
+    public async Task SetFileSeriesMetadataVersionAsync(string filePath, int version, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(filePath)) return;
+        try
+        {
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+            if (entity is null) return;
+            if (entity.SeriesMetadataVersion == version) return;
+            entity.SeriesMetadataVersion = version;
+            entity.UpdatedAt = DateTime.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            // Mirror into the in-memory snapshot so subsequent reads see the stamp.
+            if (_files.TryGetValue(filePath, out var file))
+            {
+                file.SeriesMetadataVersion = version;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to stamp series metadata version on {File}", SanitizeForLogging(filePath));
+        }
+    }
+
+    public async Task<IReadOnlyList<string>> GetFilesWithStaleSeriesMetadataAsync(
+        IEnumerable<string> filePaths,
+        int currentVersion,
+        CancellationToken cancellationToken = default)
+    {
+        var pathList = (filePaths ?? Enumerable.Empty<string>())
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (pathList.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var stale = new List<string>();
+        try
+        {
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            // Chunk to stay within SQLite's default IN-list limit.
+            const int chunkSize = 500;
+            for (var offset = 0; offset < pathList.Count; offset += chunkSize)
+            {
+                var chunk = pathList.GetRange(offset, Math.Min(chunkSize, pathList.Count - offset));
+                var rows = await dbContext.ComicFiles
+                    .AsNoTracking()
+                    .Where(e => chunk.Contains(e.FilePath) && e.SeriesMetadataVersion < currentVersion)
+                    .Select(e => e.FilePath)
+                    .ToListAsync(cancellationToken);
+                stale.AddRange(rows);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to query stale series-metadata-version files (current={Version})", currentVersion);
+        }
+        return stale;
     }
 
     public async Task<int> CleanupStaleEntriesAsync(CancellationToken cancellationToken = default)

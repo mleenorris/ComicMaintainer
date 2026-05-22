@@ -62,6 +62,14 @@ public class SeriesMetadataCacheRecord
     [JsonPropertyName("localized_titles")]
     public List<LocalizedTitle> LocalizedTitles { get; set; } = new();
 
+    /// <summary>
+    /// Monotonic version bumped on every cache mutation that should
+    /// invalidate stale per-file metadata stamps. Surfaced so external
+    /// callers can verify the version a UI screen was rendered against.
+    /// </summary>
+    [JsonPropertyName("metadata_version")]
+    public int MetadataVersion { get; set; }
+
     /// <summary>True when an image (downloaded or user-uploaded) is available locally.</summary>
     [JsonPropertyName("has_image")]
     public bool HasImage =>

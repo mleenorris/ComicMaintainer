@@ -57,6 +57,9 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.HasIndex(e => e.Directory);
             entity.HasIndex(e => e.UpdatedAt);
             entity.HasIndex(e => e.CreatedAt);
+            // Used by LibraryScanJobHandler to find files whose series-metadata
+            // stamp is lower than the current cache record's MetadataVersion.
+            entity.HasIndex(e => e.SeriesMetadataVersion);
             
             // Configure owned type for metadata
             entity.OwnsOne(e => e.Metadata, metadata =>
@@ -220,6 +223,18 @@ public class ComicFileEntity
     public ComicMetadata? Metadata { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Version of the <c>SeriesMetadataCacheEntity</c> record that was used
+    /// the last time this file was normalized. The library-scan job
+    /// compares this value against the current
+    /// <c>SeriesMetadataCacheEntity.MetadataVersion</c> for the file's
+    /// matched series; any file whose stamp is lower than the current
+    /// record's version is considered stale and will be re-normalized
+    /// without needing to re-read every archive on disk. New rows start
+    /// at 0 so the first normalize pass always writes a stamp.
+    /// </summary>
+    public int SeriesMetadataVersion { get; set; }
 }
 
 /// <summary>
@@ -396,4 +411,17 @@ public class SeriesMetadataCacheEntity
     /// stable; null/empty when no language information is available.
     /// </summary>
     public string? LocalizedTitlesJson { get; set; }
+
+    /// <summary>
+    /// Monotonic version counter bumped every time a mutation occurs that
+    /// could affect how files belonging to this series should be
+    /// normalized — canonical title edits, alias changes, language
+    /// preference changes, localized-title list growth, manual matches,
+    /// etc. The library-scan job compares this against each tracked
+    /// file's <c>SeriesMetadataVersion</c> stamp and re-normalizes any
+    /// file whose stamp is lower than the current value. Existing rows
+    /// default to 1 (anything stamped 0 is therefore considered stale on
+    /// first scan).
+    /// </summary>
+    public int MetadataVersion { get; set; } = 1;
 }

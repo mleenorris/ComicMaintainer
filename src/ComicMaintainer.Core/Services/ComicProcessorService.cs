@@ -286,6 +286,16 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                 await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
             }
 
+            // After a successful normalize (or "already normalized" detection),
+            // stamp the file with the current series-metadata-cache version so
+            // the library-scan job's stale-retag pass knows this file reflects
+            // the latest cache record. Skipped when normalize was disabled in
+            // settings (we didn't actually apply any cache state).
+            if (normalizeSuccess && metadata != null && _settings.WatcherEnableNormalize)
+            {
+                await StampSeriesMetadataVersionAsync(filePath, metadata.Series, cancellationToken);
+            }
+
             // IsProcessed is automatically computed in MarkFileRenamedAsync and MarkFileNormalizedAsync
             // It will only be true when both rename and normalize are successful
             var isFullyProcessed = renameSuccess && normalizeSuccess;
@@ -689,6 +699,33 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
     }
 
+    /// <summary>
+    /// After a successful normalize, look up the cache record for the
+    /// resolved series and stamp the file with the record's current
+    /// <c>MetadataVersion</c>. This is the read-side of the
+    /// metadata-version invalidation scheme: a future library-scan run
+    /// compares this stamp to the latest record version to decide whether
+    /// the file needs another normalize. Best-effort; cache lookup failure
+    /// must not fail the normalize itself.
+    /// </summary>
+    private async Task StampSeriesMetadataVersionAsync(string filePath, string? resolvedSeries, CancellationToken cancellationToken)
+    {
+        if (_seriesMetadataCache is null || string.IsNullOrWhiteSpace(resolvedSeries)) return;
+        try
+        {
+            var key = _seriesMetadataCache.NormalizeKey(resolvedSeries);
+            if (string.IsNullOrWhiteSpace(key)) return;
+            var record = await _seriesMetadataCache.GetAsync(key, cancellationToken);
+            if (record is null) return;
+            await _fileStore.SetFileSeriesMetadataVersionAsync(filePath, record.MetadataVersion, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to stamp series-metadata version on {FilePath}",
+                LoggingHelper.SanitizePathForLog(filePath));
+        }
+    }
+
     private async Task<bool> NormalizeFileCoreAsync(string filePath, bool forceReprocess, CancellationToken cancellationToken)
     {
         try
@@ -739,6 +776,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             {
                 _logger.LogInformation("NormalizeFileAsync: File already has normalized metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
+                await StampSeriesMetadataVersionAsync(filePath, metadata.Series, cancellationToken);
                 var filename = Path.GetFileName(filePath);
                 await LogHistoryWithChangesAsync(filePath, "Normalize", true, "File already normalized",
                     filename, filename, metadata, metadata, cancellationToken);
@@ -757,6 +795,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             
             if (success)
             {
+                await StampSeriesMetadataVersionAsync(filePath, normalizedMetadata.Series, cancellationToken);
                 _logger.LogInformation("NormalizeFileAsync: File normalized successfully: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 var filename = Path.GetFileName(filePath);
                 // For normalize operations, we log the same metadata as before/after since we're ensuring

@@ -122,6 +122,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 entity.IsUserCanonical = true;
             }
             entity.UpdatedAt = now;
+            BumpMetadataVersion(entity);
         }
 
         await db.SaveChangesAsync(cancellationToken);
@@ -156,6 +157,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
 
         entity.UserAliases = updated;
         entity.UpdatedAt = DateTime.UtcNow;
+        BumpMetadataVersion(entity);
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -231,6 +233,10 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 // fields for the user-selected match.
                 entity.LookupStatus = wasManualMatch ? "manual_match" : status;
                 entity.UpdatedAt = now;
+                // Successful refreshes can change canonical title, aliases,
+                // or localized titles — bump so library scan re-normalizes
+                // affected files.
+                BumpMetadataVersion(entity);
             }
             else if (wasManualMatch)
             {
@@ -599,6 +605,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             entity.LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(match));
             entity.LookupStatus = "manual_match";
             entity.UpdatedAt = now;
+            BumpMetadataVersion(entity);
         }
 
         // Try to grab the candidate's image. User-uploaded images are sticky.
@@ -684,8 +691,27 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             ImageDownloadedUtc = entity.ImageDownloadedUtc,
             ImageStatus = entity.ImageStatus,
             PreferredLanguage = entity.PreferredLanguage,
-            LocalizedTitles = DeserializeLocalizedTitles(entity.LocalizedTitlesJson)
+            LocalizedTitles = DeserializeLocalizedTitles(entity.LocalizedTitlesJson),
+            MetadataVersion = entity.MetadataVersion
         };
+    }
+
+    /// <summary>
+    /// Increment the entity's <see cref="SeriesMetadataCacheEntity.MetadataVersion"/>
+    /// to mark all files belonging to this series as needing a re-normalize
+    /// pass on the next library scan. Should be called from every mutation
+    /// path that could affect the resolved series title or language
+    /// preference (canonical edits, alias changes, language preference
+    /// changes, fresh matches, etc.). New entities start at 1.
+    /// </summary>
+    private static void BumpMetadataVersion(SeriesMetadataCacheEntity entity)
+    {
+        // Use unchecked + saturation on overflow rather than wrapping so a
+        // bumped record never compares less-than a previously-stamped file.
+        if (entity.MetadataVersion < int.MaxValue)
+        {
+            entity.MetadataVersion++;
+        }
     }
 
     /// <summary>
@@ -793,6 +819,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         {
             entity.PreferredLanguage = normalizedLanguage;
             entity.UpdatedAt = now;
+            BumpMetadataVersion(entity);
         }
 
         await db.SaveChangesAsync(cancellationToken);

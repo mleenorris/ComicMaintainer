@@ -278,6 +278,11 @@
         let combineFolderActionInFlight = false;
         let protectedImageUrls = new Map();
         const MAX_PROTECTED_IMAGE_CACHE_ENTRIES = 150;
+
+        // Stable sentinel filepath used to drive the existing toggleDropdown /
+        // getDropdownId helpers for the single per-series actions dropdown
+        // rendered in the series detail view.
+        const SERIES_ACTIONS_DROPDOWN_KEY = '__series_actions__';
         
         // Server-Sent Events connection for real-time updates
         let eventSource = null;
@@ -2464,11 +2469,30 @@
                                 ${series.metadata_source ? `<div class="series-detail-meta">Source: ${escapeHtml(series.metadata_source)}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
                                 <div class="series-detail-actions">
                                     ${issues.length ? `<button type="button" class="btn btn-small" onclick="readComic('${escapeJs(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
-                                    <button type="button" class="btn btn-small" onclick="openManageSeriesNamesModal('${escapeJs(series.title)}')">🏷️ Manage Names</button>
-                                    <button type="button" class="btn btn-small" onclick="openSeriesFoldersModal('${escapeJs(series.id)}','${escapeJs(series.title)}')" title="See the on-disk folders contributing to this series and merge them into one">📁 Manage Folders</button>
-                                    <button type="button" class="btn btn-small" onclick="refreshSeriesMetadataDirect('${escapeJs(series.title)}')">🌐 Refresh Metadata</button>
-                                    <button type="button" class="btn btn-small" onclick="refreshSeriesFolder('${escapeJs(series.id)}','${escapeJs(series.title)}')" title="Refresh metadata for every folder/alias that groups under this series">📁 Refresh Folder</button>
-                                    <button type="button" class="btn btn-small" onclick="resetSeriesProcessedStatus('${escapeJs(series.id)}','${escapeJs(series.title)}')" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">♻️ Reset Processed Status</button>
+                                    <div class="file-actions-dropdown series-actions-dropdown">
+                                        <button type="button" class="dropdown-toggle" onclick="toggleDropdown(event, '${escapeJs(SERIES_ACTIONS_DROPDOWN_KEY)}')">
+                                            ⚙️ Actions
+                                        </button>
+                                        <div class="dropdown-menu" id="${getDropdownId(SERIES_ACTIONS_DROPDOWN_KEY)}">
+                                            <button class="dropdown-item" onclick="openManageSeriesNamesModal('${escapeJs(series.title)}'); closeAllDropdowns();">
+                                                🏷️ Manage Names
+                                            </button>
+                                            <button class="dropdown-item" onclick="openSeriesFoldersModal('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="See the on-disk folders contributing to this series and merge them into one">
+                                                📁 Manage Folders
+                                            </button>
+                                            <div class="dropdown-divider"></div>
+                                            <button class="dropdown-item" onclick="refreshSeriesMetadataDirect('${escapeJs(series.title)}'); closeAllDropdowns();">
+                                                🌐 Refresh Metadata
+                                            </button>
+                                            <button class="dropdown-item" onclick="refreshSeriesFolder('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="Refresh metadata for every folder/alias that groups under this series">
+                                                📁 Refresh Folder
+                                            </button>
+                                            <div class="dropdown-divider"></div>
+                                            <button class="dropdown-item" onclick="resetSeriesProcessedStatus('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
+                                                ♻️ Reset Processed Status
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -2626,6 +2650,9 @@
                                 </button>
                                 <button class="dropdown-item" onclick="normalizeSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                     ✨ Normalize
+                                </button>
+                                <button class="dropdown-item" onclick="removeFileMetadata('${escapeJs(file.relative_path)}'); closeAllDropdowns();" title="Open the archive, delete the embedded ComicInfo.xml, and mark the file as unprocessed so it can be re-processed.">
+                                    🧹 Remove Metadata
                                 </button>
                                 <div class="dropdown-divider"></div>
                                 <button class="dropdown-item" onclick="deleteSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
@@ -4943,6 +4970,32 @@
                 await loadActiveLibraryView(1, true);
             } catch (error) {
                 showMessage('Failed to delete file: ' + error.message, 'error');
+            }
+        }
+
+        async function removeFileMetadata(filepath) {
+            if (!confirm(`Remove embedded metadata (ComicInfo.xml) from:\n${filepath}\n\nThe archive will be rewritten without its ComicInfo.xml and the file will be marked as unprocessed. Continue?`)) {
+                return;
+            }
+
+            showMessage('Removing metadata...', 'info');
+
+            try {
+                const encodedPath = encodeFilePathForUrl(filepath);
+                const response = await fetch(apiUrl(`/api/files/${encodedPath}/metadata`), {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                showMessage('Metadata removed and file marked unprocessed.', 'success');
+                await loadActiveLibraryView(1, true);
+            } catch (error) {
+                showMessage('Failed to remove metadata: ' + error.message, 'error');
             }
         }
         

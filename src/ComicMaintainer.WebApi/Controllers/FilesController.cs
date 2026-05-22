@@ -2503,6 +2503,63 @@ public class FilesController : ControllerBase
         }
     }
 
+    // RESTful endpoint: DELETE /api/files/{encodedFilePath}/metadata
+    // Removes the embedded ComicInfo.xml from the archive and clears the
+    // renamed/normalized/processed flags so the file will be re-evaluated on
+    // the next processing run.
+    [HttpDelete("~/api/files/{encodedFilePath}/metadata")]
+    public async Task<ActionResult> RemoveFileMetadata(string encodedFilePath, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var filePath = DecodeBase64UrlSafe(encodedFilePath);
+            if (string.IsNullOrEmpty(filePath))
+                return BadRequest("Invalid file path");
+
+            if (!IsPathSafe(filePath))
+            {
+                _logger.LogWarning("Attempt to remove metadata from file outside watched directory: {EncodedPath}", LoggingHelper.SanitizeForLog(encodedFilePath));
+                return BadRequest("File path is outside the allowed directory");
+            }
+
+            if (!System.IO.File.Exists(filePath))
+            {
+                return NotFound();
+            }
+
+            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Remove metadata requested for file: {FilePath}"), sanitizedPath);
+
+            var success = await _processor.RemoveMetadataAsync(filePath, cancellationToken);
+            if (!success)
+            {
+                await LogHistoryAsync(filePath, "RemoveMetadata", false, "RemoveMetadataAsync returned false");
+                return BadRequest("Failed to remove metadata");
+            }
+
+            // Mark the file as unprocessed so the rename/normalize pipeline will
+            // re-evaluate it on the next run.
+            var cleared = await _fileStore.ClearProcessedStatusAsync(new[] { filePath }, cancellationToken);
+
+            await LogHistoryAsync(filePath, "RemoveMetadata", true);
+
+            return Ok(new { success = true, cleared });
+        }
+        catch (Exception ex)
+        {
+            var sanitizedEncodedPath = LoggingHelper.SanitizeForLog(encodedFilePath);
+            _logger.LogError(ex, "Error removing metadata from file with encoded path {EncodedPath}", sanitizedEncodedPath);
+
+            var filePath = DecodeBase64UrlSafe(encodedFilePath);
+            if (!string.IsNullOrEmpty(filePath))
+            {
+                await LogHistoryAsync(filePath, "RemoveMetadata", false, ex.Message);
+            }
+
+            return StatusCode(500, "Error removing metadata");
+        }
+    }
+
     private static string DecodeBase64UrlSafe(string input)
     {
         try

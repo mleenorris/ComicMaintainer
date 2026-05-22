@@ -151,6 +151,79 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task RemoveMetadataAsync_ValidFile_ReturnsTrueAndStripsComicInfo()
+    {
+        // Arrange
+        var filePath = CreateTestComicArchive("Series With Metadata", "5", year: 2024);
+
+        // Sanity-check that the test archive starts out with ComicInfo.xml.
+        var before = await _service.GetMetadataAsync(filePath);
+        Assert.NotNull(before);
+        Assert.Equal("Series With Metadata", before!.Series);
+
+        // Act
+        var result = await _service.RemoveMetadataAsync(filePath);
+
+        // Assert
+        Assert.True(result);
+        Assert.True(File.Exists(filePath));
+
+        // ComicInfo.xml should no longer be present in the archive.
+        using (var archive = ZipFile.OpenRead(filePath))
+        {
+            Assert.DoesNotContain(archive.Entries, e =>
+                string.Equals(e.FullName, "ComicInfo.xml", StringComparison.OrdinalIgnoreCase));
+            // Other entries are preserved.
+            Assert.Contains(archive.Entries, e =>
+                string.Equals(e.FullName, "page001.jpg", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    [Fact]
+    public async Task RemoveMetadataAsync_NonExistentFile_ReturnsFalse()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "missing.cbz");
+
+        // Act
+        var result = await _service.RemoveMetadataAsync(filePath);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task RemoveMetadataAsync_NonComicFile_ReturnsFalse()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "notes.txt");
+        await File.WriteAllTextAsync(filePath, "hello");
+
+        // Act
+        var result = await _service.RemoveMetadataAsync(filePath);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task RemoveMetadataAsync_ArchiveWithoutComicInfo_StillReturnsTrue()
+    {
+        // Arrange
+        var filePath = CreateTestComicArchiveNoMetadata("nometa.cbz");
+
+        // Act
+        var result = await _service.RemoveMetadataAsync(filePath);
+
+        // Assert — the operation is a no-op for the metadata layer but should
+        // still succeed so callers can rely on idempotent behaviour.
+        Assert.True(result);
+        using var archive = ZipFile.OpenRead(filePath);
+        Assert.DoesNotContain(archive.Entries, e =>
+            string.Equals(e.FullName, "ComicInfo.xml", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task ProcessFilesAsync_MultipleFiles_CreatesJob()
     {
         // Arrange

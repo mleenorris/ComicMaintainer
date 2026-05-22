@@ -7,8 +7,10 @@ namespace ComicMaintainer.Core.Services;
 
 /// <summary>
 /// Scheduled-job handler that re-evaluates tracked comic files to ensure
-/// they are properly named. Files that haven't been marked as renamed yet
-/// are queued through the normal <see cref="IComicProcessorService.RenameFilesAsync(IEnumerable{string}, bool, CancellationToken)"/>
+/// they are properly named. By default the audit only reports how many
+/// files appear to need renaming. When the <c>autoCorrect</c> option is
+/// enabled the candidate files are queued through the normal
+/// <see cref="IComicProcessorService.RenameFilesAsync(IEnumerable{string}, bool, CancellationToken)"/>
 /// pipeline so the watcher's rename behavior is applied retroactively to
 /// anything that slipped through (e.g. the watcher was disabled when the
 /// file was added, or rename previously failed transiently).
@@ -37,11 +39,11 @@ public class FileNamingAuditJobHandler : IScheduledJobHandler
     public string JobKey => Key;
     public string DisplayName => "File Naming Audit";
     public string Description =>
-        "Re-evaluates tracked comic files to ensure their filenames match the expected metadata-derived names. By default only files that haven't been renamed yet are processed; enable forceReprocess in options to re-check every file.";
+        "Re-evaluates tracked comic files to ensure their filenames match the expected metadata-derived names. By default only files that haven't been renamed yet are considered; enable forceReprocess in options to re-check every file. The audit is report-only unless autoCorrect is enabled, in which case candidate files are queued through the rename pipeline.";
 
     // Default: disabled (so it doesn't run unprompted on existing installs) and daily when enabled.
     public ScheduledJobDefaults Defaults =>
-        new(Enabled: false, IntervalMinutes: 60 * 24, OptionsJson: """{"forceReprocess":false}""");
+        new(Enabled: false, IntervalMinutes: 60 * 24, OptionsJson: """{"forceReprocess":false,"autoCorrect":false}""");
 
     public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
     {
@@ -53,12 +55,17 @@ public class FileNamingAuditJobHandler : IScheduledJobHandler
             : allFiles.Where(f => !f.IsRenamed).Select(f => f.FilePath).ToList();
 
         _logger.LogInformation(
-            "File naming audit starting: {Candidates}/{Total} file(s) to evaluate (forceReprocess={Force})",
-            candidates.Count, allFiles.Count, options.ForceReprocess);
+            "File naming audit starting: {Candidates}/{Total} file(s) to evaluate (forceReprocess={Force}, autoCorrect={AutoCorrect})",
+            candidates.Count, allFiles.Count, options.ForceReprocess, options.AutoCorrect);
 
         if (candidates.Count == 0)
         {
             return $"Scanned {allFiles.Count}: all files already properly named.";
+        }
+
+        if (!options.AutoCorrect)
+        {
+            return $"Scanned {allFiles.Count}: {candidates.Count} file(s) appear to need renaming. Enable autoCorrect to rename.";
         }
 
         var jobId = await _processor.RenameFilesAsync(candidates, options.ForceReprocess, cancellationToken);
@@ -114,5 +121,6 @@ public class FileNamingAuditJobHandler : IScheduledJobHandler
     private sealed class FileNamingAuditOptions
     {
         public bool ForceReprocess { get; set; }
+        public bool AutoCorrect { get; set; }
     }
 }

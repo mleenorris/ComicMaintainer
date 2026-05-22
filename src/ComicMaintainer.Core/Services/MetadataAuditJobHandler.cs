@@ -19,6 +19,10 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
 {
     public const string Key = "metadata-audit";
 
+    // Poll the spawned normalize batch job at this cadence while waiting for completion
+    // during an autoCorrect run, mirroring FileNamingAuditJobHandler's pattern.
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
+
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
@@ -138,6 +142,11 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
         }
 
         // Optional auto-correct: re-normalize the offending files via the existing pipeline.
+        // We wait for the spawned normalize batch to reach a terminal state so the
+        // scheduled job's last-run status (and summary) reflect the actual outcome
+        // rather than just queue submission. Without this wait the audit would report
+        // success the instant the job was queued, before any ComicInfo.xml was rewritten.
+        var correctedSummary = string.Empty;
         if (options.AutoCorrect)
         {
             var toFix = findings
@@ -149,11 +158,38 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
             if (toFix.Count > 0)
             {
                 _logger.LogInformation("Metadata audit auto-correct: queueing {Count} file(s) for normalization", toFix.Count);
-                await _processor.NormalizeFilesAsync(toFix, forceReprocess: true, cancellationToken);
+                var jobId = await _processor.NormalizeFilesAsync(toFix, forceReprocess: true, cancellationToken);
+
+                ProcessingJob? job = null;
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    job = _processor.GetJob(jobId);
+                    if (job is null)
+                    {
+                        // Job record was evicted before we observed completion; treat as success
+                        // since the normalize pipeline only persists state on success.
+                        break;
+                    }
+                    if (job.Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Cancelled)
+                    {
+                        break;
+                    }
+                    await Task.Delay(PollInterval, cancellationToken);
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                correctedSummary = job is null
+                    ? $" Auto-correct queued {toFix.Count} file(s); job record no longer available."
+                    : $" Auto-correct: {job.ProcessedFiles}/{toFix.Count} normalized, {job.FailedFiles} failed (status: {job.Status}).";
+            }
+            else
+            {
+                correctedSummary = " Auto-correct: nothing to fix.";
             }
         }
 
-        return $"Scanned {files.Count}: {seriesMismatch} series mismatch, {missingChapter} missing chapter, {unreadable} unreadable.";
+        return $"Scanned {files.Count}: {seriesMismatch} series mismatch, {missingChapter} missing chapter, {unreadable} unreadable.{correctedSummary}";
     }
 
     /// <summary>

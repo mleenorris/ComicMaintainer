@@ -86,6 +86,13 @@ public interface IComicProcessorService
     Task<Guid> UpdateMetadataAsync(IEnumerable<string> filePaths, ComicMetadata metadata, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Remove the embedded ComicInfo.xml from multiple comic files as a batch
+    /// job. Each successfully rewritten file is also marked as unprocessed so
+    /// it will be re-evaluated on the next processing run.
+    /// </summary>
+    Task<Guid> RemoveMetadataFromFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Normalize metadata and then rename multiple comic files as a single batch job.
     /// For each file, normalization is performed first (so the series name reflects the
     /// containing folder) and the rename step uses the freshly normalized metadata.

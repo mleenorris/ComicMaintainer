@@ -222,7 +222,7 @@
         let unmarkedCount = 0;
         let perPage = DEFAULT_PER_PAGE; // Will be loaded from server preferences
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
-        let libraryViewMode = 'files';
+        let libraryViewMode = 'series';
         // Series layout: null = auto (list on mobile portrait, compact otherwise),
         // or one of 'list', 'grid', 'compact' when explicitly chosen by the user.
         let seriesLayoutPreference = null;
@@ -810,11 +810,9 @@
             const seriesButton = document.getElementById('mobileSeriesViewBtn');
 
             if (!toggle || !filesView || !filesButton) {
-                console.warn('Mobile library view controls are missing from the page.', {
-                    toggleMissing: !toggle,
-                    filesViewMissing: !filesView,
-                    filesButtonMissing: !filesButton
-                });
+                // The mobile library view toggle was removed when the dedicated
+                // Files view was retired; the underlying library list is still
+                // rendered, so there is nothing more to do here.
                 return;
             }
 
@@ -1354,9 +1352,9 @@
                     });
                 }
 
-                if (prefs.libraryViewMode === 'series' || prefs.libraryViewMode === 'files') {
-                    libraryViewMode = prefs.libraryViewMode;
-                }
+                // The Files library view has been removed; always force series
+                // mode regardless of what the server has cached for this user.
+                libraryViewMode = 'series';
 
                 updateLibraryViewButtons();
                 updateLibraryViewLayout();
@@ -1582,14 +1580,14 @@
         }
 
         async function setLibraryViewMode(mode) {
+            // The Files view has been removed; the library is always shown in
+            // Series mode. Any incoming request is coerced to 'series' so legacy
+            // call sites (preferences with `libraryViewMode === 'files'`, etc.)
+            // still resolve to a valid state.
+            mode = 'series';
             if (isMobileLibraryViewport()) {
-                // Ensure the mobile view tracks the underlying library mode:
-                // Series → 'series'; Files (or anything else) → 'files'.
-                const desiredMobileView = mode === 'series' ? 'series' : 'files';
-                if (currentMobileLibraryView !== desiredMobileView) {
-                    // Inline the visual swap without recursing into
-                    // setMobileLibraryView (which would call back into us).
-                    currentMobileLibraryView = desiredMobileView;
+                if (currentMobileLibraryView !== 'series') {
+                    currentMobileLibraryView = 'series';
                     applyMobileLibraryView();
                 }
             }
@@ -2525,6 +2523,54 @@
                                                ${selectedFiles.has(issue.file_path) ? 'checked' : ''}
                                                onchange="toggleFileSelection('${escapeJs(issue.file_path)}', this.checked)">
                                     </label>
+                                    <div class="series-issue-actions file-actions-dropdown" onclick="event.stopPropagation()">
+                                        <button type="button" class="dropdown-toggle" aria-label="Issue actions" onclick="toggleDropdown(event, '${escapeJs(issue.file_path)}')">
+                                            ⋯
+                                        </button>
+                                        <div class="dropdown-menu" id="${getDropdownId(issue.file_path)}">
+                                            <button class="dropdown-item" onclick="showFileInfo('${escapeJs(issue.file_path)}', '${escapeJs(issue.file_name)}'); closeAllDropdowns();">
+                                                ℹ️ Info
+                                            </button>
+                                            <button class="dropdown-item" onclick="viewTags('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                                👁️ View/Edit
+                                            </button>
+                                            <button class="dropdown-item" onclick="readComic('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                                📖 Read Comic
+                                            </button>
+                                            ${issue.duplicate
+                                                ? `<button class="dropdown-item" onclick="openDuplicateReviewModal('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                                    🔁 Review Duplicate
+                                                </button>`
+                                                : ''
+                                            }
+                                            <div class="dropdown-divider"></div>
+                                            ${issue.read
+                                                ? `<button class="dropdown-item" onclick="markFileUnread('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                                    📚 Mark Unread
+                                                </button>`
+                                                : `<button class="dropdown-item" onclick="markFileRead('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                                    ✅ Mark Read
+                                                </button>`
+                                            }
+                                            <div class="dropdown-divider"></div>
+                                            <button class="dropdown-item" onclick="processSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                                🚀 Process
+                                            </button>
+                                            <button class="dropdown-item" onclick="renameSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                                📝 Rename
+                                            </button>
+                                            <button class="dropdown-item" onclick="normalizeSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                                ✨ Normalize
+                                            </button>
+                                            <button class="dropdown-item" onclick="removeFileMetadata('${escapeJs(issue.file_path)}'); closeAllDropdowns();" title="Open the archive, delete the embedded ComicInfo.xml, and mark the file as unprocessed so it can be re-processed.">
+                                                🧹 Remove Metadata
+                                            </button>
+                                            <div class="dropdown-divider"></div>
+                                            <button class="dropdown-item" onclick="deleteSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                                🗑️ Delete
+                                            </button>
+                                        </div>
+                                    </div>
                                     <button type="button" class="series-issue-cover-button" aria-label="Read ${escapeHtml(issue.title || issue.file_name)}" onclick="readComic('${escapeJs(issue.file_path)}')">
                                         <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy">
                                         <div class="series-issue-cover-overlay"></div>
@@ -3082,6 +3128,7 @@
             const markSelectedReadItem = document.getElementById('markSelectedReadItem');
             const markSelectedUnreadItem = document.getElementById('markSelectedUnreadItem');
             const clearSelectedStatusItem = document.getElementById('clearSelectedStatusItem');
+            const removeMetadataSelectedItem = document.getElementById('removeMetadataSelectedItem');
             
             if (count === 0) {
                 info.textContent = 'No files selected';
@@ -3093,6 +3140,7 @@
                 if (markSelectedReadItem) markSelectedReadItem.disabled = true;
                 if (markSelectedUnreadItem) markSelectedUnreadItem.disabled = true;
                 if (clearSelectedStatusItem) clearSelectedStatusItem.disabled = true;
+                if (removeMetadataSelectedItem) removeMetadataSelectedItem.disabled = true;
             } else {
                 info.textContent = `${count} file${count > 1 ? 's' : ''} selected`;
                 batchBtn.disabled = false;
@@ -3103,6 +3151,7 @@
                 if (markSelectedReadItem) markSelectedReadItem.disabled = false;
                 if (markSelectedUnreadItem) markSelectedUnreadItem.disabled = false;
                 if (clearSelectedStatusItem) clearSelectedStatusItem.disabled = false;
+                if (removeMetadataSelectedItem) removeMetadataSelectedItem.disabled = false;
             }
         }
         
@@ -4187,6 +4236,99 @@
             } catch (err) {
                 console.error('clearSelectedProcessedStatus failed', err);
                 showMessage('Failed to clear processed status: ' + err.message, 'error');
+            }
+        }
+
+        async function removeMetadataSelected() {
+            if (selectedFiles.size === 0) {
+                showMessage('Please select at least one file', 'error');
+                return;
+            }
+            const count = selectedFiles.size;
+            if (!confirm(
+                `Remove embedded metadata (ComicInfo.xml) from ${count} selected file${count > 1 ? 's' : ''}?\n\n` +
+                'Each archive will be rewritten without its ComicInfo.xml and the files will be marked unprocessed so they can be re-processed.')) {
+                return;
+            }
+
+            showProgressModal('Starting metadata removal...');
+
+            const files = Array.from(selectedFiles);
+            try {
+                const response = await fetch(apiUrl('/api/jobs/remove-metadata-selected'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ Files: files })
+                });
+
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
+                if (!response.ok) {
+                    throw new Error('Failed to start remove metadata job');
+                }
+
+                const data = await response.json();
+                const jobId = data.job_id;
+                const totalItems = data.total_items;
+
+                showMessage(`Started removing metadata from ${totalItems} selected file${totalItems === 1 ? '' : 's'} in background`, 'info');
+                await trackJobStatus(jobId, 'Removing Metadata from Selected Files...');
+            } catch (err) {
+                console.error('removeMetadataSelected failed', err);
+                showMessage('Failed to remove metadata: ' + err.message, 'error');
+                closeProgressModal();
+            }
+        }
+
+        async function removeMetadataAll() {
+            if (!confirm(
+                'Remove embedded metadata (ComicInfo.xml) from ALL files in the library?\n\n' +
+                'Every archive will be rewritten without its ComicInfo.xml and all files will be marked unprocessed so they can be re-processed. This may take a while.')) {
+                return;
+            }
+
+            showProgressModal('Starting metadata removal...');
+
+            try {
+                const response = await fetch(apiUrl('/api/jobs/remove-metadata-all'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    credentials: 'same-origin'
+                });
+
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
+                if (!response.ok) {
+                    throw new Error('Failed to start remove metadata job');
+                }
+
+                const data = await response.json();
+                const jobId = data.job_id;
+                const totalItems = data.total_items;
+
+                if (!totalItems) {
+                    closeProgressModal();
+                    showMessage('No files found in library', 'info');
+                    return;
+                }
+
+                showMessage(`Started removing metadata from ${totalItems} file${totalItems === 1 ? '' : 's'} in background`, 'info');
+                await trackJobStatus(jobId, 'Removing Metadata from All Files...');
+            } catch (err) {
+                console.error('removeMetadataAll failed', err);
+                showMessage('Failed to remove metadata: ' + err.message, 'error');
+                closeProgressModal();
             }
         }
 

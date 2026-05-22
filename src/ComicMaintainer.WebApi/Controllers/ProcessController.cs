@@ -66,21 +66,26 @@ public class ProcessController : ControllerBase
     }
 
     [HttpPost("rename-all")]
-    public async Task<ActionResult<object>> RenameAll([FromQuery] bool stream = false, CancellationToken cancellationToken = default)
+    public async Task<ActionResult<object>> RenameAll([FromQuery] bool stream = false, [FromQuery] bool forceReprocess = false, CancellationToken cancellationToken = default)
     {
         try
         {
-            // Only queue files that have not yet been renamed (respects database state).
+            // When forceReprocess is true, include every tracked file (except
+            // duplicates) so callers can re-run rename against files that are
+            // already DB-marked renamed — necessary after a manual series
+            // match or canonical-title change requires the filename on disk
+            // to catch up. Without the flag we keep the historical
+            // "skip already-renamed files" behaviour.
             var allFiles = await _fileStore.GetAllFilesAsync(cancellationToken);
             var filePaths = allFiles
-                .Where(f => !f.IsRenamed && !f.IsDuplicate)
+                .Where(f => !f.IsDuplicate && (forceReprocess || !f.IsRenamed))
                 .Select(f => f.FilePath)
                 .ToList();
             
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename all files requested, processing {Count} unrenamed files"), filePaths.Count);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename all files requested, processing {Count} files (forceReprocess={Force})"), filePaths.Count, forceReprocess);
             
             // Start rename job
-            var jobId = await _processor.RenameFilesAsync(filePaths, cancellationToken);
+            var jobId = await _processor.RenameFilesAsync(filePaths, forceReprocess, cancellationToken);
             
             return Ok(new { jobId, streaming = stream, totalFiles = filePaths.Count });
         }
@@ -92,7 +97,7 @@ public class ProcessController : ControllerBase
     }
 
     [HttpPost("rename-selected")]
-    public async Task<ActionResult<object>> RenameSelected([FromBody] ProcessRequest request, [FromQuery] bool stream = false, CancellationToken cancellationToken = default)
+    public async Task<ActionResult<object>> RenameSelected([FromBody] ProcessRequest request, [FromQuery] bool stream = false, [FromQuery] bool forceReprocess = false, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -101,10 +106,10 @@ public class ProcessController : ControllerBase
                 return BadRequest("No files specified");
             }
             
-            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename selected files requested, processing {Count} files"), request.Files.Count);
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("Rename selected files requested, processing {Count} files (forceReprocess={Force})"), request.Files.Count, forceReprocess);
             
             // Start rename job
-            var jobId = await _processor.RenameFilesAsync(request.Files, cancellationToken);
+            var jobId = await _processor.RenameFilesAsync(request.Files, forceReprocess, cancellationToken);
             
             return Ok(new { jobId, streaming = stream, totalFiles = request.Files.Count });
         }

@@ -1091,6 +1091,96 @@
             box-shadow: 0 0 0 1px var(--accent-primary), var(--shadow-md);
         }
 
+        /* Duplicate issue: distinct orange outline so it's obvious at a glance
+           alongside the existing status icon in the actions menu. */
+        .series-issue-card--duplicate {
+            border-color: #e67e22;
+            box-shadow: 0 0 0 1px #e67e22, var(--shadow-md);
+        }
+
+        .series-issue-card--duplicate.series-issue-card--selected {
+            /* When a duplicate is also selected, keep the duplicate outline
+               but layer the accent ring on top so both are visible. */
+            box-shadow: 0 0 0 1px var(--accent-primary), 0 0 0 3px #e67e22, var(--shadow-md);
+        }
+
+        /* Placeholder card for a missing issue — gives the user a visible gap
+           in the series so they know to acquire that issue. */
+        .series-issue-card--missing {
+            border-color: var(--border-secondary);
+            border-style: dashed;
+            background: transparent;
+            opacity: 0.85;
+            box-shadow: none;
+        }
+
+        .series-issue-card--missing:hover {
+            transform: none;
+            box-shadow: none;
+        }
+
+        .series-issue-cover--missing {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+            font-size: 48px;
+            background: var(--bg-hover);
+        }
+
+        .series-issue-cover-button--missing {
+            cursor: default;
+        }
+
+        .series-issue-missing-icon {
+            opacity: 0.6;
+        }
+
+        /* Banner shown above the issues grid when integer issue numbers are
+           missing from the series. */
+        .series-detail-missing-banner {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            margin: 8px 0;
+            background: var(--status-duplicate);
+            border-left: 4px solid #e67e22;
+            border-radius: 6px;
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        .series-detail-missing-banner-icon {
+            font-size: 18px;
+            flex-shrink: 0;
+        }
+
+        .series-detail-missing-banner-text {
+            line-height: 1.4;
+        }
+
+        /* Inline duplicate badge displayed inside the issue card so the
+           duplicate status is communicated visually as well as via the
+           outline color above. */
+        .series-issue-duplicate-badge {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            z-index: 3;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 600;
+            background: #e67e22;
+            color: #fff;
+            box-shadow: var(--shadow-sm);
+            pointer-events: none;
+        }
+
         .series-issue-select {
             position: absolute;
             top: 10px;
@@ -1113,26 +1203,40 @@
             cursor: pointer;
         }
 
-        /* Per-issue actions menu, anchored to the top-left of the card so it
-           does not collide with the selection checkbox in the top-right. */
+        /* Per-issue actions menu, anchored to the bottom-right of the card so
+           the three-vertical-dots button is easy to find/tap and does not
+           collide with the selection checkbox in the top-right or the issue
+           number badge in the top-left. */
         .series-issue-actions {
             position: absolute;
-            top: 6px;
-            left: 6px;
+            bottom: 8px;
+            right: 8px;
             z-index: 3;
         }
 
         .series-issue-actions .dropdown-toggle {
             min-width: 0;
-            padding: 2px 8px;
-            font-size: 14px;
-            line-height: 1.2;
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            font-size: 18px;
+            line-height: 1;
             background: rgba(15, 23, 42, 0.82);
             color: #fff;
             border: 0;
             border-radius: 999px;
             box-shadow: var(--shadow-sm);
             cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Hide the generic "▼" caret that the global .dropdown-toggle::after
+           rule adds — the per-issue toggle uses an explicit ⋮ glyph instead
+           so the caret would only clutter the icon. */
+        .series-issue-actions .dropdown-toggle::after {
+            content: none;
         }
 
         .series-issue-actions .dropdown-toggle:hover {
@@ -1664,6 +1768,7 @@
         .file-item.status-duplicate,
         .file-item.indented.status-duplicate {
             background: var(--status-duplicate);
+            border-left: 4px solid #e67e22;
         }
         
         .file-item.status-duplicate:hover,

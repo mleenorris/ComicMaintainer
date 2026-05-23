@@ -7,7 +7,41 @@ using ComicMaintainer.WebApi.Hubs;
 namespace ComicMaintainer.WebApi.Services;
 
 /// <summary>
-/// Service for broadcasting events to connected SSE clients and SignalR hubs
+/// Service for broadcasting events to connected SSE clients
+/// (<c>GET /api/events/stream</c>) and SignalR hubs (<see cref="ProgressHub"/>).
+///
+/// <para>
+/// SSE event contract — every event is a JSON object with a <c>type</c>
+/// string and a <c>data</c> object payload:
+/// </para>
+/// <list type="bullet">
+///   <item><description><c>job_updated</c> — emitted by
+///     <see cref="BroadcastJobUpdateAsync"/> for batch-processing jobs
+///     (process / rename / normalize / metadata update / remove-metadata /
+///     bulk-delete / combine-folders). Payload includes <c>job_id</c>,
+///     <c>status</c>, and a <c>progress</c> sub-object with
+///     <c>processed</c>, <c>total</c>, <c>success</c>, <c>errors</c>,
+///     <c>percentage</c>.</description></item>
+///   <item><description><c>file_processed</c> — emitted by
+///     <see cref="BroadcastFileProcessedAsync"/> after each file in a batch
+///     job (and after one-off metadata edits, tag writes, and
+///     remove-embedded-metadata). The UI uses this to invalidate a single
+///     folder's cache and patch the visible series-detail / file row in
+///     place without rebuilding the whole library.</description></item>
+///   <item><description><c>file_list_updated</c> — emitted by
+///     <see cref="BroadcastFileListUpdateAsync"/> when files are added or
+///     removed from the file store, or after a coalesced batch of moves
+///     (e.g. combine-folders). UI debounces this to a single library
+///     refresh.</description></item>
+///   <item><description><c>watcher_status</c> — emitted by
+///     <see cref="BroadcastWatcherStatusAsync"/> when the file-system
+///     watcher starts/stops or is toggled.</description></item>
+/// </list>
+///
+/// <para>
+/// All broadcasts are best-effort and never throw to the caller. A failing
+/// SSE writer is silently disconnected and removed from the registry.
+/// </para>
 /// </summary>
 public class EventBroadcasterService : IEventBroadcaster
 {

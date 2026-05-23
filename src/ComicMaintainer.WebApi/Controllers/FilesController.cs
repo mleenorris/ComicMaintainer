@@ -2147,6 +2147,11 @@ public class FilesController : ControllerBase
             if (!success)
             {
                 await LogHistoryAsync(filePath, "Update Metadata", false, "Failed to update metadata");
+                if (_eventBroadcaster is not null)
+                {
+                    try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), false, "Failed to update metadata"); }
+                    catch (Exception bex) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata update failure"); }
+                }
                 return BadRequest("Failed to update metadata");
             }
             
@@ -2154,6 +2159,15 @@ public class FilesController : ControllerBase
             var filename = Path.GetFileName(filePath);
             await LogHistoryWithChangesAsync(filePath, "Update Metadata", true, null,
                 filename, filename, beforeMetadata, metadata);
+
+            // Broadcast a file_processed event so the UI patches the affected
+            // folder/series detail in place instead of waiting for a full
+            // file_list_updated debounce.
+            if (_eventBroadcaster is not null)
+            {
+                try { await _eventBroadcaster.BroadcastFileProcessedAsync(filename, true); }
+                catch (Exception bex) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata update"); }
+            }
             
             return Ok();
         }
@@ -2493,6 +2507,11 @@ public class FilesController : ControllerBase
                 return BadRequest("Invalid file path");
 
             var success = await _processor.UpdateMetadataAsync(filePath, metadata);
+            if (success && _eventBroadcaster is not null)
+            {
+                try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), true); }
+                catch (Exception bex) { _logger.LogDebug(bex, "Failed to broadcast file_processed for tag update"); }
+            }
             return success ? Ok() : BadRequest("Failed to update tags");
         }
         catch (Exception ex)
@@ -2542,6 +2561,15 @@ public class FilesController : ControllerBase
             var cleared = await _fileStore.ClearProcessedStatusAsync(new[] { filePath }, cancellationToken);
 
             await LogHistoryAsync(filePath, "RemoveMetadata", true);
+
+            // Broadcast a file_processed event so the UI updates the affected
+            // folder / series detail in place rather than waiting for the
+            // debounced file_list_updated.
+            if (_eventBroadcaster is not null)
+            {
+                try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), true); }
+                catch (Exception bex) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata removal"); }
+            }
 
             return Ok(new { success = true, cleared });
         }

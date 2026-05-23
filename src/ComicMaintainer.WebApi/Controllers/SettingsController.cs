@@ -24,6 +24,7 @@ public class SettingsController : ControllerBase
     private readonly ISettingsService _settingsService;
     private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly ISeriesLanguagePreferenceRetagService? _languageRetag;
+    private readonly IEventBroadcaster? _eventBroadcaster;
 
     public SettingsController(
         IOptionsMonitor<AppSettings> appSettings, 
@@ -33,7 +34,8 @@ public class SettingsController : ControllerBase
         IFileStoreService fileStore,
         ISettingsService settingsService,
         IHostApplicationLifetime applicationLifetime,
-        ISeriesLanguagePreferenceRetagService? languageRetag = null)
+        ISeriesLanguagePreferenceRetagService? languageRetag = null,
+        IEventBroadcaster? eventBroadcaster = null)
     {
         _appSettings = appSettings;
         _logger = logger;
@@ -43,6 +45,7 @@ public class SettingsController : ControllerBase
         _settingsService = settingsService;
         _applicationLifetime = applicationLifetime;
         _languageRetag = languageRetag;
+        _eventBroadcaster = eventBroadcaster;
     }
 
     // RESTful endpoint: GET /api/settings - Get all settings
@@ -407,7 +410,20 @@ public class SettingsController : ControllerBase
             _logger.LogInformation("Manual database cleanup requested");
             var removedCount = await _fileStore.CleanupStaleEntriesAsync(cancellationToken);
             _logger.LogInformation("Database cleanup completed, removed {Count} stale entries", removedCount);
-            
+
+            // Notify clients so the library refreshes in place.
+            if (removedCount > 0 && _eventBroadcaster is not null)
+            {
+                try
+                {
+                    await _eventBroadcaster.BroadcastFileListUpdateAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to broadcast file list update after manual database cleanup");
+                }
+            }
+
             return Ok(new { success = true, message = $"Database cleanup completed. Removed {removedCount} stale entries.", removedCount = removedCount });
         }
         catch (Exception ex)
@@ -451,6 +467,21 @@ public class SettingsController : ControllerBase
             await _fileStore.InitializeFromDatabaseAsync(cancellationToken);
 
             _logger.LogInformation("Database reset completed successfully");
+
+            // Notify connected clients that the file list has changed so they
+            // can refresh their views in place rather than requiring a full
+            // page reload.
+            if (_eventBroadcaster is not null)
+            {
+                try
+                {
+                    await _eventBroadcaster.BroadcastFileListUpdateAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to broadcast file list update after database reset");
+                }
+            }
 
             return Ok(new { success = true, message = "Database reset completed successfully" });
         }

@@ -1286,7 +1286,7 @@
         // Function to trigger installation
         function installApp() {
             if (!deferredPrompt) {
-                alert('App is already installed or installation is not available.');
+                showMessage('App is already installed or installation is not available.', 'info');
                 return;
             }
             
@@ -4055,7 +4055,8 @@
                 if (!response.ok) {
                     throw new Error(data.error || `HTTP error! status: ${response.status}`);
                 }
-                alert(`Combine complete: ${data.moved} moved, ${data.skipped} skipped, ${data.failed} failed.`);
+                showMessage(`Combine complete: ${data.moved} moved, ${data.skipped} skipped, ${data.failed} failed.`,
+                    data.failed > 0 ? 'warning' : 'success');
                 if (typeof loadLibraryHealth === 'function') {
                     loadLibraryHealth();
                 }
@@ -4066,7 +4067,7 @@
                 await openCombineFoldersModal();
             } catch (error) {
                 console.error('Failed to combine folders:', error);
-                alert(`Failed to combine folders: ${error.message}`);
+                showMessage(`Failed to combine folders: ${error.message}`, 'error');
             } finally {
                 combineFolderActionInFlight = false;
                 renderCombineFolderGroup();
@@ -5699,12 +5700,21 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    showMessage('Database reset completed successfully! Reloading page...', 'success');
-                    
-                    // Reload the page after a short delay to see the success message
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 2000);
+                    showMessage('Database reset completed successfully', 'success');
+                    // Clear in-memory selection state — the file list is now empty.
+                    if (typeof selectedFiles !== 'undefined' && selectedFiles && typeof selectedFiles.clear === 'function') {
+                        selectedFiles.clear();
+                    }
+                    // The server emits file_list_updated on completion, which
+                    // triggers handleFileListUpdatedEvent → in-place refresh.
+                    // Refresh counts and active library view defensively in
+                    // case the SSE connection is briefly disconnected.
+                    if (typeof loadLibraryHealth === 'function') {
+                        try { await loadLibraryHealth(); } catch (_e) { /* ignore */ }
+                    }
+                    if (typeof loadActiveLibraryView === 'function') {
+                        try { await loadActiveLibraryView(1, true); } catch (_e) { /* ignore */ }
+                    }
                 } else {
                     showMessage(result.error || 'Failed to reset database', 'error');
                 }
@@ -6909,7 +6919,11 @@
         async function refreshSeriesMetadataDirect(seriesTitle) {
             if (!seriesTitle) return;
             try {
-                const response = await fetch(apiUrl(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}`), {
+                // Always queue the refresh as a background job so the UI is never
+                // blocked on the (potentially slow) external lookup. Progress is
+                // surfaced via the same inline toast used by refresh-all /
+                // refresh-folder.
+                const response = await fetch(apiUrl(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}?queue=true`), {
                     method: 'POST',
                     headers: getAuthHeaders ? getAuthHeaders() : undefined,
                     credentials: 'same-origin'
@@ -6918,21 +6932,25 @@
                     showMessage('Failed to refresh metadata for ' + seriesTitle, 'error');
                     return;
                 }
-                const record = await response.json();
-                const status = record.lookup_status || 'success';
-                if (status === 'not_found') {
-                    showMessage(`No external metadata found for "${seriesTitle}"`, 'info');
-                } else if (status === 'error') {
-                    showMessage(`External lookup failed for "${seriesTitle}"`, 'error');
+                const data = await response.json();
+                if (data && data.jobId) {
+                    showMessage(`Queued metadata refresh for "${seriesTitle}"`, 'info');
+                    trackMetadataRefreshJob(data.jobId, seriesTitle);
                 } else {
-                    showMessage(`Metadata refreshed for "${seriesTitle}"${record.source ? ' from ' + record.source : ''}`, 'success');
+                    // Fallback: server returned the sync record (legacy path).
+                    const status = data.lookup_status || 'success';
+                    if (status === 'not_found') {
+                        showMessage(`No external metadata found for "${seriesTitle}"`, 'info');
+                    } else if (status === 'error') {
+                        showMessage(`External lookup failed for "${seriesTitle}"`, 'error');
+                    } else {
+                        showMessage(`Metadata refreshed for "${seriesTitle}"${data.source ? ' from ' + data.source : ''}`, 'success');
+                    }
+                    if (typeof loadSeriesLibrary === 'function') {
+                        loadSeriesLibrary(1, true);
+                    }
+                    loadProviderHealth();
                 }
-                // Refresh the library so any new aliases collapse folders.
-                if (typeof loadSeriesLibrary === 'function') {
-                    loadSeriesLibrary(1, true);
-                }
-                // Provider counters likely changed too.
-                loadProviderHealth();
             } catch (err) {
                 console.error('refreshSeriesMetadataDirect failed', err);
                 showMessage('Failed to refresh metadata', 'error');

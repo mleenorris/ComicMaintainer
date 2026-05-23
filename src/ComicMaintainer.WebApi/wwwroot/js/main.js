@@ -253,6 +253,13 @@
         // stays inside the detail view instead of getting kicked back to the
         // library list.
         let currentSeriesDetailTitleKeys = null;
+        // Snapshot of the open series' lightweight metadata (id, title, aliases,
+        // cover, issue_count, total_size, metadata_source). Updated whenever
+        // the series is found in the library list or refreshed via the issues
+        // endpoint. Used as a fallback when the active filter excludes the
+        // series from the library list so the user is not kicked back to the
+        // series list while drilled into a series.
+        let currentSeriesDetailSeries = null;
         const seriesIssuesCache = new Map();        // seriesId -> { issues: [], total: n }
         const metadataRefreshJobs = new Map();     // jobId -> { seriesIds, label }
         let providerHealthRefreshTimer = null;
@@ -1856,8 +1863,21 @@
         
         function filterFiles() {
             searchQuery = document.getElementById('headerSearchInput').value;
+            // If a series detail is open, keep the user inside the series and
+            // re-fetch its issues filtered by the new search query (the search
+            // box does not apply to the issue list, but we still refresh the
+            // background series list so it's accurate when the user goes back).
+            if (currentSeriesDetailId) {
+                const detailId = currentSeriesDetailId;
+                seriesIssuesCache.delete(detailId);
+                renderSeriesDetail(detailId); // re-render to show loading state
+                loadSeriesIssues(detailId, true);
+                // Refresh the underlying series library too (without leaving the
+                // detail view) so going back shows the filtered series list.
+                loadActiveLibraryView(1, true);
+                return;
+            }
             // Reload from page 1 with new search query
-            currentSeriesDetailId = null;
             currentSeriesDetailTitleKeys = null;
             loadActiveLibraryView(1);
         }
@@ -1904,9 +1924,22 @@
             if (isMobileLibraryViewport()) {
                 setMobileLibraryView('files');
             }
-            
+
+            // If a series detail is open, stay inside the series and re-fetch
+            // its issues with the new filter (the filter applies to the issue
+            // list too via the /api/files/series/{id}/issues endpoint). Also
+            // refresh the underlying series library in the background so it's
+            // up to date when the user goes back.
+            if (currentSeriesDetailId) {
+                const detailId = currentSeriesDetailId;
+                seriesIssuesCache.delete(detailId);
+                renderSeriesDetail(detailId);
+                loadSeriesIssues(detailId, true);
+                loadActiveLibraryView(1, true);
+                return;
+            }
+
             // Reload from page 1 with new filter
-            currentSeriesDetailId = null;
             currentSeriesDetailTitleKeys = null;
             loadActiveLibraryView(1);
         }
@@ -1941,9 +1974,17 @@
             
             // Close the dropdown
             document.getElementById('headerSortMenu').classList.remove('show');
-            
+
+            // If a series detail is open, keep the user inside it. Sorting
+            // does not apply to issues within a series (issues are ordered by
+            // their number), so we just refresh the underlying series library
+            // in the background and stay on the current series.
+            if (currentSeriesDetailId) {
+                loadActiveLibraryView(1, true);
+                return;
+            }
+
             // Reload from page 1 with new sort order
-            currentSeriesDetailId = null;
             currentSeriesDetailTitleKeys = null;
             loadActiveLibraryView(1);
         }
@@ -2333,7 +2374,9 @@
 
         function openSeriesDetail(seriesId) {
             currentSeriesDetailId = seriesId;
-            captureSeriesDetailIdentity(seriesLibrary.find(item => item && item.id === seriesId));
+            const found = seriesLibrary.find(item => item && item.id === seriesId);
+            captureSeriesDetailIdentity(found);
+            if (found) currentSeriesDetailSeries = found;
             renderSeriesDetail(seriesId);
             // Kick off the issues fetch right away so the detail content
             // appears as soon as it's available.
@@ -2343,6 +2386,7 @@
         function closeSeriesDetail() {
             currentSeriesDetailId = null;
             currentSeriesDetailTitleKeys = null;
+            currentSeriesDetailSeries = null;
             renderSeriesLibrary();
             updatePagination();
             updateLibraryViewLayout();
@@ -2436,6 +2480,26 @@
                         issues: data.issues || [],
                         total: data.issue_count || (data.issues ? data.issues.length : 0)
                     });
+                    // Refresh the cached series metadata snapshot from the
+                    // response so the detail view can render correctly even
+                    // when the active filter excludes this series from the
+                    // library list.
+                    if (currentSeriesDetailId === seriesId) {
+                        currentSeriesDetailSeries = Object.assign(
+                            {},
+                            currentSeriesDetailSeries || {},
+                            {
+                                id: data.id || seriesId,
+                                title: data.title,
+                                canonical_title: data.canonical_title,
+                                aliases: data.aliases,
+                                metadata_source: data.metadata_source,
+                                cover_file_path: data.cover_file_path,
+                                issue_count: data.issue_count,
+                                total_size: data.total_size
+                            }
+                        );
+                    }
                 }
             } catch (err) {
                 console.error('loadSeriesIssues failed', err);
@@ -2445,6 +2509,111 @@
             if (currentSeriesDetailId === seriesId) {
                 renderSeriesDetail(seriesId);
             }
+        }
+
+        // Parse a free-form issue identifier into a positive integer when it
+        // represents an integer issue number (e.g. "1", "001", "12"). Returns
+        // null for non-integer values like "1.5", "Annual", or empty strings.
+        function parseIntegerIssueNumber(value) {
+            if (value === null || value === undefined) return null;
+            const text = String(value).trim();
+            if (!text) return null;
+            // Allow optional leading zeros, but require the whole token to be
+            // a non-negative integer to avoid mistaking "1.5" or "1a" for #1.
+            if (!/^\d+$/.test(text)) return null;
+            const n = parseInt(text, 10);
+            if (!Number.isFinite(n) || n < 0) return null;
+            return n;
+        }
+
+        // Given the issues array returned by the API, identify integer issue
+        // numbers that are missing between 1 and the highest known integer
+        // issue number. Returns a sorted array of missing integers.
+        function computeMissingIssueNumbers(issues) {
+            if (!Array.isArray(issues) || !issues.length) return [];
+            const present = new Set();
+            let maxIssue = 0;
+            for (const issue of issues) {
+                const n = parseIntegerIssueNumber(issue && issue.issue);
+                if (n === null) continue;
+                present.add(n);
+                if (n > maxIssue) maxIssue = n;
+            }
+            if (maxIssue <= 0) return [];
+            const missing = [];
+            for (let n = 1; n <= maxIssue; n++) {
+                if (!present.has(n)) missing.push(n);
+            }
+            return missing;
+        }
+
+        // Build the grid items array for the series-issues-grid, interleaving
+        // missing-issue placeholders in their proper position (sorted by
+        // integer issue number) so the user can visually see which issues are
+        // missing alongside the issues they own. Issues without an integer
+        // issue number are appended at the end in their original order.
+        function buildSeriesIssuesGridItems(issues) {
+            const items = [];
+            const integerIssues = [];
+            const nonIntegerIssues = [];
+            for (const issue of issues || []) {
+                const n = parseIntegerIssueNumber(issue && issue.issue);
+                if (n === null) {
+                    nonIntegerIssues.push(issue);
+                } else {
+                    integerIssues.push({ number: n, issue });
+                }
+            }
+            integerIssues.sort((a, b) => a.number - b.number);
+            const missing = computeMissingIssueNumbers(issues);
+            const missingSet = new Set(missing);
+            const presentSet = new Set(integerIssues.map(i => i.number));
+            const maxIssue = integerIssues.length ? integerIssues[integerIssues.length - 1].number : 0;
+            for (let n = 1; n <= maxIssue; n++) {
+                if (presentSet.has(n)) {
+                    const match = integerIssues.find(i => i.number === n);
+                    if (match) items.push({ kind: 'issue', issue: match.issue });
+                } else if (missingSet.has(n)) {
+                    items.push({ kind: 'missing', number: n });
+                }
+            }
+            // Append issues whose number is not a plain integer (e.g. "1.5",
+            // "Annual") after the numbered range so they remain visible.
+            for (const issue of nonIntegerIssues) {
+                items.push({ kind: 'issue', issue });
+            }
+            return items;
+        }
+
+        // Render a small banner above the issues grid summarizing any missing
+        // integer issue numbers between #1 and the highest known issue number.
+        function renderMissingIssuesBanner(issues) {
+            const missing = computeMissingIssueNumbers(issues);
+            if (!missing.length) return '';
+            // Compress runs of consecutive numbers into ranges (e.g. 2,3,4 -> "2-4").
+            const ranges = [];
+            let start = missing[0];
+            let prev = missing[0];
+            for (let i = 1; i < missing.length; i++) {
+                if (missing[i] === prev + 1) {
+                    prev = missing[i];
+                    continue;
+                }
+                ranges.push(start === prev ? `#${start}` : `#${start}-${prev}`);
+                start = missing[i];
+                prev = missing[i];
+            }
+            ranges.push(start === prev ? `#${start}` : `#${start}-${prev}`);
+            const label = ranges.join(', ');
+            const count = missing.length;
+            return `
+                <div class="series-detail-missing-banner" role="status">
+                    <span class="series-detail-missing-banner-icon" aria-hidden="true">⚠️</span>
+                    <span class="series-detail-missing-banner-text">
+                        Missing ${count} issue${count === 1 ? '' : 's'}: ${escapeHtml(label)}
+                    </span>
+                </div>
+            `;
         }
 
         function renderSeriesDetail(seriesId) {
@@ -2464,10 +2633,21 @@
                     }
                 }
             }
+            // Fall back to the cached snapshot of the open series when the
+            // current filter / search excludes it from the library list. This
+            // keeps the user inside the series detail when they change filter,
+            // instead of being kicked back to the series grid.
+            if (!series && seriesId === currentSeriesDetailId && currentSeriesDetailSeries
+                && currentSeriesDetailSeries.id === seriesId) {
+                series = currentSeriesDetailSeries;
+            }
             if (!series) {
                 closeSeriesDetail();
                 return;
             }
+            // Keep the cached snapshot fresh whenever we successfully resolve
+            // the series object.
+            currentSeriesDetailSeries = series;
             // Keep title-based identity fresh in case aliases changed.
             captureSeriesDetailIdentity(series);
 
@@ -2534,6 +2714,7 @@
                             </label>
                             <span class="series-detail-selection-meta">${issues.length} issue${issues.length === 1 ? '' : 's'} in this series</span>
                         </div>
+                        ${renderMissingIssuesBanner(issues)}
                     ` : ''}
                     ${issuesLoading ? `
                         <div class="loading">
@@ -2544,16 +2725,44 @@
                         <div class="empty-state"><p>Failed to load issues. <button type="button" class="btn btn-small" onclick="loadSeriesIssues('${escapeJs(seriesId)}', true)">Retry</button></p></div>
                     ` : `
                         <div class="series-issues-grid">
-                            ${issues.map(issue => `
-                                <div class="series-issue-card ${selectedFiles.has(issue.file_path) ? 'series-issue-card--selected' : ''}" data-file-path="${escapeHtml(issue.file_path)}">
+                            ${buildSeriesIssuesGridItems(issues).map(item => {
+                                if (item.kind === 'missing') {
+                                    return `
+                                <div class="series-issue-card series-issue-card--missing" aria-label="Missing issue #${item.number}" title="Missing issue #${item.number}">
+                                    <div class="series-issue-cover-button series-issue-cover-button--missing">
+                                        <div class="series-issue-cover series-issue-cover--missing">
+                                            <span class="series-issue-missing-icon">❔</span>
+                                        </div>
+                                        <span class="series-issue-badge">#${item.number}</span>
+                                    </div>
+                                    <div class="series-issue-body">
+                                        <h3 class="series-issue-title">Missing</h3>
+                                        <p class="series-issue-subtitle">Issue #${item.number} is not in your collection</p>
+                                    </div>
+                                </div>`;
+                                }
+                                const issue = item.issue;
+                                return `
+                                <div class="series-issue-card ${selectedFiles.has(issue.file_path) ? 'series-issue-card--selected' : ''} ${issue.duplicate ? 'series-issue-card--duplicate' : ''}" data-file-path="${escapeHtml(issue.file_path)}">
                                     <label class="series-issue-select" aria-label="Select ${escapeHtml(issue.title || issue.file_name)}" onclick="event.stopPropagation()">
                                         <input type="checkbox"
                                                ${selectedFiles.has(issue.file_path) ? 'checked' : ''}
                                                onchange="toggleFileSelection('${escapeJs(issue.file_path)}', this.checked)">
                                     </label>
+                                    ${issue.duplicate ? `<span class="series-issue-duplicate-badge" title="Duplicate">🔁 Duplicate</span>` : ''}
+                                    <button type="button" class="series-issue-cover-button" aria-label="Read ${escapeHtml(issue.title || issue.file_name)}" onclick="readComic('${escapeJs(issue.file_path)}')">
+                                        <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy">
+                                        <div class="series-issue-cover-overlay"></div>
+                                        ${issue.issue ? `<span class="series-issue-badge">#${escapeHtml(issue.issue)}</span>` : ''}
+                                    </button>
+                                    <div class="series-issue-body">
+                                        <h3 class="series-issue-title" title="${escapeHtml(issue.title || issue.file_name)}">${escapeHtml(issue.title || issue.file_name)}</h3>
+                                        <p class="series-issue-subtitle">${issue.year ? `${issue.year}` : ''}${issue.volume ? `${issue.year ? ' · ' : ''}Vol. ${escapeHtml(issue.volume)}` : ''}</p>
+                                        <div class="series-detail-meta">${formatFileSize(issue.size)}</div>
+                                    </div>
                                     <div class="series-issue-actions file-actions-dropdown" onclick="event.stopPropagation()">
-                                        <button type="button" class="dropdown-toggle" aria-label="Issue actions" onclick="toggleDropdown(event, '${escapeJs(issue.file_path)}')">
-                                            ⋯
+                                        <button type="button" class="dropdown-toggle series-issue-actions-toggle" aria-label="Issue actions" onclick="toggleDropdown(event, '${escapeJs(issue.file_path)}')">
+                                            <span aria-hidden="true">⋮</span>
                                         </button>
                                         <div class="dropdown-menu" id="${getDropdownId(issue.file_path)}">
                                             <button class="dropdown-item" onclick="showFileInfo('${escapeJs(issue.file_path)}', '${escapeJs(issue.file_name)}'); closeAllDropdowns();">
@@ -2599,18 +2808,8 @@
                                             </button>
                                         </div>
                                     </div>
-                                    <button type="button" class="series-issue-cover-button" aria-label="Read ${escapeHtml(issue.title || issue.file_name)}" onclick="readComic('${escapeJs(issue.file_path)}')">
-                                        <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy">
-                                        <div class="series-issue-cover-overlay"></div>
-                                        ${issue.issue ? `<span class="series-issue-badge">#${escapeHtml(issue.issue)}</span>` : ''}
-                                    </button>
-                                    <div class="series-issue-body">
-                                        <h3 class="series-issue-title" title="${escapeHtml(issue.title || issue.file_name)}">${escapeHtml(issue.title || issue.file_name)}</h3>
-                                        <p class="series-issue-subtitle">${issue.year ? `${issue.year}` : ''}${issue.volume ? `${issue.year ? ' · ' : ''}Vol. ${escapeHtml(issue.volume)}` : ''}</p>
-                                        <div class="series-detail-meta">${formatFileSize(issue.size)}</div>
-                                    </div>
-                                </div>
-                            `).join('')}
+                                </div>`;
+                            }).join('')}
                         </div>
                     `}
                 </div>

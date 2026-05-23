@@ -538,7 +538,17 @@
             if (libraryViewMode !== 'series' && data && data.filename) {
                 invalidateFolderForFile(data.filename);
             } else if (libraryViewMode === 'series') {
-                loadActiveLibraryView(1, false);
+                // When the user has a series detail view open, just refresh
+                // that series's issue list in-place so a rename/normalize
+                // updates the visible file names without rebuilding the
+                // series library (which would lose scroll position and
+                // could close the detail view if the series fell outside
+                // the freshly-loaded first page).
+                if (currentSeriesDetailId) {
+                    loadSeriesIssues(currentSeriesDetailId, true);
+                } else {
+                    loadActiveLibraryView(1, false);
+                }
             }
             scheduleLibraryHealthRefresh();
         }
@@ -555,7 +565,15 @@
             }
             fileListRefreshTimer = setTimeout(() => {
                 fileListRefreshTimer = null;
-                loadActiveLibraryView(1, false);
+                // When a series detail view is open, refresh only that
+                // series's issues so renames/moves update the visible file
+                // list without rebuilding the series library and kicking
+                // the user back to the library screen.
+                if (libraryViewMode === 'series' && currentSeriesDetailId) {
+                    loadSeriesIssues(currentSeriesDetailId, true);
+                } else {
+                    loadActiveLibraryView(1, false);
+                }
             }, FILE_LIST_REFRESH_DEBOUNCE_DELAY);
 
             scheduleLibraryHealthRefresh();
@@ -596,9 +614,19 @@
                         completeProgress();
                         hasActiveJob = false;
                         currentJobTitle = null;
-                        // Clear selected files and refresh the file list
+                        // Clear selected files and refresh the file list. If
+                        // the user is viewing a series detail, refresh only
+                        // that series's issues in-place so a rename/normalize
+                        // updates the visible file names without rebuilding
+                        // the series library (which would lose scroll position
+                        // and could close the detail view).
                         selectedFiles.clear();
-                        await loadActiveLibraryView(1, true);
+                        if (libraryViewMode === 'series' && currentSeriesDetailId) {
+                            await loadSeriesIssues(currentSeriesDetailId, true);
+                            scheduleLibraryHealthRefresh();
+                        } else {
+                            await loadActiveLibraryView(1, true);
+                        }
                         // Close modal after refresh completes
                         setTimeout(closeProgressModal, 1000);
                     } else if (status === 'failed') {

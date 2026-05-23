@@ -684,9 +684,16 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                     // This avoids race condition from check-then-act pattern
                     File.Move(filePath, newFilePath);
                     
-                    // Update file store with new path
-                    await _fileStore.RemoveFileAsync(filePath, cancellationToken);
-                    await _fileStore.AddFileAsync(newFilePath, cancellationToken);
+                    // Atomically remap the file-store row from the old path to the new path,
+                    // preserving all processing state (IsRenamed/IsNormalized/SeriesMetadataVersion/
+                    // IsDuplicate/IsRead/...) and avoiding the race with FileWatcherService's
+                    // OnFileRenamed handler, which also calls UpdateFilePathAsync. Using
+                    // RemoveFileAsync+AddFileAsync here previously left the old path tracked
+                    // when the watcher's update interleaved with the processor's removal —
+                    // the file then only disappeared from the file list on the next full
+                    // library scan (reconcile-deletions pass). This matches the pattern
+                    // already used by ProcessFileCoreAsync.
+                    await _fileStore.UpdateFilePathAsync(filePath, newFilePath, cancellationToken);
                     await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
                     
                     _logger.LogInformation("File renamed successfully: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));

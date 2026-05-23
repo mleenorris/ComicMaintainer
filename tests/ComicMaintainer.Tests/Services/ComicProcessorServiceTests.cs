@@ -467,6 +467,107 @@ public class ComicProcessorServiceTests : IDisposable
             Times.AtLeastOnce);
     }
 
+    [Fact]
+    public async Task DeleteFilesAsync_DeletesEachFileAndBroadcastsEvents()
+    {
+        // Arrange
+        var mockEventBroadcaster = new Mock<IEventBroadcaster>();
+        var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            mockEventBroadcaster.Object);
+
+        var fileA = Path.Combine(_testDirectory, "delete-a.cbz");
+        var fileB = Path.Combine(_testDirectory, "delete-b.cbz");
+        File.WriteAllText(fileA, "x");
+        File.WriteAllText(fileB, "x");
+
+        _mockFileStore
+            .Setup(f => f.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        var jobId = await service.DeleteFilesAsync(new[] { fileA, fileB });
+        var job = await WaitForJobCompletionAsync(service, jobId);
+
+        // Assert
+        Assert.NotNull(job);
+        Assert.Equal(JobStatus.Completed, job!.Status);
+        Assert.Equal(2, job.TotalFiles);
+        Assert.Equal(2, job.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+        Assert.False(File.Exists(fileA));
+        Assert.False(File.Exists(fileB));
+
+        _mockFileStore.Verify(f => f.RemoveFileAsync(fileA, It.IsAny<CancellationToken>()), Times.Once);
+        _mockFileStore.Verify(f => f.RemoveFileAsync(fileB, It.IsAny<CancellationToken>()), Times.Once);
+
+        // job_updated must be broadcast at least for Running and Completed.
+        mockEventBroadcaster.Verify(
+            b => b.BroadcastJobUpdateAsync(
+                jobId, It.IsAny<string>(),
+                It.IsAny<int>(), It.IsAny<int>(),
+                It.IsAny<int>(), It.IsAny<int>()),
+            Times.AtLeast(2));
+
+        // file_processed should fire once per deleted file.
+        mockEventBroadcaster.Verify(
+            b => b.BroadcastFileProcessedAsync(
+                It.IsAny<string>(),
+                true,
+                It.IsAny<string?>()),
+            Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task RunCustomBatchJobAsync_InvokesPostLoopHookBeforeCompletion()
+    {
+        // Arrange
+        var mockEventBroadcaster = new Mock<IEventBroadcaster>();
+        var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            mockEventBroadcaster.Object);
+
+        var seen = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var postLoopRan = 0;
+        var loopCompletedBeforePostHook = false;
+
+        // Act
+        var jobId = await service.RunCustomBatchJobAsync(
+            operationName: "TestCustomBatch",
+            trackedItems: new[] { "a", "b", "c" },
+            itemOperation: (item, _) =>
+            {
+                seen.Add(item);
+                return Task.FromResult(true);
+            },
+            failureMessage: "test failure",
+            postLoopAsync: _ =>
+            {
+                // The per-item loop must have fully drained before the
+                // post-loop hook runs.
+                loopCompletedBeforePostHook = seen.Count == 3;
+                Interlocked.Increment(ref postLoopRan);
+                return Task.CompletedTask;
+            });
+
+        var job = await WaitForJobCompletionAsync(service, jobId);
+
+        // Assert
+        Assert.NotNull(job);
+        Assert.Equal(JobStatus.Completed, job!.Status);
+        Assert.Equal(3, job.ProcessedFiles);
+        Assert.Equal(3, seen.Count);
+        Assert.Equal(1, postLoopRan);
+        Assert.True(loopCompletedBeforePostHook,
+            "post-loop hook must run after the per-item loop has completed");
+    }
+
     private const int JobPollingIntervalMs = 50;
 
     private async Task<ProcessingJob?> WaitForJobCompletionAsync(Guid jobId, int timeoutMs = 5000)

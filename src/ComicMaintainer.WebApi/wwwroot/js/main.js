@@ -2637,8 +2637,18 @@
             // current filter / search excludes it from the library list. This
             // keeps the user inside the series detail when they change filter,
             // instead of being kicked back to the series grid.
-            if (!series && seriesId === currentSeriesDetailId && currentSeriesDetailSeries
-                && currentSeriesDetailSeries.id === seriesId) {
+            //
+            // We intentionally do NOT require `currentSeriesDetailSeries.id`
+            // to equal `seriesId` here. The backend series id is the
+            // union-find representative of the files visible under the
+            // current filter, so switching filters (e.g. duplicates → all)
+            // can cause the representative key — and therefore the series
+            // id — to drift even though it still refers to the same series
+            // the user is viewing. The snapshot is set when the series is
+            // opened and refreshed by every successful `loadSeriesIssues`
+            // response, so it always represents the open series; trust it
+            // as a fallback regardless of id drift.
+            if (!series && seriesId === currentSeriesDetailId && currentSeriesDetailSeries) {
                 series = currentSeriesDetailSeries;
             }
             if (!series) {

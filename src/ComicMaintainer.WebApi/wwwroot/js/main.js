@@ -4055,15 +4055,34 @@
                 if (!response.ok) {
                     throw new Error(data.error || `HTTP error! status: ${response.status}`);
                 }
-                showMessage(`Combine complete: ${data.moved} moved, ${data.skipped} skipped, ${data.failed} failed.`,
-                    data.failed > 0 ? 'warning' : 'success');
-                if (typeof loadLibraryHealth === 'function') {
-                    loadLibraryHealth();
+
+                // The server now enqueues the moves as a background job and
+                // returns 202 immediately with { jobId, totalItems, ... }.
+                // Track via the standard SSE-driven progress modal so the user
+                // sees per-move progress, then refresh the modal once the job
+                // finishes.
+                const jobId = data.jobId || data.job_id;
+                const totalItems = data.totalItems || data.total_items || 0;
+                const skipped = data.skipped || 0;
+
+                if (!jobId || totalItems === 0) {
+                    // Nothing to move (everything was skipped). Just refresh.
+                    showMessage(`Combine complete: 0 moved, ${skipped} skipped, 0 failed.`, 'info');
+                    if (typeof loadLibraryHealth === 'function') loadLibraryHealth();
+                    if (typeof refreshFiles === 'function') refreshFiles();
+                    await openCombineFoldersModal();
+                    return;
                 }
-                if (typeof refreshFiles === 'function') {
-                    refreshFiles();
-                }
-                // Reload groups; the just-combined group should disappear.
+
+                showMessage(`Combining ${totalItems} file(s) in background${skipped > 0 ? ` (${skipped} skipped)` : ''}`, 'info');
+                showProgressModal(`Combining ${totalItems} file(s)...`);
+                await trackJobStatus(jobId, `Combining ${totalItems} file(s)...`);
+
+                // The progress-modal completion handler already refreshes the
+                // library view; refresh the combine-folders modal once the job
+                // settles so the just-combined group disappears.
+                if (typeof loadLibraryHealth === 'function') loadLibraryHealth();
+                if (typeof refreshFiles === 'function') refreshFiles();
                 await openCombineFoldersModal();
             } catch (error) {
                 console.error('Failed to combine folders:', error);
@@ -6746,60 +6765,59 @@
         // Function to delete selected files
         async function deleteSelectedFiles() {
             const selectedFilesArray = Array.from(selectedFiles);
-            
+
             if (selectedFilesArray.length === 0) {
                 showMessage('No files selected', 'error');
                 return;
             }
-            
+
             // Confirm deletion
             if (!confirm(`Are you sure you want to delete ${selectedFilesArray.length} file(s)? This action cannot be undone.`)) {
                 return;
             }
-            
+
             showProgressModal(`Deleting ${selectedFilesArray.length} file(s)...`);
-            
-            let successCount = 0;
-            let failCount = 0;
-            
-            // Delete files one by one
-            for (let i = 0; i < selectedFilesArray.length; i++) {
-                const filepath = selectedFilesArray[i];
-                updateProgress(i + 1, selectedFilesArray.length, successCount, failCount);
-                
-                try {
-                    // Use RESTful endpoint: DELETE /api/files/{encodedFilePath}
-                    const encodedPath = encodeFilePathForUrl(filepath);
-                    const response = await fetch(apiUrl(`/api/files/${encodedPath}`), {
-                        method: 'DELETE',
-                        headers: getAuthHeaders()
-                    });
-                    
-                    if (response.ok) {
-                        successCount++;
-                        addProgressDetail(filepath, true);
-                    } else {
-                        const errorText = await response.text();
-                        failCount++;
-                        addProgressDetail(filepath, false, errorText || 'Unknown error');
-                    }
-                } catch (error) {
-                    failCount++;
-                    addProgressDetail(filepath, false, error.message);
+
+            try {
+                console.log(`[BULK DELETE] Starting delete-selected job for ${selectedFilesArray.length} file(s)...`);
+                const response = await fetch(apiUrl('/api/jobs/delete-selected'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ Files: selectedFilesArray })
+                });
+
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
                 }
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || `Failed to start delete job (HTTP ${response.status})`);
+                }
+
+                const data = await response.json();
+                const jobId = data.jobId || data.job_id;
+                const totalItems = data.totalItems || data.total_items || selectedFilesArray.length;
+
+                console.log(`[BULK DELETE] Created job ${jobId} for ${totalItems} file(s)`);
+                showMessage(`Deleting ${totalItems} file(s) in background`, 'info');
+
+                // Clear selected files now; the server is authoritative from this
+                // point on and SSE events (job_updated / file_processed /
+                // file_list_updated) will refresh the library in place.
+                selectedFiles.clear();
+
+                // Track via the standard SSE-driven progress modal.
+                await trackJobStatus(jobId, `Deleting ${totalItems} file(s)...`);
+            } catch (error) {
+                console.error('[BULK DELETE] Error starting delete-selected job:', error);
+                showMessage('Failed to start delete: ' + error.message, 'error');
+                closeProgressModal();
             }
-            
-            completeProgress();
-            
-            if (failCount === 0) {
-                showMessage(`Deleted ${successCount} file(s) successfully!`, 'success');
-            } else {
-                showMessage(`Deleted ${successCount} file(s), ${failCount} failed`, 'warning');
-            }
-            
-            // Clear selected files and refresh file list
-            selectedFiles.clear();
-            await loadActiveLibraryView(1, true);
         }
         
         // Watcher status management - no polling, using SSE events only

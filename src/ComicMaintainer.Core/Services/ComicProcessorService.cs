@@ -410,6 +410,55 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             cancellationToken);
     }
 
+    public Task<Guid> DeleteFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    {
+        return QueueBatchJobAsync(
+            filePaths,
+            "DeleteFilesAsync",
+            "deleting",
+            async (filePath, token) =>
+            {
+                try
+                {
+                    if (File.Exists(filePath))
+                    {
+                        // Remove from file store first (unlikely to fail), then
+                        // delete the physical file. This order prevents orphaned
+                        // file-store entries if the disk delete fails.
+                        await _fileStore.RemoveFileAsync(filePath, token);
+                        File.Delete(filePath);
+                        await LogHistoryAsync(filePath, "Delete", true, null, token);
+                        return true;
+                    }
+
+                    // File already missing on disk — still scrub the store entry
+                    // so the library list reflects reality.
+                    try
+                    {
+                        await _fileStore.RemoveFileAsync(filePath, token);
+                    }
+                    catch (Exception removeEx)
+                    {
+                        _logger.LogDebug(removeEx,
+                            "DeleteFilesAsync: file-store cleanup failed for missing file {FilePath}",
+                            LoggingHelper.SanitizePathForLog(filePath));
+                    }
+                    await LogHistoryAsync(filePath, "Delete", false, "File not found on disk", token);
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "DeleteFilesAsync: error deleting file {FilePath}",
+                        LoggingHelper.SanitizePathForLog(filePath));
+                    await LogHistoryAsync(filePath, "Delete", false, ex.Message, token);
+                    return false;
+                }
+            },
+            "Delete failed",
+            cancellationToken);
+    }
+
     public Task<Guid> NormalizeAndRenameFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
     {
         // For each file, normalize first (so ComicInfo.xml has the series name derived
@@ -434,13 +483,32 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             cancellationToken);
     }
 
+    public Task<Guid> RunCustomBatchJobAsync(
+        string operationName,
+        IEnumerable<string> trackedItems,
+        Func<string, CancellationToken, Task<bool>> itemOperation,
+        string failureMessage,
+        Func<CancellationToken, Task>? postLoopAsync = null,
+        CancellationToken cancellationToken = default)
+    {
+        return QueueBatchJobAsync(
+            trackedItems,
+            operationName,
+            operationName.ToLowerInvariant(),
+            itemOperation,
+            failureMessage,
+            cancellationToken,
+            postLoopAsync);
+    }
+
     private Task<Guid> QueueBatchJobAsync(
         IEnumerable<string> filePaths,
         string operationName,
         string actionDescription,
         Func<string, CancellationToken, Task<bool>> fileOperation,
         string failureMessage,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task>? postLoopAsync = null)
     {
         var jobId = Guid.NewGuid();
         var rawList = filePaths?.ToList() ?? new List<string>();
@@ -553,6 +621,12 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                                 success ? null : failureMessage);
                         }
                     });
+
+                if (postLoopAsync is not null)
+                {
+                    _logger.LogDebug("{OperationName}: Job {JobId} running post-loop hook", operationName, jobId);
+                    await postLoopAsync(jobCts.Token);
+                }
 
                 lock (jobSyncLock)
                 {

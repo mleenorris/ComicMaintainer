@@ -444,6 +444,36 @@ public class JobsController : ControllerBase
         }
     }
 
+    [HttpPost("delete-selected")]
+    public async Task<ActionResult<object>> DeleteSelected([FromBody] ProcessSelectedRequest request)
+    {
+        try
+        {
+            if (request?.Files == null || request.Files.Count == 0)
+            {
+                return BadRequest(new { error = "No files specified" });
+            }
+
+            _logger.LogInformation(LoggingHelper.WithWebsitePrefix("DeleteSelected: starting delete-selected job for {Count} file(s)"), request.Files.Count);
+
+            var jobId = await _processor.DeleteFilesAsync(request.Files);
+            // Return both snake_case (legacy) and camelCase shapes so existing
+            // and future callers can use a single response contract.
+            return Ok(new
+            {
+                job_id = jobId.ToString(),
+                jobId = jobId.ToString(),
+                total_items = request.Files.Count,
+                totalItems = request.Files.Count
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("DeleteSelected: error starting delete-selected job"));
+            return StatusCode(500, new { error = "Error starting job" });
+        }
+    }
+
     // RESTful endpoint: GET /api/jobs - List all jobs
     [HttpGet]
     public ActionResult<object> ListJobs()

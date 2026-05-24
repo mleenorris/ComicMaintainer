@@ -71,6 +71,29 @@ public interface ISeriesNameResolver
         ComicMetadata? metadata,
         bool mutateCache = true,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resolve the expected <c>&lt;Series&gt;</c> value for a single cache
+    /// record, applying the same per-series / global preferred-language
+    /// rules used by <see cref="ResolveAsync"/>. Used by record-centric
+    /// surfaces (library display title, language-audit job) so they share
+    /// the resolver instead of calling
+    /// <see cref="Services.SeriesDisplayTitleResolver"/> directly.
+    ///
+    /// <para>
+    /// The returned string is the same value the normalize pipeline would
+    /// write into ComicInfo.xml's <c>&lt;Series&gt;</c> tag for any file
+    /// reaching this record — that parity is the whole point of the
+    /// method and is enforced by tests.
+    /// </para>
+    /// </summary>
+    /// <param name="record">The cache record to resolve.</param>
+    /// <returns>
+    /// The non-empty resolved series name, or
+    /// <see cref="SeriesMetadataCacheRecord.CanonicalTitle"/> as a final
+    /// fallback. Never null.
+    /// </returns>
+    string ResolveForRecord(SeriesMetadataCacheRecord record);
 }
 
 /// <summary>

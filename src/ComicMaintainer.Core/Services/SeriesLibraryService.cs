@@ -28,19 +28,22 @@ public class SeriesLibraryService : ISeriesLibraryService
     private readonly ISeriesMetadataCacheService _metadataCache;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesLibraryService> _logger;
+    private readonly ISeriesNameResolver? _seriesNameResolver;
 
     public SeriesLibraryService(
         IFileStoreService fileStore,
         IComicProcessorService processor,
         ISeriesMetadataCacheService metadataCache,
         IOptionsMonitor<AppSettings> settings,
-        ILogger<SeriesLibraryService> logger)
+        ILogger<SeriesLibraryService> logger,
+        ISeriesNameResolver? seriesNameResolver = null)
     {
         _fileStore = fileStore;
         _processor = processor;
         _metadataCache = metadataCache;
         _settings = settings;
         _logger = logger;
+        _seriesNameResolver = seriesNameResolver;
     }
 
     public async Task<SeriesLibraryResult> GetSeriesAsync(
@@ -626,10 +629,15 @@ public class SeriesLibraryService : ISeriesLibraryService
             // per-series preferred-language override (and the global default)
             // by picking the first localized title in that language. The
             // CanonicalTitle remains the unchanged "source of truth" used by
-            // tagging / file rename flows.
+            // tagging / file rename flows. We route through ISeriesNameResolver
+            // (when registered) so this surface stays in lockstep with the
+            // <Series> value that ComicProcessorService writes to ComicInfo.xml
+            // for files reaching the same record — the same rule decides both.
             var displayTitle = record is null
                 ? canonicalTitle
-                : SeriesDisplayTitleResolver.Resolve(record, _settings.CurrentValue.DefaultPreferredLanguage);
+                : (_seriesNameResolver is not null
+                    ? _seriesNameResolver.ResolveForRecord(record)
+                    : SeriesDisplayTitleResolver.Resolve(record, _settings.CurrentValue.DefaultPreferredLanguage));
             if (string.IsNullOrWhiteSpace(displayTitle))
             {
                 displayTitle = canonicalTitle;

@@ -252,6 +252,14 @@ public class SeriesNameResolver : ISeriesNameResolver
         return UnknownSeries;
     }
 
+    /// <inheritdoc />
+    public string ResolveForRecord(SeriesMetadataCacheRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        var globalPreferred = _settings.CurrentValue.DefaultPreferredLanguage;
+        return ResolveDisplayTitle(record, globalPreferred);
+    }
+
     private async Task<SeriesMetadataCacheRecord?> LookupUserCanonicalRecordAsync(string seriesName, CancellationToken cancellationToken)
     {
         if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;

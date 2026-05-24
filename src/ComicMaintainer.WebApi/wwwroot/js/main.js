@@ -4156,7 +4156,13 @@
         
         async function saveTags() {
             if (!currentEditFile) return;
-            
+
+            // Capture the target file path before calling closeModal(), which
+            // resets currentEditFile to null. Without this snapshot, the
+            // request body below would serialize Files:[null] and the server
+            // would silently fail to update any file's metadata.
+            const targetFile = currentEditFile;
+
             const form = document.getElementById('tagForm');
             const formData = new FormData(form);
             const metadata = {};
@@ -4191,7 +4197,7 @@
                         'Content-Type': 'application/json',
                         ...getAuthHeaders()
                     },
-                    body: JSON.stringify({ Files: [currentEditFile], Metadata: metadata })
+                    body: JSON.stringify({ Files: [targetFile], Metadata: metadata })
                 });
                 
                 if (handleAuthError(response)) {
@@ -4210,7 +4216,7 @@
                     throw new Error('No job ID returned');
                 }
                 
-                console.log(`[SINGLE FILE] Created job ${jobId} for file: ${currentEditFile}`);
+                console.log(`[SINGLE FILE] Created job ${jobId} for file: ${targetFile}`);
                 showMessage(`Started updating metadata for file in background`, 'info');
                 
                 // Track job status

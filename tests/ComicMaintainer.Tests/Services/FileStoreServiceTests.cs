@@ -891,38 +891,51 @@ public class FileStoreServiceTests
     }
 
     [Fact]
-    public async Task ClearProcessedStatusAsync_ResetsRenamedNormalizedAndProcessedFlags()
+    public async Task ClearProcessedStatusAsync_ResetsRenamedNormalizedProcessedAndDuplicateFlags()
     {
-        // Arrange: two files fully processed, one untouched.
+        // Arrange: two files fully processed (one also flagged as duplicate),
+        // a third file flagged only as a duplicate, and one untouched.
         var file1 = Path.Combine(_testDirectory, "clear1.cbz");
         var file2 = Path.Combine(_testDirectory, "clear2.cbz");
+        var dupOnly = Path.Combine(_testDirectory, "dup-only.cbz");
         var untouched = Path.Combine(_testDirectory, "untouched.cbz");
         File.WriteAllText(file1, "x");
         File.WriteAllText(file2, "x");
+        File.WriteAllText(dupOnly, "x");
         File.WriteAllText(untouched, "x");
         await _service.AddFileAsync(file1);
         await _service.AddFileAsync(file2);
+        await _service.AddFileAsync(dupOnly);
         await _service.AddFileAsync(untouched);
         await _service.MarkFileRenamedAsync(file1, true);
         await _service.MarkFileNormalizedAsync(file1, true);
+        await _service.MarkFileDuplicateAsync(file1, true);
         await _service.MarkFileRenamedAsync(file2, true);
         await _service.MarkFileNormalizedAsync(file2, true);
+        await _service.MarkFileDuplicateAsync(dupOnly, true);
 
         // Sanity check
         Assert.True(await _service.IsFileProcessedAsync(file1));
         Assert.True(await _service.IsFileProcessedAsync(file2));
+        Assert.True((await _service.GetAllFilesAsync()).First(f => f.FilePath == file1).IsDuplicate);
+        Assert.True((await _service.GetAllFilesAsync()).First(f => f.FilePath == dupOnly).IsDuplicate);
 
         // Act
-        var cleared = await _service.ClearProcessedStatusAsync(new[] { file1, file2, untouched });
+        var cleared = await _service.ClearProcessedStatusAsync(new[] { file1, file2, dupOnly, untouched });
 
-        // Assert: both processed files cleared; untouched (already false) not counted.
-        Assert.Equal(2, cleared);
+        // Assert: all three flagged files cleared; untouched (already false) not counted.
+        Assert.Equal(3, cleared);
         Assert.False(await _service.IsFileRenamedAsync(file1));
         Assert.False(await _service.IsFileNormalizedAsync(file1));
         Assert.False(await _service.IsFileProcessedAsync(file1));
         Assert.False(await _service.IsFileRenamedAsync(file2));
         Assert.False(await _service.IsFileNormalizedAsync(file2));
         Assert.False(await _service.IsFileProcessedAsync(file2));
+
+        var allFiles = await _service.GetAllFilesAsync();
+        Assert.False(allFiles.First(f => f.FilePath == file1).IsDuplicate);
+        Assert.False(allFiles.First(f => f.FilePath == file2).IsDuplicate);
+        Assert.False(allFiles.First(f => f.FilePath == dupOnly).IsDuplicate);
     }
 
     [Fact]

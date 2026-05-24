@@ -7090,6 +7090,11 @@
             document.getElementById('manageSeriesProviderAliases').textContent = 'Loading...';
             document.getElementById('manageSeriesProviderSource').textContent = '';
             document.getElementById('manageSeriesUserAliases').textContent = 'Loading...';
+            const pinSelect = document.getElementById('manageSeriesPinnedTitle');
+            if (pinSelect) {
+                pinSelect.innerHTML = '<option value="">(None — use language preference)</option>';
+                pinSelect.value = '';
+            }
             document.getElementById('manageSeriesSearchInput').value = seriesTitle;
             document.getElementById('manageSeriesSearchResults').innerHTML = '';
             document.getElementById('manageSeriesNamesModal').classList.add('active');
@@ -7119,6 +7124,7 @@
                 if (prefSelect) {
                     prefSelect.value = record.preferred_language || '';
                 }
+                populateManageSeriesPinnedTitleOptions(record);
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
                 renderManageSeriesImage(record);
@@ -7418,6 +7424,87 @@
             } catch (err) {
                 console.error('saveManageSeriesPreferredLanguage failed', err);
                 showMessage('Failed to update preferred language', 'error');
+            }
+        }
+
+        // Build the Pinned Title <select> from the record's canonical title
+        // plus its provider-supplied localized titles. Each entry's label
+        // includes the language tag (when known) to help users disambiguate
+        // identical-looking transliterations. Case-insensitive dedup keeps a
+        // localized title from being listed twice when it equals the
+        // canonical title.
+        function populateManageSeriesPinnedTitleOptions(record) {
+            const select = document.getElementById('manageSeriesPinnedTitle');
+            if (!select) return;
+            const seen = new Set();
+            const options = ['<option value="">(None — use language preference)</option>'];
+            const pushOption = (title, languageHint) => {
+                if (!title) return;
+                const key = title.trim().toLowerCase();
+                if (!key || seen.has(key)) return;
+                seen.add(key);
+                const label = languageHint
+                    ? `${escapeHtml(title)} (${escapeHtml(languageHint)})`
+                    : escapeHtml(title);
+                options.push(`<option value="${escapeHtml(title)}">${label}</option>`);
+            };
+            if (record && record.canonical_title) {
+                pushOption(record.canonical_title, 'canonical');
+            }
+            if (record && Array.isArray(record.localized_titles)) {
+                for (const lt of record.localized_titles) {
+                    pushOption(lt && lt.title, lt && lt.language ? lt.language : null);
+                }
+            }
+            select.innerHTML = options.join('');
+            // Preserve the user's current pin even if the cache hasn't been
+            // refreshed with a matching localized_titles entry yet — server
+            // validation already rejected anything that didn't match at write
+            // time, so the value is known-good.
+            const pinned = (record && record.pinned_localized_title) || '';
+            if (pinned && !seen.has(pinned.trim().toLowerCase())) {
+                const opt = document.createElement('option');
+                opt.value = pinned;
+                opt.textContent = pinned;
+                select.appendChild(opt);
+            }
+            select.value = pinned;
+        }
+
+        // Save just the per-series pinned title (called on the select's
+        // change event, same UX pattern as the preferred-language control).
+        async function saveManageSeriesPinnedTitle() {
+            const { seriesTitle } = manageSeriesState;
+            if (!seriesTitle) return;
+            const select = document.getElementById('manageSeriesPinnedTitle');
+            if (!select) return;
+            const value = select.value || null;
+            try {
+                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/pinned-localized-title`), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ pinnedTitle: value })
+                });
+                if (!response.ok) {
+                    let msg = 'Failed to update pinned title';
+                    try { const j = await response.json(); if (j && (j.error || typeof j === 'string')) msg = j.error || j; } catch {}
+                    showMessage(msg, 'error');
+                    // Revert the select to the last known good value from the cached record.
+                    const current = (manageSeriesState.record && manageSeriesState.record.pinned_localized_title) || '';
+                    select.value = current;
+                    return;
+                }
+                const record = await response.json();
+                manageSeriesState.record = record;
+                populateManageSeriesPinnedTitleOptions(record);
+                showMessage(value ? `Pinned title set to "${value}"` : 'Pinned title cleared', 'success');
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
+            } catch (err) {
+                console.error('saveManageSeriesPinnedTitle failed', err);
+                showMessage('Failed to update pinned title', 'error');
             }
         }
 

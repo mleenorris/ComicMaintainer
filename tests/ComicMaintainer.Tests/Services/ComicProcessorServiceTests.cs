@@ -2041,16 +2041,21 @@ public class ComicProcessorServiceTests : IDisposable
 
         Assert.True(result);
 
-        // The new filename must still contain the chapter number from
-        // metadata.Issue; the safety net appends "Chapter 0007" when the
-        // template would otherwise have rendered it without the chapter.
+        // After processing (normalize-then-rename), the final filename must
+        // still contain the chapter number from metadata.Issue. Because
+        // normalize runs first and sets Title to "Chapter <n>", the rendered
+        // template naturally embeds the chapter via {title}; if that already
+        // matches the original filename no rename occurs (the chapter is
+        // already there). Either way, the final file on disk must contain
+        // the chapter number "7".
         _mockFileStore.Verify(
-            f => f.UpdateFilePathAsync(
-                originalPath,
-                It.Is<string>(p => Path.GetFileName(p).Contains("0007")),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<bool>()),
-            Times.Once);
+            f => f.MarkFileRenamedAsync(
+                It.Is<string>(p => ComicFileProcessor.ChapterNumbersEquivalent(
+                    ComicFileProcessor.ParseChapterNumber(Path.GetFileNameWithoutExtension(p)),
+                    "7")),
+                true,
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
     }
 
     [Fact]

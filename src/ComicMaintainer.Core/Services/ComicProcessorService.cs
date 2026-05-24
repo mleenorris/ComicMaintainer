@@ -140,6 +140,62 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             bool renameSuccess = false;
             bool normalizeSuccess = false;
 
+            _logger.LogDebug("ProcessFileAsync: Starting normalize phase - WatcherEnableNormalize: {NormalizeEnabled}, Has Metadata: {HasMetadata}",
+                _settings.WatcherEnableNormalize, metadata != null);
+
+            // Normalize metadata (update ComicInfo.xml) FIRST so the rename phase below uses
+            // the resolved/normalized series name (and any chapter/title fields populated by
+            // normalization) when generating the target filename.
+            if (_settings.WatcherEnableNormalize && metadata != null)
+            {
+                _logger.LogDebug("ProcessFileAsync: Attempting to normalize file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                // Check if metadata is already normalized (has ComicInfo.xml with valid data and series name matches folder)
+                if (await IsMetadataNormalizedAsync(metadata, filePath, cancellationToken))
+                {
+                    _logger.LogDebug("File already has normalized metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                    await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
+                    var filename = Path.GetFileName(filePath);
+                    await LogHistoryWithChangesAsync(filePath, "Normalize", true, "File already normalized",
+                        filename, filename, metadata, metadata, cancellationToken);
+                    normalizeSuccess = true;
+                }
+                else
+                {
+                    var beforeMetadata = metadata.Clone();
+                    var normalizedMetadata = await NormalizeMetadataAsync(metadata, filePath, cancellationToken);
+
+                    normalizeSuccess = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, cancellationToken);
+                    await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
+                    if (normalizeSuccess)
+                    {
+                        var filename = Path.GetFileName(filePath);
+                        await LogHistoryWithChangesAsync(filePath, "Normalize", true, null,
+                            filename, filename, beforeMetadata, normalizedMetadata, cancellationToken);
+
+                        // Use the normalized metadata for the rename phase so the new filename
+                        // reflects the resolved series name and any populated issue/title.
+                        metadata = normalizedMetadata;
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Failed to normalize metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                        await LogHistoryAsync(filePath, "Normalize", false, "Failed to update metadata", cancellationToken);
+                    }
+                }
+            }
+            else if (!_settings.WatcherEnableNormalize)
+            {
+                // Normalize disabled in settings
+                _logger.LogDebug("Normalize disabled in settings: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken); // Mark as "normalized" (skipped)
+                await LogHistoryAsync(filePath, "Normalize", true, "Normalize disabled", cancellationToken);
+                normalizeSuccess = true;
+            }
+            else
+            {
+                await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
+            }
+
             _logger.LogDebug("ProcessFileAsync: Starting rename phase - WatcherEnableRename: {RenameEnabled}, Has Metadata: {HasMetadata}, Has Series: {HasSeries}",
                 _settings.WatcherEnableRename, metadata != null, metadata?.Series != null);
 
@@ -234,56 +290,6 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                     await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
                     await LogHistoryAsync(filePath, "Rename", false, "No metadata or series information", cancellationToken);
                 }
-            }
-
-            _logger.LogDebug("ProcessFileAsync: Starting normalize phase - WatcherEnableNormalize: {NormalizeEnabled}, Has Metadata: {HasMetadata}",
-                _settings.WatcherEnableNormalize, metadata != null);
-
-            // Normalize metadata (update ComicInfo.xml) if enabled
-            if (_settings.WatcherEnableNormalize && metadata != null)
-            {
-                _logger.LogDebug("ProcessFileAsync: Attempting to normalize file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                // Check if metadata is already normalized (has ComicInfo.xml with valid data and series name matches folder)
-                if (await IsMetadataNormalizedAsync(metadata, filePath, cancellationToken))
-                {
-                    _logger.LogDebug("File already has normalized metadata: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                    await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken);
-                    var filename = Path.GetFileName(filePath);
-                    await LogHistoryWithChangesAsync(filePath, "Normalize", true, "File already normalized",
-                        filename, filename, metadata, metadata, cancellationToken);
-                    normalizeSuccess = true;
-                }
-                else
-                {
-                    var beforeMetadata = metadata.Clone();
-                    var normalizedMetadata = await NormalizeMetadataAsync(metadata, filePath, cancellationToken);
-
-                    normalizeSuccess = await UpdateMetadataCoreAsync(filePath, normalizedMetadata, cancellationToken);
-                    await _fileStore.MarkFileNormalizedAsync(filePath, normalizeSuccess, cancellationToken);
-                    if (normalizeSuccess)
-                    {
-                        var filename = Path.GetFileName(filePath);
-                        await LogHistoryWithChangesAsync(filePath, "Normalize", true, null,
-                            filename, filename, beforeMetadata, normalizedMetadata, cancellationToken);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Failed to normalize metadata for: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                        await LogHistoryAsync(filePath, "Normalize", false, "Failed to update metadata", cancellationToken);
-                    }
-                }
-            }
-            else if (!_settings.WatcherEnableNormalize)
-            {
-                // Normalize disabled in settings
-                _logger.LogDebug("Normalize disabled in settings: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-                await _fileStore.MarkFileNormalizedAsync(filePath, true, cancellationToken); // Mark as "normalized" (skipped)
-                await LogHistoryAsync(filePath, "Normalize", true, "Normalize disabled", cancellationToken);
-                normalizeSuccess = true;
-            }
-            else
-            {
-                await _fileStore.MarkFileNormalizedAsync(filePath, false, cancellationToken);
             }
 
             // After a successful normalize (or "already normalized" detection),

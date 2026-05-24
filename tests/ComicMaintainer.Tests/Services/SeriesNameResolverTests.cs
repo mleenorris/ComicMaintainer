@@ -233,4 +233,86 @@ public class SeriesNameResolverTests
         var resolver = BuildResolver();
         Assert.Throws<ArgumentNullException>(() => resolver.ResolveForRecord(null!));
     }
+
+    [Fact]
+    public async Task ResolveAsync_PinnedLocalizedTitle_ReportsPinAsWinningStep()
+    {
+        _settings.DefaultPreferredLanguage = null;
+        var resolver = BuildResolver();
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "one-piece",
+            CanonicalTitle = "One Piece",
+            LookupStatus = "success",
+            PreferredLanguage = "ja",
+            PinnedLocalizedTitle = "Wan Piisu",
+            LocalizedTitles =
+            {
+                new LocalizedTitle("One Piece", "en"),
+                new LocalizedTitle("ワンピース", "ja"),
+                new LocalizedTitle("Wan Piisu", "ja-Latn")
+            }
+        };
+        _cache.Setup(c => c.GetAsync("one-piece", It.IsAny<CancellationToken>())).ReturnsAsync(record);
+
+        var result = await resolver.ResolveAsync(
+            "/library/One Piece/c1.cbz",
+            new ComicMetadata { Series = "One Piece" },
+            mutateCache: false);
+
+        Assert.Equal(SeriesNameResolutionStep.PinnedLocalizedTitle, result.WinningStep);
+        Assert.Equal("Wan Piisu", result.ResolvedSeries);
+        // AppliedLanguage is meaningless when the pin decides the result;
+        // the resolver leaves it null so consumers don't surface a
+        // misleading "applied language" in audit/diagnostic output.
+        Assert.Null(result.AppliedLanguage);
+        Assert.Contains("pinned", result.Explanation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_UserCanonical_StillWinsOverPin()
+    {
+        var resolver = BuildResolver();
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "one-piece",
+            CanonicalTitle = "One Piece (User Override)",
+            IsUserCanonical = true,
+            PinnedLocalizedTitle = "English Title",
+            LocalizedTitles = { new LocalizedTitle("English Title", "en") }
+        };
+        _cache.Setup(c => c.GetAsync("one-piece", It.IsAny<CancellationToken>())).ReturnsAsync(record);
+
+        var result = await resolver.ResolveAsync(
+            "/library/One Piece/c1.cbz",
+            new ComicMetadata { Series = "One Piece" },
+            mutateCache: false);
+
+        Assert.Equal(SeriesNameResolutionStep.UserCanonical, result.WinningStep);
+        Assert.Equal("One Piece (User Override)", result.ResolvedSeries);
+    }
+
+    [Fact]
+    public void ResolveForRecord_PinnedLocalizedTitle_IsHonored()
+    {
+        // Parity: the record-only path (used by SeriesLibraryService and
+        // the language audit) returns the pinned title just like the
+        // file-path ResolveAsync does, so library display and on-disk
+        // <Series> stay in lockstep when the user pins a title.
+        var resolver = BuildResolver();
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "one-piece",
+            CanonicalTitle = "One Piece",
+            PreferredLanguage = "ja",
+            PinnedLocalizedTitle = "Wan Piisu",
+            LocalizedTitles =
+            {
+                new LocalizedTitle("ワンピース", "ja"),
+                new LocalizedTitle("Wan Piisu", "ja-Latn")
+            }
+        };
+
+        Assert.Equal("Wan Piisu", resolver.ResolveForRecord(record));
+    }
 }

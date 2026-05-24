@@ -55,6 +55,20 @@ public class SeriesMetadataCacheRecord
     public string? PreferredLanguage { get; set; }
 
     /// <summary>
+    /// User-pinned localized title that wins over the language-preference
+    /// rule but loses to <see cref="IsUserCanonical"/>. When non-null/empty
+    /// it is returned verbatim as the resolved series name. Typical use:
+    /// the user wants a specific romaji or English alternative even though
+    /// their general preferred language would otherwise select a different
+    /// entry from <see cref="LocalizedTitles"/>. The value should be one of
+    /// the strings present in <see cref="LocalizedTitles"/> or
+    /// <see cref="CanonicalTitle"/>; the cache service validates this on
+    /// write.
+    /// </summary>
+    [JsonPropertyName("pinned_localized_title")]
+    public string? PinnedLocalizedTitle { get; set; }
+
+    /// <summary>
     /// Provider-supplied titles tagged with their language. Used by the
     /// display-title resolver and surfaced to the UI so users can see which
     /// alternatives exist and in which language.

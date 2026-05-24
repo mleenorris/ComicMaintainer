@@ -691,6 +691,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             ImageDownloadedUtc = entity.ImageDownloadedUtc,
             ImageStatus = entity.ImageStatus,
             PreferredLanguage = entity.PreferredLanguage,
+            PinnedLocalizedTitle = entity.PinnedLocalizedTitle,
             LocalizedTitles = DeserializeLocalizedTitles(entity.LocalizedTitlesJson),
             MetadataVersion = entity.MetadataVersion
         };
@@ -823,6 +824,83 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         }
 
         await db.SaveChangesAsync(cancellationToken);
+        return ToRecord(entity);
+    }
+
+    /// <inheritdoc />
+    public async Task<SeriesMetadataCacheRecord?> SetPinnedLocalizedTitleAsync(
+        string seriesTitle,
+        string? pinnedTitle,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            throw new ArgumentException("Series title is required", nameof(seriesTitle));
+        }
+
+        var key = NormalizeKey(seriesTitle);
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        if (entity is null)
+        {
+            // Pins are only meaningful for series the cache already knows
+            // about (we need the set of LocalizedTitles to validate against).
+            return null;
+        }
+
+        var trimmedPin = pinnedTitle?.Trim();
+        if (string.IsNullOrEmpty(trimmedPin))
+        {
+            // Clear the pin.
+            if (entity.PinnedLocalizedTitle is not null)
+            {
+                entity.PinnedLocalizedTitle = null;
+                entity.UpdatedAt = DateTime.UtcNow;
+                BumpMetadataVersion(entity);
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            return ToRecord(entity);
+        }
+
+        // Validate the pin against the record's canonical title or any of its
+        // localized titles. The persisted value is the matched record-side
+        // string so the pin survives case/whitespace-only differences in
+        // user input.
+        string? canonicalValue = null;
+        if (!string.IsNullOrWhiteSpace(entity.CanonicalTitle)
+            && string.Equals(entity.CanonicalTitle.Trim(), trimmedPin, StringComparison.OrdinalIgnoreCase))
+        {
+            canonicalValue = entity.CanonicalTitle.Trim();
+        }
+        else
+        {
+            var localized = DeserializeLocalizedTitles(entity.LocalizedTitlesJson);
+            foreach (var lt in localized)
+            {
+                if (!string.IsNullOrWhiteSpace(lt?.Title)
+                    && string.Equals(lt!.Title.Trim(), trimmedPin, StringComparison.OrdinalIgnoreCase))
+                {
+                    canonicalValue = lt.Title.Trim();
+                    break;
+                }
+            }
+        }
+
+        if (canonicalValue is null)
+        {
+            throw new ArgumentException(
+                $"Pinned title '{trimmedPin}' must match the canonical title or one of the localized titles for series '{seriesTitle}'.",
+                nameof(pinnedTitle));
+        }
+
+        if (!string.Equals(entity.PinnedLocalizedTitle, canonicalValue, StringComparison.Ordinal))
+        {
+            entity.PinnedLocalizedTitle = canonicalValue;
+            entity.UpdatedAt = DateTime.UtcNow;
+            BumpMetadataVersion(entity);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
         return ToRecord(entity);
     }
 }

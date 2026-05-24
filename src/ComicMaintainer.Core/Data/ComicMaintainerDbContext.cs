@@ -173,6 +173,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.ImageContentType).HasMaxLength(64);
             entity.Property(e => e.ImageStatus).HasMaxLength(32);
             entity.Property(e => e.PreferredLanguage).HasMaxLength(16);
+            entity.Property(e => e.PinnedLocalizedTitle).HasMaxLength(512);
             // LocalizedTitlesJson is opaque JSON; no max length so it can
             // accommodate long alias lists from providers like MangaDex.
         });
@@ -402,6 +403,15 @@ public class SeriesMetadataCacheEntity
     /// the global default / canonical title.
     /// </summary>
     public string? PreferredLanguage { get; set; }
+
+    /// <summary>
+    /// User-pinned localized title. When non-null/empty it wins over the
+    /// language-preference rule but loses to <see cref="IsUserCanonical"/>.
+    /// Persisted as a plain string column rather than a foreign key into
+    /// the localized-titles JSON so order-only edits to that list don't
+    /// silently invalidate a pin.
+    /// </summary>
+    public string? PinnedLocalizedTitle { get; set; }
 
     /// <summary>
     /// JSON-encoded list of <see cref="Models.LocalizedTitle"/> entries

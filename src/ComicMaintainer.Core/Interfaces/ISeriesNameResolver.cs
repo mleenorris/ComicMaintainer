@@ -154,6 +154,9 @@ public enum SeriesNameResolutionStep
     /// <summary>User-overridden canonical title (IsUserCanonical=true).</summary>
     UserCanonical = 1,
 
+    /// <summary>User-pinned localized title (<see cref="SeriesMetadataCacheRecord.PinnedLocalizedTitle"/>).</summary>
+    PinnedLocalizedTitle = 8,
+
     /// <summary>Cache record from a successful/manual match.</summary>
     MatchedCache = 2,
 

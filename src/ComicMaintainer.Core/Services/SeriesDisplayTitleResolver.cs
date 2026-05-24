@@ -9,6 +9,10 @@ namespace ComicMaintainer.Core.Services;
 ///   <item>If the user has overridden the canonical title
 ///         (<c>IsUserCanonical</c> = true), always return it. Explicit user
 ///         choice wins over any language rule.</item>
+///   <item>If the record has a non-empty <see cref="SeriesMetadataCacheRecord.PinnedLocalizedTitle"/>,
+///         return it verbatim. This is the user's "pin this exact title"
+///         override; it wins over the language-preference rule but loses to
+///         <c>IsUserCanonical</c>.</item>
 ///   <item>If a per-series preference (or, failing that, the global default)
 ///         matches one of the cached <see cref="LocalizedTitle"/> entries,
 ///         return the first matching title.</item>
@@ -35,6 +39,15 @@ public static class SeriesDisplayTitleResolver
         if (record.IsUserCanonical && !string.IsNullOrWhiteSpace(record.CanonicalTitle))
         {
             return record.CanonicalTitle;
+        }
+
+        // User-pinned localized title wins over the language-preference rule.
+        // Represents an explicit "always show this exact title for this
+        // series" choice — e.g. the romaji variant — that should not be
+        // displaced when the user changes their general language preference.
+        if (!string.IsNullOrWhiteSpace(record.PinnedLocalizedTitle))
+        {
+            return record.PinnedLocalizedTitle;
         }
 
         var preferred = SeriesLanguagePreference.Normalize(record.PreferredLanguage)

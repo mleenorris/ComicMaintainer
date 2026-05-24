@@ -114,4 +114,27 @@ public interface ISeriesMetadataCacheService
         string seriesTitle,
         string? language,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Set (or clear, by passing null/empty) the user-pinned localized
+    /// title for a series. The pinned title wins over the language-preference
+    /// rule but loses to <see cref="SeriesMetadataCacheRecord.IsUserCanonical"/>.
+    /// <para>
+    /// When non-null/empty the value must equal (case-insensitive,
+    /// whitespace-trimmed) either the record's
+    /// <see cref="SeriesMetadataCacheRecord.CanonicalTitle"/> or one of its
+    /// <see cref="SeriesMetadataCacheRecord.LocalizedTitles"/> entries; an
+    /// <see cref="ArgumentException"/> is thrown otherwise. The persisted
+    /// value is the canonical-cased version of the title from the record
+    /// so the pin survives whitespace/case-only differences in user input.
+    /// </para>
+    /// <para>
+    /// Returns null when no cache record exists for the key — pins can
+    /// only be set on series the cache already knows about (no upsert).
+    /// </para>
+    /// </summary>
+    Task<SeriesMetadataCacheRecord?> SetPinnedLocalizedTitleAsync(
+        string seriesTitle,
+        string? pinnedTitle,
+        CancellationToken cancellationToken = default);
 }

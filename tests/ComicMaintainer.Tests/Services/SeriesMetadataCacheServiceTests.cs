@@ -667,4 +667,104 @@ public class SeriesMetadataCacheServiceTests
         Assert.Equal("ja", refreshed.PreferredLanguage);
         Assert.NotEmpty(refreshed.LocalizedTitles);
     }
+
+    [Fact]
+    public async Task SetPinnedLocalizedTitleAsync_ReturnsNull_WhenNoCacheRecordExists()
+    {
+        var result = await _service.SetPinnedLocalizedTitleAsync("Unknown Series", "Anything");
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task SetPinnedLocalizedTitleAsync_AcceptsCanonicalTitle()
+    {
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Naruto",
+                LocalizedTitles = new List<LocalizedTitle>
+                {
+                    new("Naruto", "en"),
+                    new("ナルト", "ja")
+                }
+            });
+        await _service.RefreshAsync("Naruto");
+
+        var record = await _service.SetPinnedLocalizedTitleAsync("Naruto", "Naruto");
+        Assert.NotNull(record);
+        Assert.Equal("Naruto", record!.PinnedLocalizedTitle);
+    }
+
+    [Fact]
+    public async Task SetPinnedLocalizedTitleAsync_AcceptsLocalizedTitle_CaseInsensitively()
+    {
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "One Piece",
+                LocalizedTitles = new List<LocalizedTitle>
+                {
+                    new("One Piece", "en"),
+                    new("ワンピース", "ja"),
+                    new("Wan Piisu", "ja-Latn")
+                }
+            });
+        await _service.RefreshAsync("One Piece");
+
+        // Pin using a different case + whitespace; the persisted value
+        // should be the canonical record-side casing.
+        var record = await _service.SetPinnedLocalizedTitleAsync("One Piece", "  wan piisu  ");
+        Assert.NotNull(record);
+        Assert.Equal("Wan Piisu", record!.PinnedLocalizedTitle);
+    }
+
+    [Fact]
+    public async Task SetPinnedLocalizedTitleAsync_ThrowsArgumentException_WhenTitleNotInList()
+    {
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Bleach",
+                LocalizedTitles = new List<LocalizedTitle> { new("Bleach", "en"), new("ブリーチ", "ja") }
+            });
+        await _service.RefreshAsync("Bleach");
+
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.SetPinnedLocalizedTitleAsync("Bleach", "Not A Title"));
+    }
+
+    [Fact]
+    public async Task SetPinnedLocalizedTitleAsync_ClearsPin_WhenNullOrEmpty()
+    {
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Bleach",
+                LocalizedTitles = new List<LocalizedTitle> { new("Bleach", "en") }
+            });
+        await _service.RefreshAsync("Bleach");
+        await _service.SetPinnedLocalizedTitleAsync("Bleach", "Bleach");
+
+        var cleared = await _service.SetPinnedLocalizedTitleAsync("Bleach", null);
+        Assert.NotNull(cleared);
+        Assert.Null(cleared!.PinnedLocalizedTitle);
+    }
+
+    [Fact]
+    public async Task SetPinnedLocalizedTitleAsync_BumpsMetadataVersion()
+    {
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Berserk",
+                LocalizedTitles = new List<LocalizedTitle> { new("Berserk", "en"), new("ベルセルク", "ja") }
+            });
+        var initial = await _service.RefreshAsync("Berserk");
+        var initialVersion = initial.MetadataVersion;
+
+        var pinned = await _service.SetPinnedLocalizedTitleAsync("Berserk", "ベルセルク");
+        Assert.NotNull(pinned);
+        Assert.True(pinned!.MetadataVersion > initialVersion,
+            $"Expected MetadataVersion to be bumped (was {initialVersion}, now {pinned.MetadataVersion}).");
+    }
 }

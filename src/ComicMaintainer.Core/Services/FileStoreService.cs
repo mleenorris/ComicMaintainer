@@ -582,11 +582,12 @@ public class FileStoreService : IFileStoreService
 
                 foreach (var entity in entities)
                 {
-                    if (entity.IsRenamed || entity.IsNormalized || entity.IsProcessed)
+                    if (entity.IsRenamed || entity.IsNormalized || entity.IsProcessed || entity.IsDuplicate)
                     {
                         entity.IsRenamed = false;
                         entity.IsNormalized = false;
                         entity.IsProcessed = false;
+                        entity.IsDuplicate = false;
                         entity.UpdatedAt = now;
                         updated++;
                     }
@@ -609,13 +610,15 @@ public class FileStoreService : IFileStoreService
                     file.IsRenamed = false;
                     file.IsNormalized = false;
                     file.IsProcessed = false;
+                    file.IsDuplicate = false;
                 }
+                _duplicateFiles.TryRemove(path, out _);
             }
 
             if (updated > 0)
             {
                 _logger.LogInformation(
-                    "ClearProcessedStatusAsync: Cleared renamed/normalized/processed flags on {Count} file(s)",
+                    "ClearProcessedStatusAsync: Cleared renamed/normalized/processed/duplicate flags on {Count} file(s)",
                     updated);
 
                 if (_eventBroadcaster != null)

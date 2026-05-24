@@ -93,6 +93,44 @@ public interface IComicProcessorService
     Task<Guid> RemoveMetadataFromFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Delete multiple comic files (from disk and the file store) as a batch
+    /// job. Emits the standard <c>job_updated</c> + <c>file_processed</c> SSE
+    /// events so the UI's existing progress modal works unchanged.
+    /// </summary>
+    Task<Guid> DeleteFilesAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Generic background job entry point used by callers that need to run a
+    /// custom per-item operation through the standard job pipeline (i.e.
+    /// surface progress + completion via <c>job_updated</c> / <c>file_processed</c>
+    /// SSE events and the existing UI progress modal).
+    /// </summary>
+    /// <param name="operationName">Stable identifier used in log messages.</param>
+    /// <param name="trackedItems">
+    ///   The list of items the job will iterate over. Typically file paths,
+    ///   but can be any string identifier — the job's <see cref="ProcessingJob.Files"/>
+    ///   list mirrors this collection so the UI can render per-item progress.
+    /// </param>
+    /// <param name="itemOperation">
+    ///   Per-item operation invoked once per <paramref name="trackedItems"/>
+    ///   entry. Returning <c>false</c> increments the job's failure count and
+    ///   records <paramref name="failureMessage"/> as the error for that item.
+    /// </param>
+    /// <param name="failureMessage">Error string recorded when <paramref name="itemOperation"/> returns false.</param>
+    /// <param name="postLoopAsync">
+    ///   Optional cleanup / follow-up work that runs after the per-item loop
+    ///   completes but before the job is marked <c>Completed</c>. Exceptions
+    ///   from this hook flip the job to <c>Failed</c>.
+    /// </param>
+    Task<Guid> RunCustomBatchJobAsync(
+        string operationName,
+        IEnumerable<string> trackedItems,
+        Func<string, CancellationToken, Task<bool>> itemOperation,
+        string failureMessage,
+        Func<CancellationToken, Task>? postLoopAsync = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Normalize metadata and then rename multiple comic files as a single batch job.
     /// For each file, normalization is performed first (so the series name reflects the
     /// containing folder) and the rename step uses the freshly normalized metadata.

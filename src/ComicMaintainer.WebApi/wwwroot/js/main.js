@@ -1286,7 +1286,7 @@
         // Function to trigger installation
         function installApp() {
             if (!deferredPrompt) {
-                alert('App is already installed or installation is not available.');
+                showMessage('App is already installed or installation is not available.', 'info');
                 return;
             }
             
@@ -4055,18 +4055,38 @@
                 if (!response.ok) {
                     throw new Error(data.error || `HTTP error! status: ${response.status}`);
                 }
-                alert(`Combine complete: ${data.moved} moved, ${data.skipped} skipped, ${data.failed} failed.`);
-                if (typeof loadLibraryHealth === 'function') {
-                    loadLibraryHealth();
+
+                // The server now enqueues the moves as a background job and
+                // returns 202 immediately with { jobId, totalItems, ... }.
+                // Track via the standard SSE-driven progress modal so the user
+                // sees per-move progress, then refresh the modal once the job
+                // finishes.
+                const jobId = data.jobId || data.job_id;
+                const totalItems = data.totalItems || data.total_items || 0;
+                const skipped = data.skipped || 0;
+
+                if (!jobId || totalItems === 0) {
+                    // Nothing to move (everything was skipped). Just refresh.
+                    showMessage(`Combine complete: 0 moved, ${skipped} skipped, 0 failed.`, 'info');
+                    if (typeof loadLibraryHealth === 'function') loadLibraryHealth();
+                    if (typeof refreshFiles === 'function') refreshFiles();
+                    await openCombineFoldersModal();
+                    return;
                 }
-                if (typeof refreshFiles === 'function') {
-                    refreshFiles();
-                }
-                // Reload groups; the just-combined group should disappear.
+
+                showMessage(`Combining ${totalItems} file(s) in background${skipped > 0 ? ` (${skipped} skipped)` : ''}`, 'info');
+                showProgressModal(`Combining ${totalItems} file(s)...`);
+                await trackJobStatus(jobId, `Combining ${totalItems} file(s)...`);
+
+                // The progress-modal completion handler already refreshes the
+                // library view; refresh the combine-folders modal once the job
+                // settles so the just-combined group disappears.
+                if (typeof loadLibraryHealth === 'function') loadLibraryHealth();
+                if (typeof refreshFiles === 'function') refreshFiles();
                 await openCombineFoldersModal();
             } catch (error) {
                 console.error('Failed to combine folders:', error);
-                alert(`Failed to combine folders: ${error.message}`);
+                showMessage(`Failed to combine folders: ${error.message}`, 'error');
             } finally {
                 combineFolderActionInFlight = false;
                 renderCombineFolderGroup();
@@ -5699,12 +5719,21 @@
                 const result = await response.json();
                 
                 if (result.success) {
-                    showMessage('Database reset completed successfully! Reloading page...', 'success');
-                    
-                    // Reload the page after a short delay to see the success message
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 2000);
+                    showMessage('Database reset completed successfully', 'success');
+                    // Clear in-memory selection state — the file list is now empty.
+                    if (typeof selectedFiles !== 'undefined' && selectedFiles && typeof selectedFiles.clear === 'function') {
+                        selectedFiles.clear();
+                    }
+                    // The server emits file_list_updated on completion, which
+                    // triggers handleFileListUpdatedEvent → in-place refresh.
+                    // Refresh counts and active library view defensively in
+                    // case the SSE connection is briefly disconnected.
+                    if (typeof loadLibraryHealth === 'function') {
+                        try { await loadLibraryHealth(); } catch (_e) { /* ignore */ }
+                    }
+                    if (typeof loadActiveLibraryView === 'function') {
+                        try { await loadActiveLibraryView(1, true); } catch (_e) { /* ignore */ }
+                    }
                 } else {
                     showMessage(result.error || 'Failed to reset database', 'error');
                 }
@@ -6736,60 +6765,59 @@
         // Function to delete selected files
         async function deleteSelectedFiles() {
             const selectedFilesArray = Array.from(selectedFiles);
-            
+
             if (selectedFilesArray.length === 0) {
                 showMessage('No files selected', 'error');
                 return;
             }
-            
+
             // Confirm deletion
             if (!confirm(`Are you sure you want to delete ${selectedFilesArray.length} file(s)? This action cannot be undone.`)) {
                 return;
             }
-            
+
             showProgressModal(`Deleting ${selectedFilesArray.length} file(s)...`);
-            
-            let successCount = 0;
-            let failCount = 0;
-            
-            // Delete files one by one
-            for (let i = 0; i < selectedFilesArray.length; i++) {
-                const filepath = selectedFilesArray[i];
-                updateProgress(i + 1, selectedFilesArray.length, successCount, failCount);
-                
-                try {
-                    // Use RESTful endpoint: DELETE /api/files/{encodedFilePath}
-                    const encodedPath = encodeFilePathForUrl(filepath);
-                    const response = await fetch(apiUrl(`/api/files/${encodedPath}`), {
-                        method: 'DELETE',
-                        headers: getAuthHeaders()
-                    });
-                    
-                    if (response.ok) {
-                        successCount++;
-                        addProgressDetail(filepath, true);
-                    } else {
-                        const errorText = await response.text();
-                        failCount++;
-                        addProgressDetail(filepath, false, errorText || 'Unknown error');
-                    }
-                } catch (error) {
-                    failCount++;
-                    addProgressDetail(filepath, false, error.message);
+
+            try {
+                console.log(`[BULK DELETE] Starting delete-selected job for ${selectedFilesArray.length} file(s)...`);
+                const response = await fetch(apiUrl('/api/jobs/delete-selected'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ Files: selectedFilesArray })
+                });
+
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
                 }
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || `Failed to start delete job (HTTP ${response.status})`);
+                }
+
+                const data = await response.json();
+                const jobId = data.jobId || data.job_id;
+                const totalItems = data.totalItems || data.total_items || selectedFilesArray.length;
+
+                console.log(`[BULK DELETE] Created job ${jobId} for ${totalItems} file(s)`);
+                showMessage(`Deleting ${totalItems} file(s) in background`, 'info');
+
+                // Clear selected files now; the server is authoritative from this
+                // point on and SSE events (job_updated / file_processed /
+                // file_list_updated) will refresh the library in place.
+                selectedFiles.clear();
+
+                // Track via the standard SSE-driven progress modal.
+                await trackJobStatus(jobId, `Deleting ${totalItems} file(s)...`);
+            } catch (error) {
+                console.error('[BULK DELETE] Error starting delete-selected job:', error);
+                showMessage('Failed to start delete: ' + error.message, 'error');
+                closeProgressModal();
             }
-            
-            completeProgress();
-            
-            if (failCount === 0) {
-                showMessage(`Deleted ${successCount} file(s) successfully!`, 'success');
-            } else {
-                showMessage(`Deleted ${successCount} file(s), ${failCount} failed`, 'warning');
-            }
-            
-            // Clear selected files and refresh file list
-            selectedFiles.clear();
-            await loadActiveLibraryView(1, true);
         }
         
         // Watcher status management - no polling, using SSE events only
@@ -6909,7 +6937,11 @@
         async function refreshSeriesMetadataDirect(seriesTitle) {
             if (!seriesTitle) return;
             try {
-                const response = await fetch(apiUrl(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}`), {
+                // Always queue the refresh as a background job so the UI is never
+                // blocked on the (potentially slow) external lookup. Progress is
+                // surfaced via the same inline toast used by refresh-all /
+                // refresh-folder.
+                const response = await fetch(apiUrl(`/api/metadata/refresh/${encodeURIComponent(seriesTitle)}?queue=true`), {
                     method: 'POST',
                     headers: getAuthHeaders ? getAuthHeaders() : undefined,
                     credentials: 'same-origin'
@@ -6918,21 +6950,25 @@
                     showMessage('Failed to refresh metadata for ' + seriesTitle, 'error');
                     return;
                 }
-                const record = await response.json();
-                const status = record.lookup_status || 'success';
-                if (status === 'not_found') {
-                    showMessage(`No external metadata found for "${seriesTitle}"`, 'info');
-                } else if (status === 'error') {
-                    showMessage(`External lookup failed for "${seriesTitle}"`, 'error');
+                const data = await response.json();
+                if (data && data.jobId) {
+                    showMessage(`Queued metadata refresh for "${seriesTitle}"`, 'info');
+                    trackMetadataRefreshJob(data.jobId, seriesTitle);
                 } else {
-                    showMessage(`Metadata refreshed for "${seriesTitle}"${record.source ? ' from ' + record.source : ''}`, 'success');
+                    // Fallback: server returned the sync record (legacy path).
+                    const status = data.lookup_status || 'success';
+                    if (status === 'not_found') {
+                        showMessage(`No external metadata found for "${seriesTitle}"`, 'info');
+                    } else if (status === 'error') {
+                        showMessage(`External lookup failed for "${seriesTitle}"`, 'error');
+                    } else {
+                        showMessage(`Metadata refreshed for "${seriesTitle}"${data.source ? ' from ' + data.source : ''}`, 'success');
+                    }
+                    if (typeof loadSeriesLibrary === 'function') {
+                        loadSeriesLibrary(1, true);
+                    }
+                    loadProviderHealth();
                 }
-                // Refresh the library so any new aliases collapse folders.
-                if (typeof loadSeriesLibrary === 'function') {
-                    loadSeriesLibrary(1, true);
-                }
-                // Provider counters likely changed too.
-                loadProviderHealth();
             } catch (err) {
                 console.error('refreshSeriesMetadataDirect failed', err);
                 showMessage('Failed to refresh metadata', 'error');

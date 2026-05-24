@@ -1056,11 +1056,30 @@ public class FilesController : ControllerBase
                 return BadRequest(new { error });
             }
 
-            var moved = 0;
-            var skipped = 0;
-            var failed = 0;
-            var results = new List<object>(plan!.Moves.Count);
-            var movedDestinationPaths = new List<string>();
+            // Skipped entries are decided synchronously when the plan was built;
+            // they need no work and can be reported in the immediate response.
+            var skippedResults = plan!.Moves
+                .Where(m => m.Skipped)
+                .Select(m => new { sourcePath = m.SourcePath, destinationPath = m.DestinationPath, status = "skipped", reason = m.Reason })
+                .ToList();
+
+            var nonSkippedMoves = plan.Moves.Where(m => !m.Skipped).ToList();
+
+            // Nothing to move — return immediately with the skipped results so
+            // the UI doesn't have to track an empty job.
+            if (nonSkippedMoves.Count == 0)
+            {
+                return Accepted(new
+                {
+                    destination = plan.Destination,
+                    sources = plan.SourceDirectories,
+                    moved = 0,
+                    skipped = skippedResults.Count,
+                    failed = 0,
+                    totalItems = 0,
+                    results = skippedResults
+                });
+            }
 
             // Capture in-memory series metadata for the files about to be moved so
             // we can persist their existing series names (which the user has
@@ -1068,145 +1087,154 @@ public class FilesController : ControllerBase
             // destination series. This must happen *before* the moves because the
             // in-memory ComicFile list keys off the original source paths.
             var preMoveSeriesBySourcePath = await GetPreMoveSeriesNamesAsync(
-                plan.Moves.Where(m => !m.Skipped).Select(m => m.SourcePath),
+                nonSkippedMoves.Select(m => m.SourcePath),
                 cancellationToken);
 
-            foreach (var move in plan.Moves)
-            {
-                if (move.Skipped)
-                {
-                    skipped++;
-                    results.Add(new { sourcePath = move.SourcePath, destinationPath = move.DestinationPath, status = "skipped", reason = move.Reason });
-                    continue;
-                }
+            // Index moves by source path so the per-item job operation can look
+            // up the destination without rebuilding the plan.
+            var movesBySource = nonSkippedMoves.ToDictionary(
+                m => m.SourcePath,
+                m => m,
+                StringComparer.OrdinalIgnoreCase);
 
-                try
+            // Concurrent collection — File.Move on distinct files is safe in
+            // parallel, but the result list is mutated from worker threads.
+            var movedDestinationPaths = new System.Collections.Concurrent.ConcurrentBag<string>();
+
+            var trackedItems = nonSkippedMoves.Select(m => m.SourcePath).ToList();
+
+            var jobId = await _processor.RunCustomBatchJobAsync(
+                operationName: "CombineFoldersJob",
+                trackedItems: trackedItems,
+                itemOperation: async (sourcePath, token) =>
                 {
-                    var destDir = Path.GetDirectoryName(move.DestinationPath);
-                    if (!string.IsNullOrEmpty(destDir))
+                    if (!movesBySource.TryGetValue(sourcePath, out var move))
                     {
-                        System.IO.Directory.CreateDirectory(destDir);
+                        return false;
                     }
-
-                    System.IO.File.Move(move.SourcePath, move.DestinationPath);
-                    // Suppress per-file broadcasts: combining a folder with many files would
-                    // otherwise emit one file_list_updated SSE event per move, flooding the
-                    // browser and hanging the site. We emit a single broadcast after the loop.
-                    await _fileStore.UpdateFilePathAsync(move.SourcePath, move.DestinationPath, cancellationToken, broadcastUpdate: false);
-                    await LogHistoryAsync(move.SourcePath, "Combine Folder", true,
-                        $"Moved to {move.DestinationPath}");
-                    moved++;
-                    movedDestinationPaths.Add(move.DestinationPath);
-                    results.Add(new { sourcePath = move.SourcePath, destinationPath = move.DestinationPath, status = "moved" });
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    failed++;
-                    _logger.LogWarning(ex, "Failed to move {Source} to {Destination} during folder combine",
-                        LoggingHelper.SanitizePathForLog(move.SourcePath),
-                        LoggingHelper.SanitizePathForLog(move.DestinationPath));
-                    await LogHistoryAsync(move.SourcePath, "Combine Folder", false, ex.Message);
-                    results.Add(new { sourcePath = move.SourcePath, destinationPath = move.DestinationPath, status = "failed", reason = ex.Message });
-                }
-            }
-
-            // Try to remove now-empty source directories
-            var removedDirectories = new List<string>();
-            foreach (var sourceDir in plan.SourceDirectories)
-            {
-                try
-                {
-                    if (System.IO.Directory.Exists(sourceDir) &&
-                        !System.IO.Directory.EnumerateFileSystemEntries(sourceDir).Any())
+                    try
                     {
-                        System.IO.Directory.Delete(sourceDir);
-                        removedDirectories.Add(sourceDir);
-                    }
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    _logger.LogDebug(ex, "Could not remove source directory {Directory} after folder combine",
-                        LoggingHelper.SanitizePathForLog(sourceDir));
-                }
-            }
-
-            // Emit a single file list update broadcast for the entire combine operation
-            // so that connected clients refresh once instead of once per file.
-            if ((moved > 0 || removedDirectories.Count > 0) && _eventBroadcaster != null)
-            {
-                try
-                {
-                    await _eventBroadcaster.BroadcastFileListUpdateAsync();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to broadcast file list update after folder combine");
-                }
-            }
-
-            // Queue a normalize-then-rename batch job for the moved files so that their
-            // ComicInfo.xml series matches the destination folder and the filenames are
-            // updated to use that series name. This runs asynchronously so the request
-            // returns promptly even for large combines.
-            Guid? postProcessJobId = null;
-            if (movedDestinationPaths.Count > 0)
-            {
-                // Before kicking off the post-process job, persist the source-folder
-                // series names (and any distinct file-level Series values) as user
-                // aliases on the destination series record, with the destination
-                // folder name as the user-canonical title. This teaches the
-                // metadata cache to:
-                //   * surface the destination folder name on subsequent normalizes
-                //     (NormalizeFile prefers the user-canonical title over any
-                //     external lookup result)
-                //   * group these folders together on subsequent folder-combine
-                //     suggestions even after their original folders are gone.
-                await PersistFolderCombineAliasesAsync(plan, preMoveSeriesBySourcePath, cancellationToken);
-
-                // Include the destination folder's *existing* files in the
-                // normalize-and-rename batch, not just the moved ones. The user
-                // explicitly wants every item in the combined folder to share
-                // the destination series' metadata, so any previously-existing
-                // file with stale (or merely folder-derived) metadata is
-                // brought into line at the same time as the incoming items.
-                var pathsToProcess = new HashSet<string>(movedDestinationPaths, StringComparer.OrdinalIgnoreCase);
-                try
-                {
-                    var existingDestinationFiles = await GetFilesInDirectoryAsync(plan.Destination, cancellationToken);
-                    foreach (var existingPath in existingDestinationFiles)
-                    {
-                        if (!string.IsNullOrWhiteSpace(existingPath))
+                        var destDir = Path.GetDirectoryName(move.DestinationPath);
+                        if (!string.IsNullOrEmpty(destDir))
                         {
-                            pathsToProcess.Add(existingPath);
+                            System.IO.Directory.CreateDirectory(destDir);
+                        }
+
+                        System.IO.File.Move(move.SourcePath, move.DestinationPath);
+                        // Suppress per-file broadcasts: combining a folder with many files would
+                        // otherwise emit one file_list_updated SSE event per move, flooding the
+                        // browser and hanging the site. We emit a single broadcast after the loop.
+                        await _fileStore.UpdateFilePathAsync(move.SourcePath, move.DestinationPath, token, broadcastUpdate: false);
+                        await LogHistoryAsync(move.SourcePath, "Combine Folder", true,
+                            $"Moved to {move.DestinationPath}");
+                        movedDestinationPaths.Add(move.DestinationPath);
+                        return true;
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        _logger.LogWarning(ex, "Failed to move {Source} to {Destination} during folder combine",
+                            LoggingHelper.SanitizePathForLog(move.SourcePath),
+                            LoggingHelper.SanitizePathForLog(move.DestinationPath));
+                        await LogHistoryAsync(move.SourcePath, "Combine Folder", false, ex.Message);
+                        return false;
+                    }
+                },
+                failureMessage: "Combine folder move failed",
+                postLoopAsync: async (token) =>
+                {
+                    // Try to remove now-empty source directories.
+                    var removedDirectories = new List<string>();
+                    foreach (var sourceDir in plan.SourceDirectories)
+                    {
+                        try
+                        {
+                            if (System.IO.Directory.Exists(sourceDir) &&
+                                !System.IO.Directory.EnumerateFileSystemEntries(sourceDir).Any())
+                            {
+                                System.IO.Directory.Delete(sourceDir);
+                                removedDirectories.Add(sourceDir);
+                            }
+                        }
+                        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                        {
+                            _logger.LogDebug(ex, "Could not remove source directory {Directory} after folder combine",
+                                LoggingHelper.SanitizePathForLog(sourceDir));
                         }
                     }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Failed to enumerate existing destination files for {Destination}; only moved files will be re-normalized",
-                        LoggingHelper.SanitizePathForLog(plan.Destination));
-                }
 
-                try
-                {
-                    postProcessJobId = await _processor.NormalizeAndRenameFilesAsync(pathsToProcess, cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to queue normalize-and-rename job after folder combine");
-                }
-            }
+                    // Emit a single file list update broadcast for the entire combine operation
+                    // so that connected clients refresh once instead of once per file.
+                    if ((!movedDestinationPaths.IsEmpty || removedDirectories.Count > 0) && _eventBroadcaster != null)
+                    {
+                        try
+                        {
+                            await _eventBroadcaster.BroadcastFileListUpdateAsync();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to broadcast file list update after folder combine");
+                        }
+                    }
 
-            return Ok(new
+                    // Persist user-canonical / alias info on the destination
+                    // series and queue a normalize-then-rename batch job so
+                    // every file in the combined folder reflects the new
+                    // series name / file format.
+                    if (!movedDestinationPaths.IsEmpty)
+                    {
+                        try
+                        {
+                            await PersistFolderCombineAliasesAsync(plan, preMoveSeriesBySourcePath, token);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to persist folder-combine aliases for {Destination}",
+                                LoggingHelper.SanitizePathForLog(plan.Destination));
+                        }
+
+                        var pathsToProcess = new HashSet<string>(movedDestinationPaths, StringComparer.OrdinalIgnoreCase);
+                        try
+                        {
+                            var existingDestinationFiles = await GetFilesInDirectoryAsync(plan.Destination, token);
+                            foreach (var existingPath in existingDestinationFiles)
+                            {
+                                if (!string.IsNullOrWhiteSpace(existingPath))
+                                {
+                                    pathsToProcess.Add(existingPath);
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Failed to enumerate existing destination files for {Destination}; only moved files will be re-normalized",
+                                LoggingHelper.SanitizePathForLog(plan.Destination));
+                        }
+
+                        try
+                        {
+                            await _processor.NormalizeAndRenameFilesAsync(pathsToProcess, token);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to queue normalize-and-rename job after folder combine");
+                        }
+                    }
+                },
+                cancellationToken: cancellationToken);
+
+            // Return immediately with the job id and the plan summary so the UI
+            // can attach its progress modal via the standard SSE pipeline. The
+            // actual moved/failed counts come from job_updated events.
+            return Accepted(new
             {
+                jobId = jobId.ToString(),
+                job_id = jobId.ToString(),
+                totalItems = trackedItems.Count,
+                total_items = trackedItems.Count,
                 destination = plan.Destination,
                 sources = plan.SourceDirectories,
-                moved,
-                skipped,
-                failed,
-                removedDirectories,
-                postProcessJobId,
-                results
+                skipped = skippedResults.Count,
+                skippedResults
             });
         }
         catch (Exception ex)
@@ -2147,6 +2175,11 @@ public class FilesController : ControllerBase
             if (!success)
             {
                 await LogHistoryAsync(filePath, "Update Metadata", false, "Failed to update metadata");
+                if (_eventBroadcaster is not null)
+                {
+                    try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), false, "Failed to update metadata"); }
+                    catch (Exception bex) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata update failure"); }
+                }
                 return BadRequest("Failed to update metadata");
             }
             
@@ -2154,6 +2187,15 @@ public class FilesController : ControllerBase
             var filename = Path.GetFileName(filePath);
             await LogHistoryWithChangesAsync(filePath, "Update Metadata", true, null,
                 filename, filename, beforeMetadata, metadata);
+
+            // Broadcast a file_processed event so the UI patches the affected
+            // folder/series detail in place instead of waiting for a full
+            // file_list_updated debounce.
+            if (_eventBroadcaster is not null)
+            {
+                try { await _eventBroadcaster.BroadcastFileProcessedAsync(filename, true); }
+                catch (Exception bex) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata update"); }
+            }
             
             return Ok();
         }
@@ -2493,6 +2535,11 @@ public class FilesController : ControllerBase
                 return BadRequest("Invalid file path");
 
             var success = await _processor.UpdateMetadataAsync(filePath, metadata);
+            if (success && _eventBroadcaster is not null)
+            {
+                try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), true); }
+                catch (Exception bex) { _logger.LogDebug(bex, "Failed to broadcast file_processed for tag update"); }
+            }
             return success ? Ok() : BadRequest("Failed to update tags");
         }
         catch (Exception ex)
@@ -2542,6 +2589,15 @@ public class FilesController : ControllerBase
             var cleared = await _fileStore.ClearProcessedStatusAsync(new[] { filePath }, cancellationToken);
 
             await LogHistoryAsync(filePath, "RemoveMetadata", true);
+
+            // Broadcast a file_processed event so the UI updates the affected
+            // folder / series detail in place rather than waiting for the
+            // debounced file_list_updated.
+            if (_eventBroadcaster is not null)
+            {
+                try { await _eventBroadcaster.BroadcastFileProcessedAsync(Path.GetFileName(filePath), true); }
+                catch (Exception bex) { _logger.LogDebug(bex, "Failed to broadcast file_processed for metadata removal"); }
+            }
 
             return Ok(new { success = true, cleared });
         }

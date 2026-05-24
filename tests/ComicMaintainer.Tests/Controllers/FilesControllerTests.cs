@@ -38,7 +38,32 @@ public class FilesControllerTests
             WatchedDirectory = Path.GetTempPath()
         };
         _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
-        
+
+        // Make RunCustomBatchJobAsync execute the supplied per-item callback
+        // and post-loop hook inline so combine-folders / bulk-delete tests can
+        // observe the moves/deletes synchronously the way the pre-job
+        // implementation behaved.
+        _mockProcessor
+            .Setup(p => p.RunCustomBatchJobAsync(
+                It.IsAny<string>(),
+                It.IsAny<IEnumerable<string>>(),
+                It.IsAny<Func<string, CancellationToken, Task<bool>>>(),
+                It.IsAny<string>(),
+                It.IsAny<Func<CancellationToken, Task>?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (string _, IEnumerable<string> items, Func<string, CancellationToken, Task<bool>> op, string _, Func<CancellationToken, Task>? post, CancellationToken ct) =>
+            {
+                foreach (var item in items)
+                {
+                    await op(item, ct);
+                }
+                if (post is not null)
+                {
+                    await post(ct);
+                }
+                return Guid.NewGuid();
+            });
+
         _controller = new FilesController(_mockFileStore.Object, _mockProcessor.Object, _mockHistoryService.Object, _mockSeriesLibrary.Object, _mockLogger.Object, _mockSettings.Object);
     }
 
@@ -1788,10 +1813,13 @@ public class FilesControllerTests
 
             var result = await controller.CombineFolders(request);
 
-            var okResult = Assert.IsType<OkObjectResult>(result.Result);
+            var okResult = Assert.IsType<AcceptedResult>(result.Result);
             using var doc = SerializeAsCamelCase(okResult.Value);
-            Assert.Equal(1, doc.RootElement.GetProperty("moved").GetInt32());
-            Assert.Equal(0, doc.RootElement.GetProperty("failed").GetInt32());
+            // Endpoint now returns 202 with a job id; the per-item operation
+            // (mocked above) runs synchronously inside the test so the moves
+            // are observable below.
+            Assert.True(doc.RootElement.TryGetProperty("jobId", out _));
+            Assert.Equal(1, doc.RootElement.GetProperty("totalItems").GetInt32());
 
             Assert.True(System.IO.File.Exists(Path.Combine(newerDir, "Batman-001.cbz")));
             Assert.False(System.IO.File.Exists(olderPath));
@@ -1920,7 +1948,7 @@ public class FilesControllerTests
 
             var result = await controller.CombineFolders(request);
 
-            Assert.IsType<OkObjectResult>(result.Result);
+            Assert.IsType<AcceptedResult>(result.Result);
 
             // The destination folder name ("Batman") should be the canonical
             // title override and "Batman (Classic)" + "The Batman Adventures"
@@ -2028,10 +2056,10 @@ public class FilesControllerTests
 
             var result = await controller.CombineFolders(request);
 
-            var okResult = Assert.IsType<OkObjectResult>(result.Result);
+            var okResult = Assert.IsType<AcceptedResult>(result.Result);
             using var doc = SerializeAsCamelCase(okResult.Value);
-            Assert.Equal(1, doc.RootElement.GetProperty("moved").GetInt32());
-            Assert.Equal(0, doc.RootElement.GetProperty("failed").GetInt32());
+            Assert.True(doc.RootElement.TryGetProperty("jobId", out _));
+            Assert.Equal(1, doc.RootElement.GetProperty("totalItems").GetInt32());
             Assert.True(System.IO.File.Exists(Path.Combine(newerDir, "Batman-001.cbz")));
         }
         finally

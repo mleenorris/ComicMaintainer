@@ -537,4 +537,63 @@ public class JobsControllerTests
         var statusCodeResult = Assert.IsType<ObjectResult>(result.Result);
         Assert.Equal(500, statusCodeResult.StatusCode);
     }
+
+    [Fact]
+    public async Task DeleteSelected_ValidRequest_QueuesJobAndReturnsBothJobIdShapes()
+    {
+        // Arrange
+        var files = new List<string> { "/path/a.cbz", "/path/b.cbz" };
+        var jobId = Guid.NewGuid();
+        _mockProcessor
+            .Setup(p => p.DeleteFilesAsync(files, default))
+            .ReturnsAsync(jobId);
+
+        var request = new JobsController.ProcessSelectedRequest { Files = files };
+
+        // Act
+        var result = await _controller.DeleteSelected(request);
+
+        // Assert
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        var json = JObject.FromObject(ok.Value!);
+        // Both legacy snake_case and new camelCase shapes must be present so
+        // callers can use a single response contract.
+        Assert.Equal(jobId.ToString(), json["job_id"]!.ToString());
+        Assert.Equal(jobId.ToString(), json["jobId"]!.ToString());
+        Assert.Equal(2, json["total_items"]!.Value<int>());
+        Assert.Equal(2, json["totalItems"]!.Value<int>());
+    }
+
+    [Fact]
+    public async Task DeleteSelected_EmptyRequest_ReturnsBadRequest()
+    {
+        // Arrange
+        var request = new JobsController.ProcessSelectedRequest { Files = new List<string>() };
+
+        // Act
+        var result = await _controller.DeleteSelected(request);
+
+        // Assert
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        _mockProcessor.Verify(p => p.DeleteFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task DeleteSelected_WhenExceptionThrown_ReturnsInternalServerError()
+    {
+        // Arrange
+        var files = new List<string> { "/path/a.cbz" };
+        _mockProcessor
+            .Setup(p => p.DeleteFilesAsync(files, default))
+            .ThrowsAsync(new InvalidOperationException("boom"));
+
+        var request = new JobsController.ProcessSelectedRequest { Files = files };
+
+        // Act
+        var result = await _controller.DeleteSelected(request);
+
+        // Assert
+        var status = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(500, status.StatusCode);
+    }
 }

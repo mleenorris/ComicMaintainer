@@ -1861,7 +1861,7 @@
         function nextPage() { /* deprecated: infinite scroll */ }
         function previousPage() { /* deprecated: infinite scroll */ }
         
-        function filterFiles() {
+        async function filterFiles() {
             searchQuery = document.getElementById('headerSearchInput').value;
             // If a series detail is open, keep the user inside the series and
             // re-fetch its issues filtered by the new search query (the search
@@ -1871,10 +1871,18 @@
                 const detailId = currentSeriesDetailId;
                 seriesIssuesCache.delete(detailId);
                 renderSeriesDetail(detailId); // re-render to show loading state
-                loadSeriesIssues(detailId, true);
-                // Refresh the underlying series library too (without leaving the
-                // detail view) so going back shows the filtered series list.
-                loadActiveLibraryView(1, true);
+                // Refresh the underlying series library first so a possibly-
+                // changed series id (the backend union-find representative can
+                // drift between filters) is known before we fetch issues.
+                // Without this await, loadSeriesIssues would fire with the
+                // stale id and a 404 could get cached and then migrated onto
+                // the remapped id, leaving the detail stuck on a failure
+                // state until a full page refresh.
+                await loadActiveLibraryView(1, true);
+                const remapped = remapCurrentSeriesDetailId();
+                const targetId = remapped ? remapped.id : currentSeriesDetailId;
+                seriesIssuesCache.delete(targetId);
+                loadSeriesIssues(targetId, true);
                 return;
             }
             // Reload from page 1 with new search query
@@ -1928,14 +1936,18 @@
             // If a series detail is open, stay inside the series and re-fetch
             // its issues with the new filter (the filter applies to the issue
             // list too via the /api/files/series/{id}/issues endpoint). Also
-            // refresh the underlying series library in the background so it's
-            // up to date when the user goes back.
+            // refresh the underlying series library first so its (possibly
+            // remapped) id is resolved before we fetch issues — see
+            // filterFiles() for the rationale.
             if (currentSeriesDetailId) {
                 const detailId = currentSeriesDetailId;
                 seriesIssuesCache.delete(detailId);
                 renderSeriesDetail(detailId);
-                loadSeriesIssues(detailId, true);
-                loadActiveLibraryView(1, true);
+                await loadActiveLibraryView(1, true);
+                const remapped = remapCurrentSeriesDetailId();
+                const targetId = remapped ? remapped.id : currentSeriesDetailId;
+                seriesIssuesCache.delete(targetId);
+                loadSeriesIssues(targetId, true);
                 return;
             }
 
@@ -2448,9 +2460,14 @@
             const remapped = findSeriesByTitleKeys(currentSeriesDetailTitleKeys);
             if (!remapped || remapped.id === currentSeriesDetailId) return null;
             // Migrate cached issues to the new id so we don't refetch when
-            // the underlying content hasn't changed. Drop the old key.
-            if (seriesIssuesCache.has(currentSeriesDetailId) && !seriesIssuesCache.has(remapped.id)) {
-                seriesIssuesCache.set(remapped.id, seriesIssuesCache.get(currentSeriesDetailId));
+            // the underlying content hasn't changed. Drop the old key. Never
+            // migrate error entries — a 404/failure cached under the stale id
+            // (e.g. from a race during a filter change) must not poison the
+            // remapped id; leaving the new key empty lets renderSeriesDetail
+            // trigger a fresh fetch.
+            const oldCached = seriesIssuesCache.get(currentSeriesDetailId);
+            if (oldCached && !oldCached.error && !seriesIssuesCache.has(remapped.id)) {
+                seriesIssuesCache.set(remapped.id, oldCached);
             }
             seriesIssuesCache.delete(currentSeriesDetailId);
             currentSeriesDetailId = remapped.id;

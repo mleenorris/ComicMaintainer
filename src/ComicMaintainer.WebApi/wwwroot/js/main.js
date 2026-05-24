@@ -1864,25 +1864,20 @@
         async function filterFiles() {
             searchQuery = document.getElementById('headerSearchInput').value;
             // If a series detail is open, keep the user inside the series and
-            // re-fetch its issues filtered by the new search query (the search
-            // box does not apply to the issue list, but we still refresh the
-            // background series list so it's accurate when the user goes back).
+            // re-fetch its issues with the new search query. The series
+            // library is refreshed in the background so that pressing Back
+            // shows an up-to-date list, but we deliberately do NOT await it
+            // — awaiting causes the open series id to potentially drift
+            // (union-find representative changes when the filtered file-set
+            // changes) and leaves the user staring at a loading spinner
+            // while the library reload happens, which is what makes filter
+            // toggles feel like they "kick the user out" of the view.
             if (currentSeriesDetailId) {
                 const detailId = currentSeriesDetailId;
                 seriesIssuesCache.delete(detailId);
                 renderSeriesDetail(detailId); // re-render to show loading state
-                // Refresh the underlying series library first so a possibly-
-                // changed series id (the backend union-find representative can
-                // drift between filters) is known before we fetch issues.
-                // Without this await, loadSeriesIssues would fire with the
-                // stale id and a 404 could get cached and then migrated onto
-                // the remapped id, leaving the detail stuck on a failure
-                // state until a full page refresh.
-                await loadActiveLibraryView(1, true);
-                const remapped = remapCurrentSeriesDetailId();
-                const targetId = remapped ? remapped.id : currentSeriesDetailId;
-                seriesIssuesCache.delete(targetId);
-                loadSeriesIssues(targetId, true);
+                loadSeriesIssues(detailId, true);
+                loadActiveLibraryView(1, true);
                 return;
             }
             // Reload from page 1 with new search query
@@ -1935,19 +1930,21 @@
 
             // If a series detail is open, stay inside the series and re-fetch
             // its issues with the new filter (the filter applies to the issue
-            // list too via the /api/files/series/{id}/issues endpoint). Also
-            // refresh the underlying series library first so its (possibly
-            // remapped) id is resolved before we fetch issues — see
-            // filterFiles() for the rationale.
+            // list too via the /api/files/series/{id}/issues endpoint). The
+            // backend tolerates id-drift (union-find representative changes
+            // between filtered file-sets) by resolving the series via the
+            // unfiltered groups, so we can safely fetch issues using the
+            // current id without first waiting for the series library to
+            // reload. Refresh the library in the background so going Back
+            // shows fresh data — but do NOT await it, otherwise the user is
+            // stuck on a loading spinner during what should be a quick
+            // in-place refresh of the issues grid.
             if (currentSeriesDetailId) {
                 const detailId = currentSeriesDetailId;
                 seriesIssuesCache.delete(detailId);
                 renderSeriesDetail(detailId);
-                await loadActiveLibraryView(1, true);
-                const remapped = remapCurrentSeriesDetailId();
-                const targetId = remapped ? remapped.id : currentSeriesDetailId;
-                seriesIssuesCache.delete(targetId);
-                loadSeriesIssues(targetId, true);
+                loadSeriesIssues(detailId, true);
+                loadActiveLibraryView(1, true);
                 return;
             }
 
@@ -2750,6 +2747,11 @@
                         </div>
                     ` : issuesFailed ? `
                         <div class="empty-state"><p>Failed to load issues. <button type="button" class="btn btn-small" onclick="loadSeriesIssues('${escapeJs(seriesId)}', true)">Retry</button></p></div>
+                    ` : issues.length === 0 ? `
+                        <div class="empty-state">
+                            <p>${filterMode !== 'all' || searchQuery ? 'No issues in this series match the current filter.' : 'No issues in this series.'}</p>
+                            ${filterMode !== 'all' ? `<button type="button" class="btn btn-small" onclick="setHeaderFilter('all')">Clear filter</button>` : ''}
+                        </div>
                     ` : `
                         <div class="series-issues-grid">
                             ${buildSeriesIssuesGridItems(issues).map(item => {

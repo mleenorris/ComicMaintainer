@@ -239,7 +239,47 @@ public class SeriesLibraryService : ISeriesLibraryService
         var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
         if (!groups.TryGetValue(seriesId, out var accumulator))
         {
-            return null;
+            // The requested series id is not present in the filtered groups.
+            // This happens for two reasons when an active file filter is in
+            // effect: (1) the filter excludes every file of the series, or
+            // (2) the union-find representative used as the series id
+            // "drifted" because excluding files changed which file is the
+            // first key in the union. Both cases happen during ordinary
+            // filter-toggle usage from the series-detail view and must NOT
+            // 404 — otherwise the UI shows a "Failed to load issues" error
+            // and the user is effectively kicked out of the series view.
+            //
+            // Resolve the series via the unfiltered groups: if found there,
+            // try to map it back to an equivalent filtered group by matching
+            // canonical title / aliases (id-drift); otherwise synthesize an
+            // empty accumulator that preserves the series metadata so the
+            // detail view stays open with an empty issues list.
+            if (string.IsNullOrWhiteSpace(fileFilter))
+            {
+                return null;
+            }
+
+            var unfilteredGroups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+            if (!unfilteredGroups.TryGetValue(seriesId, out var unfilteredAccumulator))
+            {
+                return null;
+            }
+
+            accumulator = FindMatchingFilteredGroup(groups, unfilteredAccumulator)
+                ?? new SeriesAccumulator
+                {
+                    Id = unfilteredAccumulator.Id,
+                    DisplayTitle = unfilteredAccumulator.DisplayTitle,
+                    CanonicalTitle = unfilteredAccumulator.CanonicalTitle,
+                    MetadataSource = unfilteredAccumulator.MetadataSource,
+                    LookupStatus = unfilteredAccumulator.LookupStatus,
+                    LastLookupUtc = unfilteredAccumulator.LastLookupUtc,
+                    Aliases = new List<string>(unfilteredAccumulator.Aliases),
+                    HasExternalImage = unfilteredAccumulator.HasExternalImage,
+                    ImageNormalizedKey = unfilteredAccumulator.ImageNormalizedKey
+                    // Issues intentionally left empty: the active filter
+                    // excludes every file in this series.
+                };
         }
 
         // Best-effort upgrade: for issues with empty title metadata, try the
@@ -1250,6 +1290,47 @@ public class SeriesLibraryService : ISeriesLibraryService
             ProviderUnmatchedFilter => !hasMatch,
             _ => true
         };
+    }
+
+    private static SeriesAccumulator? FindMatchingFilteredGroup(
+        Dictionary<string, SeriesAccumulator> filteredGroups,
+        SeriesAccumulator reference)
+    {
+        if (filteredGroups.Count == 0) return null;
+
+        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(string? value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                keys.Add(value.Trim());
+            }
+        }
+        Add(reference.CanonicalTitle);
+        Add(reference.DisplayTitle);
+        foreach (var alias in reference.Aliases) Add(alias);
+        if (keys.Count == 0) return null;
+
+        foreach (var candidate in filteredGroups.Values)
+        {
+            if (!string.IsNullOrWhiteSpace(candidate.CanonicalTitle) && keys.Contains(candidate.CanonicalTitle))
+            {
+                return candidate;
+            }
+            if (!string.IsNullOrWhiteSpace(candidate.DisplayTitle) && keys.Contains(candidate.DisplayTitle))
+            {
+                return candidate;
+            }
+            foreach (var alias in candidate.Aliases)
+            {
+                if (!string.IsNullOrWhiteSpace(alias) && keys.Contains(alias))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return null;
     }
 
     private sealed class SeriesAccumulator

@@ -627,6 +627,81 @@ public class MetadataController : ControllerBase
         public string? Language { get; set; }
     }
 
+    /// <summary>
+    /// Set (or clear, by passing null/empty) the user-pinned localized title
+    /// for a series. The pinned title wins over the language-preference rule
+    /// but loses to a user-canonical override. Must equal the canonical
+    /// title or one of the cached localized titles for the series.
+    /// </summary>
+    [HttpPut("series/{seriesTitle}/pinned-localized-title")]
+    public async Task<ActionResult<SeriesMetadataCacheRecord>> SetPinnedLocalizedTitle(
+        string seriesTitle,
+        [FromBody] PinnedLocalizedTitleRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return BadRequest("Series title is required");
+        }
+
+        try
+        {
+            var record = await _cache.SetPinnedLocalizedTitleAsync(
+                seriesTitle,
+                request?.PinnedTitle,
+                cancellationToken);
+
+            if (record is null)
+            {
+                return NotFound($"No cached metadata exists for series '{seriesTitle}'.");
+            }
+
+            // Fire-and-forget per-file retag so on-disk <Series> tags catch
+            // up with the new pin (same flow as preferred-language changes).
+            if (_languageRetag is not null)
+            {
+                try
+                {
+                    var retagJobId = await _languageRetag.QueueRetagForSeriesAsync(record, cancellationToken);
+                    if (retagJobId is not null)
+                    {
+                        _logger.LogInformation(
+                            LoggingHelper.WithWebsitePrefix("Queued per-file retag job {JobId} after pinned-title change for {SeriesTitle}"),
+                            retagJobId.Value, LoggingHelper.SanitizeForLog(seriesTitle));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        LoggingHelper.WithWebsitePrefix("Failed to queue per-file retag after pinned-title change for {SeriesTitle}"),
+                        LoggingHelper.SanitizeForLog(seriesTitle));
+                }
+            }
+
+            return Ok(record);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error setting pinned localized title for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
+            return StatusCode(500, "Error setting pinned localized title");
+        }
+    }
+
+    public class PinnedLocalizedTitleRequest
+    {
+        /// <summary>
+        /// Exact string to pin as the series' displayed/written <c>&lt;Series&gt;</c>
+        /// title. Must match the cached record's canonical title or one of
+        /// its localized titles (case-insensitive). Pass null or empty to
+        /// clear the pin and fall back to the language-preference rule.
+        /// </summary>
+        public string? PinnedTitle { get; set; }
+    }
+
     public class RefreshSelectedRequest
     {
         public List<string> Series { get; set; } = new();

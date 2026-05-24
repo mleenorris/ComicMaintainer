@@ -1215,6 +1215,13 @@
                      </select>
                  </div>
                  <div class="form-group">
+                     <label for="manageSeriesPinnedTitle" style="font-weight: 600; color: var(--text-secondary);">Pinned Title</label>
+                     <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Pin a specific title (canonical or one of the provider's localized titles) to be shown and written to <code>ComicInfo.xml</code> <code>&lt;Series&gt;</code> regardless of the preferred-language setting. A user-overridden canonical title still wins. Choose "(None)" to fall back to the language-preference rule.</p>
+                     <select id="manageSeriesPinnedTitle" name="manageSeriesPinnedTitle" onchange="saveManageSeriesPinnedTitle()" style="width: 100%; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); margin-top: 5px;">
+                         <option value="">(None — use language preference)</option>
+                     </select>
+                 </div>
+                 <div class="form-group">
                      <label style="font-weight: 600; color: var(--text-secondary);">Provider Aliases</label>
                      <div id="manageSeriesProviderAliases" style="padding: 10px; background: var(--bg-hover); border-radius: 5px; margin-top: 5px; min-height: 36px;">None</div>
                      <div id="manageSeriesProviderSource" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;"></div>

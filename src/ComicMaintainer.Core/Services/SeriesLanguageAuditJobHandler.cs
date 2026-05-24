@@ -27,19 +27,22 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
     private readonly ISeriesLanguagePreferenceRetagService _retag;
     private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly ILogger<SeriesLanguageAuditJobHandler> _logger;
+    private readonly ISeriesNameResolver? _seriesNameResolver;
 
     public SeriesLanguageAuditJobHandler(
         ISeriesMetadataCacheService cache,
         IFileStoreService fileStore,
         ISeriesLanguagePreferenceRetagService retag,
         IOptionsMonitor<AppSettings> appSettings,
-        ILogger<SeriesLanguageAuditJobHandler> logger)
+        ILogger<SeriesLanguageAuditJobHandler> logger,
+        ISeriesNameResolver? seriesNameResolver = null)
     {
         _cache = cache;
         _fileStore = fileStore;
         _retag = retag;
         _appSettings = appSettings;
         _logger = logger;
+        _seriesNameResolver = seriesNameResolver;
     }
 
     public string JobKey => Key;
@@ -88,7 +91,14 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
             cancellationToken.ThrowIfCancellationRequested();
             seriesScanned++;
 
-            var expected = SeriesDisplayTitleResolver.Resolve(record, globalDefault);
+            // Route through ISeriesNameResolver when registered so the
+            // language-audit's "expected" value matches the string the
+            // normalize pipeline writes into ComicInfo.xml — the audit
+            // exists to catch drift between cache state and on-disk
+            // metadata, so it must use the same resolver as the writer.
+            var expected = _seriesNameResolver is not null
+                ? _seriesNameResolver.ResolveForRecord(record)
+                : SeriesDisplayTitleResolver.Resolve(record, globalDefault);
             if (string.IsNullOrWhiteSpace(expected))
             {
                 continue;

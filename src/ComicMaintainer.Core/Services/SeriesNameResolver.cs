@@ -89,9 +89,12 @@ public class SeriesNameResolver : ISeriesNameResolver
             if (record is not null && !string.IsNullOrWhiteSpace(record.CanonicalTitle))
             {
                 var resolved = ResolveDisplayTitle(record, globalPreferred);
-                var appliedLanguage = !string.IsNullOrWhiteSpace(record.PreferredLanguage)
-                    ? record.PreferredLanguage
-                    : globalPreferred;
+                var pinDecided = IsPinDecided(record);
+                var appliedLanguage = pinDecided
+                    ? null
+                    : (!string.IsNullOrWhiteSpace(record.PreferredLanguage)
+                        ? record.PreferredLanguage
+                        : globalPreferred);
                 if (mutateCache)
                 {
                     await EnsureFolderNameIsAliasAsync(folderSeries, record.CanonicalTitle, cancellationToken);
@@ -99,13 +102,16 @@ public class SeriesNameResolver : ISeriesNameResolver
                 return new SeriesNameResolution
                 {
                     ResolvedSeries = resolved,
-                    WinningStep = SeriesNameResolutionStep.MatchedCache,
+                    WinningStep = pinDecided
+                        ? SeriesNameResolutionStep.PinnedLocalizedTitle
+                        : SeriesNameResolutionStep.MatchedCache,
                     Candidates = candidates,
                     FolderSeries = folderSeries,
                     MatchedCacheKey = record.NormalizedKey,
                     AppliedLanguage = appliedLanguage,
-                    Explanation =
-                        $"Matched cache record '{record.NormalizedKey}' (status='{record.LookupStatus}') matched candidate '{candidate}'; resolved to '{resolved}' under language '{appliedLanguage ?? "(none)"}'."
+                    Explanation = pinDecided
+                        ? $"Matched cache record '{record.NormalizedKey}' has pinned localized title '{record.PinnedLocalizedTitle}'; pin wins over language preference."
+                        : $"Matched cache record '{record.NormalizedKey}' (status='{record.LookupStatus}') matched candidate '{candidate}'; resolved to '{resolved}' under language '{appliedLanguage ?? "(none)"}'."
                 };
             }
         }
@@ -125,9 +131,12 @@ public class SeriesNameResolver : ISeriesNameResolver
                     && string.Equals(lt!.Title, metadata.Series, StringComparison.OrdinalIgnoreCase)))
             {
                 var resolved = ResolveDisplayTitle(folderRecord, globalPreferred);
-                var appliedLanguage = !string.IsNullOrWhiteSpace(folderRecord.PreferredLanguage)
-                    ? folderRecord.PreferredLanguage
-                    : globalPreferred;
+                var pinDecided = IsPinDecided(folderRecord);
+                var appliedLanguage = pinDecided
+                    ? null
+                    : (!string.IsNullOrWhiteSpace(folderRecord.PreferredLanguage)
+                        ? folderRecord.PreferredLanguage
+                        : globalPreferred);
                 if (mutateCache)
                 {
                     await EnsureFolderNameIsAliasAsync(folderSeries, folderRecord.CanonicalTitle, cancellationToken);
@@ -135,13 +144,16 @@ public class SeriesNameResolver : ISeriesNameResolver
                 return new SeriesNameResolution
                 {
                     ResolvedSeries = resolved,
-                    WinningStep = SeriesNameResolutionStep.LocalizedTitleBackref,
+                    WinningStep = pinDecided
+                        ? SeriesNameResolutionStep.PinnedLocalizedTitle
+                        : SeriesNameResolutionStep.LocalizedTitleBackref,
                     Candidates = candidates,
                     FolderSeries = folderSeries,
                     MatchedCacheKey = folderRecord.NormalizedKey,
                     AppliedLanguage = appliedLanguage,
-                    Explanation =
-                        $"File <Series> '{metadata.Series}' matched localized-title on folder's cache record '{folderRecord.NormalizedKey}'; resolved to '{resolved}'."
+                    Explanation = pinDecided
+                        ? $"File <Series> '{metadata.Series}' matched localized-title on folder's cache record '{folderRecord.NormalizedKey}', which has pinned localized title '{folderRecord.PinnedLocalizedTitle}'."
+                        : $"File <Series> '{metadata.Series}' matched localized-title on folder's cache record '{folderRecord.NormalizedKey}'; resolved to '{resolved}'."
                 };
             }
         }
@@ -250,6 +262,26 @@ public class SeriesNameResolver : ISeriesNameResolver
             return record.CanonicalTitle.Trim();
         }
         return UnknownSeries;
+    }
+
+    /// <summary>
+    /// True when the record's resolution would be decided by
+    /// <see cref="SeriesMetadataCacheRecord.PinnedLocalizedTitle"/>: i.e.
+    /// not user-canonical, and the pinned title is non-empty. Used to
+    /// report <see cref="SeriesNameResolutionStep.PinnedLocalizedTitle"/>
+    /// as the winning step on top of an otherwise MatchedCache /
+    /// LocalizedTitleBackref match.
+    /// </summary>
+    private static bool IsPinDecided(SeriesMetadataCacheRecord record) =>
+        !(record.IsUserCanonical && !string.IsNullOrWhiteSpace(record.CanonicalTitle))
+        && !string.IsNullOrWhiteSpace(record.PinnedLocalizedTitle);
+
+    /// <inheritdoc />
+    public string ResolveForRecord(SeriesMetadataCacheRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        var globalPreferred = _settings.CurrentValue.DefaultPreferredLanguage;
+        return ResolveDisplayTitle(record, globalPreferred);
     }
 
     private async Task<SeriesMetadataCacheRecord?> LookupUserCanonicalRecordAsync(string seriesName, CancellationToken cancellationToken)

@@ -2061,19 +2061,42 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             }
         }
 
-        foreach (var candidate in candidateSeries)
+        // Skip Step 4 entirely when the cache holds a "cleared" record for any
+        // candidate — the user has explicitly cleared external metadata and
+        // it must not be silently re-fetched. Only an explicit refresh /
+        // manual match may bring external metadata back.
+        var hasClearedRecord = await AnyCandidateClearedAsync(candidateSeries, cancellationToken);
+
+        foreach (var candidate in hasClearedRecord ? (IEnumerable<string>)Array.Empty<string>() : candidateSeries)
         {
             var externalMetadata = await LookupExternalSeriesMetadataAsync(candidate, cancellationToken);
             if (!string.IsNullOrWhiteSpace(externalMetadata?.CanonicalTitle))
             {
                 var canonical = externalMetadata!.CanonicalTitle.Trim();
 
-                // Wrap the external lookup in a transient cache-record-like
-                // object so the same resolver is used for the language rules.
-                // PreferredLanguage is left null (the per-series override only
-                // exists once the user has explicitly set it on a cached
-                // record); the global default applies.
-                var transient = new SeriesMetadataCacheRecord
+                // Persist the lookup so subsequent normalize calls hit the
+                // cache (the matched-record pass above) instead of re-querying
+                // the provider on every file. Failure to persist must not
+                // prevent the per-file normalize from proceeding.
+                SeriesMetadataCacheRecord? persisted = null;
+                if (_seriesMetadataCache is not null)
+                {
+                    try
+                    {
+                        persisted = await _seriesMetadataCache.PersistExternalLookupAsync(candidate, externalMetadata, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex,
+                            "Failed to persist external lookup for series {SeriesName}",
+                            LoggingHelper.SanitizeForLog(candidate));
+                    }
+                }
+
+                // Resolve the display title from the persisted record when
+                // available so per-series language preferences (if any) apply;
+                // otherwise fall back to a transient projection of the lookup.
+                var resolveSource = persisted ?? new SeriesMetadataCacheRecord
                 {
                     CanonicalTitle = canonical,
                     LocalizedTitles = externalMetadata.LocalizedTitles is { Count: > 0 }
@@ -2086,7 +2109,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                     IsUserCanonical = false
                 };
 
-                var resolved = ResolveDisplayTitle(transient, globalPreferredLanguage);
+                var resolved = ResolveDisplayTitle(resolveSource, globalPreferredLanguage);
                 await EnsureFolderNameIsAliasAsync(fallbackSeries, canonical, cancellationToken);
                 return resolved;
             }
@@ -2316,6 +2339,40 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             _logger.LogWarning(ex, "Failed to resolve external metadata for series {SeriesName}", LoggingHelper.SanitizeForLog(seriesName));
             return null;
         }
+    }
+
+    /// <summary>
+    /// True when any candidate has a cached record with
+    /// <c>LookupStatus == "cleared"</c>. Used by the legacy
+    /// <see cref="ResolveNormalizedSeriesAsync"/> fallback to honor an explicit
+    /// user clear: a cleared series's external metadata must not be silently
+    /// re-fetched on subsequent normalize runs.
+    /// </summary>
+    private async Task<bool> AnyCandidateClearedAsync(IReadOnlyList<string> candidates, CancellationToken cancellationToken)
+    {
+        if (_seriesMetadataCache is null || candidates.Count == 0) return false;
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate)) continue;
+            try
+            {
+                var key = _seriesMetadataCache.NormalizeKey(candidate);
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                var record = await _seriesMetadataCache.GetAsync(key, cancellationToken);
+                if (record is not null
+                    && string.Equals(record.LookupStatus, "cleared", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to consult series metadata cache for cleared-status check on {SeriesName}",
+                    LoggingHelper.SanitizeForLog(candidate));
+            }
+        }
+        return false;
     }
 
     /// <summary>

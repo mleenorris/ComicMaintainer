@@ -426,6 +426,60 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
+    public async Task PersistExternalLookupAsync_UpsertsAsSuccessAndPreservesUserAliases()
+    {
+        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" }, null);
+
+        var record = await _service.PersistExternalLookupAsync(
+            "Batman",
+            new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Aliases = new List<string> { "Bruce Wayne" },
+                Source = "ComicVine"
+            });
+
+        // Auto-persisted external lookups are recorded as "success" so they
+        // can be distinguished from user-driven manual matches, while still
+        // satisfying the matched-cache pass on subsequent resolves.
+        Assert.Equal("success", record.LookupStatus);
+        Assert.Equal("Batman", record.CanonicalTitle);
+        Assert.Equal("ComicVine", record.Source);
+        Assert.NotNull(record.LastLookupUtc);
+        Assert.Contains("Bruce Wayne", record.Aliases);
+        Assert.Contains("Caped Crusader", record.UserAliases);
+    }
+
+    [Fact]
+    public async Task PersistExternalLookupAsync_PreservesUserCanonicalOverride()
+    {
+        await _service.SetUserAliasesAsync("Batman", Array.Empty<string>(), canonicalTitleOverride: "My Batman");
+
+        var record = await _service.PersistExternalLookupAsync(
+            "Batman",
+            new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman (1940)",
+                Source = "ComicVine"
+            });
+
+        Assert.Equal("My Batman", record.CanonicalTitle);
+        Assert.True(record.IsUserCanonical);
+        Assert.Equal("success", record.LookupStatus);
+    }
+
+    [Fact]
+    public async Task PersistExternalLookupAsync_RejectsInvalidInput()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.PersistExternalLookupAsync("Batman", new ExternalSeriesMetadata()));
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.PersistExternalLookupAsync("", new ExternalSeriesMetadata { CanonicalTitle = "X" }));
+        await Assert.ThrowsAsync<ArgumentNullException>(() =>
+            _service.PersistExternalLookupAsync("Batman", null!));
+    }
+
+    [Fact]
     public async Task RefreshAsync_AfterManualMatch_LooksUpByManualCanonicalAndPreservesStatus()
     {
         // User manually matched "Batman" to a specific candidate ("Batman: Year One").

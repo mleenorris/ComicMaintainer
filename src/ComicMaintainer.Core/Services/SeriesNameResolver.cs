@@ -159,13 +159,38 @@ public class SeriesNameResolver : ISeriesNameResolver
         }
 
         // Step 4: external provider lookup.
-        foreach (var candidate in candidates)
+        // Skip when the user has explicitly cleared the cached external
+        // metadata for this candidate — a "cleared" record must not be
+        // silently re-populated by an automatic lookup. Only explicit user
+        // actions (refresh / manual match) may repopulate external metadata.
+        var hasClearedRecord = await AnyCandidateClearedAsync(candidates, cancellationToken);
+        foreach (var candidate in hasClearedRecord ? (IEnumerable<string>)Array.Empty<string>() : candidates)
         {
             var external = await LookupExternalSeriesMetadataAsync(candidate, cancellationToken);
             if (!string.IsNullOrWhiteSpace(external?.CanonicalTitle))
             {
                 var canonical = external!.CanonicalTitle.Trim();
-                var transient = new SeriesMetadataCacheRecord
+
+                // Persist the lookup so subsequent normalize/resolve calls
+                // read from the cache (Step 2) instead of re-querying the
+                // provider. Honor the caller's mutateCache flag: read-only
+                // resolution paths (e.g. previews) must not write back.
+                SeriesMetadataCacheRecord? persisted = null;
+                if (mutateCache && _cache is not null)
+                {
+                    try
+                    {
+                        persisted = await _cache.PersistExternalLookupAsync(candidate, external, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex,
+                            "Failed to persist external lookup for series {SeriesName}",
+                            LoggingHelper.SanitizeForLog(candidate));
+                    }
+                }
+
+                var resolveSource = persisted ?? new SeriesMetadataCacheRecord
                 {
                     CanonicalTitle = canonical,
                     LocalizedTitles = external.LocalizedTitles is { Count: > 0 }
@@ -177,7 +202,7 @@ public class SeriesNameResolver : ISeriesNameResolver
                     PreferredLanguage = null,
                     IsUserCanonical = false
                 };
-                var resolved = ResolveDisplayTitle(transient, globalPreferred);
+                var resolved = ResolveDisplayTitle(resolveSource, globalPreferred);
                 if (mutateCache)
                 {
                     await EnsureFolderNameIsAliasAsync(folderSeries, canonical, cancellationToken);
@@ -188,7 +213,7 @@ public class SeriesNameResolver : ISeriesNameResolver
                     WinningStep = SeriesNameResolutionStep.ExternalLookup,
                     Candidates = candidates,
                     FolderSeries = folderSeries,
-                    MatchedCacheKey = null,
+                    MatchedCacheKey = persisted?.NormalizedKey,
                     AppliedLanguage = globalPreferred,
                     Explanation =
                         $"External provider '{external.Source ?? "(unknown)"}' returned canonical '{canonical}' for candidate '{candidate}'; resolved to '{resolved}' under language '{globalPreferred ?? "(none)"}'."
@@ -342,6 +367,42 @@ public class SeriesNameResolver : ISeriesNameResolver
                 LoggingHelper.SanitizeForLog(seriesName));
             return null;
         }
+    }
+
+    /// <summary>
+    /// True when any of the supplied candidates resolves (via the normalized
+    /// cache key) to a record whose <see cref="SeriesMetadataCacheRecord.LookupStatus"/>
+    /// is <c>cleared</c>. Used by Step 4 (external provider lookup) to honor
+    /// an explicit user clear: once a series's external metadata has been
+    /// cleared, automatic re-fetches must not re-populate it. Only an
+    /// explicit refresh or manual match (which set a non-cleared status)
+    /// may bring external metadata back.
+    /// </summary>
+    private async Task<bool> AnyCandidateClearedAsync(IReadOnlyList<string> candidates, CancellationToken cancellationToken)
+    {
+        if (_cache is null || candidates.Count == 0) return false;
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate)) continue;
+            try
+            {
+                var key = _cache.NormalizeKey(candidate);
+                if (string.IsNullOrWhiteSpace(key)) continue;
+                var record = await _cache.GetAsync(key, cancellationToken);
+                if (record is not null
+                    && string.Equals(record.LookupStatus, "cleared", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Failed to consult cache for cleared-status check on {SeriesName}",
+                    LoggingHelper.SanitizeForLog(candidate));
+            }
+        }
+        return false;
     }
 
     /// <summary>

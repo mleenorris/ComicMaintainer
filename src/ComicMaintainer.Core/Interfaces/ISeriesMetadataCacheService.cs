@@ -93,6 +93,27 @@ public interface ISeriesMetadataCacheService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Persist the result of an automatic external-provider lookup into the
+    /// cache so subsequent normalize/resolve operations read from the cache
+    /// instead of re-hitting the provider. Mirrors
+    /// <see cref="ApplyExternalMatchAsync"/> but records the lookup as an
+    /// automatic <c>success</c> (rather than a user-driven <c>manual_match</c>),
+    /// so the user can still pick a different candidate via the manual-match
+    /// UI. Preserves user-canonical title overrides and user aliases; a
+    /// user-uploaded image is never overwritten.
+    /// <para>
+    /// Callers should not invoke this when the cached record's
+    /// <see cref="SeriesMetadataCacheRecord.LookupStatus"/> is <c>cleared</c>
+    /// — a user-requested clear must not be silently undone by the next
+    /// auto-lookup.
+    /// </para>
+    /// </summary>
+    Task<SeriesMetadataCacheRecord> PersistExternalLookupAsync(
+        string seriesTitle,
+        ExternalSeriesMetadata lookup,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Clear the external-metadata fields cached for a series (provider
     /// aliases, source, last-lookup, lookup-status, and the canonical-title
     /// override if it came from the provider). User-managed aliases and a

@@ -3264,8 +3264,26 @@
             if (scrollObserver) {
                 try { scrollObserver.disconnect(); } catch (e) { /* ignore */ }
             }
-            const sentinel = document.getElementById('libraryScrollSentinel');
-            if (!sentinel) return;
+            const fileList = document.getElementById('fileList');
+            if (!fileList) return;
+            // The sentinel must live INSIDE the scrolling container (`.file-list`)
+            // and be observed against that container as the IO root. Otherwise the
+            // sentinel — sitting at the bottom of the viewport because `.file-list`
+            // has `flex: 1` — would be perpetually within the 400 px rootMargin and
+            // trigger an infinite "load more → re-render → re-observe" loop. That
+            // loop is what made the list flicker and items unclickable on desktop
+            // and could leave the list appearing cut off or never displayed at all
+            // on smaller viewports.
+            let sentinel = document.getElementById('libraryScrollSentinel');
+            if (!sentinel) {
+                sentinel = document.createElement('div');
+                sentinel.id = 'libraryScrollSentinel';
+            }
+            if (sentinel.parentElement !== fileList) {
+                fileList.appendChild(sentinel);
+            } else if (sentinel !== fileList.lastElementChild) {
+                fileList.appendChild(sentinel);
+            }
             scrollObserver = new IntersectionObserver((entries) => {
                 for (const e of entries) {
                     if (!e.isIntersecting) continue;
@@ -3279,7 +3297,7 @@
                         }
                     }
                 }
-            }, { rootMargin: '400px' });
+            }, { root: fileList, rootMargin: '400px' });
             scrollObserver.observe(sentinel);
         }
 

@@ -315,4 +315,94 @@ public class SeriesNameResolverTests
 
         Assert.Equal("Wan Piisu", resolver.ResolveForRecord(record));
     }
+
+    [Fact]
+    public async Task ResolveAsync_ExternalLookupHit_PersistsToCache_WhenMutateCacheTrue()
+    {
+        // External metadata returned by the auto-lookup step must be written
+        // back to the cache so subsequent normalize/resolve calls hit the
+        // matched-cache pass instead of re-querying the provider on every
+        // file. This is the core "external metadata persistence" guarantee.
+        var resolver = BuildResolver();
+        _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        var lookup = new ExternalSeriesMetadata
+        {
+            CanonicalTitle = "One Piece",
+            Source = "MangaDex",
+            LocalizedTitles = new List<LocalizedTitle> { new("One Piece", "en") }
+        };
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                 .ReturnsAsync(lookup);
+        _cache.Setup(c => c.PersistExternalLookupAsync(It.IsAny<string>(), It.IsAny<ExternalSeriesMetadata>(), It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new SeriesMetadataCacheRecord
+              {
+                  NormalizedKey = "one-piece",
+                  CanonicalTitle = "One Piece",
+                  LookupStatus = "success",
+                  LocalizedTitles = lookup.LocalizedTitles
+              });
+
+        var result = await resolver.ResolveAsync(
+            "/library/One Piece/c1.cbz",
+            new ComicMetadata { Series = "One Piece" },
+            mutateCache: true);
+
+        Assert.Equal(SeriesNameResolutionStep.ExternalLookup, result.WinningStep);
+        _cache.Verify(c => c.PersistExternalLookupAsync(
+            It.IsAny<string>(),
+            It.Is<ExternalSeriesMetadata>(m => m.CanonicalTitle == "One Piece"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ExternalLookupHit_DoesNotPersist_WhenMutateCacheFalse()
+    {
+        // Read-only resolution paths (previews, diagnostics) must not write
+        // back to the cache even when an external lookup succeeds.
+        var resolver = BuildResolver();
+        _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                 .ReturnsAsync(new ExternalSeriesMetadata { CanonicalTitle = "One Piece", Source = "MangaDex" });
+
+        var result = await resolver.ResolveAsync(
+            "/library/One Piece/c1.cbz",
+            new ComicMetadata { Series = "One Piece" },
+            mutateCache: false);
+
+        Assert.Equal(SeriesNameResolutionStep.ExternalLookup, result.WinningStep);
+        _cache.Verify(c => c.PersistExternalLookupAsync(
+            It.IsAny<string>(),
+            It.IsAny<ExternalSeriesMetadata>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ClearedRecord_SkipsExternalLookup()
+    {
+        // After a user explicitly clears external metadata for a series, the
+        // resolver must NOT silently re-fetch it from the provider on the
+        // next normalize. Only an explicit refresh / manual match may
+        // repopulate external metadata.
+        var resolver = BuildResolver();
+        var cleared = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "one-piece",
+            CanonicalTitle = "one-piece",
+            LookupStatus = "cleared"
+        };
+        _cache.Setup(c => c.GetAsync("one-piece", It.IsAny<CancellationToken>())).ReturnsAsync(cleared);
+
+        var result = await resolver.ResolveAsync(
+            "/library/One Piece/c1.cbz",
+            new ComicMetadata { Series = "One Piece" },
+            mutateCache: true);
+
+        // Should fall through past Step 4 to Step 5 (existing <Series>).
+        Assert.NotEqual(SeriesNameResolutionStep.ExternalLookup, result.WinningStep);
+        _external.Verify(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _cache.Verify(c => c.PersistExternalLookupAsync(
+            It.IsAny<string>(),
+            It.IsAny<ExternalSeriesMetadata>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
 }

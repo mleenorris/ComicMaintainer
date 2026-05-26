@@ -548,10 +548,29 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
     /// Manually adopt an externally-supplied candidate as the cached metadata
     /// for the series. Used to correct a wrong automatic match.
     /// </summary>
-    public async Task<SeriesMetadataCacheRecord> ApplyExternalMatchAsync(
+    public Task<SeriesMetadataCacheRecord> ApplyExternalMatchAsync(
         string seriesTitle,
         ExternalSeriesMetadata match,
         CancellationToken cancellationToken = default)
+        => UpsertExternalLookupAsync(seriesTitle, match, "manual_match", cancellationToken);
+
+    /// <summary>
+    /// Persist an automatic provider lookup (e.g. the one performed by
+    /// <see cref="ISeriesNameResolver"/>'s external-lookup step) so it survives
+    /// across normalize calls without re-querying the provider. Recorded with
+    /// status <c>success</c>.
+    /// </summary>
+    public Task<SeriesMetadataCacheRecord> PersistExternalLookupAsync(
+        string seriesTitle,
+        ExternalSeriesMetadata lookup,
+        CancellationToken cancellationToken = default)
+        => UpsertExternalLookupAsync(seriesTitle, lookup, "success", cancellationToken);
+
+    private async Task<SeriesMetadataCacheRecord> UpsertExternalLookupAsync(
+        string seriesTitle,
+        ExternalSeriesMetadata match,
+        string lookupStatus,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
         {
@@ -567,7 +586,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         }
 
         var key = NormalizeKey(seriesTitle);
-        var trimmedTitle = seriesTitle.Trim();
         var now = DateTime.UtcNow;
 
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -583,7 +601,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 IsUserCanonical = false,
                 Source = match.Source,
                 LastLookupUtc = now,
-                LookupStatus = "manual_match",
+                LookupStatus = lookupStatus,
                 LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(match)),
                 CreatedAt = now,
                 UpdatedAt = now
@@ -603,7 +621,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             entity.Source = match.Source;
             entity.LastLookupUtc = now;
             entity.LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(match));
-            entity.LookupStatus = "manual_match";
+            entity.LookupStatus = lookupStatus;
             entity.UpdatedAt = now;
             BumpMetadataVersion(entity);
         }

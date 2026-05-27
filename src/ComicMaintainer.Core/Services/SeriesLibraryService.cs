@@ -294,14 +294,32 @@ public class SeriesLibraryService : ISeriesLibraryService
             ? sortedIssues
             : sortedIssues.Skip((page - 1) * effectivePerPage).Take(effectivePerPage).ToList();
 
+        // Best-effort upgrade: for issues with empty title metadata, try the
+        // archive on disk. Bounded to the requested page so we never read more
+        // archives than the user actually sees. An additional hard cap from
+        // AppSettings.SeriesIssuesMaxArchiveUpgrades protects against
+        // pathological requests (e.g. perPage == -1 with a 1000-issue series
+        // and no cached metadata) where the upgrade loop would otherwise
+        // dominate request latency.
+        var upgradeBudget = Math.Max(0, _settings.CurrentValue?.SeriesIssuesMaxArchiveUpgrades ?? 100);
+
         // Upgrade missing titles by opening just the visible archives.
         for (var i = 0; i < pageIssues.Count; i++)
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
             var issue = pageIssues[i];
             if (!string.IsNullOrWhiteSpace(issue.Title) && !string.IsNullOrWhiteSpace(issue.Issue))
             {
                 continue;
             }
+            if (upgradeBudget <= 0)
+            {
+                break;
+            }
+            upgradeBudget--;
 
             try
             {

@@ -3560,7 +3560,14 @@
             return 'dropdown-' + filepath.replace(/[^a-zA-Z0-9]/g, '_');
         }
         
-        function toggleSelectAll(checked) {
+        async function toggleSelectAll(checked) {
+            // In series view the "Select all issues" toggle should affect every
+            // issue in the series, not just the pages the user has scrolled
+            // through. Eagerly load any remaining pages before applying the
+            // selection change so unloaded issues are included too.
+            if (libraryViewMode === 'series' && currentSeriesDetailId) {
+                await ensureAllSeriesIssuesLoaded(currentSeriesDetailId);
+            }
             const visibleFilePaths = getCurrentSelectableFilePaths();
             if (checked) {
                 visibleFilePaths.forEach(filepath => selectedFiles.add(filepath));
@@ -3571,6 +3578,31 @@
                 renderSeriesDetail(currentSeriesDetailId);
             } else {
                 renderFileList();
+            }
+        }
+
+        async function ensureAllSeriesIssuesLoaded(seriesId) {
+            // Sequentially walk through remaining pages so the cache ends up
+            // holding every issue in the series. Bails out on errors, on
+            // navigation away from this series, or if a page fails to make
+            // progress (defensive guard against an infinite loop).
+            while (true) {
+                const entry = seriesIssuesCache.get(seriesId);
+                if (!entry || entry.error || entry.allLoaded) return;
+                if (currentSeriesDetailId !== seriesId) return;
+                const loadedCount = entry.loadedPages ? entry.loadedPages.size : 0;
+                const nextPage = loadedCount + 1;
+                if (entry.loadingPages && entry.loadingPages.has(nextPage)) {
+                    // Another caller is already fetching this page; wait briefly
+                    // and re-check so we don't fan out duplicate requests.
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                    continue;
+                }
+                await loadSeriesIssues(seriesId, false, nextPage);
+                const after = seriesIssuesCache.get(seriesId);
+                if (!after || after.error) return;
+                const afterCount = after.loadedPages ? after.loadedPages.size : 0;
+                if (afterCount <= loadedCount) return;
             }
         }
         

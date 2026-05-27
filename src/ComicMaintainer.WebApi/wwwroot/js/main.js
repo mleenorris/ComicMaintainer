@@ -2074,104 +2074,129 @@
             return getSeriesCoverUrl(token);
         }
 
+        // Lazy per-image hydration. Previously this function fetched every
+        // matching image immediately in batches of 8 — fine for small
+        // libraries, but with 100+ issue series it fired dozens of cover
+        // requests for off-screen cards. We now use an IntersectionObserver
+        // so each image is only fetched when it (or its container) is close
+        // to entering the viewport. The original eager-batch behaviour is
+        // kept as a fallback for environments without IntersectionObserver.
+        const PROTECTED_IMAGE_OBSERVER = (typeof IntersectionObserver !== 'undefined')
+            ? new IntersectionObserver(entries => {
+                for (const entry of entries) {
+                    if (!entry.isIntersecting) continue;
+                    const el = entry.target;
+                    PROTECTED_IMAGE_OBSERVER.unobserve(el);
+                    hydrateOneProtectedImage(el);
+                }
+            }, { rootMargin: '400px 0px' })
+            : null;
+
+        async function hydrateOneProtectedImage(image) {
+            const primary = image.dataset.protectedImage;
+            const fallback = image.dataset.protectedImageFallback;
+            if (!primary) return;
+            if (image.dataset.protectedImageLoaded === '1') return;
+            image.dataset.protectedImageLoaded = '1';
+
+            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+            const fetchOnce = async (url) => {
+                try {
+                    const response = await fetch(url, { headers: getAuthHeaders() });
+                    return { response, errored: false };
+                } catch (error) {
+                    return { response: null, errored: true, error };
+                }
+            };
+            const tryLoad = async (token) => {
+                if (!token) return 'missing';
+                if (protectedImageUrls.has(token)) {
+                    image.src = protectedImageUrls.get(token);
+                    return 'ok';
+                }
+                const url = resolveProtectedImageUrl(token);
+                if (!url) return 'missing';
+
+                let attempt = await fetchOnce(url);
+                let response = attempt.response;
+                const isTransient = attempt.errored
+                    || (response && response.status >= 500);
+                if (isTransient) {
+                    await sleep(250);
+                    attempt = await fetchOnce(url);
+                    response = attempt.response;
+                }
+
+                if (attempt.errored || !response) {
+                    console.warn('Protected image fetch failed', attempt.error);
+                    return 'failed';
+                }
+                if (response.status === 404) {
+                    return 'missing';
+                }
+                if (!response.ok) {
+                    return 'failed';
+                }
+
+                try {
+                    const blob = await response.blob();
+                    const objectUrl = URL.createObjectURL(blob);
+                    if (protectedImageUrls.size >= MAX_PROTECTED_IMAGE_CACHE_ENTRIES) {
+                        const oldestKey = protectedImageUrls.keys().next().value;
+                        if (oldestKey) {
+                            URL.revokeObjectURL(protectedImageUrls.get(oldestKey));
+                            protectedImageUrls.delete(oldestKey);
+                        }
+                    }
+                    protectedImageUrls.set(token, objectUrl);
+                    image.src = objectUrl;
+                    return 'ok';
+                } catch (error) {
+                    console.error('Failed to decode protected image', error);
+                    return 'failed';
+                }
+            };
+
+            const primaryResult = await tryLoad(primary);
+            if (primaryResult === 'missing' && fallback && fallback !== primary) {
+                await tryLoad(fallback);
+            } else if (primaryResult === 'failed') {
+                // Allow a future hydration attempt (e.g. when the element
+                // scrolls back into view after a transient network failure).
+                delete image.dataset.protectedImageLoaded;
+            }
+        }
+
         async function hydrateProtectedImages(container = document) {
             const images = container.querySelectorAll('[data-protected-image]');
-            const imageQueue = Array.from(images);
+            // Fast path: if the cover token is already cached, set it
+            // immediately so the user sees instant re-renders for issues
+            // they've already scrolled past. Uncached covers go through the
+            // observer (lazy) when available, or fall back to eager batched
+            // loading.
+            const uncached = [];
+            for (const image of images) {
+                const primary = image.dataset.protectedImage;
+                if (primary && protectedImageUrls.has(primary)) {
+                    image.src = protectedImageUrls.get(primary);
+                    image.dataset.protectedImageLoaded = '1';
+                    continue;
+                }
+                uncached.push(image);
+            }
+
+            if (PROTECTED_IMAGE_OBSERVER) {
+                for (const image of uncached) {
+                    PROTECTED_IMAGE_OBSERVER.observe(image);
+                }
+                return;
+            }
+
+            // Fallback (no IntersectionObserver support): batched eager load.
             const batchSize = 8;
-
-            // Outcome codes returned by tryLoad:
-            //   'ok'       — image successfully fetched and assigned
-            //   'missing'  — server returned 404, the image genuinely does
-            //                not exist and the fallback should be used
-            //   'failed'   — transient failure (network error, 5xx, abort);
-            //                substituting the fallback would display the
-            //                *wrong* image (e.g. a comic-page cover instead
-            //                of the cached series cover) so we leave the
-            //                element alone and rely on the next render or
-            //                a manual refresh.
-            const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-            for (let index = 0; index < imageQueue.length; index += batchSize) {
-                const batch = imageQueue.slice(index, index + batchSize);
-                await Promise.all(batch.map(async image => {
-                    const primary = image.dataset.protectedImage;
-                    const fallback = image.dataset.protectedImageFallback;
-                    if (!primary) {
-                        return;
-                    }
-
-                    const fetchOnce = async (url) => {
-                        try {
-                            const response = await fetch(url, { headers: getAuthHeaders() });
-                            return { response, errored: false };
-                        } catch (error) {
-                            return { response: null, errored: true, error };
-                        }
-                    };
-
-                    const tryLoad = async (token) => {
-                        if (!token) return 'missing';
-                        if (protectedImageUrls.has(token)) {
-                            image.src = protectedImageUrls.get(token);
-                            return 'ok';
-                        }
-                        const url = resolveProtectedImageUrl(token);
-                        if (!url) return 'missing';
-
-                        // One immediate attempt + one retry after a short
-                        // delay on transient failures (network error or
-                        // 5xx). This eliminates the "occasionally shows
-                        // the wrong cover" symptom caused by a single
-                        // hiccup falling through to the file-based cover.
-                        let attempt = await fetchOnce(url);
-                        let response = attempt.response;
-                        const isTransient = attempt.errored
-                            || (response && response.status >= 500);
-                        if (isTransient) {
-                            await sleep(250);
-                            attempt = await fetchOnce(url);
-                            response = attempt.response;
-                        }
-
-                        if (attempt.errored || !response) {
-                            console.warn('Protected image fetch failed', attempt.error);
-                            return 'failed';
-                        }
-                        if (response.status === 404) {
-                            return 'missing';
-                        }
-                        if (!response.ok) {
-                            return 'failed';
-                        }
-
-                        try {
-                            const blob = await response.blob();
-                            const objectUrl = URL.createObjectURL(blob);
-                            if (protectedImageUrls.size >= MAX_PROTECTED_IMAGE_CACHE_ENTRIES) {
-                                const oldestKey = protectedImageUrls.keys().next().value;
-                                if (oldestKey) {
-                                    URL.revokeObjectURL(protectedImageUrls.get(oldestKey));
-                                    protectedImageUrls.delete(oldestKey);
-                                }
-                            }
-                            protectedImageUrls.set(token, objectUrl);
-                            image.src = objectUrl;
-                            return 'ok';
-                        } catch (error) {
-                            console.error('Failed to decode protected image', error);
-                            return 'failed';
-                        }
-                    };
-
-                    // Only substitute the file-based fallback when the
-                    // primary is *known* to be missing (HTTP 404). On a
-                    // transient failure we deliberately leave the slot
-                    // empty rather than display a different image.
-                    const primaryResult = await tryLoad(primary);
-                    if (primaryResult === 'missing' && fallback && fallback !== primary) {
-                        await tryLoad(fallback);
-                    }
-                }));
+            for (let index = 0; index < uncached.length; index += batchSize) {
+                const batch = uncached.slice(index, index + batchSize);
+                await Promise.all(batch.map(hydrateOneProtectedImage));
             }
         }
 
@@ -2393,6 +2418,7 @@
         }
 
         function closeSeriesDetail() {
+            disconnectSeriesIssuesObserver();
             currentSeriesDetailId = null;
             currentSeriesDetailTitleKeys = null;
             currentSeriesDetailSeries = null;
@@ -2471,14 +2497,50 @@
             return remapped;
         }
 
-        async function loadSeriesIssues(seriesId, force = false) {
+        // Page size used when incrementally loading a series's issue list.
+        // Tuned so the first paint of a large (100+ issue) series renders
+        // quickly while still amortising request overhead across batches.
+        const SERIES_ISSUES_PAGE_SIZE = 100;
+
+        async function loadSeriesIssues(seriesId, force = false, page = 1) {
             if (!seriesId) return;
-            if (!force && seriesIssuesCache.has(seriesId)) {
+            if (force) {
+                seriesIssuesCache.delete(seriesId);
+            }
+            const existing = seriesIssuesCache.get(seriesId);
+            // First page already loaded and not forced — render and exit.
+            if (!force && page === 1 && existing && !existing.error && existing.issues.length > 0) {
                 renderSeriesDetail(seriesId);
                 return;
             }
+            // Subsequent page already loaded — nothing to do.
+            if (existing && !existing.error && existing.loadedPages && existing.loadedPages.has(page)) {
+                return;
+            }
+            // Another request is already loading this exact page.
+            if (existing && existing.loadingPages && existing.loadingPages.has(page)) {
+                return;
+            }
+
+            // Prime the cache entry so concurrent callers don't fan out.
+            let entry = existing;
+            if (!entry || entry.error) {
+                entry = {
+                    issues: [],
+                    total: 0,
+                    totalPages: 1,
+                    perPage: SERIES_ISSUES_PAGE_SIZE,
+                    loadedPages: new Set(),
+                    loadingPages: new Set(),
+                    allLoaded: false,
+                    error: false
+                };
+                seriesIssuesCache.set(seriesId, entry);
+            }
+            entry.loadingPages.add(page);
+
             try {
-                let url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=-1`);
+                let url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_PAGE_SIZE}&page=${page}`);
                 if (filterMode !== 'all') {
                     url += `&filter=${encodeURIComponent(filterMode)}`;
                 }
@@ -2487,13 +2549,36 @@
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    seriesIssuesCache.set(seriesId, { issues: [], total: 0, error: true });
+                    entry.error = true;
                 } else {
                     const data = await response.json();
-                    seriesIssuesCache.set(seriesId, {
-                        issues: data.issues || [],
-                        total: data.issue_count || (data.issues ? data.issues.length : 0)
-                    });
+                    const pageIssues = Array.isArray(data.issues) ? data.issues : [];
+                    if (page === 1) {
+                        entry.issues = pageIssues.slice();
+                    } else {
+                        // De-dupe by file_path in case the same file appears
+                        // across pages (e.g. concurrent file-store mutations).
+                        const seen = new Set(entry.issues.map(i => i.file_path));
+                        for (const issue of pageIssues) {
+                            if (!seen.has(issue.file_path)) {
+                                entry.issues.push(issue);
+                                seen.add(issue.file_path);
+                            }
+                        }
+                    }
+                    entry.total = typeof data.issue_count === 'number'
+                        ? data.issue_count
+                        : entry.issues.length;
+                    entry.totalPages = typeof data.total_pages === 'number' && data.total_pages > 0
+                        ? data.total_pages
+                        : 1;
+                    entry.perPage = typeof data.per_page === 'number' && data.per_page > 0
+                        ? data.per_page
+                        : SERIES_ISSUES_PAGE_SIZE;
+                    entry.loadedPages.add(page);
+                    entry.allLoaded = entry.loadedPages.size >= entry.totalPages
+                        || entry.issues.length >= entry.total;
+                    entry.error = false;
                     // Refresh the cached series metadata snapshot from the
                     // response so the detail view can render correctly even
                     // when the active filter excludes this series from the
@@ -2517,12 +2602,106 @@
                 }
             } catch (err) {
                 console.error('loadSeriesIssues failed', err);
-                seriesIssuesCache.set(seriesId, { issues: [], total: 0, error: true });
+                entry.error = true;
+            } finally {
+                entry.loadingPages.delete(page);
             }
+
             // Re-render only if the user is still on this series.
             if (currentSeriesDetailId === seriesId) {
-                renderSeriesDetail(seriesId);
+                if (page === 1 || entry.error) {
+                    renderSeriesDetail(seriesId);
+                } else {
+                    appendSeriesIssuePage(seriesId, page);
+                }
             }
+        }
+
+        // Re-renders the issue grid contents from the cache after a new page
+        // has been appended to it. Re-rendering the full grid (rather than
+        // appending only the new page's items) preserves correct ordering
+        // and missing-issue placeholders without re-sorting the DOM in place.
+        // The surrounding panel and header are left untouched. Cover images
+        // already hydrated stay cached in `protectedImageUrls` and rebind
+        // instantly; only the freshly-added covers go through a fetch.
+        function appendSeriesIssuePage(seriesId, page) {
+            if (currentSeriesDetailId !== seriesId) return;
+            const panel = document.getElementById('seriesDetailPanel');
+            const grid = panel && panel.querySelector('.series-issues-grid');
+            const cached = seriesIssuesCache.get(seriesId);
+            if (!panel || !grid || !cached) {
+                renderSeriesDetail(seriesId);
+                return;
+            }
+            const gridItems = buildSeriesIssuesGridItems(cached.issues);
+            const allLoaded = cached.allLoaded;
+            grid.innerHTML = gridItems.map(renderSeriesIssueGridItemHtml).join('')
+                + (!allLoaded ? `<div id="seriesIssuesSentinel" class="series-issues-sentinel" aria-hidden="true"><div class="spinner spinner-small"></div></div>` : '');
+            // Update the "showing N of M" counter in the selection bar.
+            const metaSpan = panel.querySelector('.series-detail-selection-meta');
+            if (metaSpan) {
+                const total = typeof cached.total === 'number' && cached.total > 0
+                    ? cached.total
+                    : cached.issues.length;
+                metaSpan.textContent = `${total} issue${total === 1 ? '' : 's'} in this series${!allLoaded ? ` · showing ${cached.issues.length}` : ''}`;
+            }
+            hydrateProtectedImages(grid);
+            updateSelectInfo();
+            updateSelectAllCheckbox();
+            setupSeriesIssuesSentinel(seriesId);
+        }
+
+        // IntersectionObserver wiring for infinite scroll. When the sentinel
+        // at the bottom of the issues grid becomes visible (or near visible
+        // via the rootMargin), kick off the next page's fetch. Disconnects
+        // automatically when no more pages remain.
+        let seriesIssuesObserver = null;
+        function disconnectSeriesIssuesObserver() {
+            if (seriesIssuesObserver) {
+                try { seriesIssuesObserver.disconnect(); } catch (_) {}
+                seriesIssuesObserver = null;
+            }
+        }
+        function setupSeriesIssuesSentinel(seriesId) {
+            disconnectSeriesIssuesObserver();
+            const sentinel = document.getElementById('seriesIssuesSentinel');
+            if (!sentinel) return;
+            const cached = seriesIssuesCache.get(seriesId);
+            if (!cached || cached.allLoaded) return;
+            if (typeof IntersectionObserver === 'undefined') {
+                // Fallback: eagerly fetch all remaining pages on environments
+                // without IntersectionObserver support.
+                (async () => {
+                    while (true) {
+                        const entry = seriesIssuesCache.get(seriesId);
+                        if (!entry || entry.allLoaded || entry.error) break;
+                        if (currentSeriesDetailId !== seriesId) break;
+                        const nextPage = entry.loadedPages.size + 1;
+                        await loadSeriesIssues(seriesId, false, nextPage);
+                    }
+                })();
+                return;
+            }
+            seriesIssuesObserver = new IntersectionObserver(entries => {
+                for (const entry of entries) {
+                    if (!entry.isIntersecting) continue;
+                    const current = seriesIssuesCache.get(seriesId);
+                    if (!current || current.allLoaded || current.error) {
+                        disconnectSeriesIssuesObserver();
+                        return;
+                    }
+                    if (currentSeriesDetailId !== seriesId) {
+                        disconnectSeriesIssuesObserver();
+                        return;
+                    }
+                    const nextPage = current.loadedPages.size + 1;
+                    if (current.loadingPages && current.loadingPages.has(nextPage)) {
+                        return;
+                    }
+                    loadSeriesIssues(seriesId, false, nextPage);
+                }
+            }, { rootMargin: '400px 0px' });
+            seriesIssuesObserver.observe(sentinel);
         }
 
         // Parse a free-form issue identifier into a positive integer when it
@@ -2630,133 +2809,13 @@
             `;
         }
 
-        function renderSeriesDetail(seriesId) {
-            const fileList = document.getElementById('fileList');
-            let series = seriesLibrary.find(item => item.id === seriesId);
-            if (!series && seriesId === currentSeriesDetailId) {
-                // A metadata refresh may have changed the union-find
-                // representative used as the series id. Try to remap to the
-                // same series under its new id (matching by title / canonical
-                // title / aliases) instead of closing the detail view.
-                const remapped = remapCurrentSeriesDetailId();
-                if (remapped) {
-                    series = remapped;
-                    seriesId = remapped.id;
-                    if (!seriesIssuesCache.has(seriesId)) {
-                        loadSeriesIssues(seriesId);
-                    }
-                }
-            }
-            // Fall back to the cached snapshot of the open series when the
-            // current filter / search excludes it from the library list. This
-            // keeps the user inside the series detail when they change filter,
-            // instead of being kicked back to the series grid.
-            //
-            // We intentionally do NOT require `currentSeriesDetailSeries.id`
-            // to equal `seriesId` here. The backend series id is the
-            // union-find representative of the files visible under the
-            // current filter, so switching filters (e.g. duplicates → all)
-            // can cause the representative key — and therefore the series
-            // id — to drift even though it still refers to the same series
-            // the user is viewing. The snapshot is set when the series is
-            // opened and refreshed by every successful `loadSeriesIssues`
-            // response, so it always represents the open series; trust it
-            // as a fallback regardless of id drift.
-            if (!series && seriesId === currentSeriesDetailId && currentSeriesDetailSeries) {
-                series = currentSeriesDetailSeries;
-            }
-            if (!series) {
-                closeSeriesDetail();
-                return;
-            }
-            // Keep the cached snapshot fresh whenever we successfully resolve
-            // the series object.
-            currentSeriesDetailSeries = series;
-            // Keep title-based identity fresh in case aliases changed.
-            captureSeriesDetailIdentity(series);
-
-            const cached = seriesIssuesCache.get(seriesId);
-            const issues = cached ? cached.issues : [];
-            const issueCount = cached ? cached.total : (series.issue_count || 0);
-            const issuesLoading = !cached;
-            const issuesFailed = cached && cached.error;
-            const selectableIssuePaths = issues
-                .map(issue => issue.file_path)
-                .filter(path => typeof path === 'string' && path.length > 0);
-            const allIssuesSelected = selectableIssuePaths.length > 0 && selectableIssuePaths.every(path => selectedFiles.has(path));
-            const someIssuesSelected = selectableIssuePaths.some(path => selectedFiles.has(path));
-
-            fileList.innerHTML = `
-                <div class="series-detail" id="seriesDetailPanel">
-                    <div class="series-detail-header">
-                        <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">← Back to Series</button>
-                        <div class="series-detail-summary">
-                            <img class="series-detail-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
-                            <div class="series-detail-summary-body">
-                                <h2>${escapeHtml(series.title)} ${renderLookupStatusBadge(series)}</h2>
-                                <div class="series-detail-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
-                                ${series.aliases?.length ? `<div class="series-detail-meta">Also known as: ${escapeHtml(series.aliases.join(', '))}</div>` : ''}
-                                ${series.metadata_source ? `<div class="series-detail-meta">Source: ${escapeHtml(series.metadata_source)}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
-                                <div class="series-detail-actions">
-                                    ${issues.length ? `<button type="button" class="btn btn-small" onclick="readComic('${escapeJs(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
-                                    <div class="file-actions-dropdown series-actions-dropdown">
-                                        <button type="button" class="dropdown-toggle" onclick="toggleDropdown(event, '${escapeJs(SERIES_ACTIONS_DROPDOWN_KEY)}')">
-                                            ⚙️ Actions
-                                        </button>
-                                        <div class="dropdown-menu" id="${getDropdownId(SERIES_ACTIONS_DROPDOWN_KEY)}">
-                                            <button class="dropdown-item" onclick="openManageSeriesNamesModal('${escapeJs(series.title)}'); closeAllDropdowns();">
-                                                🏷️ Manage Names
-                                            </button>
-                                            <button class="dropdown-item" onclick="openSeriesFoldersModal('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="See the on-disk folders contributing to this series and merge them into one">
-                                                📁 Manage Folders
-                                            </button>
-                                            <div class="dropdown-divider"></div>
-                                            <button class="dropdown-item" onclick="refreshSeriesMetadataDirect('${escapeJs(series.title)}'); closeAllDropdowns();">
-                                                🌐 Refresh Metadata
-                                            </button>
-                                            <button class="dropdown-item" onclick="refreshSeriesFolder('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="Refresh metadata for every folder/alias that groups under this series">
-                                                📁 Refresh Folder
-                                            </button>
-                                            <div class="dropdown-divider"></div>
-                                            <button class="dropdown-item" onclick="resetSeriesProcessedStatus('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
-                                                ♻️ Reset Processed Status
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    ${!issuesLoading && !issuesFailed && issues.length ? `
-                        <div class="series-detail-selection-bar">
-                            <label class="series-detail-select-all" for="selectAll">
-                                <input type="checkbox"
-                                       id="selectAll"
-                                       onchange="toggleSelectAll(this.checked)"
-                                       ${allIssuesSelected ? 'checked' : ''}>
-                                <span>Select all issues</span>
-                            </label>
-                            <span class="series-detail-selection-meta">${issues.length} issue${issues.length === 1 ? '' : 's'} in this series</span>
-                        </div>
-                        ${renderMissingIssuesBanner(issues)}
-                    ` : ''}
-                    ${issuesLoading ? `
-                        <div class="loading">
-                            <div class="spinner"></div>
-                            <p>Loading issues...</p>
-                        </div>
-                    ` : issuesFailed ? `
-                        <div class="empty-state"><p>Failed to load issues. <button type="button" class="btn btn-small" onclick="loadSeriesIssues('${escapeJs(seriesId)}', true)">Retry</button></p></div>
-                    ` : issues.length === 0 ? `
-                        <div class="empty-state">
-                            <p>${filterMode !== 'all' || searchQuery ? 'No issues in this series match the current filter.' : 'No issues in this series.'}</p>
-                            ${filterMode !== 'all' ? `<button type="button" class="btn btn-small" onclick="setHeaderFilter('all')">Clear filter</button>` : ''}
-                        </div>
-                    ` : `
-                        <div class="series-issues-grid">
-                            ${buildSeriesIssuesGridItems(issues).map(item => {
-                                if (item.kind === 'missing') {
-                                    return `
+        // Renders one grid item (issue card or missing-issue placeholder)
+        // to HTML. Extracted from renderSeriesDetail so the same template is
+        // used for the initial render and for incrementally appending later
+        // pages without rebuilding the surrounding panel.
+        function renderSeriesIssueGridItemHtml(item) {
+            if (item.kind === 'missing') {
+                return `
                                 <div class="series-issue-card series-issue-card--missing" aria-label="Missing issue #${item.number}" title="Missing issue #${item.number}">
                                     <div class="series-issue-cover-button series-issue-cover-button--missing">
                                         <div class="series-issue-cover series-issue-cover--missing">
@@ -2769,9 +2828,9 @@
                                         <p class="series-issue-subtitle">Issue #${item.number} is not in your collection</p>
                                     </div>
                                 </div>`;
-                                }
-                                const issue = item.issue;
-                                return `
+            }
+            const issue = item.issue;
+            return `
                                 <div class="series-issue-card ${selectedFiles.has(issue.file_path) ? 'series-issue-card--selected' : ''} ${issue.duplicate ? 'series-issue-card--duplicate' : ''}" data-file-path="${escapeHtml(issue.file_path)}">
                                     <label class="series-issue-select" aria-label="Select ${escapeHtml(issue.title || issue.file_name)}" onclick="event.stopPropagation()">
                                         <input type="checkbox"
@@ -2838,7 +2897,141 @@
                                         </div>
                                     </div>
                                 </div>`;
-                            }).join('')}
+        }
+
+        function renderSeriesDetail(seriesId) {
+            const fileList = document.getElementById('fileList');
+            let series = seriesLibrary.find(item => item.id === seriesId);
+            if (!series && seriesId === currentSeriesDetailId) {
+                // A metadata refresh may have changed the union-find
+                // representative used as the series id. Try to remap to the
+                // same series under its new id (matching by title / canonical
+                // title / aliases) instead of closing the detail view.
+                const remapped = remapCurrentSeriesDetailId();
+                if (remapped) {
+                    series = remapped;
+                    seriesId = remapped.id;
+                    if (!seriesIssuesCache.has(seriesId)) {
+                        loadSeriesIssues(seriesId);
+                    }
+                }
+            }
+            // Fall back to the cached snapshot of the open series when the
+            // current filter / search excludes it from the library list. This
+            // keeps the user inside the series detail when they change filter,
+            // instead of being kicked back to the series grid.
+            //
+            // We intentionally do NOT require `currentSeriesDetailSeries.id`
+            // to equal `seriesId` here. The backend series id is the
+            // union-find representative of the files visible under the
+            // current filter, so switching filters (e.g. duplicates → all)
+            // can cause the representative key — and therefore the series
+            // id — to drift even though it still refers to the same series
+            // the user is viewing. The snapshot is set when the series is
+            // opened and refreshed by every successful `loadSeriesIssues`
+            // response, so it always represents the open series; trust it
+            // as a fallback regardless of id drift.
+            if (!series && seriesId === currentSeriesDetailId && currentSeriesDetailSeries) {
+                series = currentSeriesDetailSeries;
+            }
+            if (!series) {
+                closeSeriesDetail();
+                return;
+            }
+            // Keep the cached snapshot fresh whenever we successfully resolve
+            // the series object.
+            currentSeriesDetailSeries = series;
+            // Keep title-based identity fresh in case aliases changed.
+            captureSeriesDetailIdentity(series);
+
+            const cached = seriesIssuesCache.get(seriesId);
+            const issues = cached ? cached.issues : [];
+            // Use the backend-reported total (issue_count / cached.total) so
+            // counts reflect the full series even before all pages have
+            // streamed in via the infinite-scroll loader.
+            const issueCount = cached && typeof cached.total === 'number' && cached.total > 0
+                ? cached.total
+                : (series.issue_count || issues.length || 0);
+            const issuesLoading = !cached || (issues.length === 0 && !cached.error && (!cached.loadedPages || cached.loadedPages.size === 0));
+            const issuesFailed = cached && cached.error && issues.length === 0;
+            const allLoaded = cached ? cached.allLoaded : false;
+            const selectableIssuePaths = issues
+                .map(issue => issue.file_path)
+                .filter(path => typeof path === 'string' && path.length > 0);
+            const allIssuesSelected = selectableIssuePaths.length > 0 && selectableIssuePaths.every(path => selectedFiles.has(path));
+            const someIssuesSelected = selectableIssuePaths.some(path => selectedFiles.has(path));
+            const gridItems = buildSeriesIssuesGridItems(issues);
+
+            fileList.innerHTML = `
+                <div class="series-detail" id="seriesDetailPanel">
+                    <div class="series-detail-header">
+                        <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">← Back to Series</button>
+                        <div class="series-detail-summary">
+                            <img class="series-detail-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                            <div class="series-detail-summary-body">
+                                <h2>${escapeHtml(series.title)} ${renderLookupStatusBadge(series)}</h2>
+                                <div class="series-detail-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
+                                ${series.aliases?.length ? `<div class="series-detail-meta">Also known as: ${escapeHtml(series.aliases.join(', '))}</div>` : ''}
+                                ${series.metadata_source ? `<div class="series-detail-meta">Source: ${escapeHtml(series.metadata_source)}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
+                                <div class="series-detail-actions">
+                                    ${issues.length ? `<button type="button" class="btn btn-small" onclick="readComic('${escapeJs(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
+                                    <div class="file-actions-dropdown series-actions-dropdown">
+                                        <button type="button" class="dropdown-toggle" onclick="toggleDropdown(event, '${escapeJs(SERIES_ACTIONS_DROPDOWN_KEY)}')">
+                                            ⚙️ Actions
+                                        </button>
+                                        <div class="dropdown-menu" id="${getDropdownId(SERIES_ACTIONS_DROPDOWN_KEY)}">
+                                            <button class="dropdown-item" onclick="openManageSeriesNamesModal('${escapeJs(series.title)}'); closeAllDropdowns();">
+                                                🏷️ Manage Names
+                                            </button>
+                                            <button class="dropdown-item" onclick="openSeriesFoldersModal('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="See the on-disk folders contributing to this series and merge them into one">
+                                                📁 Manage Folders
+                                            </button>
+                                            <div class="dropdown-divider"></div>
+                                            <button class="dropdown-item" onclick="refreshSeriesMetadataDirect('${escapeJs(series.title)}'); closeAllDropdowns();">
+                                                🌐 Refresh Metadata
+                                            </button>
+                                            <button class="dropdown-item" onclick="refreshSeriesFolder('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="Refresh metadata for every folder/alias that groups under this series">
+                                                📁 Refresh Folder
+                                            </button>
+                                            <div class="dropdown-divider"></div>
+                                            <button class="dropdown-item" onclick="resetSeriesProcessedStatus('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
+                                                ♻️ Reset Processed Status
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    ${!issuesLoading && !issuesFailed && issues.length ? `
+                        <div class="series-detail-selection-bar">
+                            <label class="series-detail-select-all" for="selectAll">
+                                <input type="checkbox"
+                                       id="selectAll"
+                                       onchange="toggleSelectAll(this.checked)"
+                                       ${allIssuesSelected ? 'checked' : ''}>
+                                <span>Select all issues</span>
+                            </label>
+                            <span class="series-detail-selection-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} in this series${!allLoaded ? ` · showing ${issues.length}` : ''}</span>
+                        </div>
+                        ${renderMissingIssuesBanner(issues)}
+                    ` : ''}
+                    ${issuesLoading ? `
+                        <div class="loading">
+                            <div class="spinner"></div>
+                            <p>Loading issues...</p>
+                        </div>
+                    ` : issuesFailed ? `
+                        <div class="empty-state"><p>Failed to load issues. <button type="button" class="btn btn-small" onclick="loadSeriesIssues('${escapeJs(seriesId)}', true)">Retry</button></p></div>
+                    ` : issues.length === 0 ? `
+                        <div class="empty-state">
+                            <p>${filterMode !== 'all' || searchQuery ? 'No issues in this series match the current filter.' : 'No issues in this series.'}</p>
+                            ${filterMode !== 'all' ? `<button type="button" class="btn btn-small" onclick="setHeaderFilter('all')">Clear filter</button>` : ''}
+                        </div>
+                    ` : `
+                        <div class="series-issues-grid">
+                            ${gridItems.map(renderSeriesIssueGridItemHtml).join('')}
+                            ${!allLoaded ? `<div id="seriesIssuesSentinel" class="series-issues-sentinel" aria-hidden="true"><div class="spinner spinner-small"></div></div>` : ''}
                         </div>
                     `}
                 </div>
@@ -2852,6 +3045,7 @@
             updateSelectAllCheckbox();
             updateLibraryViewLayout();
             hydrateProtectedImages(fileList);
+            setupSeriesIssuesSentinel(seriesId);
         }
         
         function renderFileRow(file, dir) {

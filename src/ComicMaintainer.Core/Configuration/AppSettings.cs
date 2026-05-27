@@ -103,4 +103,17 @@ public class AppSettings
     /// available, the library will show it in place of the canonical title.
     /// </summary>
     public string? DefaultPreferredLanguage { get; set; }
+
+    /// <summary>
+    /// Hard cap on the number of comic archives a single
+    /// <c>GetSeriesIssuesAsync</c> call is allowed to open from disk to
+    /// upgrade missing <c>Title</c> / <c>Issue</c> metadata. The upgrade
+    /// path is best-effort and only runs for issues whose cached DTO is
+    /// missing both fields, so most requests do zero disk reads. This cap
+    /// protects the request from pathological cases (e.g. a 1000-issue
+    /// series with no cached metadata) where the upgrade loop would
+    /// otherwise dominate the request latency. Default 100 matches the
+    /// default frontend page size.
+    /// </summary>
+    public int SeriesIssuesMaxArchiveUpgrades { get; set; } = 100;
 }

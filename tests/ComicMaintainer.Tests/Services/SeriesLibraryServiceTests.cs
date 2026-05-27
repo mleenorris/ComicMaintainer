@@ -320,6 +320,98 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
+    public async Task GetSeriesIssuesAsync_LastPageContainsRemainder()
+    {
+        var files = Enumerable.Range(1, 5).Select(i => new ComicFile
+        {
+            FilePath = $"/library/Batman/Batman {i:000}.cbz",
+            FileName = $"Batman {i:000}.cbz",
+            Directory = "/library/Batman",
+            FileSize = 100,
+            LastModified = new DateTime(2024, 1, i, 0, 0, 0, DateTimeKind.Utc),
+            Metadata = new ComicMetadata { Series = "Batman", Issue = i.ToString() }
+        }).Cast<ComicFile>().ToList();
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var summaries = await service.GetSeriesSummariesAsync();
+        var seriesId = summaries.Series.Single().Id;
+
+        var lastPage = await service.GetSeriesIssuesAsync(seriesId, page: 2, perPage: 3);
+
+        Assert.NotNull(lastPage);
+        Assert.Equal(5, lastPage!.IssueCount);
+        Assert.Equal(2, lastPage.TotalPages);
+        Assert.Equal(2, lastPage.Issues.Count);
+        Assert.Equal("4", lastPage.Issues[0].Issue);
+        Assert.Equal("5", lastPage.Issues[1].Issue);
+    }
+
+    [Fact]
+    public async Task GetSeriesIssuesAsync_CapsArchiveUpgradesAtConfiguredLimit()
+    {
+        // 50 files with no cached Title — the upgrade loop would normally
+        // open every archive when perPage == -1. With the cap set to 5
+        // (overriding the AppSettings default of 100) we should see at
+        // most 5 processor calls regardless of how many issues lack a title.
+        var files = Enumerable.Range(1, 50).Select(i => new ComicFile
+        {
+            FilePath = $"/library/Batman/Batman {i:000}.cbz",
+            FileName = $"Batman {i:000}.cbz",
+            Directory = "/library/Batman",
+            FileSize = 100,
+            LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddDays(i),
+            // Series set so grouping works, but Issue/Title intentionally null
+            // so the upgrade loop wants to call GetSeriesMetadataAsync.
+            Metadata = new ComicMetadata { Series = "Batman" }
+        }).Cast<ComicFile>().ToList();
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
+        _processor.Setup(p => p.GetSeriesMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadata { Series = "Batman", Title = "Upgraded", Issue = "1" });
+
+        var monitor = new Mock<IOptionsMonitor<AppSettings>>();
+        monitor.Setup(m => m.CurrentValue).Returns(new AppSettings { SeriesIssuesMaxArchiveUpgrades = 5 });
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, monitor.Object, _logger.Object);
+
+        var summaries = await service.GetSeriesSummariesAsync();
+        var seriesId = summaries.Series.Single().Id;
+
+        var result = await service.GetSeriesIssuesAsync(seriesId, perPage: -1);
+
+        Assert.NotNull(result);
+        Assert.Equal(50, result!.IssueCount);
+        // The processor was invoked at most cap-many times by the upgrade
+        // loop (Times.AtMost accommodates internal calls outside the loop).
+        _processor.Verify(
+            p => p.GetSeriesMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.AtMost(5));
+    }
+
+    [Fact]
+    public async Task GetSeriesIssuesAsync_SkipsArchiveUpgradeWhenCachedTitleAndIssuePresent()
+    {
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = "/library/Batman/Batman 001.cbz", FileName = "Batman 001.cbz", Directory = "/library/Batman", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Batman", Issue = "1", Title = "Year One" } },
+            new() { FilePath = "/library/Batman/Batman 002.cbz", FileName = "Batman 002.cbz", Directory = "/library/Batman", FileSize = 200, LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Batman", Issue = "2", Title = "Year Two" } }
+        };
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+        var summaries = await service.GetSeriesSummariesAsync();
+        var seriesId = summaries.Series.Single().Id;
+
+        var result = await service.GetSeriesIssuesAsync(seriesId);
+
+        Assert.NotNull(result);
+        // Every DTO already has Title and Issue, so the upgrade loop should
+        // not call into the processor at all.
+        _processor.Verify(
+            p => p.GetSeriesMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task GetTitlesForSeriesIdAsync_ReturnsCanonicalAndAliases()
     {
         var files = new List<ComicFile>

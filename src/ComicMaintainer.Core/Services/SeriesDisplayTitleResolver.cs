@@ -35,6 +35,16 @@ public static class SeriesDisplayTitleResolver
     {
         ArgumentNullException.ThrowIfNull(record);
 
+        // PR 1 of 3 — when the new source-of-truth field is populated, it
+        // is the answer. The defaulter (or, for UserSelected rows, the
+        // user's explicit pick) has already encoded the precedence rules
+        // below. We keep the legacy chain as a safety net for pre-migration
+        // rows that haven't been backfilled yet; PR 3 removes it.
+        if (!string.IsNullOrWhiteSpace(record.SeriesName))
+        {
+            return record.SeriesName;
+        }
+
         // Explicit user override always wins, regardless of language rules.
         if (record.IsUserCanonical && !string.IsNullOrWhiteSpace(record.CanonicalTitle))
         {

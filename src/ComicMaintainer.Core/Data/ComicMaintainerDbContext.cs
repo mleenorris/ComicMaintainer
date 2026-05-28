@@ -183,6 +183,10 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.ImageStatus).HasMaxLength(32);
             entity.Property(e => e.PreferredLanguage).HasMaxLength(16);
             entity.Property(e => e.PinnedLocalizedTitle).HasMaxLength(512);
+            // PR 1 of 3 — series-name source-of-truth columns.
+            entity.Property(e => e.SeriesName).HasMaxLength(512);
+            entity.Property(e => e.SeriesNameSource).HasConversion<int>();
+            entity.Property(e => e.SeriesNameLanguage).HasMaxLength(16);
             // LocalizedTitlesJson is opaque JSON; no max length so it can
             // accommodate long alias lists from providers like MangaDex.
         });
@@ -448,4 +452,43 @@ public class SeriesMetadataCacheEntity
     /// first scan).
     /// </summary>
     public int MetadataVersion { get; set; } = 1;
+
+    // ---- Series-name source-of-truth (PR 1 of 3) ----
+    //
+    // The fields below are introduced in PR 1 of the series-name overhaul.
+    // <c>SeriesName</c> is the single value used by both the library UI and
+    // the per-file ComicInfo.xml &lt;Series&gt; element going forward.
+    //
+    // In PR 1, callers continue to write the legacy fields too
+    // (CanonicalTitle, IsUserCanonical, PinnedLocalizedTitle,
+    // PreferredLanguage) and <see cref="Services.SeriesDisplayTitleResolver"/>
+    // falls back to the legacy chain whenever <c>SeriesName</c> is null. PR 3
+    // removes the fallback and the legacy override fields.
+
+    /// <summary>
+    /// Resolved display name for the series — the single value that
+    /// the library card and each file's ComicInfo.xml &lt;Series&gt;
+    /// element must agree on. Recomputed by
+    /// <see cref="Services.SeriesNameDefaulter"/> on every mutation
+    /// unless <see cref="SeriesNameSource"/> is
+    /// <see cref="Models.SeriesNameSource.UserSelected"/>, in which case
+    /// the user's explicit choice is sticky.
+    /// Null only for legacy rows that predate PR 1's migration and haven't
+    /// been backfilled yet; the resolver tolerates this.
+    /// </summary>
+    public string? SeriesName { get; set; }
+
+    /// <summary>
+    /// How <see cref="SeriesName"/> was determined. Persisted as an int.
+    /// </summary>
+    public Models.SeriesNameSource SeriesNameSource { get; set; } = Models.SeriesNameSource.FolderName;
+
+    /// <summary>
+    /// Snapshot of the BCP-47 language code that produced
+    /// <see cref="SeriesName"/> when the source is
+    /// <see cref="Models.SeriesNameSource.LanguageDefault"/>. Null for
+    /// other sources or when the canonical title was used as the language
+    /// fallback. Diagnostic only — the defaulter does not read this back.
+    /// </summary>
+    public string? SeriesNameLanguage { get; set; }
 }

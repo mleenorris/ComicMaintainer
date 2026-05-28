@@ -595,33 +595,7 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
     db.Database.Migrate();
-
-    // PR 1 of 3 — series-name source-of-truth backfill. Migrations add the
-    // new SeriesName column nullable; populate it for any pre-existing row
-    // using the same precedence as the legacy display-title chain so the
-    // first read returns a consistent value. Skipped for rows that already
-    // have a SeriesName (idempotent).
-    {
-        var settings = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<AppSettings>>();
-        var globalLang = settings.CurrentValue.DefaultPreferredLanguage;
-        var staleRows = db.SeriesMetadataCache
-            .Where(e => e.SeriesName == null || e.SeriesName == "")
-            .ToList();
-        if (staleRows.Count > 0)
-        {
-            foreach (var entity in staleRows)
-            {
-                var localized = string.IsNullOrWhiteSpace(entity.LocalizedTitlesJson)
-                    ? new List<ComicMaintainer.Core.Models.LocalizedTitle>()
-                    : (System.Text.Json.JsonSerializer.Deserialize<List<ComicMaintainer.Core.Models.LocalizedTitle>>(entity.LocalizedTitlesJson)
-                       ?? new List<ComicMaintainer.Core.Models.LocalizedTitle>());
-                ComicMaintainer.Core.Services.SeriesNameDefaulter.Recompute(entity, globalLang, localized);
-            }
-            db.SaveChanges();
-            logger.LogInformation("Series-name backfill populated {Count} cache row(s).", staleRows.Count);
-        }
-    }
-
+    
     // Seed roles
     var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
     var roles = new[] { "Admin", "User", "ReadOnly" };

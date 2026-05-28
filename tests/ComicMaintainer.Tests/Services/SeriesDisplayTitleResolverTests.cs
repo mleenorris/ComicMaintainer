@@ -198,45 +198,4 @@ public class SeriesDisplayTitleResolverTests
 
         Assert.Equal("My Preferred Title", SeriesDisplayTitleResolver.Resolve(record, null));
     }
-
-    // ---- PR 1 of 3: new SeriesName source-of-truth path ----
-
-    [Fact]
-    public void SeriesName_When_Populated_IsReturnedVerbatim_RegardlessOfLegacyFields()
-    {
-        // The defaulter / explicit user pick has already resolved the
-        // displayed name; the resolver must trust it. Even a populated
-        // PinnedLocalizedTitle that would have won under the legacy chain
-        // must not displace a non-null SeriesName.
-        var record = BuildRecord(
-            canonical: "One Piece",
-            preferredLanguage: "ja",
-            localized: new[]
-            {
-                ("One Piece", (string?)"en"),
-                ("ワンピース", (string?)"ja")
-            });
-        record.PinnedLocalizedTitle = "ワンピース";
-        record.SeriesName = "One Piece";
-        record.SeriesNameSource = SeriesNameSource.UserSelected;
-
-        Assert.Equal("One Piece", SeriesDisplayTitleResolver.Resolve(record, globalDefaultLanguage: "ja"));
-    }
-
-    [Fact]
-    public void SeriesName_When_NullOrEmpty_FallsBack_ToLegacyChain()
-    {
-        // Safety net for pre-PR-1 rows that haven't been backfilled yet.
-        var record = BuildRecord(
-            canonical: "Naruto",
-            preferredLanguage: "ja",
-            localized: new[]
-            {
-                ("Naruto", (string?)"en"),
-                ("ナルト", (string?)"ja")
-            });
-        record.SeriesName = null;
-
-        Assert.Equal("ナルト", SeriesDisplayTitleResolver.Resolve(record, globalDefaultLanguage: null));
-    }
 }

@@ -453,17 +453,6 @@ namespace ComicMaintainer.Core.Migrations
                         .HasMaxLength(2048)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("SeriesName")
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SeriesNameLanguage")
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("SeriesNameSource")
-                        .HasColumnType("INTEGER");
-
                     b.Property<string>("Source")
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");

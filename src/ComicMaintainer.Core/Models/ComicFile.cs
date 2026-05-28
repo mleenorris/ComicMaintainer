@@ -1,5 +1,22 @@
 namespace ComicMaintainer.Core.Models;
 
+public enum FileMetadataSource { Scanned, ExternalLookup, UserEdit, Inferred }
+
+[Flags]
+public enum ComicMetadataFieldFlags : long
+{
+    None = 0,
+    Series = 1 << 0,
+    Title = 1 << 1,
+    Issue = 1 << 2,
+    Volume = 1 << 3,
+    Publisher = 1 << 4,
+    Year = 1 << 5,
+    Summary = 1 << 6,
+    Authors = 1 << 7,
+    Tags = 1 << 8,
+}
+
 /// <summary>
 /// Represents a comic file in the system
 /// </summary>
@@ -16,6 +33,11 @@ public class ComicFile
     public bool IsDuplicate { get; set; }
     public bool IsRead { get; set; }
     public ComicMetadata? Metadata { get; set; }
+    public int MetadataVersion { get; set; }
+    public int WrittenMetadataVersion { get; set; }
+    public DateTime? LastDbEditAt { get; set; }
+    public DateTime? LastWriteAt { get; set; }
+    public FileMetadataSource MetadataSource { get; set; } = FileMetadataSource.Scanned;
 
     /// <summary>
     /// Stamp of the series-metadata-cache record version that was used the
@@ -40,6 +62,8 @@ public class ComicMetadata
     public string? Summary { get; set; }
     public List<string> Authors { get; set; } = new();
     public List<string> Tags { get; set; } = new();
+    public bool IsUserEdited { get; set; }
+    public long UserLockedFieldsMask { get; set; }
 
     /// <summary>
     /// Creates a deep copy of this ComicMetadata instance
@@ -56,7 +80,9 @@ public class ComicMetadata
             Year = this.Year,
             Summary = this.Summary,
             Authors = new List<string>(this.Authors),
-            Tags = new List<string>(this.Tags)
+            Tags = new List<string>(this.Tags),
+            IsUserEdited = this.IsUserEdited,
+            UserLockedFieldsMask = this.UserLockedFieldsMask
         };
     }
 }

@@ -1110,5 +1110,30 @@ public class FileStoreServiceTests
         Assert.True(updated!.IsNormalized);
         Assert.True(updated!.IsProcessed);
     }
+
+    [Fact]
+    public async Task ApplyUserMetadataEditAsync_BumpsVersionAndSetsUserEditFlags()
+    {
+        var filePath = Path.Combine(_testDirectory, "metadata-edit.cbz");
+        File.WriteAllText(filePath, "content");
+        await _service.AddFileAsync(filePath);
+
+        await _service.ApplyUserMetadataEditAsync(
+            filePath,
+            new ComicMetadata { Series = "Edited Series", Issue = "7" },
+            ComicMetadataFieldFlags.Series | ComicMetadataFieldFlags.Issue);
+
+        var row = await _service.GetFileAsync(filePath);
+
+        Assert.NotNull(row);
+        Assert.Equal(1, row!.MetadataVersion);
+        Assert.Equal(FileMetadataSource.UserEdit, row.MetadataSource);
+        Assert.NotNull(row.LastDbEditAt);
+        Assert.Equal("Edited Series", row.Metadata!.Series);
+        Assert.Equal("7", row.Metadata.Issue);
+        Assert.True(row.Metadata.IsUserEdited);
+        Assert.True(((ComicMetadataFieldFlags)row.Metadata.UserLockedFieldsMask).HasFlag(ComicMetadataFieldFlags.Series));
+        Assert.True(((ComicMetadataFieldFlags)row.Metadata.UserLockedFieldsMask).HasFlag(ComicMetadataFieldFlags.Issue));
+    }
 }
 

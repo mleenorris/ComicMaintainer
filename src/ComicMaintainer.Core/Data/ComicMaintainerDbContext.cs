@@ -60,6 +60,8 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             // Used by LibraryScanJobHandler to find files whose series-metadata
             // stamp is lower than the current cache record's MetadataVersion.
             entity.HasIndex(e => e.SeriesMetadataVersion);
+            entity.HasIndex(e => new { e.MetadataVersion, e.WrittenMetadataVersion });
+            entity.Property(e => e.MetadataSource).HasMaxLength(32).HasDefaultValue("Scanned");
             
             // Configure owned type for metadata
             entity.OwnsOne(e => e.Metadata, metadata =>
@@ -78,6 +80,8 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
                     v => string.Join(';', v),
                     v => v.Split(';', StringSplitOptions.RemoveEmptyEntries).ToList()
                 );
+                metadata.Property(m => m.IsUserEdited);
+                metadata.Property(m => m.UserLockedFieldsMask).HasDefaultValue(0L);
             });
         });
 
@@ -236,6 +240,11 @@ public class ComicFileEntity
     /// at 0 so the first normalize pass always writes a stamp.
     /// </summary>
     public int SeriesMetadataVersion { get; set; }
+    public int MetadataVersion { get; set; }
+    public int WrittenMetadataVersion { get; set; }
+    public DateTime? LastDbEditAt { get; set; }
+    public DateTime? LastWriteAt { get; set; }
+    public string MetadataSource { get; set; } = "Scanned";
 }
 
 /// <summary>

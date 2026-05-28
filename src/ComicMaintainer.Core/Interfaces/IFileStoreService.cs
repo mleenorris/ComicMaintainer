@@ -17,6 +17,14 @@ public interface IFileStoreService
     /// </summary>
     Task<IEnumerable<ComicFile>> GetFilteredFilesAsync(string? filter = null, CancellationToken cancellationToken = default);
 
+    Task<ComicFile?> GetFileAsync(string filePath, CancellationToken cancellationToken = default);
+
+    Task ApplyUserMetadataEditAsync(string filePath, ComicMetadata patch, ComicMetadataFieldFlags lockFields, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ComicFile>> GetFilesNeedingBackfillAsync(int max, CancellationToken cancellationToken = default);
+
+    Task MarkFileBackfilledAsync(string filePath, int version, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Add a file to the store
     /// </summary>

@@ -82,7 +82,9 @@ public enum MetadataAuditFindingType
     /// <summary>The file's series tag does not match the expected resolved series name.</summary>
     SeriesMismatch,
     /// <summary>The file's metadata could not be read or extracted.</summary>
-    Unreadable
+    Unreadable,
+    /// <summary>Disk metadata differs from the user-edited DB metadata.</summary>
+    DiskDriftedFromDb
 }
 
 public class MetadataAuditFindingEntity

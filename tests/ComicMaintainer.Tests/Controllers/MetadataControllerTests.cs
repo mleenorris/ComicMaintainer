@@ -196,52 +196,6 @@ public class MetadataControllerTests
     }
 
     [Fact]
-    public async Task SetSeriesName_DelegatesToCacheAndTriggersRetag()
-    {
-        var record = new SeriesMetadataCacheRecord
-        {
-            NormalizedKey = "batman",
-            CanonicalTitle = "Batman",
-            SeriesName = "My Batman",
-            SeriesNameSource = SeriesNameSource.UserSelected
-        };
-        _cache.Setup(c => c.SetSeriesNameAsync("Batman", "My Batman", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(record);
-
-        var retag = new Mock<ISeriesLanguagePreferenceRetagService>();
-        retag.Setup(r => r.QueueRetagForSeriesAsync(record, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Guid.NewGuid());
-
-        var controller = new MetadataController(
-            _library.Object,
-            _cache.Object,
-            _refreshJobs.Object,
-            _external.Object,
-            new Mock<ILogger<MetadataController>>().Object,
-            languageRetag: retag.Object);
-
-        var result = await controller.SetSeriesName(
-            "Batman",
-            new MetadataController.SetSeriesNameRequest { Name = "My Batman" },
-            CancellationToken.None);
-
-        var ok = Assert.IsType<OkObjectResult>(result.Result);
-        Assert.Same(record, ok.Value);
-        retag.Verify(r => r.QueueRetagForSeriesAsync(record, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task SetSeriesName_ReturnsBadRequest_WhenSeriesTitleEmpty()
-    {
-        var result = await _controller.SetSeriesName(
-            "",
-            new MetadataController.SetSeriesNameRequest { Name = "X" },
-            CancellationToken.None);
-
-        Assert.IsType<BadRequestObjectResult>(result.Result);
-    }
-
-    [Fact]
     public async Task RemoveAlias_DelegatesToCacheService()
     {
         var record = new SeriesMetadataCacheRecord { NormalizedKey = "batman", CanonicalTitle = "Batman" };

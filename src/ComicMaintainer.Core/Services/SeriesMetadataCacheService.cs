@@ -125,7 +125,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             BumpMetadataVersion(entity);
         }
 
-        RecomputeSeriesName(entity);
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -159,7 +158,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         entity.UserAliases = updated;
         entity.UpdatedAt = DateTime.UtcNow;
         BumpMetadataVersion(entity);
-        RecomputeSeriesName(entity);
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -263,7 +261,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         // images are sticky and never overwritten by an external download.
         await TryDownloadImageAsync(entity, lookup, cancellationToken);
 
-        RecomputeSeriesName(entity);
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -383,7 +380,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
 
         await TryWriteFolderCoverAsync(entity, cancellationToken);
 
-        RecomputeSeriesName(entity);
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -459,7 +455,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
 
         await TryWriteFolderCoverAsync(entity, cancellationToken);
 
-        RecomputeSeriesName(entity);
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -506,7 +501,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 LoggingHelper.SanitizeForLog(entity.NormalizedKey));
         }
 
-        RecomputeSeriesName(entity);
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -635,7 +629,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         // Try to grab the candidate's image. User-uploaded images are sticky.
         await TryDownloadImageAsync(entity, match, cancellationToken);
 
-        RecomputeSeriesName(entity);
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -694,7 +687,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         }
 
         entity.UpdatedAt = DateTime.UtcNow;
-        RecomputeSeriesName(entity);
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -719,12 +711,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             PreferredLanguage = entity.PreferredLanguage,
             PinnedLocalizedTitle = entity.PinnedLocalizedTitle,
             LocalizedTitles = DeserializeLocalizedTitles(entity.LocalizedTitlesJson),
-            MetadataVersion = entity.MetadataVersion,
-            // PR 1 of 3 — surface the new source-of-truth field. Null is
-            // tolerated downstream (SeriesDisplayTitleResolver falls back).
-            SeriesName = entity.SeriesName,
-            SeriesNameSource = entity.SeriesNameSource,
-            SeriesNameLanguage = entity.SeriesNameLanguage
+            MetadataVersion = entity.MetadataVersion
         };
     }
 
@@ -744,22 +731,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         {
             entity.MetadataVersion++;
         }
-    }
-
-    /// <summary>
-    /// PR 1 of 3 — keep the new <c>SeriesName</c> source-of-truth fields in
-    /// lock-step with every mutation. Always recompute the default before
-    /// bumping the metadata version so the library scan re-tags files
-    /// using the same value that the UI will display. User picks
-    /// (<see cref="SeriesNameSource.UserSelected"/>) are sticky and left
-    /// untouched by <see cref="SeriesNameDefaulter.Recompute"/>.
-    /// Safe to call on a freshly-created entity that has never been saved.
-    /// </summary>
-    private void RecomputeSeriesName(SeriesMetadataCacheEntity entity)
-    {
-        var localized = DeserializeLocalizedTitles(entity.LocalizedTitlesJson);
-        var globalLang = _settings.CurrentValue.DefaultPreferredLanguage;
-        SeriesNameDefaulter.Recompute(entity, globalLang, localized);
     }
 
     /// <summary>
@@ -870,7 +841,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             BumpMetadataVersion(entity);
         }
 
-        RecomputeSeriesName(entity);
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -905,8 +875,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 entity.PinnedLocalizedTitle = null;
                 entity.UpdatedAt = DateTime.UtcNow;
                 BumpMetadataVersion(entity);
-                RecomputeSeriesName(entity);
-        await db.SaveChangesAsync(cancellationToken);
+                await db.SaveChangesAsync(cancellationToken);
             }
             return ToRecord(entity);
         }
@@ -947,8 +916,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             entity.PinnedLocalizedTitle = canonicalValue;
             entity.UpdatedAt = DateTime.UtcNow;
             BumpMetadataVersion(entity);
-            RecomputeSeriesName(entity);
-        await db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
         }
 
         return ToRecord(entity);

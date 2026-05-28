@@ -168,4 +168,41 @@ public interface IFileStoreService
         int offset = 0,
         int limit = 100,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns a paged slice of files projected to <see cref="FileDto"/>, with
+    /// filtering, search, sort and paging applied directly in the database.
+    /// Used by file-list endpoints to avoid materializing every <see cref="ComicFile"/>
+    /// per request. Pass <paramref name="perPage"/> = -1 to return all matching rows.
+    /// </summary>
+    Task<PagedFilesResult> GetFilesPageAsync(
+        string? filter = null,
+        string? search = null,
+        string? sort = "name",
+        string? direction = "asc",
+        int page = 1,
+        int perPage = 100,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the files in the supplied folder (folder key relative to the
+    /// watched directory) projected to <see cref="FileDto"/>, with filtering,
+    /// search and sort applied in the database. The returned list is fully
+    /// materialized (no paging) to match the existing folder files endpoint.
+    /// </summary>
+    Task<IReadOnlyList<FileDto>> GetFolderFilesAsync(
+        string folderKey,
+        string? filter = null,
+        string? search = null,
+        string? sort = "name",
+        string? direction = "asc",
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns the count of unmarked files (not processed and not duplicate).
+    /// The result is cached for a short window to avoid recomputing it on every
+    /// list endpoint request; the cache is invalidated whenever the file list
+    /// changes (add/remove/mark/etc.).
+    /// </summary>
+    Task<int> GetUnmarkedCountAsync(CancellationToken cancellationToken = default);
 }

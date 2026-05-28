@@ -57,6 +57,11 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.HasIndex(e => e.Directory);
             entity.HasIndex(e => e.UpdatedAt);
             entity.HasIndex(e => e.CreatedAt);
+            // Composite indexes for fast DB-backed file listing:
+            // - (Directory, FileName) covers folder-scoped file pages sorted by name.
+            // - FileName alone covers the default global "sort by name" listing.
+            entity.HasIndex(e => new { e.Directory, e.FileName });
+            entity.HasIndex(e => e.FileName);
             // Used by LibraryScanJobHandler to find files whose series-metadata
             // stamp is lower than the current cache record's MetadataVersion.
             entity.HasIndex(e => e.SeriesMetadataVersion);

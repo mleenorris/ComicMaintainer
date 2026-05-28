@@ -71,15 +71,21 @@ public class FilesControllerTests
     public async Task GetFiles_WithoutFilter_ReturnsOkWithFiles()
     {
         // Arrange
-        var files = new List<ComicFile>
+        var pageResult = new PagedFilesResult
         {
-            new() { FilePath = "/test/file1.cbz", IsProcessed = true },
-            new() { FilePath = "/test/file2.cbz", IsProcessed = false }
+            Files = new List<FileDto>
+            {
+                new() { RelativePath = "/test/file1.cbz", Processed = true },
+                new() { RelativePath = "/test/file2.cbz", Processed = false }
+            },
+            Page = 1,
+            TotalPages = 1,
+            TotalFiles = 2
         };
-        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(files);
-        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("unprocessed", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<ComicFile> { files[1] });
+        _mockFileStore.Setup(fs => fs.GetFilesPageAsync(null, null, "name", "asc", 1, 100, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pageResult);
+        _mockFileStore.Setup(fs => fs.GetUnmarkedCountAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
 
         // Act
         var result = await _controller.GetFiles();
@@ -100,14 +106,20 @@ public class FilesControllerTests
     public async Task GetFiles_WithFilter_ReturnsFilteredFiles()
     {
         // Arrange
-        var files = new List<ComicFile>
+        var pageResult = new PagedFilesResult
         {
-            new() { FilePath = "/test/batman.cbz", IsProcessed = true }
+            Files = new List<FileDto>
+            {
+                new() { RelativePath = "/test/batman.cbz", Processed = true }
+            },
+            Page = 1,
+            TotalPages = 1,
+            TotalFiles = 1
         };
-        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("processed", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(files);
-        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("unprocessed", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<ComicFile>());
+        _mockFileStore.Setup(fs => fs.GetFilesPageAsync("processed", null, "name", "asc", 1, 100, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(pageResult);
+        _mockFileStore.Setup(fs => fs.GetUnmarkedCountAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
 
         // Act
         var result = await _controller.GetFiles(filter: "marked");
@@ -127,7 +139,9 @@ public class FilesControllerTests
     public async Task GetFiles_WhenExceptionThrown_ReturnsInternalServerError()
     {
         // Arrange
-        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        _mockFileStore.Setup(fs => fs.GetFilesPageAsync(
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test error"));
 
         // Act
@@ -2282,12 +2296,8 @@ public class FilesControllerTests
         _mockFileStore.Setup(fs => fs.GetFolderSummariesAsync(
                 null, null, "name", "asc", 0, 100, It.IsAny<CancellationToken>()))
             .ReturnsAsync(folderResult);
-        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync("unprocessed", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<ComicFile>
-            {
-                new() { FilePath = "/x/a.cbz" },
-                new() { FilePath = "/x/b.cbz" }
-            });
+        _mockFileStore.Setup(fs => fs.GetUnmarkedCountAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(2);
 
         var result = await _controller.GetFolders();
 
@@ -2306,13 +2316,12 @@ public class FilesControllerTests
     {
         var watched = Path.GetTempPath();
         var batmanFile = Path.Combine(watched, "Batman", "001.cbz");
-        var supermanFile = Path.Combine(watched, "Superman", "001.cbz");
 
-        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<ComicFile>
+        _mockFileStore.Setup(fs => fs.GetFolderFilesAsync(
+                "Batman", null, null, "name", "asc", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<FileDto>
             {
-                new() { FilePath = batmanFile, FileName = "001.cbz" },
-                new() { FilePath = supermanFile, FileName = "001.cbz" }
+                new() { RelativePath = batmanFile, Name = "001.cbz" }
             });
 
         var encoded = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("Batman"))
@@ -2324,7 +2333,7 @@ public class FilesControllerTests
         Assert.NotNull(ok.Value);
         var t = ok.Value!.GetType();
         Assert.Equal("Batman", (string)t.GetProperty("path")!.GetValue(ok.Value)!);
-        var files = t.GetProperty("files")!.GetValue(ok.Value) as List<FileDto>;
+        var files = t.GetProperty("files")!.GetValue(ok.Value) as IReadOnlyList<FileDto>;
         Assert.NotNull(files);
         Assert.Single(files!);
         Assert.Equal(batmanFile, files![0].RelativePath);
@@ -2334,21 +2343,17 @@ public class FilesControllerTests
     public async Task GetFolderFiles_EmptyEncodedPath_ReturnsRootFiles()
     {
         var watched = Path.GetTempPath();
-        // Ensure no trailing separator quirks affect ComputeFolderKey by
-        // re-aligning the mocked settings with the canonical path form used
-        // for the test files.
         var canonical = Path.GetFullPath(watched);
         var settings = new AppSettings { WatchedDirectory = canonical };
         _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
 
         var rootFile = Path.Combine(canonical, "loose.cbz");
-        var subFile = Path.Combine(canonical, "Batman", "001.cbz");
 
-        _mockFileStore.Setup(fs => fs.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<ComicFile>
+        _mockFileStore.Setup(fs => fs.GetFolderFilesAsync(
+                string.Empty, null, null, "name", "asc", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<FileDto>
             {
-                new() { FilePath = rootFile, FileName = "loose.cbz" },
-                new() { FilePath = subFile, FileName = "001.cbz" }
+                new() { RelativePath = rootFile, Name = "loose.cbz" }
             });
 
         var result = await _controller.GetFolderFiles(string.Empty);
@@ -2356,7 +2361,7 @@ public class FilesControllerTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         Assert.NotNull(ok.Value);
         var t = ok.Value!.GetType();
-        var files = t.GetProperty("files")!.GetValue(ok.Value) as List<FileDto>;
+        var files = t.GetProperty("files")!.GetValue(ok.Value) as IReadOnlyList<FileDto>;
         Assert.NotNull(files);
         Assert.Single(files!);
         Assert.Equal(rootFile, files![0].RelativePath);

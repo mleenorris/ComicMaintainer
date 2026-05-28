@@ -5,6 +5,7 @@ using ComicMaintainer.Core.Data;
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.EntityFrameworkCore;
 
 namespace ComicMaintainer.Core.Services;
@@ -14,23 +15,29 @@ namespace ComicMaintainer.Core.Services;
 /// </summary>
 public class FileStoreService : IFileStoreService
 {
+    private const string UnmarkedCountCacheKey = "FileStore.UnmarkedCount";
+    private static readonly TimeSpan UnmarkedCountCacheTtl = TimeSpan.FromSeconds(10);
+
     private readonly ConcurrentDictionary<string, ComicFile> _files = new();
     private readonly ConcurrentDictionary<string, bool> _duplicateFiles = new();
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<FileStoreService> _logger;
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IEventBroadcaster? _eventBroadcaster;
+    private readonly IMemoryCache? _memoryCache;
 
     public FileStoreService(
         IOptionsMonitor<AppSettings> settings,
         ILogger<FileStoreService> logger,
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
-        IEventBroadcaster? eventBroadcaster = null)
+        IEventBroadcaster? eventBroadcaster = null,
+        IMemoryCache? memoryCache = null)
     {
         _settings = settings;
         _logger = logger;
         _dbContextFactory = dbContextFactory;
         _eventBroadcaster = eventBroadcaster;
+        _memoryCache = memoryCache;
     }
 
     private static string SanitizeForLogging(string? input)
@@ -124,6 +131,10 @@ public class FileStoreService : IFileStoreService
 
     private async Task BroadcastFileListUpdateSafeAsync()
     {
+        // Invalidate cached aggregates whose values depend on the file list,
+        // so the next request recomputes them from the database.
+        _memoryCache?.Remove(UnmarkedCountCacheKey);
+
         if (_eventBroadcaster is null) return;
         try
         {
@@ -711,45 +722,39 @@ public class FileStoreService : IFileStoreService
         try
         {
             _logger.LogInformation("Initializing file store from database");
-            
+
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            
-            // Load all files from database
+
+            // Load all files from database. We deliberately do NOT call File.Exists()
+            // for each row here: with large libraries a synchronous stat() per row
+            // delays startup (and thus the first file-list response) noticeably.
+            // Stale rows for files no longer on disk are cleaned up asynchronously
+            // by CleanupStaleEntriesAsync (and by the live FileSystemWatcher when a
+            // delete is observed). Read paths now query the database directly, so
+            // the worst case for a transiently missing file is one stale entry in
+            // the UI until cleanup runs.
             var fileEntities = await dbContext.ComicFiles
+                .AsNoTracking()
                 .ToListAsync(cancellationToken);
-            
+
             _logger.LogInformation("Loading {Count} files from database", fileEntities.Count);
-            
-            // Populate in-memory collections
+
             foreach (var entity in fileEntities)
             {
-                // Only add file if it still exists on filesystem
-                if (File.Exists(entity.FilePath))
+                var comicFile = ToComicFile(entity);
+                _files.AddOrUpdate(entity.FilePath, comicFile, (_, _) => comicFile);
+
+                if (entity.IsDuplicate)
                 {
-                    var comicFile = ToComicFile(entity);
-                    
-                    _files.AddOrUpdate(entity.FilePath, comicFile, (_, _) => comicFile);
-                    
-                    if (entity.IsDuplicate)
-                    {
-                        _duplicateFiles.TryAdd(entity.FilePath, true);
-                    }
-                }
-                else
-                {
-                    // File no longer exists, remove from database
-                    _logger.LogDebug("File no longer exists, will be removed from database: {FilePath}", SanitizeForLogging(entity.FilePath));
-                    dbContext.ComicFiles.Remove(entity);
+                    _duplicateFiles.TryAdd(entity.FilePath, true);
                 }
             }
-            
-            await dbContext.SaveChangesAsync(cancellationToken);
-            
+
             var loadedCount = _files.Count;
             var processedCount = _files.Values.Count(f => f.IsProcessed);
             var duplicateCount = _duplicateFiles.Count;
-            
-            _logger.LogInformation("Loaded {FileCount} files from database ({ProcessedCount} processed, {DuplicateCount} duplicates)", 
+
+            _logger.LogInformation("Loaded {FileCount} files from database ({ProcessedCount} processed, {DuplicateCount} duplicates)",
                 loadedCount, processedCount, duplicateCount);
         }
         catch (Exception ex)
@@ -1352,6 +1357,268 @@ public class FileStoreService : IFileStoreService
         }
     }
 
+    /// <summary>
+    /// Compute the directory key for a raw directory path, relative to the
+    /// watched directory, normalized to forward slashes. Returns empty string
+    /// when the directory IS the watched directory itself. Used by the
+    /// DB-backed folder summary aggregation, which groups by raw
+    /// <c>Directory</c> column values before mapping them to folder keys.
+    /// </summary>
+    public static string ComputeFolderKeyFromDirectory(string? directory, string? watchedDirectory)
+    {
+        if (string.IsNullOrEmpty(directory))
+            return string.Empty;
+
+        try
+        {
+            if (!string.IsNullOrEmpty(watchedDirectory))
+            {
+                var watchedFull = Path.GetFullPath(watchedDirectory)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                var dirFull = Path.GetFullPath(directory)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+                if (string.Equals(dirFull, watchedFull, StringComparison.OrdinalIgnoreCase) ||
+                    dirFull.StartsWith(watchedFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                {
+                    var rel = Path.GetRelativePath(watchedFull, dirFull);
+                    if (rel == "." || string.IsNullOrEmpty(rel))
+                    {
+                        return string.Empty;
+                    }
+                    return rel.Replace('\\', '/');
+                }
+            }
+
+            return directory.Replace('\\', '/');
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Apply the named status filter to a <see cref="ComicFileEntity"/> query.
+    /// Matches the semantics of <see cref="GetFilteredFilesAsync"/>.
+    /// </summary>
+    private static IQueryable<ComicFileEntity> ApplyEntityFilter(IQueryable<ComicFileEntity> q, string? filter)
+    {
+        if (string.IsNullOrEmpty(filter)) return q;
+        return filter.ToLowerInvariant() switch
+        {
+            "processed" => q.Where(f => f.IsRenamed && f.IsNormalized),
+            "unprocessed" => q.Where(f => !(f.IsRenamed && f.IsNormalized) && !f.IsDuplicate),
+            "duplicates" => q.Where(f => f.IsDuplicate),
+            "renamed" => q.Where(f => f.IsRenamed),
+            "normalized" => q.Where(f => f.IsNormalized),
+            "read" => q.Where(f => f.IsRead),
+            "unread" => q.Where(f => !f.IsRead),
+            _ => q
+        };
+    }
+
+    private static IQueryable<ComicFileEntity> ApplyEntitySearch(IQueryable<ComicFileEntity> q, string? search)
+    {
+        if (string.IsNullOrEmpty(search)) return q;
+        var pattern = $"%{search}%";
+        return q.Where(f => EF.Functions.Like(f.FileName, pattern) || EF.Functions.Like(f.FilePath, pattern));
+    }
+
+    private static IOrderedQueryable<ComicFileEntity> ApplyEntityOrder(IQueryable<ComicFileEntity> q, string? sort, string? direction)
+    {
+        var dir = (direction ?? "asc").ToLowerInvariant();
+        return (sort?.ToLowerInvariant(), dir) switch
+        {
+            ("name", "desc") => q.OrderByDescending(f => f.FileName),
+            ("date", "asc") => q.OrderBy(f => f.LastModified),
+            ("date", "desc") => q.OrderByDescending(f => f.LastModified),
+            ("size", "asc") => q.OrderBy(f => f.FileSize),
+            ("size", "desc") => q.OrderByDescending(f => f.FileSize),
+            _ => q.OrderBy(f => f.FileName)
+        };
+    }
+
+    private static long ToUnixSeconds(DateTime value)
+    {
+        return value.Kind == DateTimeKind.Utc
+            ? new DateTimeOffset(value, TimeSpan.Zero).ToUnixTimeSeconds()
+            : new DateTimeOffset(value).ToUnixTimeSeconds();
+    }
+
+    /// <summary>
+    /// Projection shape used by paged file queries. Kept private so we can
+    /// translate the EF Select cleanly without pulling DateTime conversion
+    /// helpers into the SQL expression tree.
+    /// </summary>
+    private sealed class FileProjection
+    {
+        public string FilePath { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public long FileSize { get; set; }
+        public DateTime LastModified { get; set; }
+        public bool IsRenamed { get; set; }
+        public bool IsNormalized { get; set; }
+        public bool IsDuplicate { get; set; }
+        public bool IsRead { get; set; }
+    }
+
+    private static FileDto ToFileDto(FileProjection p) => new()
+    {
+        RelativePath = p.FilePath,
+        Name = p.FileName,
+        Size = p.FileSize,
+        Modified = ToUnixSeconds(p.LastModified),
+        Processed = p.IsRenamed && p.IsNormalized,
+        Renamed = p.IsRenamed,
+        Normalized = p.IsNormalized,
+        Duplicate = p.IsDuplicate,
+        Read = p.IsRead,
+    };
+
+    public async Task<PagedFilesResult> GetFilesPageAsync(
+        string? filter = null,
+        string? search = null,
+        string? sort = "name",
+        string? direction = "asc",
+        int page = 1,
+        int perPage = 100,
+        CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var query = dbContext.ComicFiles.AsNoTracking().AsQueryable();
+        query = ApplyEntityFilter(query, filter);
+        query = ApplyEntitySearch(query, search);
+
+        var totalFiles = await query.CountAsync(cancellationToken);
+
+        var ordered = ApplyEntityOrder(query, sort, direction);
+
+        List<FileProjection> rows;
+        int currentPage;
+        int totalPages;
+
+        if (perPage == -1)
+        {
+            rows = await ordered.Select(f => new FileProjection
+            {
+                FilePath = f.FilePath,
+                FileName = f.FileName,
+                FileSize = f.FileSize,
+                LastModified = f.LastModified,
+                IsRenamed = f.IsRenamed,
+                IsNormalized = f.IsNormalized,
+                IsDuplicate = f.IsDuplicate,
+                IsRead = f.IsRead,
+            }).ToListAsync(cancellationToken);
+            currentPage = 1;
+            totalPages = 1;
+        }
+        else
+        {
+            var safePerPage = Math.Max(1, perPage);
+            totalPages = totalFiles == 0 ? 1 : (int)Math.Ceiling((double)totalFiles / safePerPage);
+            currentPage = Math.Max(1, Math.Min(page, totalPages));
+
+            rows = await ordered
+                .Skip((currentPage - 1) * safePerPage)
+                .Take(safePerPage)
+                .Select(f => new FileProjection
+                {
+                    FilePath = f.FilePath,
+                    FileName = f.FileName,
+                    FileSize = f.FileSize,
+                    LastModified = f.LastModified,
+                    IsRenamed = f.IsRenamed,
+                    IsNormalized = f.IsNormalized,
+                    IsDuplicate = f.IsDuplicate,
+                    IsRead = f.IsRead,
+                })
+                .ToListAsync(cancellationToken);
+        }
+
+        return new PagedFilesResult
+        {
+            Files = rows.Select(ToFileDto).ToList(),
+            Page = currentPage,
+            TotalPages = totalPages,
+            TotalFiles = totalFiles,
+        };
+    }
+
+    public async Task<IReadOnlyList<FileDto>> GetFolderFilesAsync(
+        string folderKey,
+        string? filter = null,
+        string? search = null,
+        string? sort = "name",
+        string? direction = "asc",
+        CancellationToken cancellationToken = default)
+    {
+        var key = folderKey ?? string.Empty;
+        var watchedDir = _settings.CurrentValue?.WatchedDirectory;
+
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        // Resolve raw Directory values that map to the requested folder key.
+        // The set of distinct directories is typically small (one per folder)
+        // so loading and mapping in memory is cheap, and lets us do the
+        // file-level filter as `WHERE Directory IN (...)` which uses the
+        // Directory index.
+        var distinctDirs = await dbContext.ComicFiles
+            .AsNoTracking()
+            .Select(f => f.Directory)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        var matchedDirs = distinctDirs
+            .Where(d => string.Equals(ComputeFolderKeyFromDirectory(d, watchedDir), key, StringComparison.Ordinal))
+            .ToList();
+
+        if (matchedDirs.Count == 0)
+        {
+            return Array.Empty<FileDto>();
+        }
+
+        var query = dbContext.ComicFiles
+            .AsNoTracking()
+            .Where(f => matchedDirs.Contains(f.Directory));
+
+        query = ApplyEntityFilter(query, filter);
+        query = ApplyEntitySearch(query, search);
+        var ordered = ApplyEntityOrder(query, sort, direction);
+
+        var rows = await ordered.Select(f => new FileProjection
+        {
+            FilePath = f.FilePath,
+            FileName = f.FileName,
+            FileSize = f.FileSize,
+            LastModified = f.LastModified,
+            IsRenamed = f.IsRenamed,
+            IsNormalized = f.IsNormalized,
+            IsDuplicate = f.IsDuplicate,
+            IsRead = f.IsRead,
+        }).ToListAsync(cancellationToken);
+
+        return rows.Select(ToFileDto).ToList();
+    }
+
+    public async Task<int> GetUnmarkedCountAsync(CancellationToken cancellationToken = default)
+    {
+        if (_memoryCache != null && _memoryCache.TryGetValue(UnmarkedCountCacheKey, out int cached))
+        {
+            return cached;
+        }
+
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var count = await dbContext.ComicFiles
+            .AsNoTracking()
+            .CountAsync(f => !(f.IsRenamed && f.IsNormalized) && !f.IsDuplicate, cancellationToken);
+
+        _memoryCache?.Set(UnmarkedCountCacheKey, count, UnmarkedCountCacheTtl);
+        return count;
+    }
+
     public async Task<FolderSummariesResult> GetFolderSummariesAsync(
         string? filter = null,
         string? search = null,
@@ -1361,30 +1628,43 @@ public class FileStoreService : IFileStoreService
         int limit = 100,
         CancellationToken cancellationToken = default)
     {
-        var filtered = await GetFilteredFilesAsync(filter, cancellationToken);
-        IEnumerable<ComicFile> files = filtered;
-
-        if (!string.IsNullOrEmpty(search))
-        {
-            files = files.Where(f =>
-                (f.FileName?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (f.FilePath?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
-        }
-
         var watchedDir = _settings.CurrentValue?.WatchedDirectory;
 
-        var grouped = files
-            .GroupBy(f => ComputeFolderKey(f.FilePath, watchedDir))
-            .Select(g => new FolderSummaryDto
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+
+        var query = dbContext.ComicFiles.AsNoTracking().AsQueryable();
+        query = ApplyEntityFilter(query, filter);
+        query = ApplyEntitySearch(query, search);
+
+        // Aggregate per raw Directory in the database. The number of distinct
+        // directories is typically small relative to the file count, so the
+        // post-processing (map Directory -> folder key, then sort/page) runs
+        // on a tiny in-memory set.
+        var rawGroups = await query
+            .GroupBy(f => f.Directory)
+            .Select(g => new
             {
-                Path = g.Key,
+                Directory = g.Key,
                 FileCount = g.Count(),
                 TotalSize = g.Sum(f => f.FileSize),
-                LastModified = g.Max(f => f.LastModified.Kind == DateTimeKind.Utc
-                    ? new DateTimeOffset(f.LastModified, TimeSpan.Zero).ToUnixTimeSeconds()
-                    : new DateTimeOffset(f.LastModified).ToUnixTimeSeconds()),
-                UnmarkedCount = g.Count(f => !f.IsProcessed && !f.IsDuplicate),
-                DuplicateCount = g.Count(f => f.IsDuplicate)
+                LastModified = g.Max(f => f.LastModified),
+                UnmarkedCount = g.Count(f => !(f.IsRenamed && f.IsNormalized) && !f.IsDuplicate),
+                DuplicateCount = g.Count(f => f.IsDuplicate),
+            })
+            .ToListAsync(cancellationToken);
+
+        // Multiple raw directories can collapse to the same folder key (e.g.
+        // when watched-dir normalization differs), so re-aggregate by key.
+        var grouped = rawGroups
+            .GroupBy(g => ComputeFolderKeyFromDirectory(g.Directory, watchedDir))
+            .Select(grp => new FolderSummaryDto
+            {
+                Path = grp.Key,
+                FileCount = grp.Sum(x => x.FileCount),
+                TotalSize = grp.Sum(x => x.TotalSize),
+                LastModified = ToUnixSeconds(grp.Max(x => x.LastModified)),
+                UnmarkedCount = grp.Sum(x => x.UnmarkedCount),
+                DuplicateCount = grp.Sum(x => x.DuplicateCount),
             })
             .ToList();
 

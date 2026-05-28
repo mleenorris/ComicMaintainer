@@ -110,6 +110,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
                     ActualIssue = null,
                     Details = "ComicInfo <Number> tag is empty.",
                 });
+                await AddDiskDriftFindingIfNeededAsync(file.FilePath, metadata, findings, cancellationToken);
                 continue;
             }
 
@@ -138,6 +139,8 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
                     Details = details,
                 });
             }
+
+            await AddDiskDriftFindingIfNeededAsync(file.FilePath, metadata, findings, cancellationToken);
         }
 
         // Persist findings: replace prior findings with the freshly computed set so the UI
@@ -202,6 +205,62 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
 
         return $"Scanned {files.Count}: {seriesMismatch} series mismatch, {missingChapter} missing chapter, {unreadable} unreadable.{correctedSummary}";
     }
+
+
+    private async Task AddDiskDriftFindingIfNeededAsync(
+        string filePath,
+        ComicMetadata diskMetadata,
+        List<MetadataAuditFindingEntity> findings,
+        CancellationToken cancellationToken)
+    {
+        var row = await _fileStore.GetFileAsync(filePath, cancellationToken);
+        if (row?.Metadata?.IsUserEdited != true)
+        {
+            return;
+        }
+
+        var dbMetadata = row.Metadata;
+        var flags = (ComicMetadataFieldFlags)dbMetadata.UserLockedFieldsMask;
+        if (flags == ComicMetadataFieldFlags.None)
+        {
+            return;
+        }
+
+        if (!LockedFieldsDiffer(flags, diskMetadata, dbMetadata))
+        {
+            return;
+        }
+
+        findings.Add(new MetadataAuditFindingEntity
+        {
+            FilePath = filePath,
+            FindingType = MetadataAuditFindingType.DiskDriftedFromDb.ToString(),
+            ActualSeries = diskMetadata.Series,
+            ExpectedSeries = dbMetadata.Series,
+            ActualIssue = diskMetadata.Issue,
+            Details = "Disk metadata diverges from user-edited DB record; backfill will rewrite.",
+        });
+    }
+
+    private static bool LockedFieldsDiffer(ComicMetadataFieldFlags flags, ComicMetadata disk, ComicMetadata db)
+    {
+        if (flags.HasFlag(ComicMetadataFieldFlags.Series) && !StringEquals(disk.Series, db.Series)) return true;
+        if (flags.HasFlag(ComicMetadataFieldFlags.Title) && !StringEquals(disk.Title, db.Title)) return true;
+        if (flags.HasFlag(ComicMetadataFieldFlags.Issue) && !StringEquals(disk.Issue, db.Issue)) return true;
+        if (flags.HasFlag(ComicMetadataFieldFlags.Volume) && !StringEquals(disk.Volume, db.Volume)) return true;
+        if (flags.HasFlag(ComicMetadataFieldFlags.Publisher) && !StringEquals(disk.Publisher, db.Publisher)) return true;
+        if (flags.HasFlag(ComicMetadataFieldFlags.Year) && disk.Year != db.Year) return true;
+        if (flags.HasFlag(ComicMetadataFieldFlags.Summary) && !StringEquals(disk.Summary, db.Summary)) return true;
+        if (flags.HasFlag(ComicMetadataFieldFlags.Authors) && !ListEquals(disk.Authors, db.Authors)) return true;
+        if (flags.HasFlag(ComicMetadataFieldFlags.Tags) && !ListEquals(disk.Tags, db.Tags)) return true;
+        return false;
+    }
+
+    private static bool StringEquals(string? left, string? right)
+        => string.Equals(left ?? string.Empty, right ?? string.Empty, StringComparison.Ordinal);
+
+    private static bool ListEquals(IReadOnlyList<string>? left, IReadOnlyList<string>? right)
+        => (left ?? Array.Empty<string>()).SequenceEqual(right ?? Array.Empty<string>(), StringComparer.Ordinal);
 
     /// <summary>
     /// Backward-compatible thin wrapper around

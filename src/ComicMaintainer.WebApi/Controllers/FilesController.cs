@@ -4,6 +4,7 @@ using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -37,6 +38,7 @@ public class FilesController : ControllerBase
     private readonly IEventBroadcaster? _eventBroadcaster;
     private readonly ISeriesMetadataCacheService? _metadataCache;
     private readonly ISeriesNameResolver? _seriesNameResolver;
+    private readonly ScheduledJobsHostedService? _scheduledJobsHostedService;
 
     public FilesController(
         IFileStoreService fileStore,
@@ -48,7 +50,8 @@ public class FilesController : ControllerBase
         IDbContextFactory<ComicMaintainerDbContext>? dbContextFactory = null,
         IEventBroadcaster? eventBroadcaster = null,
         ISeriesMetadataCacheService? metadataCache = null,
-        ISeriesNameResolver? seriesNameResolver = null)
+        ISeriesNameResolver? seriesNameResolver = null,
+        ScheduledJobsHostedService? scheduledJobsHostedService = null)
     {
         _fileStore = fileStore;
         _processor = processor;
@@ -60,6 +63,7 @@ public class FilesController : ControllerBase
         _eventBroadcaster = eventBroadcaster;
         _metadataCache = metadataCache;
         _seriesNameResolver = seriesNameResolver;
+        _scheduledJobsHostedService = scheduledJobsHostedService;
     }
 
     /// <summary>
@@ -2207,6 +2211,89 @@ public class FilesController : ControllerBase
         }
     }
 
+
+    [HttpPatch("metadata")]
+    public async Task<ActionResult> PatchMetadata([FromQuery] string filePath, [FromBody] PatchMetadataRequest body, CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(filePath))
+                return BadRequest("File path is required");
+
+            if (!IsPathSafe(filePath))
+            {
+                _logger.LogWarning("Attempt to patch metadata for file outside watched directory: {FilePath}", LoggingHelper.SanitizeForLog(LoggingHelper.SanitizePathForLog(filePath)));
+                return BadRequest("File path is outside the allowed directory");
+            }
+
+            if (body?.Metadata is null)
+                return BadRequest("Metadata patch is required");
+
+            var patch = body.Metadata;
+            var lockFields = DetermineEditedFields(patch);
+            if (body.LockFields is not null)
+            {
+                foreach (var field in body.LockFields)
+                {
+                    lockFields |= ParseMetadataField(field);
+                }
+            }
+
+            await _fileStore.ApplyUserMetadataEditAsync(filePath, patch, lockFields, ct);
+
+            if (_scheduledJobsHostedService is not null)
+            {
+                _ = _scheduledJobsHostedService.RunNowAsync(MetadataBackfillJobHandler.Key, CancellationToken.None);
+            }
+
+            var updated = await _fileStore.GetFileAsync(filePath, ct);
+            return Accepted(new { filePath, metadataVersion = updated?.MetadataVersion ?? 0 });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(ex, "Cannot patch metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return NotFound("File is not tracked");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error patching metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return StatusCode(500, "Error patching metadata");
+        }
+    }
+
+    private static ComicMetadataFieldFlags DetermineEditedFields(ComicMetadata metadata)
+    {
+        var flags = ComicMetadataFieldFlags.None;
+        if (metadata.Series is not null) flags |= ComicMetadataFieldFlags.Series;
+        if (metadata.Title is not null) flags |= ComicMetadataFieldFlags.Title;
+        if (metadata.Issue is not null) flags |= ComicMetadataFieldFlags.Issue;
+        if (metadata.Volume is not null) flags |= ComicMetadataFieldFlags.Volume;
+        if (metadata.Publisher is not null) flags |= ComicMetadataFieldFlags.Publisher;
+        if (metadata.Year.HasValue) flags |= ComicMetadataFieldFlags.Year;
+        if (metadata.Summary is not null) flags |= ComicMetadataFieldFlags.Summary;
+        if (metadata.Authors.Count > 0) flags |= ComicMetadataFieldFlags.Authors;
+        if (metadata.Tags.Count > 0) flags |= ComicMetadataFieldFlags.Tags;
+        return flags;
+    }
+
+    private static ComicMetadataFieldFlags ParseMetadataField(string? field)
+    {
+        if (string.IsNullOrWhiteSpace(field)) return ComicMetadataFieldFlags.None;
+        return field.Trim().ToLowerInvariant() switch
+        {
+            "series" => ComicMetadataFieldFlags.Series,
+            "title" => ComicMetadataFieldFlags.Title,
+            "issue" or "number" => ComicMetadataFieldFlags.Issue,
+            "volume" => ComicMetadataFieldFlags.Volume,
+            "publisher" => ComicMetadataFieldFlags.Publisher,
+            "year" => ComicMetadataFieldFlags.Year,
+            "summary" or "description" => ComicMetadataFieldFlags.Summary,
+            "authors" or "writer" or "writers" => ComicMetadataFieldFlags.Authors,
+            "tags" => ComicMetadataFieldFlags.Tags,
+            _ => ComicMetadataFieldFlags.None
+        };
+    }
+
     [HttpPost("process")]
     public async Task<ActionResult> ProcessFile([FromQuery] string filePath)
     {
@@ -2887,4 +2974,10 @@ public class FilesController : ControllerBase
         "unmatched" => "unmatched",
         _ => null
     };
+}
+
+public class PatchMetadataRequest
+{
+    public ComicMetadata? Metadata { get; set; }
+    public List<string>? LockFields { get; set; }
 }

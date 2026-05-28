@@ -83,6 +83,58 @@ public class FileStoreService : IFileStoreService
         }
     }
 
+
+    private static ComicFile ToComicFile(ComicFileEntity entity)
+    {
+        Enum.TryParse<FileMetadataSource>(entity.MetadataSource, ignoreCase: true, out var source);
+        return new ComicFile
+        {
+            FilePath = entity.FilePath,
+            FileName = entity.FileName,
+            Directory = entity.Directory,
+            FileSize = entity.FileSize,
+            LastModified = entity.LastModified,
+            IsProcessed = ComputeProcessedState(entity.IsRenamed, entity.IsNormalized),
+            IsRenamed = entity.IsRenamed,
+            IsNormalized = entity.IsNormalized,
+            IsDuplicate = entity.IsDuplicate,
+            IsRead = entity.IsRead,
+            Metadata = entity.Metadata?.Clone(),
+            SeriesMetadataVersion = entity.SeriesMetadataVersion,
+            MetadataVersion = entity.MetadataVersion,
+            WrittenMetadataVersion = entity.WrittenMetadataVersion,
+            LastDbEditAt = entity.LastDbEditAt,
+            LastWriteAt = entity.LastWriteAt,
+            MetadataSource = source
+        };
+    }
+
+    private static void CopyNonNullMetadataFields(ComicMetadata target, ComicMetadata patch)
+    {
+        if (patch.Series is not null) target.Series = patch.Series;
+        if (patch.Title is not null) target.Title = patch.Title;
+        if (patch.Issue is not null) target.Issue = patch.Issue;
+        if (patch.Volume is not null) target.Volume = patch.Volume;
+        if (patch.Publisher is not null) target.Publisher = patch.Publisher;
+        if (patch.Year.HasValue) target.Year = patch.Year;
+        if (patch.Summary is not null) target.Summary = patch.Summary;
+        if (patch.Authors.Count > 0) target.Authors = new List<string>(patch.Authors);
+        if (patch.Tags.Count > 0) target.Tags = new List<string>(patch.Tags);
+    }
+
+    private async Task BroadcastFileListUpdateSafeAsync()
+    {
+        if (_eventBroadcaster is null) return;
+        try
+        {
+            await _eventBroadcaster.BroadcastFileListUpdateAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to broadcast file list update");
+        }
+    }
+
     private ComicFileEntity CreateFileEntity(string filePath, bool? isDuplicate = null)
     {
         var fileInfo = new FileInfo(filePath);
@@ -98,7 +150,8 @@ public class FileStoreService : IFileStoreService
             IsNormalized = false, // Initialize to false by default
             IsDuplicate = isDuplicate ?? _duplicateFiles.ContainsKey(filePath),
             CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            UpdatedAt = DateTime.UtcNow,
+            MetadataSource = FileMetadataSource.Scanned.ToString()
         };
     }
 
@@ -673,21 +726,7 @@ public class FileStoreService : IFileStoreService
                 // Only add file if it still exists on filesystem
                 if (File.Exists(entity.FilePath))
                 {
-                    var comicFile = new ComicFile
-                    {
-                        FilePath = entity.FilePath,
-                        FileName = entity.FileName,
-                        Directory = entity.Directory,
-                        FileSize = entity.FileSize,
-                        LastModified = entity.LastModified,
-                        IsProcessed = ComputeProcessedState(entity.IsRenamed, entity.IsNormalized),
-                        IsRenamed = entity.IsRenamed,
-                        IsNormalized = entity.IsNormalized,
-                        IsDuplicate = entity.IsDuplicate,
-                        IsRead = entity.IsRead,
-                        Metadata = entity.Metadata,
-                        SeriesMetadataVersion = entity.SeriesMetadataVersion
-                    };
+                    var comicFile = ToComicFile(entity);
                     
                     _files.AddOrUpdate(entity.FilePath, comicFile, (_, _) => comicFile);
                     
@@ -784,7 +823,13 @@ public class FileStoreService : IFileStoreService
                 IsProcessed = existingFile.IsProcessed,
                 IsDuplicate = existingFile.IsDuplicate,
                 IsRead = existingFile.IsRead,
-                Metadata = existingFile.Metadata
+                Metadata = existingFile.Metadata,
+                SeriesMetadataVersion = existingFile.SeriesMetadataVersion,
+                MetadataVersion = existingFile.MetadataVersion,
+                WrittenMetadataVersion = existingFile.WrittenMetadataVersion,
+                LastDbEditAt = existingFile.LastDbEditAt,
+                LastWriteAt = existingFile.LastWriteAt,
+                MetadataSource = existingFile.MetadataSource
             };
             _files[newPath] = newFile;
             if (newFile.IsDuplicate)
@@ -925,6 +970,82 @@ public class FileStoreService : IFileStoreService
             _logger.LogWarning(ex, "Failed to query stale series-metadata-version files (current={Version})", currentVersion);
         }
         return stale;
+    }
+
+
+    public async Task<ComicFile?> GetFileAsync(string filePath, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(filePath)) return null;
+
+        try
+        {
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            var entity = await dbContext.ComicFiles
+                .AsNoTracking()
+                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+            return entity is null ? null : ToComicFile(entity);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load file row for {FilePath}", SanitizeForLogging(filePath));
+            return _files.TryGetValue(filePath, out var cached) ? cached : null;
+        }
+    }
+
+    public async Task ApplyUserMetadataEditAsync(string filePath, ComicMetadata patch, ComicMetadataFieldFlags lockFields, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(patch);
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+        if (entity is null)
+        {
+            throw new InvalidOperationException($"File is not tracked: {filePath}");
+        }
+
+        entity.Metadata ??= new ComicMetadata();
+        CopyNonNullMetadataFields(entity.Metadata, patch);
+        entity.Metadata.IsUserEdited = true;
+        entity.Metadata.UserLockedFieldsMask |= (long)lockFields;
+        if (entity.MetadataVersion < int.MaxValue) entity.MetadataVersion++;
+        entity.LastDbEditAt = DateTime.UtcNow;
+        entity.MetadataSource = FileMetadataSource.UserEdit.ToString();
+        entity.UpdatedAt = DateTime.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var updated = ToComicFile(entity);
+        _files.AddOrUpdate(filePath, updated, (_, _) => updated);
+        await BroadcastFileListUpdateSafeAsync();
+    }
+
+    public async Task<IReadOnlyList<ComicFile>> GetFilesNeedingBackfillAsync(int max, CancellationToken cancellationToken = default)
+    {
+        if (max <= 0) return Array.Empty<ComicFile>();
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var rows = await dbContext.ComicFiles
+            .AsNoTracking()
+            .Where(e => !e.IsDuplicate && e.MetadataVersion > e.WrittenMetadataVersion)
+            .OrderByDescending(e => e.UpdatedAt)
+            .Take(max)
+            .ToListAsync(cancellationToken);
+        return rows.Select(ToComicFile).ToList();
+    }
+
+    public async Task MarkFileBackfilledAsync(string filePath, int version, CancellationToken cancellationToken = default)
+    {
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+        if (entity is null) return;
+        entity.WrittenMetadataVersion = version;
+        entity.LastWriteAt = DateTime.UtcNow;
+        if (!string.Equals(entity.MetadataSource, FileMetadataSource.UserEdit.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            entity.MetadataSource = FileMetadataSource.Scanned.ToString();
+        }
+        entity.UpdatedAt = DateTime.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var updated = ToComicFile(entity);
+        _files.AddOrUpdate(filePath, updated, (_, _) => updated);
     }
 
     public async Task<int> CleanupStaleEntriesAsync(CancellationToken cancellationToken = default)

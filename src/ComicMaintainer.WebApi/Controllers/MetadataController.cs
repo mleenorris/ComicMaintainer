@@ -405,7 +405,7 @@ public class MetadataController : ControllerBase
         return Ok(record);
     }
 
-    /// <summary>Replace the user-managed alias list (and optional canonical override) for a series.</summary>
+    /// <summary>Replace the user-managed alias list for a series.</summary>
     [HttpPut("series/{seriesTitle}/aliases")]
     public async Task<ActionResult<SeriesMetadataCacheRecord>> SetAliases(
         string seriesTitle,
@@ -422,7 +422,6 @@ public class MetadataController : ControllerBase
             var record = await _cache.SetUserAliasesAsync(
                 seriesTitle,
                 request?.Aliases ?? new List<string>(),
-                request?.CanonicalTitle,
                 cancellationToken);
             return Ok(record);
         }
@@ -628,15 +627,16 @@ public class MetadataController : ControllerBase
     }
 
     /// <summary>
-    /// Set (or clear, by passing null/empty) the user-pinned localized title
-    /// for a series. The pinned title wins over the language-preference rule
-    /// but loses to a user-canonical override. Must equal the canonical
-    /// title or one of the cached localized titles for the series.
+    /// Set (or clear, by passing null/empty) the user-selected series name —
+    /// the single authoritative "pinned" name shown in the library and
+    /// written into ComicInfo.xml's <c>&lt;Series&gt;</c>. It wins over the
+    /// language-preference rule and is sticky until the user picks a
+    /// different name or reverts to automatic (null/empty).
     /// </summary>
-    [HttpPut("series/{seriesTitle}/pinned-localized-title")]
-    public async Task<ActionResult<SeriesMetadataCacheRecord>> SetPinnedLocalizedTitle(
+    [HttpPut("series/{seriesTitle}/name")]
+    public async Task<ActionResult<SeriesMetadataCacheRecord>> SetSeriesName(
         string seriesTitle,
-        [FromBody] PinnedLocalizedTitleRequest? request,
+        [FromBody] SeriesNameRequest? request,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
@@ -646,9 +646,9 @@ public class MetadataController : ControllerBase
 
         try
         {
-            var record = await _cache.SetPinnedLocalizedTitleAsync(
+            var record = await _cache.SetSeriesNameAsync(
                 seriesTitle,
-                request?.PinnedTitle,
+                request?.Name,
                 cancellationToken);
 
             if (record is null)
@@ -657,7 +657,7 @@ public class MetadataController : ControllerBase
             }
 
             // Fire-and-forget per-file retag so on-disk <Series> tags catch
-            // up with the new pin (same flow as preferred-language changes).
+            // up with the new name (same flow as preferred-language changes).
             if (_languageRetag is not null)
             {
                 try
@@ -666,14 +666,14 @@ public class MetadataController : ControllerBase
                     if (retagJobId is not null)
                     {
                         _logger.LogInformation(
-                            LoggingHelper.WithWebsitePrefix("Queued per-file retag job {JobId} after pinned-title change for {SeriesTitle}"),
+                            LoggingHelper.WithWebsitePrefix("Queued per-file retag job {JobId} after series-name change for {SeriesTitle}"),
                             retagJobId.Value, LoggingHelper.SanitizeForLog(seriesTitle));
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex,
-                        LoggingHelper.WithWebsitePrefix("Failed to queue per-file retag after pinned-title change for {SeriesTitle}"),
+                        LoggingHelper.WithWebsitePrefix("Failed to queue per-file retag after series-name change for {SeriesTitle}"),
                         LoggingHelper.SanitizeForLog(seriesTitle));
                 }
             }
@@ -686,20 +686,21 @@ public class MetadataController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error setting pinned localized title for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
-            return StatusCode(500, "Error setting pinned localized title");
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error setting series name for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
+            return StatusCode(500, "Error setting series name");
         }
     }
 
-    public class PinnedLocalizedTitleRequest
+    public class SeriesNameRequest
     {
         /// <summary>
-        /// Exact string to pin as the series' displayed/written <c>&lt;Series&gt;</c>
-        /// title. Must match the cached record's canonical title or one of
-        /// its localized titles (case-insensitive). Pass null or empty to
-        /// clear the pin and fall back to the language-preference rule.
+        /// Exact name to use as the series' displayed/written
+        /// <c>&lt;Series&gt;</c> title. Should be the canonical title, one of
+        /// the aliases, or one of the localized titles; an unrecognised value
+        /// is added as a new user alias. Pass null or empty to revert to
+        /// automatic (language-preference) resolution.
         /// </summary>
-        public string? PinnedTitle { get; set; }
+        public string? Name { get; set; }
     }
 
     public class RefreshSelectedRequest
@@ -722,7 +723,6 @@ public class MetadataController : ControllerBase
     public class SetAliasesRequest
     {
         public List<string> Aliases { get; set; } = new();
-        public string? CanonicalTitle { get; set; }
     }
 
     public class ApplyMatchRequest

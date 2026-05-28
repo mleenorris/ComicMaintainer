@@ -73,33 +73,34 @@ public class SeriesMetadataCacheServiceTests
     {
         var record = await _service.SetUserAliasesAsync(
             "Series A",
-            new[] { "Alias One", "alias one", "Alias Two", "" },
-            canonicalTitleOverride: null);
+            new[] { "Alias One", "alias one", "Alias Two", "" });
 
         Assert.Equal("series-a", record.NormalizedKey);
         Assert.Equal("Series A", record.CanonicalTitle);
         Assert.Equal(2, record.UserAliases.Count);
         Assert.Contains("Alias One", record.UserAliases);
         Assert.Contains("Alias Two", record.UserAliases);
-        Assert.False(record.IsUserCanonical);
+        Assert.False(record.IsUserSelectedName);
     }
 
     [Fact]
-    public async Task SetUserAliasesAsync_AppliesCanonicalOverride()
+    public async Task SetSeriesNameAsync_SetsUserSelectedName()
     {
-        var record = await _service.SetUserAliasesAsync(
-            "Series A",
-            new[] { "Alias" },
-            canonicalTitleOverride: "Canonical A");
+        await _service.SetUserAliasesAsync("Series A", new[] { "Alias" });
 
-        Assert.Equal("Canonical A", record.CanonicalTitle);
-        Assert.True(record.IsUserCanonical);
+        var record = await _service.SetSeriesNameAsync("Series A", "Canonical A");
+
+        Assert.NotNull(record);
+        Assert.Equal("Series A", record!.CanonicalTitle);
+        Assert.Equal("Canonical A", record.SeriesName);
+        Assert.True(record.IsUserSelectedName);
+        Assert.Contains("Canonical A", record.UserAliases);
     }
 
     [Fact]
     public async Task RemoveUserAliasAsync_RemovesCaseInsensitive()
     {
-        await _service.SetUserAliasesAsync("Series A", new[] { "Alias One", "Alias Two" }, null);
+        await _service.SetUserAliasesAsync("Series A", new[] { "Alias One", "Alias Two" });
         var updated = await _service.RemoveUserAliasAsync("series-a", "alias one");
         Assert.NotNull(updated);
         Assert.Single(updated!.UserAliases);
@@ -109,7 +110,7 @@ public class SeriesMetadataCacheServiceTests
     [Fact]
     public async Task RefreshAsync_UpsertsProviderResultAndPreservesUserAliases()
     {
-        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" }, null);
+        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" });
 
         _external.Setup(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ExternalSeriesMetadata
@@ -142,9 +143,10 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
-    public async Task RefreshAsync_PreservesUserCanonicalOverride()
+    public async Task RefreshAsync_PreservesUserSelectedName()
     {
-        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" }, canonicalTitleOverride: "My Batman");
+        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" });
+        await _service.SetSeriesNameAsync("Batman", "My Batman");
 
         _external.Setup(e => e.LookupSeriesAsync("Batman", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ExternalSeriesMetadata
@@ -156,9 +158,10 @@ public class SeriesMetadataCacheServiceTests
 
         var record = await _service.RefreshAsync("Batman");
 
-        // User-overridden canonical title must NOT be overwritten by the provider.
-        Assert.Equal("My Batman", record.CanonicalTitle);
-        Assert.True(record.IsUserCanonical);
+        Assert.Equal("Batman", record.CanonicalTitle);
+        Assert.Equal("My Batman", record.SeriesName);
+        Assert.Equal("My Batman", record.ResolvedSeriesName);
+        Assert.True(record.IsUserSelectedName);
         Assert.Contains("Dark Knight", record.Aliases);
     }
 
@@ -375,7 +378,7 @@ public class SeriesMetadataCacheServiceTests
     [Fact]
     public async Task ApplyExternalMatchAsync_UpsertsCandidateAndPreservesUserAliases()
     {
-        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" }, null);
+        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" });
 
         var record = await _service.ApplyExternalMatchAsync(
             "Batman",
@@ -396,9 +399,10 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
-    public async Task ApplyExternalMatchAsync_PreservesUserCanonicalOverride()
+    public async Task ApplyExternalMatchAsync_PreservesUserSelectedName()
     {
-        await _service.SetUserAliasesAsync("Batman", Array.Empty<string>(), canonicalTitleOverride: "My Batman");
+        await _service.SetUserAliasesAsync("Batman", Array.Empty<string>());
+        await _service.SetSeriesNameAsync("Batman", "My Batman");
 
         var record = await _service.ApplyExternalMatchAsync(
             "Batman",
@@ -409,8 +413,10 @@ public class SeriesMetadataCacheServiceTests
                 Source = "ComicVine"
             });
 
-        Assert.Equal("My Batman", record.CanonicalTitle);
-        Assert.True(record.IsUserCanonical);
+        Assert.Equal("Batman (1940)", record.CanonicalTitle);
+        Assert.Equal("My Batman", record.SeriesName);
+        Assert.Equal("My Batman", record.ResolvedSeriesName);
+        Assert.True(record.IsUserSelectedName);
         Assert.Contains("Detective Comics", record.Aliases);
     }
 
@@ -428,7 +434,7 @@ public class SeriesMetadataCacheServiceTests
     [Fact]
     public async Task PersistExternalLookupAsync_UpsertsAsSuccessAndPreservesUserAliases()
     {
-        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" }, null);
+        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" });
 
         var record = await _service.PersistExternalLookupAsync(
             "Batman",
@@ -451,9 +457,10 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
-    public async Task PersistExternalLookupAsync_PreservesUserCanonicalOverride()
+    public async Task PersistExternalLookupAsync_PreservesUserSelectedName()
     {
-        await _service.SetUserAliasesAsync("Batman", Array.Empty<string>(), canonicalTitleOverride: "My Batman");
+        await _service.SetUserAliasesAsync("Batman", Array.Empty<string>());
+        await _service.SetSeriesNameAsync("Batman", "My Batman");
 
         var record = await _service.PersistExternalLookupAsync(
             "Batman",
@@ -463,8 +470,10 @@ public class SeriesMetadataCacheServiceTests
                 Source = "ComicVine"
             });
 
-        Assert.Equal("My Batman", record.CanonicalTitle);
-        Assert.True(record.IsUserCanonical);
+        Assert.Equal("Batman (1940)", record.CanonicalTitle);
+        Assert.Equal("My Batman", record.SeriesName);
+        Assert.Equal("My Batman", record.ResolvedSeriesName);
+        Assert.True(record.IsUserSelectedName);
         Assert.Equal("success", record.LookupStatus);
     }
 
@@ -571,7 +580,7 @@ public class SeriesMetadataCacheServiceTests
                 Source = "ComicVine"
             });
         await _service.RefreshAsync("Batman");
-        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" }, null);
+        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" });
 
         var cleared = await _service.ClearExternalMetadataAsync("batman");
 
@@ -588,9 +597,10 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
-    public async Task ClearExternalMetadataAsync_PreservesUserCanonicalAndUserImage()
+    public async Task ClearExternalMetadataAsync_PreservesUserSelectedNameAndUserImage()
     {
-        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" }, canonicalTitleOverride: "My Batman");
+        await _service.SetUserAliasesAsync("Batman", new[] { "Caped Crusader" });
+        await _service.SetSeriesNameAsync("Batman", "My Batman");
 
         // Simulate a user-uploaded image already attached to the record.
         await using (var db = await _dbContextFactory.CreateDbContextAsync())
@@ -607,8 +617,10 @@ public class SeriesMetadataCacheServiceTests
         var cleared = await _service.ClearExternalMetadataAsync("batman");
 
         Assert.NotNull(cleared);
-        Assert.Equal("My Batman", cleared!.CanonicalTitle);
-        Assert.True(cleared.IsUserCanonical);
+        Assert.Equal("batman", cleared!.CanonicalTitle);
+        Assert.Equal("My Batman", cleared.SeriesName);
+        Assert.Equal("My Batman", cleared.ResolvedSeriesName);
+        Assert.True(cleared.IsUserSelectedName);
         // User image must be sticky across a metadata clear.
         Assert.Equal("user", cleared.ImageStatus);
         Assert.Equal("batman-user.jpg", cleared.LocalImageFile);
@@ -723,14 +735,14 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
-    public async Task SetPinnedLocalizedTitleAsync_ReturnsNull_WhenNoCacheRecordExists()
+    public async Task SetSeriesNameAsync_ReturnsNull_WhenNoCacheRecordExists()
     {
-        var result = await _service.SetPinnedLocalizedTitleAsync("Unknown Series", "Anything");
+        var result = await _service.SetSeriesNameAsync("Unknown Series", "Anything");
         Assert.Null(result);
     }
 
     [Fact]
-    public async Task SetPinnedLocalizedTitleAsync_AcceptsCanonicalTitle()
+    public async Task SetSeriesNameAsync_AcceptsCanonicalTitle()
     {
         _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ExternalSeriesMetadata
@@ -744,13 +756,14 @@ public class SeriesMetadataCacheServiceTests
             });
         await _service.RefreshAsync("Naruto");
 
-        var record = await _service.SetPinnedLocalizedTitleAsync("Naruto", "Naruto");
+        var record = await _service.SetSeriesNameAsync("Naruto", "Naruto");
         Assert.NotNull(record);
-        Assert.Equal("Naruto", record!.PinnedLocalizedTitle);
+        Assert.Equal("Naruto", record!.SeriesName);
+        Assert.True(record.IsUserSelectedName);
     }
 
     [Fact]
-    public async Task SetPinnedLocalizedTitleAsync_AcceptsLocalizedTitle_CaseInsensitively()
+    public async Task SetSeriesNameAsync_AcceptsLocalizedTitle_CaseInsensitively()
     {
         _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ExternalSeriesMetadata
@@ -765,15 +778,15 @@ public class SeriesMetadataCacheServiceTests
             });
         await _service.RefreshAsync("One Piece");
 
-        // Pin using a different case + whitespace; the persisted value
+        // Select using a different case + whitespace; the persisted value
         // should be the canonical record-side casing.
-        var record = await _service.SetPinnedLocalizedTitleAsync("One Piece", "  wan piisu  ");
+        var record = await _service.SetSeriesNameAsync("One Piece", "  wan piisu  ");
         Assert.NotNull(record);
-        Assert.Equal("Wan Piisu", record!.PinnedLocalizedTitle);
+        Assert.Equal("Wan Piisu", record!.SeriesName);
     }
 
     [Fact]
-    public async Task SetPinnedLocalizedTitleAsync_ThrowsArgumentException_WhenTitleNotInList()
+    public async Task SetSeriesNameAsync_AddsUnknownNameAsUserAlias()
     {
         _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ExternalSeriesMetadata
@@ -783,12 +796,15 @@ public class SeriesMetadataCacheServiceTests
             });
         await _service.RefreshAsync("Bleach");
 
-        await Assert.ThrowsAsync<ArgumentException>(
-            () => _service.SetPinnedLocalizedTitleAsync("Bleach", "Not A Title"));
+        var record = await _service.SetSeriesNameAsync("Bleach", "Not A Title");
+
+        Assert.NotNull(record);
+        Assert.Equal("Not A Title", record!.SeriesName);
+        Assert.Contains("Not A Title", record.UserAliases);
     }
 
     [Fact]
-    public async Task SetPinnedLocalizedTitleAsync_ClearsPin_WhenNullOrEmpty()
+    public async Task SetSeriesNameAsync_ClearsName_WhenNullOrEmpty()
     {
         _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ExternalSeriesMetadata
@@ -797,15 +813,16 @@ public class SeriesMetadataCacheServiceTests
                 LocalizedTitles = new List<LocalizedTitle> { new("Bleach", "en") }
             });
         await _service.RefreshAsync("Bleach");
-        await _service.SetPinnedLocalizedTitleAsync("Bleach", "Bleach");
+        await _service.SetSeriesNameAsync("Bleach", "Bleach");
 
-        var cleared = await _service.SetPinnedLocalizedTitleAsync("Bleach", null);
+        var cleared = await _service.SetSeriesNameAsync("Bleach", null);
         Assert.NotNull(cleared);
-        Assert.Null(cleared!.PinnedLocalizedTitle);
+        Assert.Null(cleared!.SeriesName);
+        Assert.False(cleared.IsUserSelectedName);
     }
 
     [Fact]
-    public async Task SetPinnedLocalizedTitleAsync_BumpsMetadataVersion()
+    public async Task SetSeriesNameAsync_BumpsMetadataVersion()
     {
         _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ExternalSeriesMetadata
@@ -816,9 +833,9 @@ public class SeriesMetadataCacheServiceTests
         var initial = await _service.RefreshAsync("Berserk");
         var initialVersion = initial.MetadataVersion;
 
-        var pinned = await _service.SetPinnedLocalizedTitleAsync("Berserk", "ベルセルク");
-        Assert.NotNull(pinned);
-        Assert.True(pinned!.MetadataVersion > initialVersion,
-            $"Expected MetadataVersion to be bumped (was {initialVersion}, now {pinned.MetadataVersion}).");
+        var selected = await _service.SetSeriesNameAsync("Berserk", "ベルセルク");
+        Assert.NotNull(selected);
+        Assert.True(selected!.MetadataVersion > initialVersion,
+            $"Expected MetadataVersion to be bumped (was {initialVersion}, now {selected.MetadataVersion}).");
     }
 }

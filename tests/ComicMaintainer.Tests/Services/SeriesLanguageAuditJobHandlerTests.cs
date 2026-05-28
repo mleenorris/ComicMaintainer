@@ -141,14 +141,14 @@ public class SeriesLanguageAuditJobHandlerTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_UserCanonicalOverrideIsRespected()
+    public async Task ExecuteAsync_UserSelectedNameIsRespected()
     {
-        // IsUserCanonical=true means the canonical title wins regardless of
-        // language preference — files tagged with the canonical title must
+        // SeriesName means the user-selected title wins regardless of
+        // language preference — files tagged with that title must
         // therefore NOT be flagged as mismatched.
         var record = BuildRecord("My Custom Title", preferred: "ja",
             ("One Piece", "en"), ("ワンピース", "ja"));
-        record.IsUserCanonical = true;
+        record.SeriesName = "My Custom Title";
 
         _cache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { record });

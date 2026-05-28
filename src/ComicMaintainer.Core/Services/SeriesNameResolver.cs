@@ -57,11 +57,11 @@ public class SeriesNameResolver : ISeriesNameResolver
         }
         var globalPreferred = _settings.CurrentValue.DefaultPreferredLanguage;
 
-        // Step 1: user-canonical cache record.
+        // Step 1: user-selected name cache record (the sticky "pinned" name).
         foreach (var candidate in candidates)
         {
-            var record = await LookupUserCanonicalRecordAsync(candidate, cancellationToken);
-            if (record is not null && !string.IsNullOrWhiteSpace(record.CanonicalTitle))
+            var record = await LookupUserSelectedRecordAsync(candidate, cancellationToken);
+            if (record is not null && !string.IsNullOrWhiteSpace(record.SeriesName))
             {
                 var resolved = ResolveDisplayTitle(record, globalPreferred);
                 if (mutateCache)
@@ -71,13 +71,13 @@ public class SeriesNameResolver : ISeriesNameResolver
                 return new SeriesNameResolution
                 {
                     ResolvedSeries = resolved,
-                    WinningStep = SeriesNameResolutionStep.UserCanonical,
+                    WinningStep = SeriesNameResolutionStep.UserSelectedName,
                     Candidates = candidates,
                     FolderSeries = folderSeries,
                     MatchedCacheKey = record.NormalizedKey,
                     AppliedLanguage = null,
                     Explanation =
-                        $"User-canonical cache record '{record.NormalizedKey}' matched candidate '{candidate}'; canonical title '{record.CanonicalTitle}' used unconditionally."
+                        $"User-selected name cache record '{record.NormalizedKey}' matched candidate '{candidate}'; series name '{record.SeriesName}' used unconditionally."
                 };
             }
         }
@@ -89,8 +89,8 @@ public class SeriesNameResolver : ISeriesNameResolver
             if (record is not null && !string.IsNullOrWhiteSpace(record.CanonicalTitle))
             {
                 var resolved = ResolveDisplayTitle(record, globalPreferred);
-                var pinDecided = IsPinDecided(record);
-                var appliedLanguage = pinDecided
+                var userSelected = !string.IsNullOrWhiteSpace(record.SeriesName);
+                var appliedLanguage = userSelected
                     ? null
                     : (!string.IsNullOrWhiteSpace(record.PreferredLanguage)
                         ? record.PreferredLanguage
@@ -102,15 +102,15 @@ public class SeriesNameResolver : ISeriesNameResolver
                 return new SeriesNameResolution
                 {
                     ResolvedSeries = resolved,
-                    WinningStep = pinDecided
-                        ? SeriesNameResolutionStep.PinnedLocalizedTitle
+                    WinningStep = userSelected
+                        ? SeriesNameResolutionStep.UserSelectedName
                         : SeriesNameResolutionStep.MatchedCache,
                     Candidates = candidates,
                     FolderSeries = folderSeries,
                     MatchedCacheKey = record.NormalizedKey,
                     AppliedLanguage = appliedLanguage,
-                    Explanation = pinDecided
-                        ? $"Matched cache record '{record.NormalizedKey}' has pinned localized title '{record.PinnedLocalizedTitle}'; pin wins over language preference."
+                    Explanation = userSelected
+                        ? $"Matched cache record '{record.NormalizedKey}' has user-selected series name '{record.SeriesName}'; it wins over language preference."
                         : $"Matched cache record '{record.NormalizedKey}' (status='{record.LookupStatus}') matched candidate '{candidate}'; resolved to '{resolved}' under language '{appliedLanguage ?? "(none)"}'."
                 };
             }
@@ -123,7 +123,7 @@ public class SeriesNameResolver : ISeriesNameResolver
             && !string.Equals(metadata!.Series, folderSeries, StringComparison.OrdinalIgnoreCase))
         {
             var folderRecord = await LookupMatchedRecordAsync(folderSeries, cancellationToken)
-                                ?? await LookupUserCanonicalRecordAsync(folderSeries, cancellationToken);
+                                ?? await LookupUserSelectedRecordAsync(folderSeries, cancellationToken);
             if (folderRecord is not null
                 && folderRecord.LocalizedTitles is { Count: > 0 }
                 && folderRecord.LocalizedTitles.Any(lt =>
@@ -131,8 +131,8 @@ public class SeriesNameResolver : ISeriesNameResolver
                     && string.Equals(lt!.Title, metadata.Series, StringComparison.OrdinalIgnoreCase)))
             {
                 var resolved = ResolveDisplayTitle(folderRecord, globalPreferred);
-                var pinDecided = IsPinDecided(folderRecord);
-                var appliedLanguage = pinDecided
+                var userSelected = !string.IsNullOrWhiteSpace(folderRecord.SeriesName);
+                var appliedLanguage = userSelected
                     ? null
                     : (!string.IsNullOrWhiteSpace(folderRecord.PreferredLanguage)
                         ? folderRecord.PreferredLanguage
@@ -144,15 +144,15 @@ public class SeriesNameResolver : ISeriesNameResolver
                 return new SeriesNameResolution
                 {
                     ResolvedSeries = resolved,
-                    WinningStep = pinDecided
-                        ? SeriesNameResolutionStep.PinnedLocalizedTitle
+                    WinningStep = userSelected
+                        ? SeriesNameResolutionStep.UserSelectedName
                         : SeriesNameResolutionStep.LocalizedTitleBackref,
                     Candidates = candidates,
                     FolderSeries = folderSeries,
                     MatchedCacheKey = folderRecord.NormalizedKey,
                     AppliedLanguage = appliedLanguage,
-                    Explanation = pinDecided
-                        ? $"File <Series> '{metadata.Series}' matched localized-title on folder's cache record '{folderRecord.NormalizedKey}', which has pinned localized title '{folderRecord.PinnedLocalizedTitle}'."
+                    Explanation = userSelected
+                        ? $"File <Series> '{metadata.Series}' matched localized-title on folder's cache record '{folderRecord.NormalizedKey}', which has user-selected series name '{folderRecord.SeriesName}'."
                         : $"File <Series> '{metadata.Series}' matched localized-title on folder's cache record '{folderRecord.NormalizedKey}'; resolved to '{resolved}'."
                 };
             }
@@ -199,8 +199,7 @@ public class SeriesNameResolver : ISeriesNameResolver
                             .Select(t => new LocalizedTitle(t.Title, t.Language))
                             .ToList()
                         : new List<LocalizedTitle>(),
-                    PreferredLanguage = null,
-                    IsUserCanonical = false
+                    PreferredLanguage = null
                 };
                 var resolved = ResolveDisplayTitle(resolveSource, globalPreferred);
                 if (mutateCache)
@@ -289,18 +288,6 @@ public class SeriesNameResolver : ISeriesNameResolver
         return UnknownSeries;
     }
 
-    /// <summary>
-    /// True when the record's resolution would be decided by
-    /// <see cref="SeriesMetadataCacheRecord.PinnedLocalizedTitle"/>: i.e.
-    /// not user-canonical, and the pinned title is non-empty. Used to
-    /// report <see cref="SeriesNameResolutionStep.PinnedLocalizedTitle"/>
-    /// as the winning step on top of an otherwise MatchedCache /
-    /// LocalizedTitleBackref match.
-    /// </summary>
-    private static bool IsPinDecided(SeriesMetadataCacheRecord record) =>
-        !(record.IsUserCanonical && !string.IsNullOrWhiteSpace(record.CanonicalTitle))
-        && !string.IsNullOrWhiteSpace(record.PinnedLocalizedTitle);
-
     /// <inheritdoc />
     public string ResolveForRecord(SeriesMetadataCacheRecord record)
     {
@@ -309,7 +296,7 @@ public class SeriesNameResolver : ISeriesNameResolver
         return ResolveDisplayTitle(record, globalPreferred);
     }
 
-    private async Task<SeriesMetadataCacheRecord?> LookupUserCanonicalRecordAsync(string seriesName, CancellationToken cancellationToken)
+    private async Task<SeriesMetadataCacheRecord?> LookupUserSelectedRecordAsync(string seriesName, CancellationToken cancellationToken)
     {
         if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;
         try
@@ -317,13 +304,13 @@ public class SeriesNameResolver : ISeriesNameResolver
             var key = _cache.NormalizeKey(seriesName);
             if (string.IsNullOrWhiteSpace(key)) return null;
             var record = await _cache.GetAsync(key, cancellationToken);
-            return record is { IsUserCanonical: true } && !string.IsNullOrWhiteSpace(record.CanonicalTitle)
+            return record is not null && !string.IsNullOrWhiteSpace(record.SeriesName)
                 ? record
                 : null;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to consult cache for user-canonical title {SeriesName}",
+            _logger.LogWarning(ex, "Failed to consult cache for user-selected name {SeriesName}",
                 LoggingHelper.SanitizeForLog(seriesName));
             return null;
         }
@@ -340,7 +327,7 @@ public class SeriesNameResolver : ISeriesNameResolver
             if (record is null || string.IsNullOrWhiteSpace(record.CanonicalTitle)) return null;
 
             var status = record.LookupStatus;
-            var isMatched = record.IsUserCanonical
+            var isMatched = !string.IsNullOrWhiteSpace(record.SeriesName)
                 || string.Equals(status, "success", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(status, "manual_match", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(status, "manual", StringComparison.OrdinalIgnoreCase);
@@ -448,7 +435,6 @@ public class SeriesNameResolver : ISeriesNameResolver
             await _cache.SetUserAliasesAsync(
                 resolvedSeries,
                 mergedAliases,
-                canonicalTitleOverride: null,
                 cancellationToken);
 
             _logger.LogInformation(

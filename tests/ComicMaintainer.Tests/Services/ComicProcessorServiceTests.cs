@@ -1275,7 +1275,7 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task NormalizeFileAsync_UserCanonicalRecord_ShortCircuitsExternalLookup()
+    public async Task NormalizeFileAsync_UserSelectedNameRecord_ShortCircuitsExternalLookup()
     {
         var seriesFolder = Path.Combine(_testDirectory, "Batman");
         Directory.CreateDirectory(seriesFolder);
@@ -1309,7 +1309,7 @@ public class ComicProcessorServiceTests : IDisposable
         _settings.WatcherEnableNormalize = true;
 
         // External lookup would steer us to a different canonical title, but
-        // the user-canonical cache record should win and short-circuit it.
+        // the user-selected cache record should win and short-circuit it.
         _mockExternalSeriesMetadata
             .Setup(service => service.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ExternalSeriesMetadata
@@ -1328,14 +1328,14 @@ public class ComicProcessorServiceTests : IDisposable
             {
                 NormalizedKey = "batman",
                 CanonicalTitle = "Batman",
-                IsUserCanonical = true,
+                SeriesName = "Batman",
                 UserAliases = new List<string> { "The Dark Knight" }
             });
         mockSeriesMetadataCache
             .Setup(c => c.GetAsync(It.Is<string>(k => k != "batman"), It.IsAny<CancellationToken>()))
             .ReturnsAsync((SeriesMetadataCacheRecord?)null);
 
-        // Construct a service with the cache wired in so the user-canonical
+        // Construct a service with the cache wired in so the user-selected-name
         // path is exercised.
         using var service = new ComicProcessorService(
             _mockOptions.Object,
@@ -1353,7 +1353,7 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.Equal("Batman", updatedMetadata.Series);
 
         // The external lookup must NOT have been consulted because the user
-        // already declared the canonical title.
+        // already selected the series name.
         _mockExternalSeriesMetadata.Verify(
             service => service.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -1415,7 +1415,6 @@ public class ComicProcessorServiceTests : IDisposable
             .Setup(c => c.SetUserAliasesAsync(
                 It.IsAny<string>(),
                 It.IsAny<IEnumerable<string>>(),
-                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord());
 
@@ -1440,7 +1439,6 @@ public class ComicProcessorServiceTests : IDisposable
             "Batman",
             It.Is<IEnumerable<string>>(aliases =>
                 aliases.Contains("The Dark Knight", StringComparer.OrdinalIgnoreCase)),
-            (string?)null,
             It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
     }
@@ -1516,7 +1514,6 @@ public class ComicProcessorServiceTests : IDisposable
         mockSeriesMetadataCache.Verify(c => c.SetUserAliasesAsync(
             It.IsAny<string>(),
             It.IsAny<IEnumerable<string>>(),
-            It.IsAny<string?>(),
             It.IsAny<CancellationToken>()),
             Times.Never);
     }
@@ -1632,7 +1629,6 @@ public class ComicProcessorServiceTests : IDisposable
         mock.Setup(c => c.SetUserAliasesAsync(
                 It.IsAny<string>(),
                 It.IsAny<IEnumerable<string>>(),
-                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord());
         return mock;
@@ -1685,7 +1681,7 @@ public class ComicProcessorServiceTests : IDisposable
         // user takes a direct action on a series that hasn't been externally
         // matched yet) must still be honored when rewriting per-file <Series>.
         // Previously LookupMatchedRecordAsync only accepted "success" /
-        // "manual_match" / IsUserCanonical records, so a "manual" record was
+        // "manual_match" / user-selected records, so a "manual" record was
         // silently skipped and the file's <Series> never reflected the
         // user's preferred-language choice.
         var filePath = CreateLocalizedComicArchive("One Piece", "One Piece", "1");
@@ -1770,7 +1766,7 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task NormalizeFileAsync_UserCanonical_BeatsLanguagePreference()
+    public async Task NormalizeFileAsync_UserSelectedName_BeatsLanguagePreference()
     {
         var filePath = CreateLocalizedComicArchive("One Piece", "One Piece", "1");
 
@@ -1782,7 +1778,7 @@ public class ComicProcessorServiceTests : IDisposable
         {
             NormalizedKey = "one piece",
             CanonicalTitle = "My One Piece",
-            IsUserCanonical = true,
+            SeriesName = "My One Piece",
             LookupStatus = "manual",
             PreferredLanguage = "ja",
             UserAliases = new List<string> { "One Piece" },
@@ -1883,7 +1879,6 @@ public class ComicProcessorServiceTests : IDisposable
         cache.Setup(c => c.SetUserAliasesAsync(
                 It.IsAny<string>(),
                 It.IsAny<IEnumerable<string>>(),
-                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord());
 
@@ -1942,7 +1937,6 @@ public class ComicProcessorServiceTests : IDisposable
         cache.Setup(c => c.SetUserAliasesAsync(
                 It.IsAny<string>(),
                 It.IsAny<IEnumerable<string>>(),
-                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesMetadataCacheRecord());
 

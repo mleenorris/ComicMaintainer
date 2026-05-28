@@ -28,22 +28,22 @@ public class SeriesNameResolverTests
     }
 
     [Fact]
-    public async Task ResolveAsync_UserCanonicalRecord_Wins()
+    public async Task ResolveAsync_UserSelectedNameRecord_Wins()
     {
         var resolver = BuildResolver();
         var record = new SeriesMetadataCacheRecord
         {
             NormalizedKey = "one-piece",
             CanonicalTitle = "One Piece (User Override)",
-            IsUserCanonical = true
+            SeriesName = "One Piece (User Override)"
         };
         _cache.Setup(c => c.GetAsync("one-piece", It.IsAny<CancellationToken>())).ReturnsAsync(record);
 
         var result = await resolver.ResolveAsync("/library/One Piece/c1.cbz", new ComicMetadata { Series = "One Piece" }, mutateCache: false);
 
-        Assert.Equal(SeriesNameResolutionStep.UserCanonical, result.WinningStep);
+        Assert.Equal(SeriesNameResolutionStep.UserSelectedName, result.WinningStep);
         Assert.Equal("One Piece (User Override)", result.ResolvedSeries);
-        Assert.Contains("user-canonical", result.Explanation, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("user-selected", result.Explanation, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public class SeriesNameResolverTests
         {
             NormalizedKey = "one-piece",
             CanonicalTitle = "One Piece",
-            IsUserCanonical = true
+            SeriesName = "One Piece (User Override)"
         };
         _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(record);
 
@@ -140,7 +140,6 @@ public class SeriesNameResolverTests
         _cache.Verify(c => c.SetUserAliasesAsync(
             It.IsAny<string>(),
             It.IsAny<IEnumerable<string>>(),
-            It.IsAny<string?>(),
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -179,14 +178,14 @@ public class SeriesNameResolverTests
     }
 
     [Fact]
-    public async Task ResolveForRecord_MatchesFilePathResolution_ForUserCanonicalRecord()
+    public async Task ResolveForRecord_MatchesFilePathResolution_ForUserSelectedNameRecord()
     {
         var resolver = BuildResolver();
         var record = new SeriesMetadataCacheRecord
         {
             NormalizedKey = "one-piece",
             CanonicalTitle = "One Piece (User Override)",
-            IsUserCanonical = true,
+            SeriesName = "One Piece (User Override)",
             PreferredLanguage = "ja",
             LocalizedTitles =
             {
@@ -202,7 +201,7 @@ public class SeriesNameResolverTests
             mutateCache: false);
         var fromRecord = resolver.ResolveForRecord(record);
 
-        // User-canonical override wins in both surfaces, regardless of language preference.
+        // User-selected name wins in both surfaces, regardless of language preference.
         Assert.Equal(fromFile.ResolvedSeries, fromRecord);
         Assert.Equal("One Piece (User Override)", fromRecord);
     }
@@ -235,7 +234,7 @@ public class SeriesNameResolverTests
     }
 
     [Fact]
-    public async Task ResolveAsync_PinnedLocalizedTitle_ReportsPinAsWinningStep()
+    public async Task ResolveAsync_SeriesName_ReportsUserSelectedNameAsWinningStep()
     {
         _settings.DefaultPreferredLanguage = null;
         var resolver = BuildResolver();
@@ -245,7 +244,7 @@ public class SeriesNameResolverTests
             CanonicalTitle = "One Piece",
             LookupStatus = "success",
             PreferredLanguage = "ja",
-            PinnedLocalizedTitle = "Wan Piisu",
+            SeriesName = "Wan Piisu",
             LocalizedTitles =
             {
                 new LocalizedTitle("One Piece", "en"),
@@ -260,25 +259,24 @@ public class SeriesNameResolverTests
             new ComicMetadata { Series = "One Piece" },
             mutateCache: false);
 
-        Assert.Equal(SeriesNameResolutionStep.PinnedLocalizedTitle, result.WinningStep);
+        Assert.Equal(SeriesNameResolutionStep.UserSelectedName, result.WinningStep);
         Assert.Equal("Wan Piisu", result.ResolvedSeries);
-        // AppliedLanguage is meaningless when the pin decides the result;
+        // AppliedLanguage is meaningless when the user-selected name decides the result;
         // the resolver leaves it null so consumers don't surface a
         // misleading "applied language" in audit/diagnostic output.
         Assert.Null(result.AppliedLanguage);
-        Assert.Contains("pinned", result.Explanation, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("user-selected", result.Explanation, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public async Task ResolveAsync_UserCanonical_StillWinsOverPin()
+    public async Task ResolveAsync_SeriesName_WinsOverLanguagePreference()
     {
         var resolver = BuildResolver();
         var record = new SeriesMetadataCacheRecord
         {
             NormalizedKey = "one-piece",
             CanonicalTitle = "One Piece (User Override)",
-            IsUserCanonical = true,
-            PinnedLocalizedTitle = "English Title",
+            SeriesName = "One Piece (User Override)",
             LocalizedTitles = { new LocalizedTitle("English Title", "en") }
         };
         _cache.Setup(c => c.GetAsync("one-piece", It.IsAny<CancellationToken>())).ReturnsAsync(record);
@@ -288,24 +286,24 @@ public class SeriesNameResolverTests
             new ComicMetadata { Series = "One Piece" },
             mutateCache: false);
 
-        Assert.Equal(SeriesNameResolutionStep.UserCanonical, result.WinningStep);
+        Assert.Equal(SeriesNameResolutionStep.UserSelectedName, result.WinningStep);
         Assert.Equal("One Piece (User Override)", result.ResolvedSeries);
     }
 
     [Fact]
-    public void ResolveForRecord_PinnedLocalizedTitle_IsHonored()
+    public void ResolveForRecord_SeriesName_IsHonored()
     {
         // Parity: the record-only path (used by SeriesLibraryService and
         // the language audit) returns the pinned title just like the
         // file-path ResolveAsync does, so library display and on-disk
-        // <Series> stay in lockstep when the user pins a title.
+        // <Series> stay in lockstep when the user selects a title.
         var resolver = BuildResolver();
         var record = new SeriesMetadataCacheRecord
         {
             NormalizedKey = "one-piece",
             CanonicalTitle = "One Piece",
             PreferredLanguage = "ja",
-            PinnedLocalizedTitle = "Wan Piisu",
+            SeriesName = "Wan Piisu",
             LocalizedTitles =
             {
                 new LocalizedTitle("ワンピース", "ja"),

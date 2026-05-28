@@ -80,7 +80,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
     public async Task<SeriesMetadataCacheRecord> SetUserAliasesAsync(
         string seriesTitle,
         IEnumerable<string> userAliases,
-        string? canonicalTitleOverride,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
@@ -103,10 +102,9 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             entity = new SeriesMetadataCacheEntity
             {
                 NormalizedKey = key,
-                CanonicalTitle = string.IsNullOrWhiteSpace(canonicalTitleOverride) ? seriesTitle.Trim() : canonicalTitleOverride.Trim(),
+                CanonicalTitle = seriesTitle.Trim(),
                 Aliases = new List<string>(),
                 UserAliases = cleanedAliases,
-                IsUserCanonical = !string.IsNullOrWhiteSpace(canonicalTitleOverride),
                 LookupStatus = "manual",
                 CreatedAt = now,
                 UpdatedAt = now
@@ -116,11 +114,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         else
         {
             entity.UserAliases = cleanedAliases;
-            if (!string.IsNullOrWhiteSpace(canonicalTitleOverride))
-            {
-                entity.CanonicalTitle = canonicalTitleOverride.Trim();
-                entity.IsUserCanonical = true;
-            }
             entity.UpdatedAt = now;
             BumpMetadataVersion(entity);
         }
@@ -206,7 +199,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 CanonicalTitle = lookup?.CanonicalTitle ?? trimmedTitle,
                 Aliases = lookup?.Aliases?.ToList() ?? new List<string>(),
                 UserAliases = new List<string>(),
-                IsUserCanonical = false,
                 Source = lookup?.Source,
                 LastLookupUtc = now,
                 LookupStatus = status,
@@ -220,10 +212,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         {
             if (lookup is not null)
             {
-                if (!entity.IsUserCanonical)
-                {
-                    entity.CanonicalTitle = string.IsNullOrWhiteSpace(lookup.CanonicalTitle) ? entity.CanonicalTitle : lookup.CanonicalTitle;
-                }
+                entity.CanonicalTitle = string.IsNullOrWhiteSpace(lookup.CanonicalTitle) ? entity.CanonicalTitle : lookup.CanonicalTitle;
                 entity.Aliases = lookup.Aliases?.ToList() ?? new List<string>();
                 entity.Source = lookup.Source;
                 entity.LastLookupUtc = now;
@@ -356,7 +345,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 CanonicalTitle = seriesTitle.Trim(),
                 Aliases = new List<string>(),
                 UserAliases = new List<string>(),
-                IsUserCanonical = false,
                 LookupStatus = "manual",
                 CreatedAt = now,
                 UpdatedAt = now
@@ -419,7 +407,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 CanonicalTitle = trimmedTitle,
                 Aliases = new List<string>(),
                 UserAliases = new List<string>(),
-                IsUserCanonical = false,
                 LookupStatus = "manual",
                 CreatedAt = now,
                 UpdatedAt = now
@@ -598,7 +585,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 CanonicalTitle = match.CanonicalTitle,
                 Aliases = match.Aliases?.ToList() ?? new List<string>(),
                 UserAliases = new List<string>(),
-                IsUserCanonical = false,
                 Source = match.Source,
                 LastLookupUtc = now,
                 LookupStatus = lookupStatus,
@@ -610,13 +596,9 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         }
         else
         {
-            // Preserve a user-overridden canonical title; only update the
-            // provider-derived fields. A user can change the canonical title
-            // separately via SetUserAliasesAsync.
-            if (!entity.IsUserCanonical)
-            {
-                entity.CanonicalTitle = match.CanonicalTitle;
-            }
+            // The provider canonical title is always refreshed; the user's
+            // chosen display name (SeriesName) is independent and sticky.
+            entity.CanonicalTitle = match.CanonicalTitle;
             entity.Aliases = match.Aliases?.ToList() ?? new List<string>();
             entity.Source = match.Source;
             entity.LastLookupUtc = now;
@@ -662,14 +644,11 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         entity.LookupStatus = "cleared";
         entity.LocalizedTitlesJson = null;
 
-        // If the canonical title was provider-derived, revert it to the
-        // normalized key so the UI shows a recognisable placeholder rather
-        // than a stale provider title. When the user has overridden the
-        // canonical title we leave it alone.
-        if (!entity.IsUserCanonical)
-        {
-            entity.CanonicalTitle = entity.NormalizedKey;
-        }
+        // Revert the provider-derived canonical title to the normalized key
+        // so the UI shows a recognisable placeholder rather than a stale
+        // provider title. The user's chosen display name (SeriesName), if
+        // any, is independent and preserved.
+        entity.CanonicalTitle = entity.NormalizedKey;
 
         // Drop any provider-downloaded image. A user-uploaded image is
         // sticky and must survive a metadata clear.
@@ -691,15 +670,15 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         return ToRecord(entity);
     }
 
-    private static SeriesMetadataCacheRecord ToRecord(SeriesMetadataCacheEntity entity)
+    private SeriesMetadataCacheRecord ToRecord(SeriesMetadataCacheEntity entity)
     {
-        return new SeriesMetadataCacheRecord
+        var record = new SeriesMetadataCacheRecord
         {
             NormalizedKey = entity.NormalizedKey,
             CanonicalTitle = entity.CanonicalTitle,
             Aliases = entity.Aliases?.ToList() ?? new List<string>(),
             UserAliases = entity.UserAliases?.ToList() ?? new List<string>(),
-            IsUserCanonical = entity.IsUserCanonical,
+            SeriesName = entity.SeriesName,
             Source = entity.Source,
             LastLookupUtc = entity.LastLookupUtc,
             LookupStatus = entity.LookupStatus,
@@ -709,10 +688,16 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             ImageDownloadedUtc = entity.ImageDownloadedUtc,
             ImageStatus = entity.ImageStatus,
             PreferredLanguage = entity.PreferredLanguage,
-            PinnedLocalizedTitle = entity.PinnedLocalizedTitle,
             LocalizedTitles = DeserializeLocalizedTitles(entity.LocalizedTitlesJson),
             MetadataVersion = entity.MetadataVersion
         };
+
+        // Compute the single authoritative name via the shared resolver so
+        // the value the UI shows matches what the normalize pipeline writes
+        // into ComicInfo.xml's <Series> for files reaching this record.
+        record.ResolvedSeriesName = SeriesDisplayTitleResolver.Resolve(
+            record, _settings.CurrentValue.DefaultPreferredLanguage);
+        return record;
     }
 
     /// <summary>
@@ -826,7 +811,6 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 CanonicalTitle = seriesTitle.Trim(),
                 Aliases = new List<string>(),
                 UserAliases = new List<string>(),
-                IsUserCanonical = false,
                 LookupStatus = "manual",
                 PreferredLanguage = normalizedLanguage,
                 CreatedAt = now,
@@ -846,9 +830,9 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
     }
 
     /// <inheritdoc />
-    public async Task<SeriesMetadataCacheRecord?> SetPinnedLocalizedTitleAsync(
+    public async Task<SeriesMetadataCacheRecord?> SetSeriesNameAsync(
         string seriesTitle,
-        string? pinnedTitle,
+        string? seriesName,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
@@ -861,18 +845,19 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
         if (entity is null)
         {
-            // Pins are only meaningful for series the cache already knows
-            // about (we need the set of LocalizedTitles to validate against).
+            // A user-selected name is only meaningful for a series the cache
+            // already knows about (so it can be a known alias / localized
+            // title). Without a record there is nothing to attach it to.
             return null;
         }
 
-        var trimmedPin = pinnedTitle?.Trim();
-        if (string.IsNullOrEmpty(trimmedPin))
+        var trimmed = seriesName?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
         {
-            // Clear the pin.
-            if (entity.PinnedLocalizedTitle is not null)
+            // Revert to automatic resolution.
+            if (entity.SeriesName is not null)
             {
-                entity.PinnedLocalizedTitle = null;
+                entity.SeriesName = null;
                 entity.UpdatedAt = DateTime.UtcNow;
                 BumpMetadataVersion(entity);
                 await db.SaveChangesAsync(cancellationToken);
@@ -880,40 +865,35 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             return ToRecord(entity);
         }
 
-        // Validate the pin against the record's canonical title or any of its
-        // localized titles. The persisted value is the matched record-side
-        // string so the pin survives case/whitespace-only differences in
-        // user input.
-        string? canonicalValue = null;
-        if (!string.IsNullOrWhiteSpace(entity.CanonicalTitle)
-            && string.Equals(entity.CanonicalTitle.Trim(), trimmedPin, StringComparison.OrdinalIgnoreCase))
+        // The chosen name must be one the system already knows for this
+        // series: its canonical title, a provider alias, a localized title,
+        // or an existing user alias. If it is a brand-new custom name, add it
+        // to the user-alias list so the candidate pool stays self-describing.
+        var known = new List<string?> { entity.CanonicalTitle };
+        known.AddRange(entity.Aliases ?? new List<string>());
+        known.AddRange(entity.UserAliases ?? new List<string>());
+        known.AddRange(DeserializeLocalizedTitles(entity.LocalizedTitlesJson)
+            .Where(lt => lt is not null)
+            .Select(lt => lt!.Title));
+
+        var match = known
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .FirstOrDefault(k => string.Equals(k!.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+
+        var resolvedName = match?.Trim() ?? trimmed;
+        if (match is null)
         {
-            canonicalValue = entity.CanonicalTitle.Trim();
-        }
-        else
-        {
-            var localized = DeserializeLocalizedTitles(entity.LocalizedTitlesJson);
-            foreach (var lt in localized)
+            var userAliases = entity.UserAliases?.ToList() ?? new List<string>();
+            if (!userAliases.Any(a => string.Equals(a, resolvedName, StringComparison.OrdinalIgnoreCase)))
             {
-                if (!string.IsNullOrWhiteSpace(lt?.Title)
-                    && string.Equals(lt!.Title.Trim(), trimmedPin, StringComparison.OrdinalIgnoreCase))
-                {
-                    canonicalValue = lt.Title.Trim();
-                    break;
-                }
+                userAliases.Add(resolvedName);
+                entity.UserAliases = userAliases;
             }
         }
 
-        if (canonicalValue is null)
+        if (!string.Equals(entity.SeriesName, resolvedName, StringComparison.Ordinal))
         {
-            throw new ArgumentException(
-                $"Pinned title '{trimmedPin}' must match the canonical title or one of the localized titles for series '{seriesTitle}'.",
-                nameof(pinnedTitle));
-        }
-
-        if (!string.Equals(entity.PinnedLocalizedTitle, canonicalValue, StringComparison.Ordinal))
-        {
-            entity.PinnedLocalizedTitle = canonicalValue;
+            entity.SeriesName = resolvedName;
             entity.UpdatedAt = DateTime.UtcNow;
             BumpMetadataVersion(entity);
             await db.SaveChangesAsync(cancellationToken);

@@ -7366,15 +7366,16 @@
         async function openManageSeriesNamesModal(seriesTitle) {
             manageSeriesState = { seriesTitle, record: null };
             document.getElementById('manageSeriesTitle').textContent = seriesTitle;
-            document.getElementById('manageSeriesCanonical').value = '';
             document.getElementById('manageSeriesProviderAliases').textContent = 'Loading...';
             document.getElementById('manageSeriesProviderSource').textContent = '';
             document.getElementById('manageSeriesUserAliases').textContent = 'Loading...';
-            const pinSelect = document.getElementById('manageSeriesPinnedTitle');
-            if (pinSelect) {
-                pinSelect.innerHTML = '<option value="">(None — use language preference)</option>';
-                pinSelect.value = '';
+            const nameSelect = document.getElementById('manageSeriesName');
+            if (nameSelect) {
+                nameSelect.innerHTML = '<option value="">Automatic (use language preference)</option>';
+                nameSelect.value = '';
             }
+            const resolved = document.getElementById('manageSeriesResolvedName');
+            if (resolved) resolved.textContent = '';
             document.getElementById('manageSeriesSearchInput').value = seriesTitle;
             document.getElementById('manageSeriesSearchResults').innerHTML = '';
             document.getElementById('manageSeriesNamesModal').classList.add('active');
@@ -7399,12 +7400,11 @@
                 }
                 const record = await response.json();
                 manageSeriesState.record = record;
-                document.getElementById('manageSeriesCanonical').value = record.is_user_canonical && record.canonical_title ? record.canonical_title : '';
                 const prefSelect = document.getElementById('manageSeriesPreferredLanguage');
                 if (prefSelect) {
                     prefSelect.value = record.preferred_language || '';
                 }
-                populateManageSeriesPinnedTitleOptions(record);
+                populateManageSeriesNameOptions(record);
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
                 renderManageSeriesImage(record);
@@ -7707,17 +7707,17 @@
             }
         }
 
-        // Build the Pinned Title <select> from the record's canonical title
-        // plus its provider-supplied localized titles. Each entry's label
-        // includes the language tag (when known) to help users disambiguate
-        // identical-looking transliterations. Case-insensitive dedup keeps a
-        // localized title from being listed twice when it equals the
-        // canonical title.
-        function populateManageSeriesPinnedTitleOptions(record) {
-            const select = document.getElementById('manageSeriesPinnedTitle');
+        // Build the Series Name <select> from every name the system knows for
+        // this series: its canonical title, provider aliases, user aliases and
+        // provider-supplied localized titles (with language hints). The first
+        // option is "Automatic", which clears the user-selected name and falls
+        // back to the language-preference rule. Case-insensitive dedup avoids
+        // listing the same title twice.
+        function populateManageSeriesNameOptions(record) {
+            const select = document.getElementById('manageSeriesName');
             if (!select) return;
             const seen = new Set();
-            const options = ['<option value="">(None — use language preference)</option>'];
+            const options = ['<option value="">Automatic (use language preference)</option>'];
             const pushOption = (title, languageHint) => {
                 if (!title) return;
                 const key = title.trim().toLowerCase();
@@ -7736,55 +7736,69 @@
                     pushOption(lt && lt.title, lt && lt.language ? lt.language : null);
                 }
             }
+            if (record && Array.isArray(record.aliases)) {
+                for (const a of record.aliases) pushOption(a, 'provider alias');
+            }
+            if (record && Array.isArray(record.user_aliases)) {
+                for (const a of record.user_aliases) pushOption(a, 'your alias');
+            }
             select.innerHTML = options.join('');
-            // Preserve the user's current pin even if the cache hasn't been
-            // refreshed with a matching localized_titles entry yet — server
-            // validation already rejected anything that didn't match at write
-            // time, so the value is known-good.
-            const pinned = (record && record.pinned_localized_title) || '';
-            if (pinned && !seen.has(pinned.trim().toLowerCase())) {
+            // Preserve the user's current selection even if it isn't otherwise
+            // listed (server validation already accepted it at write time).
+            const selected = (record && record.series_name) || '';
+            if (selected && !seen.has(selected.trim().toLowerCase())) {
                 const opt = document.createElement('option');
-                opt.value = pinned;
-                opt.textContent = pinned;
+                opt.value = selected;
+                opt.textContent = selected;
                 select.appendChild(opt);
             }
-            select.value = pinned;
+            select.value = selected;
+
+            const resolved = document.getElementById('manageSeriesResolvedName');
+            if (resolved) {
+                const shown = (record && record.resolved_series_name) || '';
+                resolved.textContent = selected
+                    ? `Using your selected name: "${shown}".`
+                    : (shown ? `Automatic name currently resolves to: "${shown}".` : '');
+            }
         }
 
-        // Save just the per-series pinned title (called on the select's
-        // change event, same UX pattern as the preferred-language control).
-        async function saveManageSeriesPinnedTitle() {
+        // Save just the per-series name (called on the select's change event,
+        // same UX pattern as the preferred-language control). An empty value
+        // reverts to automatic resolution.
+        async function saveManageSeriesName() {
             const { seriesTitle } = manageSeriesState;
             if (!seriesTitle) return;
-            const select = document.getElementById('manageSeriesPinnedTitle');
+            const select = document.getElementById('manageSeriesName');
             if (!select) return;
             const value = select.value || null;
             try {
-                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/pinned-localized-title`), {
+                const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/name`), {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     credentials: 'same-origin',
-                    body: JSON.stringify({ pinnedTitle: value })
+                    body: JSON.stringify({ name: value })
                 });
                 if (!response.ok) {
-                    let msg = 'Failed to update pinned title';
+                    let msg = 'Failed to update series name';
                     try { const j = await response.json(); if (j && (j.error || typeof j === 'string')) msg = j.error || j; } catch {}
                     showMessage(msg, 'error');
-                    // Revert the select to the last known good value from the cached record.
-                    const current = (manageSeriesState.record && manageSeriesState.record.pinned_localized_title) || '';
+                    // Revert the select to the last known good value.
+                    const current = (manageSeriesState.record && manageSeriesState.record.series_name) || '';
                     select.value = current;
                     return;
                 }
                 const record = await response.json();
                 manageSeriesState.record = record;
-                populateManageSeriesPinnedTitleOptions(record);
-                showMessage(value ? `Pinned title set to "${value}"` : 'Pinned title cleared', 'success');
+                populateManageSeriesNameOptions(record);
+                renderManageSeriesUserAliases(record);
+                showMessage(value ? `Series name set to "${value}"` : 'Series name set to automatic', 'success');
                 if (typeof loadSeriesLibrary === 'function') {
                     loadSeriesLibrary(1, true);
                 }
             } catch (err) {
-                console.error('saveManageSeriesPinnedTitle failed', err);
-                showMessage('Failed to update pinned title', 'error');
+                console.error('saveManageSeriesName failed', err);
+                showMessage('Failed to update series name', 'error');
             }
         }
 
@@ -7829,10 +7843,8 @@
         async function saveManageSeriesNames() {
             const { seriesTitle, record } = manageSeriesState;
             if (!seriesTitle || !record) return;
-            const canonicalInput = document.getElementById('manageSeriesCanonical').value.trim();
             const payload = {
-                aliases: record.user_aliases || [],
-                canonicalTitle: canonicalInput || null
+                aliases: record.user_aliases || []
             };
             try {
                 const response = await fetch(apiUrl(`/api/metadata/series/${encodeURIComponent(seriesTitle)}/aliases`), {
@@ -8006,11 +8018,13 @@
                 }
             };
             if (mode === 'canonical') {
-                if (result.canonical_title) {
-                    document.getElementById('manageSeriesCanonical').value = result.canonical_title;
-                }
-                // Keep the previous canonical (the series being managed) as a user alias.
+                // Keep the previous canonical (the series being managed) as a
+                // user alias, register the chosen title, then set it as the
+                // sticky series name.
                 addIfNew(manageSeriesState.seriesTitle);
+                if (result.canonical_title) {
+                    addIfNew(result.canonical_title);
+                }
             }
             (result.aliases || []).forEach(addIfNew);
             if (mode === 'aliases' && result.canonical_title) {
@@ -8018,6 +8032,20 @@
             }
             manageSeriesState.record.user_aliases = current;
             renderManageSeriesUserAliases(manageSeriesState.record);
+            populateManageSeriesNameOptions(manageSeriesState.record);
+            if (mode === 'canonical' && result.canonical_title) {
+                const select = document.getElementById('manageSeriesName');
+                if (select) {
+                    if (![...select.options].some(o => o.value === result.canonical_title)) {
+                        const opt = document.createElement('option');
+                        opt.value = result.canonical_title;
+                        opt.textContent = result.canonical_title;
+                        select.appendChild(opt);
+                    }
+                    select.value = result.canonical_title;
+                    saveManageSeriesName();
+                }
+            }
         }
 
         // Mark one of the candidates returned by /search as the *correct*

@@ -15,10 +15,10 @@ namespace ComicMaintainer.Core.Interfaces;
 /// </para>
 ///
 /// <list type="number">
-///   <item><b>UserCanonical</b> — A <see cref="SeriesMetadataCacheRecord"/>
+///   <item><b>UserSelectedName</b> — A <see cref="SeriesMetadataCacheRecord"/>
 ///     reachable from any candidate key (file's <c>&lt;Series&gt;</c>,
-///     folder name, or any existing alias) with
-///     <see cref="SeriesMetadataCacheRecord.IsUserCanonical"/>=true.
+///     folder name, or any existing alias) with a non-empty
+///     <see cref="SeriesMetadataCacheRecord.SeriesName"/>.
 ///     Wins unconditionally — represents an explicit user decision.</item>
 ///   <item><b>MatchedCache</b> — A cache record reachable from any candidate
 ///     key whose <see cref="SeriesMetadataCacheRecord.LookupStatus"/>
@@ -123,7 +123,7 @@ public sealed class SeriesNameResolution
 
     /// <summary>
     /// Normalized cache key that matched, when <see cref="WinningStep"/> is
-    /// <see cref="SeriesNameResolutionStep.UserCanonical"/>,
+    /// <see cref="SeriesNameResolutionStep.UserSelectedName"/>,
     /// <see cref="SeriesNameResolutionStep.MatchedCache"/>, or
     /// <see cref="SeriesNameResolutionStep.LocalizedTitleBackref"/>.
     /// </summary>
@@ -151,11 +151,8 @@ public sealed class SeriesNameResolution
 /// </summary>
 public enum SeriesNameResolutionStep
 {
-    /// <summary>User-overridden canonical title (IsUserCanonical=true).</summary>
-    UserCanonical = 1,
-
-    /// <summary>User-pinned localized title (<see cref="SeriesMetadataCacheRecord.PinnedLocalizedTitle"/>).</summary>
-    PinnedLocalizedTitle = 8,
+    /// <summary>User-selected (pinned) series name (<see cref="SeriesMetadataCacheRecord.SeriesName"/> set).</summary>
+    UserSelectedName = 1,
 
     /// <summary>Cache record from a successful/manual match.</summary>
     MatchedCache = 2,

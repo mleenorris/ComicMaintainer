@@ -1199,25 +1199,22 @@
                      <p id="manageSeriesTitle" style="color: var(--text-primary); padding: 10px; background: var(--bg-hover); border-radius: 5px; margin-top: 5px;"></p>
                  </div>
                  <div class="form-group">
-                     <label for="manageSeriesCanonical" style="font-weight: 600; color: var(--text-secondary);">Canonical Title</label>
-                     <input type="text" id="manageSeriesCanonical" name="manageSeriesCanonical" autocomplete="off" placeholder="(leave blank to use provider value)" style="width: 100%; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); margin-top: 5px;">
+                     <label for="manageSeriesName" style="font-weight: 600; color: var(--text-secondary);">Series Name</label>
+                     <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">The single authoritative name shown in the library and written to each file's <code>ComicInfo.xml</code> <code>&lt;Series&gt;</code>. Choose <strong>Automatic</strong> to follow the preferred-language rule, or pick a specific name (canonical, a provider/user alias, or a localized title). Your choice is sticky and won't change until you pick another name or switch back to Automatic. Add a custom name in <em>User Aliases</em> below and it will appear here.</p>
+                     <select id="manageSeriesName" name="manageSeriesName" onchange="saveManageSeriesName()" style="width: 100%; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); margin-top: 5px;">
+                         <option value="">Automatic (use language preference)</option>
+                     </select>
+                     <div id="manageSeriesResolvedName" style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;"></div>
                  </div>
                  <div class="form-group">
                      <label for="manageSeriesPreferredLanguage" style="font-weight: 600; color: var(--text-secondary);">Preferred Display Language</label>
-                     <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">When set, the library will show the first title or alias available in this language instead of the canonical title. Each file's <code>ComicInfo.xml</code> <code>&lt;Series&gt;</code> will also be rewritten to match (background job, requires normalization to be enabled). Leave on "Default" to use the global setting.</p>
+                     <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">When the series name is set to <strong>Automatic</strong>, the library shows the first title or alias available in this language instead of the canonical title, and each file's <code>ComicInfo.xml</code> <code>&lt;Series&gt;</code> is rewritten to match (background job, requires normalization to be enabled). Leave on "Default" to use the global setting.</p>
                      <select id="manageSeriesPreferredLanguage" name="manageSeriesPreferredLanguage" onchange="saveManageSeriesPreferredLanguage()" style="width: 100%; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); margin-top: 5px;">
                          <option value="">Default (use global)</option>
                          <option value="en">English</option>
                          <option value="ja">Japanese (日本語)</option>
                          <option value="ko">Korean (한국어)</option>
                          <option value="zh">Chinese (中文)</option>
-                     </select>
-                 </div>
-                 <div class="form-group">
-                     <label for="manageSeriesPinnedTitle" style="font-weight: 600; color: var(--text-secondary);">Pinned Title</label>
-                     <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Pin a specific title (canonical or one of the provider's localized titles) to be shown and written to <code>ComicInfo.xml</code> <code>&lt;Series&gt;</code> regardless of the preferred-language setting. A user-overridden canonical title still wins. Choose "(None)" to fall back to the language-preference rule.</p>
-                     <select id="manageSeriesPinnedTitle" name="manageSeriesPinnedTitle" onchange="saveManageSeriesPinnedTitle()" style="width: 100%; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary); margin-top: 5px;">
-                         <option value="">(None — use language preference)</option>
                      </select>
                  </div>
                  <div class="form-group">

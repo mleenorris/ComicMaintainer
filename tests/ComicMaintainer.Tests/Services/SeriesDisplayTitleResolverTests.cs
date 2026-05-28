@@ -8,7 +8,7 @@ public class SeriesDisplayTitleResolverTests
     private static SeriesMetadataCacheRecord BuildRecord(
         string canonical,
         string? preferredLanguage = null,
-        bool isUserCanonical = false,
+        string? seriesName = null,
         params (string title, string? lang)[] localized)
     {
         return new SeriesMetadataCacheRecord
@@ -16,7 +16,7 @@ public class SeriesDisplayTitleResolverTests
             NormalizedKey = "key",
             CanonicalTitle = canonical,
             PreferredLanguage = preferredLanguage,
-            IsUserCanonical = isUserCanonical,
+            SeriesName = seriesName,
             LocalizedTitles = localized
                 .Select(t => new LocalizedTitle(t.title, t.lang))
                 .ToList()
@@ -71,12 +71,12 @@ public class SeriesDisplayTitleResolverTests
     }
 
     [Fact]
-    public void UserCanonicalOverride_AlwaysWins_OverLanguagePreference()
+    public void SeriesName_AlwaysWins_OverLanguagePreference()
     {
         var record = BuildRecord(
             canonical: "My Preferred Title",
             preferredLanguage: "ja",
-            isUserCanonical: true,
+            seriesName: "My Preferred Title",
             localized: new[]
             {
                 ("English Title", (string?)"en"),
@@ -143,11 +143,11 @@ public class SeriesDisplayTitleResolverTests
     }
 
     [Fact]
-    public void PinnedLocalizedTitle_WinsOverLanguagePreference()
+    public void SeriesName_WinsOverLanguagePreference()
     {
-        // The user has pinned the romaji variant for this series even
+        // The user has selected the romaji variant for this series even
         // though their per-series preference would otherwise pick the
-        // native Japanese title. Pin wins.
+        // native Japanese title. The selected name wins.
         var record = BuildRecord(
             canonical: "One Piece",
             preferredLanguage: "ja",
@@ -157,13 +157,13 @@ public class SeriesDisplayTitleResolverTests
                 ("ワンピース", (string?)"ja"),
                 ("Wan Piisu", "ja-Latn")
             });
-        record.PinnedLocalizedTitle = "Wan Piisu";
+        record.SeriesName = "Wan Piisu";
 
         Assert.Equal("Wan Piisu", SeriesDisplayTitleResolver.Resolve(record, globalDefaultLanguage: null));
     }
 
     [Fact]
-    public void PinnedLocalizedTitle_WinsOverGlobalDefaultLanguage()
+    public void SeriesName_WinsOverGlobalDefaultLanguage()
     {
         var record = BuildRecord(
             canonical: "Naruto",
@@ -173,28 +173,27 @@ public class SeriesDisplayTitleResolverTests
                 ("Naruto", (string?)"en"),
                 ("ナルト", (string?)"ja")
             });
-        record.PinnedLocalizedTitle = "Naruto";
+        record.SeriesName = "Naruto";
 
-        // Global default would select the Japanese title; pin overrides.
+        // Global default would select the Japanese title; SeriesName overrides.
         Assert.Equal("Naruto", SeriesDisplayTitleResolver.Resolve(record, globalDefaultLanguage: "ja"));
     }
 
     [Fact]
-    public void UserCanonicalOverride_StillWinsOverPinnedLocalizedTitle()
+    public void SeriesName_WinsOverLanguagePreference_WhenCanonicalAlsoDiffers()
     {
-        // IsUserCanonical is the absolute top of the precedence chain — the
-        // pin is a refinement of the language-preference rule, not a
-        // replacement for the explicit user-canonical override.
+        // SeriesName is the single explicit user-selected display name and
+        // wins over all automatic language-preference rules.
         var record = BuildRecord(
             canonical: "My Preferred Title",
             preferredLanguage: "ja",
-            isUserCanonical: true,
+            seriesName: "My Preferred Title",
             localized: new[]
             {
                 ("English Title", (string?)"en"),
                 ("日本語タイトル", (string?)"ja")
             });
-        record.PinnedLocalizedTitle = "English Title";
+        record.SeriesName = "My Preferred Title";
 
         Assert.Equal("My Preferred Title", SeriesDisplayTitleResolver.Resolve(record, null));
     }

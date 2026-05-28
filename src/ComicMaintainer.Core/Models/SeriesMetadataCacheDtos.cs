@@ -19,8 +19,25 @@ public class SeriesMetadataCacheRecord
     [JsonPropertyName("user_aliases")]
     public List<string> UserAliases { get; set; } = new();
 
-    [JsonPropertyName("is_user_canonical")]
-    public bool IsUserCanonical { get; set; }
+    [JsonPropertyName("series_name")]
+    public string? SeriesName { get; set; }
+
+    /// <summary>
+    /// True when <see cref="SeriesName"/> is an explicit user selection
+    /// (sticky). Derived; surfaced so the UI can show whether the displayed
+    /// name is automatic or user-chosen.
+    /// </summary>
+    [JsonPropertyName("is_user_selected_name")]
+    public bool IsUserSelectedName => !string.IsNullOrWhiteSpace(SeriesName);
+
+    /// <summary>
+    /// The fully-resolved series name actually displayed in the library and
+    /// written into ComicInfo.xml's <c>&lt;Series&gt;</c>. Computed by the
+    /// cache service via <see cref="Services.SeriesDisplayTitleResolver"/> so
+    /// the website and file metadata always agree.
+    /// </summary>
+    [JsonPropertyName("resolved_series_name")]
+    public string ResolvedSeriesName { get; set; } = string.Empty;
 
     [JsonPropertyName("source")]
     public string? Source { get; set; }
@@ -53,20 +70,6 @@ public class SeriesMetadataCacheRecord
     /// </summary>
     [JsonPropertyName("preferred_language")]
     public string? PreferredLanguage { get; set; }
-
-    /// <summary>
-    /// User-pinned localized title that wins over the language-preference
-    /// rule but loses to <see cref="IsUserCanonical"/>. When non-null/empty
-    /// it is returned verbatim as the resolved series name. Typical use:
-    /// the user wants a specific romaji or English alternative even though
-    /// their general preferred language would otherwise select a different
-    /// entry from <see cref="LocalizedTitles"/>. The value should be one of
-    /// the strings present in <see cref="LocalizedTitles"/> or
-    /// <see cref="CanonicalTitle"/>; the cache service validates this on
-    /// write.
-    /// </summary>
-    [JsonPropertyName("pinned_localized_title")]
-    public string? PinnedLocalizedTitle { get; set; }
 
     /// <summary>
     /// Provider-supplied titles tagged with their language. Used by the

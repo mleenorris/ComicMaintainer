@@ -149,7 +149,7 @@ public class MetadataControllerTests
     public async Task SetAliases_PersistsViaCacheService()
     {
         var record = new SeriesMetadataCacheRecord { NormalizedKey = "batman", CanonicalTitle = "Batman", UserAliases = new List<string> { "Dark Knight" } };
-        _cache.Setup(c => c.SetUserAliasesAsync("Batman", It.IsAny<IEnumerable<string>>(), null, It.IsAny<CancellationToken>()))
+        _cache.Setup(c => c.SetUserAliasesAsync("Batman", It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(record);
 
         var result = await _controller.SetAliases(

@@ -1,9 +1,7 @@
-using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Moq;
 
 namespace ComicMaintainer.Tests.Services;
@@ -13,18 +11,14 @@ public class MetadataBackfillJobHandlerTests
     private readonly Mock<IFileStoreService> _fileStore = new();
     private readonly Mock<IComicProcessorService> _processor = new();
     private readonly Mock<ISeriesNameResolver> _resolver = new();
-    private readonly Mock<IOptionsMonitor<AppSettings>> _options = new();
-    private readonly AppSettings _settings = new() { WatcherEnableNormalize = true };
 
     public MetadataBackfillJobHandlerTests()
     {
-        _options.Setup(o => o.CurrentValue).Returns(_settings);
         _resolver.Setup(r => r.ResolveAsync(It.IsAny<string>(), It.IsAny<ComicMetadata?>(), false, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SeriesNameResolution { ResolvedSeries = "Resolved Series" });
     }
 
     private MetadataBackfillJobHandler BuildHandler() => new(
-        _options.Object,
         _fileStore.Object,
         _processor.Object,
         _resolver.Object,
@@ -53,14 +47,19 @@ public class MetadataBackfillJobHandlerTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_SkipsWhenNormalizeDisabled()
+    public async Task ExecuteAsync_RunsRegardlessOfWatcherEnableNormalize()
     {
-        _settings.WatcherEnableNormalize = false;
+        // The metadata backfill scheduled job must run independently of the
+        // deprecated watcher toggles. Previously it short-circuited when
+        // WatcherEnableNormalize was false, which prevented it from running
+        // for users who have disabled the legacy FileSystemWatcher.
+        _fileStore.Setup(f => f.GetFilesNeedingBackfillAsync(200, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<ComicFile>());
 
         var summary = await BuildHandler().ExecuteAsync(null, CancellationToken.None);
 
-        Assert.Equal("Skipped (WatcherEnableNormalize=false)", summary);
-        _fileStore.Verify(f => f.GetFilesNeedingBackfillAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+        _fileStore.Verify(f => f.GetFilesNeedingBackfillAsync(200, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains("0 files updated", summary);
     }
 
     [Fact]

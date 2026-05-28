@@ -84,6 +84,27 @@ public class SeriesMetadataCacheRecord
     [JsonPropertyName("metadata_version")]
     public int MetadataVersion { get; set; }
 
+    /// <summary>
+    /// PR 1 of 3 — resolved series name. The single value the library card
+    /// and each file's ComicInfo.xml &lt;Series&gt; element must agree on.
+    /// Null only for legacy rows backfilled lazily; consumers should fall
+    /// back via <see cref="Services.SeriesDisplayTitleResolver"/>.
+    /// </summary>
+    [JsonPropertyName("series_name")]
+    public string? SeriesName { get; set; }
+
+    /// <summary>How <see cref="SeriesName"/> was determined.</summary>
+    [JsonPropertyName("series_name_source")]
+    public SeriesNameSource SeriesNameSource { get; set; } = SeriesNameSource.FolderName;
+
+    /// <summary>
+    /// Snapshot of the BCP-47 language code that produced
+    /// <see cref="SeriesName"/> when the source is
+    /// <see cref="SeriesNameSource.LanguageDefault"/>. Diagnostic only.
+    /// </summary>
+    [JsonPropertyName("series_name_language")]
+    public string? SeriesNameLanguage { get; set; }
+
     /// <summary>True when an image (downloaded or user-uploaded) is available locally.</summary>
     [JsonPropertyName("has_image")]
     public bool HasImage =>

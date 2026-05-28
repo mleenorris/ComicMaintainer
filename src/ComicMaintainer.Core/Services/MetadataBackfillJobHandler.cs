@@ -1,10 +1,8 @@
 using System.Text.Json;
-using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -15,20 +13,17 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
 {
     public const string Key = "metadata-backfill";
 
-    private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
     private readonly ISeriesNameResolver _seriesNameResolver;
     private readonly ILogger<MetadataBackfillJobHandler> _logger;
 
     public MetadataBackfillJobHandler(
-        IOptionsMonitor<AppSettings> settings,
         IFileStoreService fileStore,
         IComicProcessorService processor,
         ISeriesNameResolver seriesNameResolver,
         ILogger<MetadataBackfillJobHandler> logger)
     {
-        _settings = settings;
         _fileStore = fileStore;
         _processor = processor;
         _seriesNameResolver = seriesNameResolver;
@@ -42,11 +37,6 @@ public class MetadataBackfillJobHandler : IScheduledJobHandler
 
     public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
     {
-        if (!_settings.CurrentValue.WatcherEnableNormalize)
-        {
-            return "Skipped (WatcherEnableNormalize=false)";
-        }
-
         var options = ParseOptions(optionsJson);
         var batch = await _fileStore.GetFilesNeedingBackfillAsync(options.MaxBatch, cancellationToken);
         var processed = 0;

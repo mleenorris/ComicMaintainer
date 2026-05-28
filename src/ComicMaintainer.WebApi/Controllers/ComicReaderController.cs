@@ -18,17 +18,20 @@ public class ComicReaderController : ControllerBase
 {
     private readonly IComicReaderService _readerService;
     private readonly IFileStoreService _fileStore;
+    private readonly IFileCoverCacheService _coverCache;
     private readonly ILogger<ComicReaderController> _logger;
     private readonly IOptionsMonitor<AppSettings> _settings;
 
     public ComicReaderController(
         IComicReaderService readerService,
         IFileStoreService fileStore,
+        IFileCoverCacheService coverCache,
         ILogger<ComicReaderController> logger,
         IOptionsMonitor<AppSettings> settings)
     {
         _readerService = readerService;
         _fileStore = fileStore;
+        _coverCache = coverCache;
         _logger = logger;
         _settings = settings;
     }
@@ -142,6 +145,62 @@ public class ComicReaderController : ControllerBase
         {
             _logger.LogError(ex, "Error getting page {Page} from {FilePath}", page, LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error reading page" });
+        }
+    }
+
+    /// <summary>
+    /// Get the cached cover (page 1) of a comic file as an image. Backed by
+    /// the persistent on-disk file-cover cache so the archive is only opened
+    /// the first time a file is requested (and again whenever its
+    /// last-write-time or length changes). Supports <c>If-None-Match</c> for
+    /// conditional revalidation.
+    /// </summary>
+    /// <param name="filePath">Path to the comic file</param>
+    [HttpGet("cover")]
+    public async Task<IActionResult> GetCover([FromQuery] string filePath, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(filePath))
+        {
+            return BadRequest(new { error = "File path is required" });
+        }
+
+        if (!IsPathSafe(filePath))
+        {
+            _logger.LogWarning("Attempt to access file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return BadRequest(new { error = "File path is outside the allowed directory" });
+        }
+
+        if (!System.IO.File.Exists(filePath))
+        {
+            return NotFound(new { error = "File not found" });
+        }
+
+        try
+        {
+            var entry = await _coverCache.GetOrCreateAsync(filePath, cancellationToken);
+            if (entry is null)
+            {
+                return NotFound(new { error = "Cover not available" });
+            }
+
+            var etag = "\"" + entry.Value.LastModified.UtcTicks.ToString("x") + "-" + entry.Value.Data.Length.ToString("x") + "\"";
+            var ifNoneMatch = Request.Headers.IfNoneMatch.ToString();
+            if (!string.IsNullOrEmpty(ifNoneMatch) && ifNoneMatch.Contains(etag, StringComparison.Ordinal))
+            {
+                Response.Headers.ETag = etag;
+                Response.Headers.CacheControl = "public, max-age=3600";
+                return StatusCode(StatusCodes.Status304NotModified);
+            }
+
+            Response.Headers.ETag = etag;
+            Response.Headers.CacheControl = "public, max-age=3600";
+            Response.Headers.LastModified = entry.Value.LastModified.ToString("R");
+            return File(entry.Value.Data, entry.Value.ContentType);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting cover for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            return StatusCode(500, new { error = "Error reading cover" });
         }
     }
 

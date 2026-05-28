@@ -116,4 +116,31 @@ public class AppSettings
     /// default frontend page size.
     /// </summary>
     public int SeriesIssuesMaxArchiveUpgrades { get; set; } = 100;
+
+    /// <summary>
+    /// When true (the default), the server caches the cover (page 1) bytes of
+    /// every comic file it serves to the UI on disk under
+    /// <see cref="FileCoverCacheDirectory"/>. Cached entries are validated
+    /// against the source file's last-write-time and length on every request,
+    /// so changes to the underlying archive automatically invalidate the
+    /// cache. Set to false to bypass the cache and always extract page 1
+    /// from the archive on demand.
+    /// </summary>
+    public bool FileCoverCacheEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Directory where per-file cover thumbnails (page 1 of each comic
+    /// archive) are cached. When empty, defaults to
+    /// <c>{ConfigDirectory}/file-covers</c>. Filenames inside this directory
+    /// are derived from a hash of the absolute file path; the directory is
+    /// created lazily.
+    /// </summary>
+    public string? FileCoverCacheDirectory { get; set; }
+
+    /// <summary>
+    /// Soft cap on the total size of the file-cover cache directory in
+    /// megabytes. When exceeded, the oldest entries (by last-access time)
+    /// are pruned opportunistically on cache writes. Defaults to 512 MiB.
+    /// </summary>
+    public int FileCoverCacheMaxMegabytes { get; set; } = 512;
 }

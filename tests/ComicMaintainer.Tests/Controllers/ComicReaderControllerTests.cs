@@ -13,6 +13,7 @@ public class ComicReaderControllerTests
 {
     private readonly Mock<IComicReaderService> _readerServiceMock;
     private readonly Mock<IFileStoreService> _fileStoreMock;
+    private readonly Mock<IFileCoverCacheService> _coverCacheMock;
     private readonly Mock<ILogger<ComicReaderController>> _loggerMock;
     private readonly Mock<IOptionsMonitor<AppSettings>> _settingsMock;
     private readonly ComicReaderController _controller;
@@ -22,6 +23,7 @@ public class ComicReaderControllerTests
     {
         _readerServiceMock = new Mock<IComicReaderService>();
         _fileStoreMock = new Mock<IFileStoreService>();
+        _coverCacheMock = new Mock<IFileCoverCacheService>();
         _loggerMock = new Mock<ILogger<ComicReaderController>>();
         _settingsMock = new Mock<IOptionsMonitor<AppSettings>>();
         
@@ -34,6 +36,7 @@ public class ComicReaderControllerTests
         _controller = new ComicReaderController(
             _readerServiceMock.Object,
             _fileStoreMock.Object,
+            _coverCacheMock.Object,
             _loggerMock.Object,
             _settingsMock.Object
         );

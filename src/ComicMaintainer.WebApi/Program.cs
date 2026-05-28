@@ -501,6 +501,7 @@ builder.Services.AddSingleton<IFileWatcherService, FileWatcherService>();
 builder.Services.AddSingleton<IProcessingHistoryService, ProcessingHistoryService>();
 builder.Services.AddSingleton<ISettingsService, SettingsService>();
 builder.Services.AddSingleton<IComicReaderService, ComicReaderService>();
+builder.Services.AddSingleton<IFileCoverCacheService, FileCoverCacheService>();
 builder.Services.AddSingleton<ISeriesLibraryService, SeriesLibraryService>();
 builder.Services.AddSingleton<ISeriesMetadataCacheService, SeriesMetadataCacheService>();
 builder.Services.AddSingleton<ISeriesMetadataRefreshJobService, SeriesMetadataRefreshJobService>();

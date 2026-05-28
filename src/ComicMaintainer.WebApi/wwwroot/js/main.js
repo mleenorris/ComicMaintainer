@@ -2057,6 +2057,13 @@
         }
 
         function getSeriesCoverUrl(filePath) {
+            // Persistent server-side cache endpoint. Falls back automatically
+            // (via the protected-image fallback machinery) to the legacy page
+            // extraction endpoint if the cache is unavailable.
+            return apiUrl(`/api/comicreader/cover?filePath=${encodeURIComponent(filePath)}`);
+        }
+
+        function getSeriesCoverFallbackUrl(filePath) {
             return apiUrl(`/api/comicreader/page?filePath=${encodeURIComponent(filePath)}&page=1`);
         }
 

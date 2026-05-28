@@ -30,3 +30,14 @@ public class FolderSummariesResult
     public int Limit { get; set; }
     public int TotalFolders { get; set; }
 }
+
+/// <summary>
+/// Result for paged file list queries served directly from the database.
+/// </summary>
+public class PagedFilesResult
+{
+    public List<FileDto> Files { get; set; } = new();
+    public int Page { get; set; }
+    public int TotalPages { get; set; }
+    public int TotalFiles { get; set; }
+}

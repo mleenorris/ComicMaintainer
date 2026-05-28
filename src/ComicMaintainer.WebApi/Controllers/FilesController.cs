@@ -90,77 +90,31 @@ public class FilesController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int per_page = 100,
         [FromQuery] string? sort = "name",
-        [FromQuery] string? direction = "asc")
+        [FromQuery] string? direction = "asc",
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            _logger.LogDebug("GetFiles: Request received - Filter: {Filter}, Search: {Search}, Page: {Page}, PerPage: {PerPage}, Sort: {Sort}, Direction: {Direction}", 
+            _logger.LogDebug("GetFiles: Request received - Filter: {Filter}, Search: {Search}, Page: {Page}, PerPage: {PerPage}, Sort: {Sort}, Direction: {Direction}",
                 LoggingHelper.SanitizeForLog(filter), LoggingHelper.SanitizeForLog(search), page, per_page, LoggingHelper.SanitizeForLog(sort), LoggingHelper.SanitizeForLog(direction));
-            
+
             var mappedFilter = MapFilter(filter);
 
             _logger.LogDebug("GetFiles: Mapped filter from '{OriginalFilter}' to '{MappedFilter}'", LoggingHelper.SanitizeForLog(filter), LoggingHelper.SanitizeForLog(mappedFilter));
 
-            var allFiles = await _fileStore.GetFilteredFilesAsync(mappedFilter);
-            _logger.LogDebug("GetFiles: Retrieved {FileCount} files after applying filter '{MappedFilter}'", allFiles.Count(), mappedFilter);
-            
-            // Apply search if provided
-            if (!string.IsNullOrEmpty(search))
-            {
-                allFiles = allFiles.Where(f => 
-                    f.FileName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                    f.FilePath.Contains(search, StringComparison.OrdinalIgnoreCase));
-            }
+            // DB-backed paged query — filtering, sorting and paging are pushed
+            // down to SQL so we don't materialize the full library per request.
+            var paged = await _fileStore.GetFilesPageAsync(
+                mappedFilter, search, sort, direction, page, per_page, cancellationToken);
 
-            // Apply sorting
-            allFiles = (sort?.ToLower(), direction?.ToLower()) switch
-            {
-                ("name", "asc") => allFiles.OrderBy(f => f.FileName),
-                ("name", "desc") => allFiles.OrderByDescending(f => f.FileName),
-                ("date", "asc") => allFiles.OrderBy(f => f.LastModified),
-                ("date", "desc") => allFiles.OrderByDescending(f => f.LastModified),
-                ("size", "asc") => allFiles.OrderBy(f => f.FileSize),
-                ("size", "desc") => allFiles.OrderByDescending(f => f.FileSize),
-                _ => allFiles.OrderBy(f => f.FileName)
-            };
-
-            var filesList = allFiles.ToList();
-            var totalFiles = filesList.Count;
-            
-            // Get unmarked count (all unprocessed, non-duplicate files)
-            var allUnmarked = await _fileStore.GetFilteredFilesAsync("unprocessed");
-            var unmarkedCount = allUnmarked.Count();
-
-            // Handle pagination (-1 means return all)
-            if (per_page == -1)
-            {
-                var allFilesDto = filesList.Select(FileDto.FromComicFile).ToList();
-                return Ok(new
-                {
-                    files = allFilesDto,
-                    page = 1,
-                    total_pages = 1,
-                    total_files = totalFiles,
-                    unmarked_count = unmarkedCount
-                });
-            }
-
-            // Calculate pagination
-            var totalPages = (int)Math.Ceiling((double)totalFiles / per_page);
-            page = Math.Max(1, Math.Min(page, totalPages == 0 ? 1 : totalPages));
-            
-            var pagedFiles = filesList
-                .Skip((page - 1) * per_page)
-                .Take(per_page)
-                .Select(FileDto.FromComicFile)
-                .ToList();
+            var unmarkedCount = await _fileStore.GetUnmarkedCountAsync(cancellationToken);
 
             return Ok(new
             {
-                files = pagedFiles,
-                page,
-                total_pages = totalPages,
-                total_files = totalFiles,
+                files = paged.Files,
+                page = paged.Page,
+                total_pages = paged.TotalPages,
+                total_files = paged.TotalFiles,
                 unmarked_count = unmarkedCount
             });
         }
@@ -187,7 +141,7 @@ public class FilesController : ControllerBase
         try
         {
             var mappedFilter = MapFilter(filter);
-            var allUnmarked = await _fileStore.GetFilteredFilesAsync("unprocessed", cancellationToken);
+            var unmarkedCount = await _fileStore.GetUnmarkedCountAsync(cancellationToken);
 
             // Default: lightweight summary cards (no per-issue list). Issues are
             // fetched lazily by the per-series endpoint to keep large libraries
@@ -202,7 +156,7 @@ public class FilesController : ControllerBase
                     page = fullResult.Page,
                     total_pages = fullResult.TotalPages,
                     total_series = fullResult.TotalSeries,
-                    unmarked_count = allUnmarked.Count()
+                    unmarked_count = unmarkedCount
                 });
             }
 
@@ -223,7 +177,7 @@ public class FilesController : ControllerBase
                     total_series = result.TotalSeries,
                     offset = result.Offset,
                     limit = limit!.Value,
-                    unmarked_count = allUnmarked.Count()
+                    unmarked_count = unmarkedCount
                 });
             }
 
@@ -233,7 +187,7 @@ public class FilesController : ControllerBase
                 page = result.Page,
                 total_pages = result.TotalPages,
                 total_series = result.TotalSeries,
-                unmarked_count = allUnmarked.Count()
+                unmarked_count = unmarkedCount
             });
         }
         catch (Exception ex)
@@ -262,7 +216,7 @@ public class FilesController : ControllerBase
             var mappedFilter = MapFilter(filter);
             var result = await _fileStore.GetFolderSummariesAsync(mappedFilter, search, sort, direction, offset, limit, cancellationToken);
 
-            var allUnmarked = await _fileStore.GetFilteredFilesAsync("unprocessed", cancellationToken);
+            var unmarkedCount = await _fileStore.GetUnmarkedCountAsync(cancellationToken);
 
             return Ok(new
             {
@@ -270,7 +224,7 @@ public class FilesController : ControllerBase
                 offset = result.Offset,
                 limit = result.Limit,
                 total_folders = result.TotalFolders,
-                unmarked_count = allUnmarked.Count()
+                unmarked_count = unmarkedCount
             });
         }
         catch (Exception ex)
@@ -296,33 +250,7 @@ public class FilesController : ControllerBase
                 LoggingHelper.SanitizeForLog(decodedPath), LoggingHelper.SanitizeForLog(filter));
 
             var mappedFilter = MapFilter(filter);
-            var allFiles = await _fileStore.GetFilteredFilesAsync(mappedFilter, cancellationToken);
-
-            if (!string.IsNullOrEmpty(search))
-            {
-                allFiles = allFiles.Where(f =>
-                    f.FileName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                    f.FilePath.Contains(search, StringComparison.OrdinalIgnoreCase));
-            }
-
-            var watchedDir = _settings.CurrentValue?.WatchedDirectory;
-            var folderFiles = allFiles
-                .Where(f => string.Equals(
-                    FileStoreService.ComputeFolderKey(f.FilePath, watchedDir),
-                    decodedPath ?? string.Empty,
-                    StringComparison.Ordinal));
-
-            folderFiles = (sort?.ToLower(), direction?.ToLower()) switch
-            {
-                ("name", "desc") => folderFiles.OrderByDescending(f => f.FileName),
-                ("date", "asc") => folderFiles.OrderBy(f => f.LastModified),
-                ("date", "desc") => folderFiles.OrderByDescending(f => f.LastModified),
-                ("size", "asc") => folderFiles.OrderBy(f => f.FileSize),
-                ("size", "desc") => folderFiles.OrderByDescending(f => f.FileSize),
-                _ => folderFiles.OrderBy(f => f.FileName)
-            };
-
-            var dtos = folderFiles.Select(FileDto.FromComicFile).ToList();
+            var dtos = await _fileStore.GetFolderFilesAsync(decodedPath ?? string.Empty, mappedFilter, search, sort, direction, cancellationToken);
 
             return Ok(new
             {

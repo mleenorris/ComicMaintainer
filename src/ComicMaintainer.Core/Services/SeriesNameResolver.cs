@@ -314,9 +314,7 @@ public class SeriesNameResolver : ISeriesNameResolver
         if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;
         try
         {
-            var key = _cache.NormalizeKey(seriesName);
-            if (string.IsNullOrWhiteSpace(key)) return null;
-            var record = await _cache.GetAsync(key, cancellationToken);
+            var record = await GetRecordByKeyOrAliasAsync(seriesName, cancellationToken);
             return record is { IsUserCanonical: true } && !string.IsNullOrWhiteSpace(record.CanonicalTitle)
                 ? record
                 : null;
@@ -334,9 +332,7 @@ public class SeriesNameResolver : ISeriesNameResolver
         if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;
         try
         {
-            var key = _cache.NormalizeKey(seriesName);
-            if (string.IsNullOrWhiteSpace(key)) return null;
-            var record = await _cache.GetAsync(key, cancellationToken);
+            var record = await GetRecordByKeyOrAliasAsync(seriesName, cancellationToken);
             if (record is null || string.IsNullOrWhiteSpace(record.CanonicalTitle)) return null;
 
             var status = record.LookupStatus;
@@ -352,6 +348,32 @@ public class SeriesNameResolver : ISeriesNameResolver
                 LoggingHelper.SanitizeForLog(seriesName));
             return null;
         }
+    }
+
+    /// <summary>
+    /// Resolve a candidate series name to its cache record. First tries an
+    /// authoritative exact-key match; if that misses, falls back to the cache's
+    /// alias index so a file whose folder name or embedded <c>&lt;Series&gt;</c>
+    /// is an alias / localized title (rather than the record's own normalized
+    /// key) still resolves to the record that owns the series' canonical / pin /
+    /// preferred-language settings. This keeps per-file metadata rewriting in
+    /// sync with how the library groups and displays the series.
+    /// </summary>
+    private async Task<SeriesMetadataCacheRecord?> GetRecordByKeyOrAliasAsync(string seriesName, CancellationToken cancellationToken)
+    {
+        if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;
+
+        var key = _cache.NormalizeKey(seriesName);
+        if (!string.IsNullOrWhiteSpace(key))
+        {
+            var direct = await _cache.GetAsync(key, cancellationToken);
+            if (direct is not null)
+            {
+                return direct;
+            }
+        }
+
+        return await _cache.ResolveByTitleAsync(seriesName, cancellationToken);
     }
 
     private async Task<ExternalSeriesMetadata?> LookupExternalSeriesMetadataAsync(string seriesName, CancellationToken cancellationToken)

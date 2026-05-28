@@ -17,6 +17,17 @@ public interface ISeriesMetadataCacheService
     Task<SeriesMetadataCacheRecord?> GetAsync(string normalizedKey, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Resolves a free-form title to its owning cache record by consulting the
+    /// alias index (the record's own key, canonical title, user aliases,
+    /// provider aliases, and localized titles). This mirrors the grouping/retag
+    /// layers so per-file metadata resolution can find the record that holds a
+    /// series' canonical/pin/preferred-language settings even when the file's
+    /// folder name or embedded <c>&lt;Series&gt;</c> is an alias rather than the
+    /// record's own normalized key. Returns null when no record owns the title.
+    /// </summary>
+    Task<SeriesMetadataCacheRecord?> ResolveByTitleAsync(string title, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Replaces the user-managed alias list (and optionally canonical title)
     /// for a series key. Returns the updated record.
     /// </summary>

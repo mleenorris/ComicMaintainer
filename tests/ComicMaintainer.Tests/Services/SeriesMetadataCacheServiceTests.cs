@@ -821,4 +821,71 @@ public class SeriesMetadataCacheServiceTests
         Assert.True(pinned!.MetadataVersion > initialVersion,
             $"Expected MetadataVersion to be bumped (was {initialVersion}, now {pinned.MetadataVersion}).");
     }
+
+    [Fact]
+    public async Task ResolveByTitleAsync_ResolvesByCanonicalUserAndProviderAliases()
+    {
+        // Build a record keyed under one title but with a user-canonical
+        // override plus provider aliases / localized titles. ResolveByTitleAsync
+        // must map every one of those titles back to the same owning record so
+        // per-file resolution finds the series' settings regardless of which
+        // alias a file's folder/embedded <Series> uses.
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "SSS-Class Suicide Hunter",
+                Aliases = new List<string> { "SSS-geup Jugeoya Saneun Hunter" },
+                LocalizedTitles = new List<LocalizedTitle>
+                {
+                    new("SSS-Class Suicide Hunter", "en"),
+                    new("SSS급 자살헌터", "ko")
+                }
+            });
+        // Key the record under the original/grouping title and adopt a
+        // user-canonical override + a user alias.
+        await _service.RefreshAsync("SSS-Class Revival Hunter");
+        var record = await _service.SetUserAliasesAsync(
+            "SSS-Class Revival Hunter",
+            new[] { "Revival Hunter Webtoon" },
+            canonicalTitleOverride: "SSS-Class Suicide Hunter");
+
+        var byKey = await _service.ResolveByTitleAsync("SSS-Class Revival Hunter");
+        var byCanonical = await _service.ResolveByTitleAsync("SSS-Class Suicide Hunter");
+        var byProviderAlias = await _service.ResolveByTitleAsync("SSS-geup Jugeoya Saneun Hunter");
+        var byUserAlias = await _service.ResolveByTitleAsync("Revival Hunter Webtoon");
+        var byLocalized = await _service.ResolveByTitleAsync("SSS급 자살헌터");
+
+        Assert.Equal(record.NormalizedKey, byKey?.NormalizedKey);
+        Assert.Equal(record.NormalizedKey, byCanonical?.NormalizedKey);
+        Assert.Equal(record.NormalizedKey, byProviderAlias?.NormalizedKey);
+        Assert.Equal(record.NormalizedKey, byUserAlias?.NormalizedKey);
+        Assert.Equal(record.NormalizedKey, byLocalized?.NormalizedKey);
+        Assert.True(byProviderAlias!.IsUserCanonical);
+        Assert.Equal("SSS-Class Suicide Hunter", byProviderAlias.CanonicalTitle);
+    }
+
+    [Fact]
+    public async Task ResolveByTitleAsync_ReturnsNull_ForUnknownTitle()
+    {
+        await _service.SetUserAliasesAsync("One Piece", Array.Empty<string>(), canonicalTitleOverride: null);
+
+        var result = await _service.ResolveByTitleAsync("Totally Different Series");
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task ResolveByTitleAsync_RebuildsIndex_AfterMutation()
+    {
+        // The alias index is memoized; a subsequent mutation must invalidate it
+        // so newly-added aliases resolve.
+        await _service.SetUserAliasesAsync("Naruto", Array.Empty<string>(), canonicalTitleOverride: null);
+        Assert.Null(await _service.ResolveByTitleAsync("Boruto Side Story"));
+
+        await _service.SetUserAliasesAsync("Naruto", new[] { "Boruto Side Story" }, canonicalTitleOverride: null);
+
+        var resolved = await _service.ResolveByTitleAsync("Boruto Side Story");
+        Assert.NotNull(resolved);
+        Assert.Equal(_service.NormalizeKey("Naruto"), resolved!.NormalizedKey);
+    }
 }

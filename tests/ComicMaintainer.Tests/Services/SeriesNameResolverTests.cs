@@ -68,6 +68,98 @@ public class SeriesNameResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_AliasFolder_ResolvesToUserCanonicalRecordViaAliasIndex()
+    {
+        // Repro for the per-file metadata bug: the user set a canonical title
+        // (and pin / preferred language) on a series whose record is keyed under
+        // a different title. A file living in a folder whose name is one of the
+        // series' aliases must still resolve to that record's settings rather
+        // than being preserved/folder-derived. The exact-key lookup misses
+        // (GetAsync returns null), so resolution falls back to the alias index.
+        var resolver = BuildResolver();
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "sss-class-revival-hunter",
+            CanonicalTitle = "SSS-Class Suicide Hunter",
+            IsUserCanonical = true
+        };
+        _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+              .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        _cache.Setup(c => c.ResolveByTitleAsync("SSS-geup Jugeoya Saneun Hunter", It.IsAny<CancellationToken>()))
+              .ReturnsAsync(record);
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                 .ReturnsAsync((ExternalSeriesMetadata?)null);
+
+        var result = await resolver.ResolveAsync(
+            "/library/SSS-geup Jugeoya Saneun Hunter/c1.cbz",
+            new ComicMetadata { Series = "SSS-geup Jugeoya Saneun Hunter" },
+            mutateCache: false);
+
+        Assert.Equal(SeriesNameResolutionStep.UserCanonical, result.WinningStep);
+        Assert.Equal("SSS-Class Suicide Hunter", result.ResolvedSeries);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AliasFolder_AppliesPinnedTitleViaAliasIndex()
+    {
+        // A matched (non-user-canonical) record with a pinned localized title:
+        // a file in an alias-named folder must inherit the pin even though the
+        // exact-key lookup misses and the match is found via the alias index.
+        _settings.DefaultPreferredLanguage = "ja";
+        var resolver = BuildResolver();
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "sss-class-revival-hunter",
+            CanonicalTitle = "SSS-Class Suicide Hunter",
+            LookupStatus = "success",
+            PinnedLocalizedTitle = "SSS-Class Suicide Hunter",
+            LocalizedTitles =
+            {
+                new LocalizedTitle("SSS-Class Suicide Hunter", "en"),
+                new LocalizedTitle("SSS급 자살헌터", "ko")
+            }
+        };
+        _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+              .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        _cache.Setup(c => c.ResolveByTitleAsync("SSS급 자살헌터", It.IsAny<CancellationToken>()))
+              .ReturnsAsync(record);
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                 .ReturnsAsync((ExternalSeriesMetadata?)null);
+
+        var result = await resolver.ResolveAsync(
+            "/library/SSS급 자살헌터/c1.cbz",
+            new ComicMetadata { Series = "SSS급 자살헌터" },
+            mutateCache: false);
+
+        Assert.Equal(SeriesNameResolutionStep.PinnedLocalizedTitle, result.WinningStep);
+        Assert.Equal("SSS-Class Suicide Hunter", result.ResolvedSeries);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ExactKeyMatch_DoesNotConsultAliasIndex()
+    {
+        // When the exact-key lookup succeeds the alias index must not be hit;
+        // this preserves the authoritative own-key precedence and avoids the
+        // (potentially expensive) full index build on the common path.
+        var resolver = BuildResolver();
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "one-piece",
+            CanonicalTitle = "One Piece (User Override)",
+            IsUserCanonical = true
+        };
+        _cache.Setup(c => c.GetAsync("one-piece", It.IsAny<CancellationToken>())).ReturnsAsync(record);
+
+        var result = await resolver.ResolveAsync(
+            "/library/One Piece/c1.cbz",
+            new ComicMetadata { Series = "One Piece" },
+            mutateCache: false);
+
+        Assert.Equal("One Piece (User Override)", result.ResolvedSeries);
+        _cache.Verify(c => c.ResolveByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task ResolveAsync_NoCacheNoExternal_FallsBackToFolderName()
     {
         var resolver = BuildResolver();

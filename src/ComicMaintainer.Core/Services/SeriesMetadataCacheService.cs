@@ -30,6 +30,15 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesMetadataCacheService> _logger;
 
+    // Memoized alias index (alias-key -> owning record) used by
+    // ResolveByTitleAsync so per-file resolution can map a folder/embedded
+    // <Series> alias back to the record that owns the series' settings. Lazily
+    // built from the full record set; invalidated on every mutation. The
+    // service is registered as a singleton so this in-memory cache is shared.
+    private readonly SemaphoreSlim _aliasIndexGate = new(1, 1);
+    private volatile Dictionary<string, SeriesMetadataCacheRecord>? _aliasIndex;
+    private volatile bool _aliasIndexDirty = true;
+
     public SeriesMetadataCacheService(
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         IExternalSeriesMetadataService externalMetadata,
@@ -46,16 +55,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         _logger = logger;
     }
 
-    public string NormalizeKey(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return "unknown-series";
-        }
-
-        var normalized = SeriesKeySanitizer.Replace(value.ToLowerInvariant(), "-").Trim('-');
-        return string.IsNullOrWhiteSpace(normalized) ? "unknown-series" : normalized;
-    }
+    public string NormalizeKey(string? value) => StaticNormalizeKey(value);
 
     public async Task<IReadOnlyList<SeriesMetadataCacheRecord>> GetAllAsync(CancellationToken cancellationToken = default)
     {
@@ -75,6 +75,175 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         var entity = await db.SeriesMetadataCache.AsNoTracking()
             .FirstOrDefaultAsync(e => e.NormalizedKey == normalizedKey, cancellationToken);
         return entity is null ? null : ToRecord(entity);
+    }
+
+    /// <inheritdoc />
+    public async Task<SeriesMetadataCacheRecord?> ResolveByTitleAsync(string title, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return null;
+        }
+
+        // Prefer an authoritative exact-key match (the record's own key always
+        // wins over any alias claim) before consulting the alias index.
+        var key = NormalizeKey(title);
+        if (!string.IsNullOrWhiteSpace(key))
+        {
+            var direct = await GetAsync(key, cancellationToken);
+            if (direct is not null)
+            {
+                return direct;
+            }
+        }
+
+        if (IsAmbiguousNormalizedKey(key))
+        {
+            // A degenerate key (e.g. a CJK-only title that collapses to a bare
+            // digit) must not bridge to whichever record happened to seed that
+            // key in the alias index.
+            return null;
+        }
+
+        var index = await GetAliasIndexAsync(cancellationToken);
+        return index.TryGetValue(key, out var record) ? record : null;
+    }
+
+    /// <summary>
+    /// Returns the memoized alias index, rebuilding it from the full record set
+    /// when it has been invalidated by a mutation. The index maps each
+    /// normalized alias key to the record that owns it, using the same
+    /// canonical &gt; user-alias &gt; provider-alias precedence as the
+    /// grouping layer, then localized titles as the weakest signal.
+    /// </summary>
+    private async Task<Dictionary<string, SeriesMetadataCacheRecord>> GetAliasIndexAsync(CancellationToken cancellationToken)
+    {
+        var current = _aliasIndex;
+        if (!_aliasIndexDirty && current is not null)
+        {
+            return current;
+        }
+
+        await _aliasIndexGate.WaitAsync(cancellationToken);
+        try
+        {
+            current = _aliasIndex;
+            if (!_aliasIndexDirty && current is not null)
+            {
+                return current;
+            }
+
+            // Clear the dirty flag before loading so a concurrent mutation that
+            // happens during the load re-marks the index dirty and forces a
+            // rebuild on the next call.
+            _aliasIndexDirty = false;
+            var records = await GetAllAsync(cancellationToken);
+            var index = BuildAliasIndex(records);
+            _aliasIndex = index;
+            return index;
+        }
+        catch
+        {
+            // Ensure a failed build is retried next time.
+            _aliasIndexDirty = true;
+            throw;
+        }
+        finally
+        {
+            _aliasIndexGate.Release();
+        }
+    }
+
+    private void InvalidateAliasIndex() => _aliasIndexDirty = true;
+
+    /// <summary>
+    /// Builds an alias-key -&gt; owning-record map. Mirrors the precedence used
+    /// by the grouping layer: pass 1 record key + canonical title, pass 2 user
+    /// aliases, pass 3 provider aliases, pass 4 localized titles. Each pass uses
+    /// <c>TryAdd</c> so a stronger claim is never overwritten, and degenerate
+    /// keys are skipped so unrelated series can't be bridged together.
+    /// </summary>
+    private static Dictionary<string, SeriesMetadataCacheRecord> BuildAliasIndex(IReadOnlyList<SeriesMetadataCacheRecord> records)
+    {
+        var index = new Dictionary<string, SeriesMetadataCacheRecord>(StringComparer.OrdinalIgnoreCase);
+
+        // Pass 1: record keys and canonical titles.
+        foreach (var record in records)
+        {
+            if (!string.IsNullOrWhiteSpace(record.NormalizedKey))
+            {
+                index.TryAdd(record.NormalizedKey, record);
+            }
+            if (!string.IsNullOrWhiteSpace(record.CanonicalTitle))
+            {
+                var canonicalKey = StaticNormalizeKey(record.CanonicalTitle);
+                if (!IsAmbiguousNormalizedKey(canonicalKey))
+                {
+                    index.TryAdd(canonicalKey, record);
+                }
+            }
+        }
+
+        AddAliasPass(index, records, r => r.UserAliases);
+        AddAliasPass(index, records, r => r.Aliases);
+        AddAliasPass(index, records, r => r.LocalizedTitles?.Select(t => t?.Title));
+
+        return index;
+    }
+
+    private static void AddAliasPass(
+        Dictionary<string, SeriesMetadataCacheRecord> index,
+        IReadOnlyList<SeriesMetadataCacheRecord> records,
+        Func<SeriesMetadataCacheRecord, IEnumerable<string?>?> selector)
+    {
+        foreach (var record in records)
+        {
+            var aliases = selector(record);
+            if (aliases is null) continue;
+            foreach (var alias in aliases)
+            {
+                if (string.IsNullOrWhiteSpace(alias)) continue;
+                var aliasKey = StaticNormalizeKey(alias);
+                if (IsAmbiguousNormalizedKey(aliasKey)) continue;
+                index.TryAdd(aliasKey, record);
+            }
+        }
+    }
+
+    private static string StaticNormalizeKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "unknown-series";
+        }
+        var normalized = SeriesKeySanitizer.Replace(value.ToLowerInvariant(), "-").Trim('-');
+        return string.IsNullOrWhiteSpace(normalized) ? "unknown-series" : normalized;
+    }
+
+    /// <summary>
+    /// True for keys that are too short/degenerate to safely bridge series via
+    /// the alias index (empty, single-character, the unknown sentinel, or
+    /// digits/punctuation-only — e.g. CJK-only titles that collapse to a bare
+    /// number).
+    /// </summary>
+    private static bool IsAmbiguousNormalizedKey(string? normalized)
+    {
+        if (string.IsNullOrEmpty(normalized)
+            || normalized.Length < 2
+            || string.Equals(normalized, "unknown-series", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        foreach (var ch in normalized)
+        {
+            if (char.IsLetter(ch))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public async Task<SeriesMetadataCacheRecord> SetUserAliasesAsync(
@@ -126,6 +295,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         }
 
         await db.SaveChangesAsync(cancellationToken);
+
+        InvalidateAliasIndex();
         return ToRecord(entity);
     }
 
@@ -159,6 +330,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         entity.UpdatedAt = DateTime.UtcNow;
         BumpMetadataVersion(entity);
         await db.SaveChangesAsync(cancellationToken);
+        InvalidateAliasIndex();
         return ToRecord(entity);
     }
 
@@ -262,6 +434,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         await TryDownloadImageAsync(entity, lookup, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
+
+        InvalidateAliasIndex();
         return ToRecord(entity);
     }
 
@@ -381,6 +555,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         await TryWriteFolderCoverAsync(entity, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
+
+        InvalidateAliasIndex();
         return ToRecord(entity);
     }
 
@@ -456,6 +632,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         await TryWriteFolderCoverAsync(entity, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
+
+        InvalidateAliasIndex();
         return ToRecord(entity);
     }
 
@@ -502,6 +680,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         }
 
         await db.SaveChangesAsync(cancellationToken);
+
+        InvalidateAliasIndex();
         return ToRecord(entity);
     }
 
@@ -630,6 +810,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         await TryDownloadImageAsync(entity, match, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
+
+        InvalidateAliasIndex();
         return ToRecord(entity);
     }
 
@@ -688,6 +870,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
 
         entity.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        InvalidateAliasIndex();
         return ToRecord(entity);
     }
 
@@ -842,6 +1025,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         }
 
         await db.SaveChangesAsync(cancellationToken);
+
+        InvalidateAliasIndex();
         return ToRecord(entity);
     }
 
@@ -876,6 +1061,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 entity.UpdatedAt = DateTime.UtcNow;
                 BumpMetadataVersion(entity);
                 await db.SaveChangesAsync(cancellationToken);
+                InvalidateAliasIndex();
             }
             return ToRecord(entity);
         }
@@ -917,6 +1103,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             entity.UpdatedAt = DateTime.UtcNow;
             BumpMetadataVersion(entity);
             await db.SaveChangesAsync(cancellationToken);
+            InvalidateAliasIndex();
         }
 
         return ToRecord(entity);

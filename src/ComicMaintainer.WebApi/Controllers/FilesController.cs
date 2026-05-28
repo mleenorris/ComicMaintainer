@@ -1566,7 +1566,7 @@ public class FilesController : ControllerBase
                     var existing = await _metadataCache.GetAsync(existingKeyForLookup, cancellationToken);
                     if (existing is not null
                         && !string.IsNullOrWhiteSpace(existing.CanonicalTitle)
-                        && (existing.IsUserCanonical
+                        && (!string.IsNullOrWhiteSpace(existing.SeriesName)
                             || string.Equals(existing.LookupStatus, "success", StringComparison.OrdinalIgnoreCase)
                             || string.Equals(existing.LookupStatus, "manual_match", StringComparison.OrdinalIgnoreCase)))
                     {
@@ -1653,7 +1653,6 @@ public class FilesController : ControllerBase
             await _metadataCache.SetUserAliasesAsync(
                 canonicalOverride,
                 filtered,
-                canonicalTitleOverride: canonicalOverride,
                 cancellationToken);
 
             _logger.LogInformation(

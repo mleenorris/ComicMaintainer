@@ -182,7 +182,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.ImageContentType).HasMaxLength(64);
             entity.Property(e => e.ImageStatus).HasMaxLength(32);
             entity.Property(e => e.PreferredLanguage).HasMaxLength(16);
-            entity.Property(e => e.PinnedLocalizedTitle).HasMaxLength(512);
+            entity.Property(e => e.SeriesName).HasMaxLength(512);
             // LocalizedTitlesJson is opaque JSON; no max length so it can
             // accommodate long alias lists from providers like MangaDex.
         });
@@ -365,8 +365,18 @@ public class SeriesMetadataCacheEntity
     /// <summary>Aliases manually added by the user.</summary>
     public List<string> UserAliases { get; set; } = new();
 
-    /// <summary>True when the canonical title was overridden by the user.</summary>
-    public bool IsUserCanonical { get; set; }
+    /// <summary>
+    /// The single authoritative series name override (the "pinned" name).
+    /// When non-null/empty the user has explicitly chosen this exact name
+    /// (from the alias list or a custom alias they added); it is displayed
+    /// in the library, written into ComicInfo.xml's <c>&lt;Series&gt;</c>, and
+    /// stays sticky across refreshes / language-preference changes until the
+    /// user picks a different name or reverts to automatic. When null/empty
+    /// the displayed name is computed automatically from the preferred
+    /// language (per-series, then global default) over the localized titles,
+    /// falling back to <see cref="CanonicalTitle"/>.
+    /// </summary>
+    public string? SeriesName { get; set; }
 
     /// <summary>Provider source name (e.g. ComicVine, MangaDex), null when unknown.</summary>
     public string? Source { get; set; }
@@ -417,15 +427,6 @@ public class SeriesMetadataCacheEntity
     /// the global default / canonical title.
     /// </summary>
     public string? PreferredLanguage { get; set; }
-
-    /// <summary>
-    /// User-pinned localized title. When non-null/empty it wins over the
-    /// language-preference rule but loses to <see cref="IsUserCanonical"/>.
-    /// Persisted as a plain string column rather than a foreign key into
-    /// the localized-titles JSON so order-only edits to that list don't
-    /// silently invalidate a pin.
-    /// </summary>
-    public string? PinnedLocalizedTitle { get; set; }
 
     /// <summary>
     /// JSON-encoded list of <see cref="Models.LocalizedTitle"/> entries

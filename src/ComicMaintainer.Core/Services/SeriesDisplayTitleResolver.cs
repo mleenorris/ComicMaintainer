@@ -3,20 +3,23 @@ using ComicMaintainer.Core.Models;
 namespace ComicMaintainer.Core.Services;
 
 /// <summary>
-/// Picks the title to display for a series given its cached record and the
-/// global default preferred language. The rules are:
+/// Picks the single authoritative series name for a cached record. This is
+/// the one rule used everywhere — the library display title, the value
+/// written into per-file ComicInfo.xml <c>&lt;Series&gt;</c>, and the
+/// metadata database — so the website and on-disk metadata can never
+/// disagree. The rules are:
 /// <list type="number">
-///   <item>If the user has overridden the canonical title
-///         (<c>IsUserCanonical</c> = true), always return it. Explicit user
-///         choice wins over any language rule.</item>
-///   <item>If the record has a non-empty <see cref="SeriesMetadataCacheRecord.PinnedLocalizedTitle"/>,
-///         return it verbatim. This is the user's "pin this exact title"
-///         override; it wins over the language-preference rule but loses to
-///         <c>IsUserCanonical</c>.</item>
-///   <item>If a per-series preference (or, failing that, the global default)
-///         matches one of the cached <see cref="LocalizedTitle"/> entries,
-///         return the first matching title.</item>
-///   <item>Otherwise fall back to <see cref="SeriesMetadataCacheRecord.CanonicalTitle"/>.</item>
+///   <item>If the record has an explicit user-selected
+///         <see cref="SeriesMetadataCacheRecord.SeriesName"/> (the "pinned"
+///         name), return it verbatim. This is sticky: it wins over the
+///         language-preference rule and survives refreshes until the user
+///         picks a different name or reverts to automatic.</item>
+///   <item>Otherwise, if a per-series preference (or, failing that, the
+///         global default) matches one of the cached
+///         <see cref="LocalizedTitle"/> entries, return the first matching
+///         title.</item>
+///   <item>Otherwise fall back to
+///         <see cref="SeriesMetadataCacheRecord.CanonicalTitle"/>.</item>
 /// </list>
 /// <para>
 /// The same resolver is used by <see cref="ComicProcessorService"/> when
@@ -27,27 +30,18 @@ namespace ComicMaintainer.Core.Services;
 public static class SeriesDisplayTitleResolver
 {
     /// <summary>
-    /// Resolve the title that should appear in the library for the given
-    /// record. <paramref name="globalDefaultLanguage"/> may be null/empty to
-    /// indicate "no global default".
+    /// Resolve the series name for the given record.
+    /// <paramref name="globalDefaultLanguage"/> may be null/empty to indicate
+    /// "no global default".
     /// </summary>
     public static string Resolve(SeriesMetadataCacheRecord record, string? globalDefaultLanguage)
     {
         ArgumentNullException.ThrowIfNull(record);
 
-        // Explicit user override always wins, regardless of language rules.
-        if (record.IsUserCanonical && !string.IsNullOrWhiteSpace(record.CanonicalTitle))
+        // Explicit user-selected (pinned) name always wins.
+        if (!string.IsNullOrWhiteSpace(record.SeriesName))
         {
-            return record.CanonicalTitle;
-        }
-
-        // User-pinned localized title wins over the language-preference rule.
-        // Represents an explicit "always show this exact title for this
-        // series" choice — e.g. the romaji variant — that should not be
-        // displaced when the user changes their general language preference.
-        if (!string.IsNullOrWhiteSpace(record.PinnedLocalizedTitle))
-        {
-            return record.PinnedLocalizedTitle;
+            return record.SeriesName.Trim();
         }
 
         var preferred = SeriesLanguagePreference.Normalize(record.PreferredLanguage)

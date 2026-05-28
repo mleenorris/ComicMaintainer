@@ -1588,20 +1588,16 @@ public class FilesControllerTests
     }
 
     [Fact]
-    public async Task RenameFileByEncodedPath_WithInvalidPath_ReturnsBadRequestOrNotFound()
+    public async Task RenameFileByEncodedPath_WithInvalidPath_ReturnsBadRequest()
     {
-        // Arrange
-        // "invalid-base64" can still decode as base64, so it may decode to a string
-        // But the metadata will be null for a non-existent file
-        var encodedPath = "invalid-base64";
-        _mockProcessor.Setup(p => p.GetMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ComicMetadata?)null);
+        // Arrange: a decoded absolute path outside the watched directory must be rejected.
+        var encodedPath = EncodeFilePathForUrl("/etc/passwd");
 
         // Act
         var result = await _controller.RenameFileByEncodedPath(encodedPath);
 
-        // Assert - Either BadRequest for truly invalid path, or NotFound for decoded but non-existent file
-        Assert.True(result is BadRequestObjectResult || result is NotFoundObjectResult);
+        // Assert
+        Assert.IsType<BadRequestObjectResult>(result);
     }
 
     [Fact]
@@ -1804,7 +1800,6 @@ public class FilesControllerTests
             mockMetadataCache.Setup(c => c.SetUserAliasesAsync(
                     It.IsAny<string>(),
                     It.IsAny<IEnumerable<string>>(),
-                    It.IsAny<string?>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SeriesMetadataCacheRecord());
 
@@ -1842,15 +1837,13 @@ public class FilesControllerTests
             _mockFileStore.Verify(fs => fs.UpdateFilePathAsync(olderPath,
                 Path.Combine(newerDir, "Batman-001.cbz"), It.IsAny<CancellationToken>(), It.IsAny<bool>()), Times.Once);
 
-            // Verify that the metadata cache was updated with the destination
-            // folder name as the canonical title and the source folder name as a
-            // user alias.
+            // Verify that the metadata cache was updated with the source folder name as a
+            // user alias on the destination series.
             var destFolderName = Path.GetFileName(newerDir);
             mockMetadataCache.Verify(c => c.SetUserAliasesAsync(
                 destFolderName,
                 It.Is<IEnumerable<string>>(aliases =>
                     aliases.Contains(Path.GetFileName(olderDir), StringComparer.OrdinalIgnoreCase)),
-                destFolderName,
                 It.IsAny<CancellationToken>()),
                 Times.Once);
         }
@@ -1939,7 +1932,6 @@ public class FilesControllerTests
             mockMetadataCache.Setup(c => c.SetUserAliasesAsync(
                     It.IsAny<string>(),
                     It.IsAny<IEnumerable<string>>(),
-                    It.IsAny<string?>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SeriesMetadataCacheRecord());
 
@@ -1964,17 +1956,14 @@ public class FilesControllerTests
 
             Assert.IsType<AcceptedResult>(result.Result);
 
-            // The destination folder name ("Batman") should be the canonical
-            // title override and "Batman (Classic)" + "The Batman Adventures"
-            // should appear in the alias list. The destination's own name
-            // should NOT be in the alias list.
+            // "Batman (Classic)" + "The Batman Adventures" should appear in the alias list.
+            // The destination's own name should NOT be in the alias list.
             mockMetadataCache.Verify(c => c.SetUserAliasesAsync(
                 "Batman",
                 It.Is<IEnumerable<string>>(aliases =>
                     aliases.Contains("Batman (Classic)", StringComparer.OrdinalIgnoreCase)
                     && aliases.Contains("The Batman Adventures", StringComparer.OrdinalIgnoreCase)
                     && !aliases.Contains("Batman", StringComparer.OrdinalIgnoreCase)),
-                "Batman",
                 It.IsAny<CancellationToken>()),
                 Times.Once);
         }

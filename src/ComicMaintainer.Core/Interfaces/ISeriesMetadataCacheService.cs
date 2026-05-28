@@ -17,13 +17,13 @@ public interface ISeriesMetadataCacheService
     Task<SeriesMetadataCacheRecord?> GetAsync(string normalizedKey, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Replaces the user-managed alias list (and optionally canonical title)
-    /// for a series key. Returns the updated record.
+    /// Replaces the user-managed alias list for a series key. Returns the
+    /// updated record. Aliases form the candidate pool the user can pick the
+    /// displayed series name from (see <see cref="SetSeriesNameAsync"/>).
     /// </summary>
     Task<SeriesMetadataCacheRecord> SetUserAliasesAsync(
         string seriesTitle,
         IEnumerable<string> userAliases,
-        string? canonicalTitleOverride,
         CancellationToken cancellationToken = default);
 
     /// <summary>Removes a single user alias by value (case-insensitive).</summary>
@@ -137,25 +137,25 @@ public interface ISeriesMetadataCacheService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Set (or clear, by passing null/empty) the user-pinned localized
-    /// title for a series. The pinned title wins over the language-preference
-    /// rule but loses to <see cref="SeriesMetadataCacheRecord.IsUserCanonical"/>.
+    /// Set (or clear, by passing null/empty) the user-selected series name —
+    /// the single authoritative "pinned" name shown in the library and
+    /// written into ComicInfo.xml's <c>&lt;Series&gt;</c>. It wins over the
+    /// language-preference rule and stays sticky across refreshes until the
+    /// user picks a different name or reverts to automatic (null/empty).
     /// <para>
-    /// When non-null/empty the value must equal (case-insensitive,
-    /// whitespace-trimmed) either the record's
-    /// <see cref="SeriesMetadataCacheRecord.CanonicalTitle"/> or one of its
-    /// <see cref="SeriesMetadataCacheRecord.LocalizedTitles"/> entries; an
-    /// <see cref="ArgumentException"/> is thrown otherwise. The persisted
-    /// value is the canonical-cased version of the title from the record
-    /// so the pin survives whitespace/case-only differences in user input.
+    /// When non-null/empty: if the value matches (case-insensitive) the
+    /// record's canonical title, a provider/user alias, or a localized title
+    /// it is stored verbatim from that source; otherwise it is treated as a
+    /// new custom name and added to the user-alias list. Passing null/empty
+    /// reverts to automatic resolution.
     /// </para>
     /// <para>
-    /// Returns null when no cache record exists for the key — pins can
-    /// only be set on series the cache already knows about (no upsert).
+    /// Returns null when no cache record exists for the key — a name can only
+    /// be selected for a series the cache already knows about (no upsert).
     /// </para>
     /// </summary>
-    Task<SeriesMetadataCacheRecord?> SetPinnedLocalizedTitleAsync(
+    Task<SeriesMetadataCacheRecord?> SetSeriesNameAsync(
         string seriesTitle,
-        string? pinnedTitle,
+        string? seriesName,
         CancellationToken cancellationToken = default);
 }

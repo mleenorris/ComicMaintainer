@@ -953,4 +953,66 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
 
         return ToRecord(entity);
     }
+
+    /// <inheritdoc />
+    public async Task<SeriesMetadataCacheRecord> SetSeriesNameAsync(
+        string seriesTitle,
+        string? name,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            throw new ArgumentException("Series title is required", nameof(seriesTitle));
+        }
+
+        var key = NormalizeKey(seriesTitle);
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        var now = DateTime.UtcNow;
+        var trimmed = name?.Trim();
+
+        if (entity is null)
+        {
+            entity = new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = key,
+                CanonicalTitle = seriesTitle.Trim(),
+                Aliases = new List<string>(),
+                UserAliases = new List<string>(),
+                IsUserCanonical = false,
+                LookupStatus = "manual",
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            db.SeriesMetadataCache.Add(entity);
+        }
+        else
+        {
+            entity.UpdatedAt = now;
+            BumpMetadataVersion(entity);
+        }
+
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            // Explicit reset: flip the source away from UserSelected so the
+            // defaulter is allowed to recompute the name from current inputs
+            // (canonical title, localized titles, language preference).
+            entity.SeriesNameSource = SeriesNameSource.LanguageDefault;
+            entity.SeriesName = null;
+            entity.SeriesNameLanguage = null;
+            RecomputeSeriesName(entity);
+        }
+        else
+        {
+            // Explicit user pick: sticky. SeriesNameDefaulter.Recompute leaves
+            // a non-empty UserSelected name untouched, so we set the fields
+            // directly here rather than routing through the defaulter.
+            entity.SeriesName = trimmed;
+            entity.SeriesNameSource = SeriesNameSource.UserSelected;
+            entity.SeriesNameLanguage = null;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return ToRecord(entity);
+    }
 }

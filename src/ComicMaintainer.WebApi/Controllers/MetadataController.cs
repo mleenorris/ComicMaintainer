@@ -702,6 +702,78 @@ public class MetadataController : ControllerBase
         public string? PinnedTitle { get; set; }
     }
 
+    /// <summary>
+    /// Set (or reset, by passing null/empty) the user-facing display name for
+    /// a series. This is the single control introduced in PR 2 of 3 of the
+    /// series-name overhaul that collapses the legacy preferred-language,
+    /// pinned-localized-title and canonical-override actions. A non-empty
+    /// name is persisted verbatim and is sticky (never recomputed); an empty
+    /// name clears the user pick and reverts to the language-default name.
+    /// </summary>
+    [HttpPut("series/{seriesTitle}/name")]
+    public async Task<ActionResult<SeriesMetadataCacheRecord>> SetSeriesName(
+        string seriesTitle,
+        [FromBody] SetSeriesNameRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return BadRequest("Series title is required");
+        }
+
+        try
+        {
+            var record = await _cache.SetSeriesNameAsync(
+                seriesTitle,
+                request?.Name,
+                cancellationToken);
+
+            // Fire-and-forget per-file retag so on-disk <Series> tags catch up
+            // with the new name (same flow as preferred-language / pinned-title
+            // changes). We don't block the API response on the job.
+            if (_languageRetag is not null)
+            {
+                try
+                {
+                    var retagJobId = await _languageRetag.QueueRetagForSeriesAsync(record, cancellationToken);
+                    if (retagJobId is not null)
+                    {
+                        _logger.LogInformation(
+                            LoggingHelper.WithWebsitePrefix("Queued per-file retag job {JobId} after series-name change for {SeriesTitle}"),
+                            retagJobId.Value, LoggingHelper.SanitizeForLog(seriesTitle));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        LoggingHelper.WithWebsitePrefix("Failed to queue per-file retag after series-name change for {SeriesTitle}"),
+                        LoggingHelper.SanitizeForLog(seriesTitle));
+                }
+            }
+
+            return Ok(record);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error setting series name for {SeriesTitle}"), LoggingHelper.SanitizeForLog(seriesTitle));
+            return StatusCode(500, "Error setting series name");
+        }
+    }
+
+    public class SetSeriesNameRequest
+    {
+        /// <summary>
+        /// The display name to pin for the series. Persisted verbatim as the
+        /// sticky user-selected <c>&lt;Series&gt;</c> value. Pass null or empty
+        /// to clear the user pick and revert to the language-default name.
+        /// </summary>
+        public string? Name { get; set; }
+    }
+
     public class RefreshSelectedRequest
     {
         public List<string> Series { get; set; } = new();

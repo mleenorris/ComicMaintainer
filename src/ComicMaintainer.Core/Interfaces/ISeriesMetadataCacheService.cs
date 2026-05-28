@@ -158,4 +158,30 @@ public interface ISeriesMetadataCacheService
         string seriesTitle,
         string? pinnedTitle,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Set (or reset, by passing null/empty) the series' display name — the
+    /// single user-facing control introduced in PR 2 of 3 of the series-name
+    /// overhaul. This is the collapse of the legacy
+    /// <c>/preferred-language</c>, <c>/pinned-localized-title</c> and
+    /// canonical-override controls into one action.
+    /// <para>
+    /// When <paramref name="name"/> is non-empty the value is persisted
+    /// verbatim as <see cref="SeriesMetadataCacheRecord.SeriesName"/> with
+    /// <see cref="SeriesNameSource.UserSelected"/>; this is sticky and is
+    /// never overwritten by <see cref="Services.SeriesNameDefaulter"/> on
+    /// later input changes.
+    /// </para>
+    /// <para>
+    /// When <paramref name="name"/> is null/empty the user pick is cleared:
+    /// the source is flipped back to <see cref="SeriesNameSource.LanguageDefault"/>
+    /// and the name is recomputed from current inputs (canonical title,
+    /// localized titles, language preference).
+    /// </para>
+    /// <para>Upserts the cache record when missing.</para>
+    /// </summary>
+    Task<SeriesMetadataCacheRecord> SetSeriesNameAsync(
+        string seriesTitle,
+        string? name,
+        CancellationToken cancellationToken = default);
 }

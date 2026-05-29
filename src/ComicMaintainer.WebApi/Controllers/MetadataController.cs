@@ -650,6 +650,12 @@ public class MetadataController : ControllerBase
     /// written into ComicInfo.xml's <c>&lt;Series&gt;</c>. It wins over the
     /// language-preference rule and is sticky until the user picks a
     /// different name or reverts to automatic (null/empty).
+    /// <para>
+    /// When the series has no cached metadata record yet (for example a series
+    /// grouped purely from files on disk that was never matched), pinning a
+    /// non-empty name creates a minimal manual record so the series can be
+    /// fixed. Reverting to automatic for such a series is a no-op.
+    /// </para>
     /// </summary>
     [HttpPut("series/{seriesTitle}/name")]
     public async Task<ActionResult<SeriesMetadataCacheRecord>> SetSeriesName(
@@ -671,7 +677,16 @@ public class MetadataController : ControllerBase
 
             if (record is null)
             {
-                return NotFound($"No cached metadata exists for series '{seriesTitle}'.");
+                // SetSeriesNameAsync only returns null now when reverting to
+                // automatic (empty name) for a series that has no cached
+                // record — i.e. there is nothing pinned to clear. Treat that
+                // as a successful no-op rather than an error so the UI's
+                // "revert to automatic" action never fails.
+                return Ok(new SeriesMetadataCacheRecord
+                {
+                    NormalizedKey = _cache.NormalizeKey(seriesTitle),
+                    CanonicalTitle = seriesTitle
+                });
             }
 
             // Fire-and-forget per-file retag so on-disk <Series> tags catch

@@ -901,15 +901,45 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
 
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
         var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
+        var trimmed = seriesName?.Trim();
         if (entity is null)
         {
-            // A user-selected name is only meaningful for a series the cache
-            // already knows about (so it can be a known alias / localized
-            // title). Without a record there is nothing to attach it to.
-            return null;
+            // No cache record exists for this series. This happens for series
+            // that were never matched (grouped purely from files on disk),
+            // leaving them in a "bad state" where the pinned name could not be
+            // set at all. Reverting to automatic is a no-op here (there is
+            // nothing pinned), but pinning an explicit name must still work so
+            // the user can fix the series. Create a minimal manual record to
+            // attach the user-selected name to, mirroring SetUserAliasesAsync
+            // and SetPreferredLanguageAsync.
+            if (string.IsNullOrEmpty(trimmed))
+            {
+                return null;
+            }
+
+            var createdAt = DateTime.UtcNow;
+            var canonical = seriesTitle.Trim();
+            entity = new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = NormalizeKey(seriesTitle),
+                CanonicalTitle = canonical,
+                Aliases = new List<string>(),
+                // If the pinned name differs from the series title we are
+                // keying the record by, keep the candidate pool
+                // self-describing by recording it as a user alias too.
+                UserAliases = string.Equals(canonical, trimmed, StringComparison.OrdinalIgnoreCase)
+                    ? new List<string>()
+                    : new List<string> { trimmed },
+                LookupStatus = "manual",
+                SeriesName = trimmed,
+                CreatedAt = createdAt,
+                UpdatedAt = createdAt
+            };
+            db.SeriesMetadataCache.Add(entity);
+            await db.SaveChangesAsync(cancellationToken);
+            return ToRecord(entity);
         }
 
-        var trimmed = seriesName?.Trim();
         if (string.IsNullOrEmpty(trimmed))
         {
             // Revert to automatic resolution.

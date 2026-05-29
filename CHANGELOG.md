@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Allow pinning a series name for series stuck in a "bad state" with no cached
+  metadata record (e.g. series grouped purely from files on disk). Setting a
+  non-empty name now creates a minimal manual cache record instead of failing
+  with a 404, so these series can be fixed and their on-disk `<Series>` tags
+  retagged. Reverting such a series to automatic remains a no-op.
+
 ### Added
 - Health check endpoint at `/health` and `/api/health` for Docker and Kubernetes orchestration
   - Returns 200 OK when healthy, 503 when unhealthy

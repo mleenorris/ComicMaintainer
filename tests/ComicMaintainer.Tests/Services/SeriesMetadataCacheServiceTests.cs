@@ -807,9 +807,32 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
-    public async Task SetSeriesNameAsync_ReturnsNull_WhenNoCacheRecordExists()
+    public async Task SetSeriesNameAsync_CreatesRecord_WhenNoCacheRecordExists()
     {
-        var result = await _service.SetSeriesNameAsync("Unknown Series", "Anything");
+        // A series with no cache record (e.g. grouped purely from files on
+        // disk) used to be unfixable because SetSeriesNameAsync returned null.
+        // Pinning a non-empty name now creates a minimal manual record so the
+        // series can be fixed and its on-disk <Series> retagged.
+        var result = await _service.SetSeriesNameAsync("Unknown Series", "Fixed Name");
+
+        Assert.NotNull(result);
+        Assert.Equal("Unknown Series", result!.CanonicalTitle);
+        Assert.Equal("Fixed Name", result.SeriesName);
+        Assert.True(result.IsUserSelectedName);
+        Assert.Contains("Fixed Name", result.UserAliases);
+
+        // The new record is resolvable by both the original title and the
+        // pinned name.
+        Assert.NotNull(await _service.GetByTitleAsync("Unknown Series"));
+        Assert.NotNull(await _service.GetByTitleAsync("Fixed Name"));
+    }
+
+    [Fact]
+    public async Task SetSeriesNameAsync_ReturnsNull_WhenRevertingAutomaticWithNoRecord()
+    {
+        // Reverting to automatic (empty name) for a series that has no record
+        // is a no-op: there is nothing pinned to clear.
+        var result = await _service.SetSeriesNameAsync("Unknown Series", "");
         Assert.Null(result);
     }
 

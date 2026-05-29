@@ -1129,6 +1129,60 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task NormalizeFileAsync_ZeroPaddedIssueNumber_StripsPaddingFromMetadata()
+    {
+        // Arrange - ComicInfo.xml has a zero-padded <Number> (and a padded
+        // title). After normalization the per-file metadata issue field and
+        // the title should not be zero padded: <Number> "0012" -> "12" and
+        // <Title> -> "Chapter 12".
+        var seriesFolder = Path.Combine(_testDirectory, "Spider-Man");
+        Directory.CreateDirectory(seriesFolder);
+
+        var fileName = "Spider-Man - Chapter 0012.cbz";
+        var filePath = Path.Combine(seriesFolder, fileName);
+
+        var comicInfoXml = @"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>Spider-Man</Series>
+    <Number>0012</Number>
+    <Title>Chapter 0012</Title>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy image content");
+            }
+        }
+
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        _settings.WatcherEnableRename = false;
+        _settings.WatcherEnableNormalize = true;
+
+        // Act
+        var result = await _service.ProcessFileAsync(filePath);
+
+        // Assert
+        Assert.True(result);
+
+        var updatedMetadata = await _service.GetMetadataAsync(filePath);
+        Assert.NotNull(updatedMetadata);
+        Assert.Equal("Spider-Man", updatedMetadata.Series);
+        Assert.Equal("12", updatedMetadata.Issue);
+        Assert.Equal("Chapter 12", updatedMetadata.Title);
+    }
+
+    [Fact]
     public async Task NormalizeFileAsync_MissingIssueNumber_ParsesFromFilename()
     {
         // Arrange - ComicInfo.xml has no <Number> element, but the filename

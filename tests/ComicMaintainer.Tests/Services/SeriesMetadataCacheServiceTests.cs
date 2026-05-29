@@ -838,4 +838,80 @@ public class SeriesMetadataCacheServiceTests
         Assert.True(selected!.MetadataVersion > initialVersion,
             $"Expected MetadataVersion to be bumped (was {initialVersion}, now {selected.MetadataVersion}).");
     }
+
+    [Fact]
+    public async Task ResolveByTitleAsync_FindsRecord_ByExactKey()
+    {
+        await _service.SetUserAliasesAsync("Series A", new[] { "Alias" });
+
+        var record = await _service.ResolveByTitleAsync("Series A");
+
+        Assert.NotNull(record);
+        Assert.Equal("series-a", record!.NormalizedKey);
+    }
+
+    [Fact]
+    public async Task ResolveByTitleAsync_FindsRecord_ByAliasWithDivergentKey()
+    {
+        // Record keyed "haikyuu" (canonical "Haikyuu!!") that also carries an
+        // alias whose normalized key ("haikyuu-bu") differs from the record key.
+        await _service.SetUserAliasesAsync("Haikyuu!!", new[] { "Haikyuu-bu!!" });
+
+        var record = await _service.ResolveByTitleAsync("Haikyuu-bu!!");
+
+        Assert.NotNull(record);
+        Assert.Equal("haikyuu", record!.NormalizedKey);
+        Assert.Equal("Haikyuu!!", record.CanonicalTitle);
+    }
+
+    [Fact]
+    public async Task ResolveByTitleAsync_ReturnsNull_WhenNoRecordOwnsTitle()
+    {
+        await _service.SetUserAliasesAsync("Haikyuu!!", new[] { "Karasuno" });
+
+        var record = await _service.ResolveByTitleAsync("Totally Different");
+
+        Assert.Null(record);
+    }
+
+    [Fact]
+    public async Task SetSeriesNameAsync_CanChangeName_WhenLookedUpByDivergentDisplayTitle()
+    {
+        // Regression: a user pins a name/alias ("Haikyuu-bu!!") whose normalized
+        // key ("haikyuu-bu") differs from the record's key ("haikyuu"). The
+        // resolved display title then becomes "Haikyuu-bu!!", which is what the
+        // manage UI passes back in. Previously SetSeriesNameAsync looked the
+        // record up by NormalizeKey(displayTitle), missed it, and returned null,
+        // leaving the series permanently stuck on that name.
+        await _service.SetUserAliasesAsync("Haikyuu!!", new[] { "Haikyuu-bu!!" });
+        var pinned = await _service.SetSeriesNameAsync("Haikyuu!!", "Haikyuu-bu!!");
+        Assert.NotNull(pinned);
+        Assert.Equal("Haikyuu-bu!!", pinned!.SeriesName);
+        Assert.Equal("Haikyuu-bu!!", pinned.ResolvedSeriesName);
+
+        // Re-open manage using the resolved display title and pick a new name.
+        var displayTitle = pinned.ResolvedSeriesName;
+        var changed = await _service.SetSeriesNameAsync(displayTitle, "Haikyuu!!");
+
+        Assert.NotNull(changed);
+        Assert.Equal("haikyuu", changed!.NormalizedKey);
+        Assert.Equal("Haikyuu!!", changed.SeriesName);
+        Assert.Equal("Haikyuu!!", changed.ResolvedSeriesName);
+    }
+
+    [Fact]
+    public async Task SetSeriesNameAsync_CanRevertToAutomatic_WhenLookedUpByDivergentDisplayTitle()
+    {
+        await _service.SetUserAliasesAsync("Haikyuu!!", new[] { "Haikyuu-bu!!" });
+        var pinned = await _service.SetSeriesNameAsync("Haikyuu!!", "Haikyuu-bu!!");
+        Assert.NotNull(pinned);
+
+        // Revert to automatic using the divergent display title.
+        var cleared = await _service.SetSeriesNameAsync(pinned!.ResolvedSeriesName, null);
+
+        Assert.NotNull(cleared);
+        Assert.Equal("haikyuu", cleared!.NormalizedKey);
+        Assert.Null(cleared.SeriesName);
+        Assert.Equal("Haikyuu!!", cleared.ResolvedSeriesName);
+    }
 }

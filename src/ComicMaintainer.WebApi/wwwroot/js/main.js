@@ -7829,6 +7829,9 @@
                 current.push(value);
                 manageSeriesState.record.user_aliases = current;
                 renderManageSeriesUserAliases(manageSeriesState.record);
+                // Surface the new alias as a selectable "Series Name" option so
+                // it can immediately be picked as the sticky series name.
+                populateManageSeriesNameOptions(manageSeriesState.record);
             }
             input.value = '';
         }
@@ -7838,6 +7841,8 @@
             const current = manageSeriesState.record.user_aliases || [];
             manageSeriesState.record.user_aliases = current.filter(a => a.toLowerCase() !== alias.toLowerCase());
             renderManageSeriesUserAliases(manageSeriesState.record);
+            // Keep the "Series Name" dropdown in sync with the alias list.
+            populateManageSeriesNameOptions(manageSeriesState.record);
         }
 
         async function saveManageSeriesNames() {
@@ -7890,6 +7895,10 @@
                 manageSeriesState.record = record;
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
+                renderManageSeriesImage(record);
+                // Keep the "Series Name" options in sync with the refreshed
+                // metadata, mirroring the manual-match path.
+                populateManageSeriesNameOptions(record);
                 const successStatuses = new Set(['success', 'manual_match']);
                 const isSuccess = successStatuses.has(record.lookup_status);
                 showMessage(isSuccess ? 'Metadata refreshed' : `Lookup status: ${record.lookup_status || 'unknown'}`, isSuccess ? 'success' : 'info');
@@ -8093,6 +8102,11 @@
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
                 renderManageSeriesImage(record);
+                // Refresh the "Series Name" options so the newly-matched
+                // canonical title / localized titles / provider aliases are
+                // immediately selectable — matching the dialog-open behavior so
+                // a manually-picked match behaves identically to an automatic one.
+                populateManageSeriesNameOptions(record);
                 showMessage('Match applied', 'success');
                 if (typeof loadSeriesLibrary === 'function') {
                     loadSeriesLibrary(1, true);
@@ -8130,6 +8144,9 @@
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
                 renderManageSeriesImage(record);
+                // Cleared external metadata drops provider canonical/aliases, so
+                // refresh the "Series Name" options to drop stale choices.
+                populateManageSeriesNameOptions(record);
                 showMessage('External metadata cleared', 'success');
                 if (typeof loadSeriesLibrary === 'function') {
                     loadSeriesLibrary(1, true);

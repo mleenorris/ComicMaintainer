@@ -1727,6 +1727,120 @@ public class FilesControllerTests
     }
 
     [Fact]
+    public async Task CombineFolders_DeletesSourceFolderWithLeftoverNonComicFiles()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");
+        var olderDir = Path.Combine(tempDir, "older");
+        var newerDir = Path.Combine(tempDir, "newer");
+        System.IO.Directory.CreateDirectory(olderDir);
+        System.IO.Directory.CreateDirectory(newerDir);
+        try
+        {
+            var olderPath = Path.Combine(olderDir, "Batman-001.cbz");
+            var newerPath = Path.Combine(newerDir, "Batman-002.cbz");
+            System.IO.File.WriteAllText(olderPath, "x");
+            System.IO.File.WriteAllText(newerPath, "x");
+            // Leftover non-comic files that previously prevented the source
+            // directory from being removed because it was not empty.
+            System.IO.File.WriteAllText(Path.Combine(olderDir, "cover.jpg"), "img");
+            System.IO.File.WriteAllText(Path.Combine(olderDir, "ComicInfo.xml"), "<xml/>");
+
+            var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+
+            await using (var dbContext = new ComicMaintainerDbContext(options))
+            {
+                dbContext.ComicFiles.AddRange(
+                    new ComicFileEntity
+                    {
+                        FilePath = olderPath,
+                        FileName = "Batman-001.cbz",
+                        Directory = olderDir,
+                        CreatedAt = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc)
+                    },
+                    new ComicFileEntity
+                    {
+                        FilePath = newerPath,
+                        FileName = "Batman-002.cbz",
+                        Directory = newerDir,
+                        CreatedAt = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc)
+                    });
+                await dbContext.SaveChangesAsync();
+            }
+
+            var files = new List<ComicFile>
+            {
+                new()
+                {
+                    FilePath = olderPath,
+                    FileName = "Batman-001.cbz",
+                    Directory = olderDir,
+                    LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                    Metadata = new ComicMetadata { Series = "Batman" }
+                },
+                new()
+                {
+                    FilePath = newerPath,
+                    FileName = "Batman-002.cbz",
+                    Directory = newerDir,
+                    LastModified = new DateTime(2026, 4, 5, 0, 0, 0, DateTimeKind.Utc),
+                    Metadata = new ComicMetadata { Series = "Batman" }
+                }
+            };
+
+            _mockFileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(files);
+
+            var settings = new AppSettings { WatchedDirectory = tempDir };
+            _mockSettings.Setup(s => s.CurrentValue).Returns(settings);
+
+            var mockMetadataCache = new Mock<ISeriesMetadataCacheService>();
+            mockMetadataCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+            mockMetadataCache.Setup(c => c.NormalizeKey(It.IsAny<string>()))
+                .Returns<string>(s => (s ?? string.Empty).ToLowerInvariant());
+            mockMetadataCache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+            mockMetadataCache.Setup(c => c.SetUserAliasesAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<IEnumerable<string>>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SeriesMetadataCacheRecord());
+
+            var controller = new FilesController(
+                _mockFileStore.Object,
+                _mockProcessor.Object,
+                _mockHistoryService.Object,
+                _mockSeriesLibrary.Object,
+                _mockLogger.Object,
+                _mockSettings.Object,
+                new TestDbContextFactory(options),
+                eventBroadcaster: null,
+                metadataCache: mockMetadataCache.Object);
+
+            var request = new FilesController.CombineFoldersRequest
+            {
+                DestinationDirectory = newerDir,
+                SourceDirectories = new List<string> { olderDir }
+            };
+
+            var result = await controller.CombineFolders(request);
+
+            Assert.IsType<AcceptedResult>(result.Result);
+
+            // The comic was moved and the source folder removed even though it
+            // still contained leftover non-comic files.
+            Assert.True(System.IO.File.Exists(Path.Combine(newerDir, "Batman-001.cbz")));
+            Assert.False(System.IO.File.Exists(olderPath));
+            Assert.False(System.IO.Directory.Exists(olderDir));
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task CombineFolders_MovesSourceFilesIntoDestination()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"cm-test-{Guid.NewGuid()}");

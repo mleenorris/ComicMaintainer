@@ -26,6 +26,16 @@ public interface IFileStoreService
     Task MarkFileBackfilledAsync(string filePath, int version, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Flag the given tracked files as needing a metadata backfill by bumping
+    /// each file's <c>MetadataVersion</c> so it becomes greater than its
+    /// <c>WrittenMetadataVersion</c>. The scheduled metadata-backfill job then
+    /// picks them up and rewrites each archive's ComicInfo.xml from the
+    /// DB-authoritative metadata (including the resolved <c>&lt;Series&gt;</c>).
+    /// Returns the number of files that were flagged. Duplicates are skipped.
+    /// </summary>
+    Task<int> MarkFilesNeedingBackfillAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Add a file to the store
     /// </summary>
     Task AddFileAsync(string filePath, CancellationToken cancellationToken = default);

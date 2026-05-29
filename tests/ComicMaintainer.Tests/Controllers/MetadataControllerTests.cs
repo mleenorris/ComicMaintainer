@@ -320,7 +320,7 @@ public class MetadataControllerTests
     }
 
     [Fact]
-    public async Task ApplyMatch_QueuesNormalizeAndRenameJobForMatchingFiles()
+    public async Task ApplyMatch_QueuesNormalizeJobForMatchingFiles()
     {
         var record = new SeriesMetadataCacheRecord
         {
@@ -353,10 +353,11 @@ public class MetadataControllerTests
                  .ReturnsAsync(allFiles);
 
         List<string>? queuedPaths = null;
-        processor.Setup(p => p.NormalizeAndRenameFilesAsync(
+        processor.Setup(p => p.NormalizeFilesAsync(
                     It.IsAny<IEnumerable<string>>(),
+                    true,
                     It.IsAny<CancellationToken>()))
-                 .Callback<IEnumerable<string>, CancellationToken>((paths, _) => queuedPaths = paths.ToList())
+                 .Callback<IEnumerable<string>, bool, CancellationToken>((paths, _, _) => queuedPaths = paths.ToList())
                  .ReturnsAsync(Guid.NewGuid());
 
         var controller = new MetadataController(

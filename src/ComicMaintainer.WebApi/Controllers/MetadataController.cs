@@ -494,22 +494,26 @@ public class MetadataController : ControllerBase
                 },
                 cancellationToken);
 
-            // After adopting the match, queue a background normalize-and-rename
-            // job so every file currently belonging to this series has its
-            // ComicInfo.xml series field and filename updated to reflect the
-            // newly-matched canonical title. This is best-effort: failures are
-            // logged and swallowed so the apply-match response still succeeds.
-            // The job's progress is reported via the standard SSE job-update
-            // broadcast, so we don't need to surface the id in the response
-            // payload (which would break existing API consumers that expect a
+            // After adopting the match, queue a background normalize job so
+            // every file currently belonging to this series has its
+            // ComicInfo.xml series field updated to reflect the newly-matched
+            // canonical title. This mirrors the automatic match flow
+            // (SeriesMetadataRefreshJobService), which only re-normalizes the
+            // affected files and never renames them — a manual match must not
+            // perform any additional operations (such as renaming) compared to
+            // an automatic match. This is best-effort: failures are logged and
+            // swallowed so the apply-match response still succeeds. The job's
+            // progress is reported via the standard SSE job-update broadcast,
+            // so we don't need to surface the id in the response payload (which
+            // would break existing API consumers that expect a
             // SeriesMetadataCacheRecord).
             try
             {
-                await QueueSeriesNormalizeRenameJobAsync(seriesTitle, record, cancellationToken);
+                await QueueSeriesNormalizeJobAsync(seriesTitle, record, cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, LoggingHelper.WithWebsitePrefix("Failed to queue normalize-and-rename job after applying match for {SeriesTitle}"),
+                _logger.LogWarning(ex, LoggingHelper.WithWebsitePrefix("Failed to queue normalize job after applying match for {SeriesTitle}"),
                     LoggingHelper.SanitizeForLog(seriesTitle));
             }
 
@@ -753,11 +757,13 @@ public class MetadataController : ControllerBase
     /// Locate every file currently belonging to <paramref name="seriesTitle"/>
     /// (matched by folder-derived series name, current ComicInfo.xml series,
     /// or any cached alias of the new canonical title) and queue a background
-    /// normalize-and-rename job so each file's metadata is rewritten to the
-    /// freshly-matched canonical title. Returns null when there are no files
-    /// to update or the processor/file-store dependencies are missing.
+    /// normalize job so each file's metadata is rewritten to the freshly-matched
+    /// canonical title. Mirrors the automatic match flow, which only
+    /// re-normalizes (never renames) the affected files. Returns null when there
+    /// are no files to update or the processor/file-store dependencies are
+    /// missing.
     /// </summary>
-    private async Task<Guid?> QueueSeriesNormalizeRenameJobAsync(
+    private async Task<Guid?> QueueSeriesNormalizeJobAsync(
         string seriesTitle,
         SeriesMetadataCacheRecord record,
         CancellationToken cancellationToken)
@@ -844,9 +850,9 @@ public class MetadataController : ControllerBase
             return null;
         }
 
-        var jobId = await _processor.NormalizeAndRenameFilesAsync(matchingPaths, cancellationToken);
+        var jobId = await _processor.NormalizeFilesAsync(matchingPaths, forceReprocess: true, cancellationToken);
         _logger.LogInformation(
-            LoggingHelper.WithWebsitePrefix("Queued normalize-and-rename job {JobId} for {FileCount} file(s) after applying match for {SeriesTitle}"),
+            LoggingHelper.WithWebsitePrefix("Queued normalize job {JobId} for {FileCount} file(s) after applying match for {SeriesTitle}"),
             jobId,
             matchingPaths.Count,
             LoggingHelper.SanitizeForLog(seriesTitle));

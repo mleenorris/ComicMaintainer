@@ -1380,7 +1380,8 @@
                         'marked': '✅ Marked',
                         'duplicates': '🔁 Duplicates',
                         'matched': '🔗 Matched',
-                        'unmatched': '❓ Not Matched'
+                        'unmatched': '❓ Not Matched',
+                        'missing': '🧩 Missing Issues'
                     };
                     document.getElementById('headerFilterLabel').textContent = filterLabels[filterMode];
                     
@@ -1909,7 +1910,8 @@
                 'read': '👁️ Read',
                 'unread': '📚 Unread',
                 'matched': '🔗 Matched',
-                'unmatched': '❓ Not Matched'
+                'unmatched': '❓ Not Matched',
+                'missing': '🧩 Missing Issues'
             };
             
             document.getElementById('headerFilterLabel').textContent = filterLabels[mode];

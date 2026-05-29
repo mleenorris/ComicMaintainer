@@ -1264,7 +1264,7 @@ public class SeriesLibraryService : ISeriesLibraryService
     /// file store) and an optional series-level provider-match filter
     /// (<c>matched</c> or <c>unmatched</c>) applied after grouping.
     /// </summary>
-    private static (string? FileFilter, string? ProviderFilter) SplitFilter(string? filter)
+    private static (string? FileFilter, string? SeriesFilter) SplitFilter(string? filter)
     {
         if (string.IsNullOrWhiteSpace(filter))
         {

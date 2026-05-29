@@ -24,23 +24,25 @@ namespace ComicMaintainer.Core.Migrations
             // "no such column: PinnedLocalizedTitle".
             //
             // Doing everything as ordinary SQL keeps all the work inside the
-            // migration's transaction (atomic, fully rolled back on failure) and,
-            // crucially, makes it self-healing: the data copy uses `SELECT *`
-            // which matches columns positionally, so it works whether the source
-            // title column is still named "PinnedLocalizedTitle" (clean state) or
-            // has already been renamed to "SeriesName" (partially-applied state).
+            // migration's transaction (atomic, fully rolled back on failure).
             // SeriesMetadataCache has no foreign keys, so no PRAGMA toggling is
             // required for the rebuild.
+            //
+            // The data copy enumerates the source columns explicitly (instead of
+            // `SELECT *`) so that the rebuild is robust to a live database whose
+            // SeriesMetadataCache table carries extra/legacy columns that are not
+            // part of the current EF model. A positional `SELECT *` would supply
+            // one value per source column, failing with "table ... has N columns
+            // but M values were supplied" whenever the live table is wider than
+            // the rebuilt schema. Enumerating the columns we care about copies
+            // exactly those values and silently discards any unknown extras.
 
             // Remove any leftover scratch tables from a previously interrupted
             // attempt so the rebuild can run cleanly.
             migrationBuilder.Sql("DROP TABLE IF EXISTS \"ef_temp_SeriesMetadataCache\";");
             migrationBuilder.Sql("DROP TABLE IF EXISTS \"ef_unify_SeriesMetadataCache\";");
 
-            // Create the rebuilt table with the same column order as the existing
-            // table, but with the title column named "SeriesName". Keeping the
-            // arity and order identical lets the positional `SELECT *` copy below
-            // carry the title value across regardless of its current column name.
+            // Create the rebuilt table with the title column named "SeriesName".
             // "IsUserCanonical" is retained here so the backfill can read it, then
             // dropped natively at the end.
             migrationBuilder.Sql(
@@ -65,11 +67,26 @@ namespace ComicMaintainer.Core.Migrations
                 "\"UserAliases\" TEXT NOT NULL, " +
                 "\"IsUserCanonical\" INTEGER NOT NULL DEFAULT 0);");
 
-            // Positional copy: works whether column 15 is "PinnedLocalizedTitle"
-            // or already "SeriesName".
+            // Copy the known columns explicitly. The source "PinnedLocalizedTitle"
+            // column maps to the new "SeriesName" column. Listing the columns (as
+            // opposed to `SELECT *`) keeps the copy working when the live table
+            // has additional legacy columns beyond the current model.
             migrationBuilder.Sql(
-                "INSERT INTO \"ef_unify_SeriesMetadataCache\" " +
-                "SELECT * FROM \"SeriesMetadataCache\";");
+                "INSERT INTO \"ef_unify_SeriesMetadataCache\" (" +
+                "\"NormalizedKey\", \"Aliases\", \"CanonicalTitle\", \"CreatedAt\", " +
+                "\"ImageContentType\", \"ImageDownloadedUtc\", \"ImageStatus\", " +
+                "\"LastLookupUtc\", \"LocalImageFile\", \"LocalizedTitlesJson\", " +
+                "\"LookupStatus\", \"MetadataVersion\", \"PreferredLanguage\", " +
+                "\"RemoteImageUrl\", \"SeriesName\", \"Source\", \"UpdatedAt\", " +
+                "\"UserAliases\", \"IsUserCanonical\") " +
+                "SELECT " +
+                "\"NormalizedKey\", \"Aliases\", \"CanonicalTitle\", \"CreatedAt\", " +
+                "\"ImageContentType\", \"ImageDownloadedUtc\", \"ImageStatus\", " +
+                "\"LastLookupUtc\", \"LocalImageFile\", \"LocalizedTitlesJson\", " +
+                "\"LookupStatus\", \"MetadataVersion\", \"PreferredLanguage\", " +
+                "\"RemoteImageUrl\", \"PinnedLocalizedTitle\", \"Source\", \"UpdatedAt\", " +
+                "\"UserAliases\", \"IsUserCanonical\" " +
+                "FROM \"SeriesMetadataCache\";");
 
             // Backfill: a user-canonical override used to win over the pin and
             // was displayed/written verbatim as the canonical title, so carry

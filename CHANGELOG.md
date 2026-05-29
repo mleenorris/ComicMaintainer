@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Per-file metadata is no longer zero padded. The ComicInfo `<Number>` (issue)
+  field now stores the bare issue number (e.g. `12`, not `0012`) and the
+  `<Title>` field is set to `Chapter <issue>` (e.g. `Chapter 12`). Only the
+  generated filename continues to apply the configured zero padding.
 - Allow pinning a series name for series stuck in a "bad state" with no cached
   metadata record (e.g. series grouped purely from files on disk). Setting a
   non-empty name now creates a minimal manual cache record instead of failing

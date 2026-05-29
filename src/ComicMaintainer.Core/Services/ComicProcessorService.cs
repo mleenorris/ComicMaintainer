@@ -1552,7 +1552,10 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     {
         // Simple pattern matching for issue numbers
         var match = Regex.Match(filename, @"(?i)(?:ch|chapter|issue|#)?\s*(\d+(?:\.\d+)?)", RegexOptions.IgnoreCase);
-        return match.Success ? match.Groups[1].Value : null;
+        // Strip leading zero padding so the per-file metadata issue field holds
+        // the bare issue number (e.g. "0012" -> "12"); only the generated
+        // filename is zero padded.
+        return match.Success ? ComicFileProcessor.StripLeadingZeros(match.Groups[1].Value) : null;
     }
 
     private static bool IsComicArchive(string filePath)
@@ -1865,6 +1868,19 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             }
         }
 
+        // The issue field must not be zero padded. If the stored <Number> is
+        // padded (e.g. "0012"), the file is not normalized and should be
+        // re-processed so both <Number> and <Title> become unpadded.
+        if (!string.IsNullOrEmpty(expectedIssue))
+        {
+            var strippedIssue = ComicFileProcessor.StripLeadingZeros(expectedIssue);
+            if (!string.Equals(strippedIssue, expectedIssue, StringComparison.Ordinal))
+            {
+                return false;
+            }
+            expectedIssue = strippedIssue;
+        }
+
         var expectedTitle = CreateNormalizedTitle(expectedIssue);
         _logger.LogInformation(
             "Checking title normalization for file: {FilePath}, Current metadata {title} Expected {expectedTitle}",
@@ -1965,6 +1981,22 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             {
                 _logger.LogDebug("Setting issue number from filename: {Issue}", LoggingHelper.SanitizeForLog(parsedIssue));
                 normalizedMetadata.Issue = parsedIssue;
+            }
+        }
+
+        // The per-file metadata issue field is not zero padded (only the
+        // generated filename is). Strip any leading zero padding so the
+        // <Number> tag holds the bare issue number, e.g. "0012" -> "12",
+        // "0012.5" -> "12.5".
+        if (!string.IsNullOrEmpty(normalizedMetadata.Issue))
+        {
+            var strippedIssue = ComicFileProcessor.StripLeadingZeros(normalizedMetadata.Issue);
+            if (!string.Equals(strippedIssue, normalizedMetadata.Issue, StringComparison.Ordinal))
+            {
+                _logger.LogDebug("Stripping issue padding: {Before} -> {After}",
+                    LoggingHelper.SanitizeForLog(normalizedMetadata.Issue),
+                    LoggingHelper.SanitizeForLog(strippedIssue));
+                normalizedMetadata.Issue = strippedIssue;
             }
         }
 

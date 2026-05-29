@@ -199,6 +199,8 @@ public class MetadataControllerTests
     public async Task RemoveAlias_DelegatesToCacheService()
     {
         var record = new SeriesMetadataCacheRecord { NormalizedKey = "batman", CanonicalTitle = "Batman" };
+        _cache.Setup(c => c.GetByTitleAsync("Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(record);
         _cache.Setup(c => c.RemoveUserAliasAsync("batman", "Dark Knight", It.IsAny<CancellationToken>()))
             .ReturnsAsync(record);
 
@@ -466,6 +468,8 @@ public class MetadataControllerTests
             CanonicalTitle = "batman",
             LookupStatus = "cleared"
         };
+        _cache.Setup(c => c.GetByTitleAsync("Batman", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(record);
         _cache.Setup(c => c.ClearExternalMetadataAsync("batman", It.IsAny<CancellationToken>()))
             .ReturnsAsync(record);
 

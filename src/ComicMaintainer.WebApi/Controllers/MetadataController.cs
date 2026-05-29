@@ -393,7 +393,7 @@ public class MetadataController : ControllerBase
         }
 
         var key = _cache.NormalizeKey(seriesTitle);
-        var record = await _cache.GetAsync(key, cancellationToken);
+        var record = await _cache.GetByTitleAsync(seriesTitle, cancellationToken);
         if (record is null)
         {
             return Ok(new SeriesMetadataCacheRecord
@@ -444,8 +444,15 @@ public class MetadataController : ControllerBase
             return BadRequest("Series title and alias are required");
         }
 
-        var key = _cache.NormalizeKey(seriesTitle);
-        var record = await _cache.RemoveUserAliasAsync(key, alias, cancellationToken);
+        // Resolve the owning record by title first: after a manual match the
+        // record stays keyed by the original folder title, so the matched
+        // display title the UI sends won't match the stored key directly.
+        var resolved = await _cache.GetByTitleAsync(seriesTitle, cancellationToken);
+        if (resolved is null)
+        {
+            return NotFound();
+        }
+        var record = await _cache.RemoveUserAliasAsync(resolved.NormalizedKey, alias, cancellationToken);
         return record is null ? NotFound() : Ok(record);
     }
 
@@ -544,8 +551,15 @@ public class MetadataController : ControllerBase
 
         try
         {
-            var key = _cache.NormalizeKey(seriesTitle);
-            var record = await _cache.ClearExternalMetadataAsync(key, cancellationToken);
+            // Resolve the owning record by title first so a series referenced
+            // by its matched canonical title (which differs from the stored
+            // key after a manual match) still targets the right record.
+            var resolved = await _cache.GetByTitleAsync(seriesTitle, cancellationToken);
+            if (resolved is null)
+            {
+                return NotFound();
+            }
+            var record = await _cache.ClearExternalMetadataAsync(resolved.NormalizedKey, cancellationToken);
             return record is null ? NotFound() : Ok(record);
         }
         catch (Exception ex)

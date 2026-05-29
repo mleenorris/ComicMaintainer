@@ -77,6 +77,65 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         return entity is null ? null : ToRecord(entity);
     }
 
+    public async Task<SeriesMetadataCacheRecord?> GetByTitleAsync(string seriesTitle, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return null;
+        }
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
+        return entity is null ? null : ToRecord(entity);
+    }
+
+    /// <summary>
+    /// Resolves the cache entity for a free-form series title. Tries an exact
+    /// normalized-key lookup first, then falls back to scanning every record's
+    /// known titles (canonical title, user-selected name, provider/user
+    /// aliases, and localized titles). The fallback is what keeps a series
+    /// editable after a manual match: applying a match leaves the record keyed
+    /// by the original folder title while the UI now refers to the series by
+    /// its matched canonical title, so an exact-key lookup on that new title
+    /// would otherwise miss the record.
+    /// </summary>
+    private async Task<SeriesMetadataCacheEntity?> ResolveEntityByTitleAsync(
+        ComicMaintainerDbContext db,
+        string seriesTitle,
+        CancellationToken cancellationToken)
+    {
+        var key = NormalizeKey(seriesTitle);
+        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        if (entity is not null)
+        {
+            return entity;
+        }
+
+        // Exact-key miss: the record may be keyed by an older title (typically
+        // the original folder name) while the caller refers to the series by
+        // its matched canonical title or one of its aliases. Resolve by
+        // scanning known titles. Exact key is always preferred above.
+        var candidates = await db.SeriesMetadataCache.ToListAsync(cancellationToken);
+        return candidates.FirstOrDefault(e => EntityMatchesTitleKey(e, key));
+    }
+
+    private bool EntityMatchesTitleKey(SeriesMetadataCacheEntity entity, string requestedKey)
+    {
+        if (KeyEquals(entity.CanonicalTitle, requestedKey)) return true;
+        if (KeyEquals(entity.SeriesName, requestedKey)) return true;
+        if (entity.Aliases is not null && entity.Aliases.Any(a => KeyEquals(a, requestedKey))) return true;
+        if (entity.UserAliases is not null && entity.UserAliases.Any(a => KeyEquals(a, requestedKey))) return true;
+        foreach (var localized in DeserializeLocalizedTitles(entity.LocalizedTitlesJson))
+        {
+            if (localized is not null && KeyEquals(localized.Title, requestedKey)) return true;
+        }
+        return false;
+    }
+
+    private bool KeyEquals(string? value, string requestedKey)
+        => !string.IsNullOrWhiteSpace(value)
+           && string.Equals(NormalizeKey(value), requestedKey, StringComparison.Ordinal);
+
     public async Task<SeriesMetadataCacheRecord> SetUserAliasesAsync(
         string seriesTitle,
         IEnumerable<string> userAliases,
@@ -95,7 +154,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             .ToList();
 
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
         var now = DateTime.UtcNow;
         if (entity is null)
         {
@@ -171,7 +230,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         // canonical title and preserve the "manual_match" status so the
         // series stays marked as manually matched.
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
         var wasManualMatch = string.Equals(entity?.LookupStatus, "manual_match", StringComparison.OrdinalIgnoreCase);
         var lookupQuery = wasManualMatch && !string.IsNullOrWhiteSpace(entity!.CanonicalTitle)
             ? entity.CanonicalTitle
@@ -576,7 +635,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         var now = DateTime.UtcNow;
 
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
         if (entity is null)
         {
             entity = new SeriesMetadataCacheEntity
@@ -801,7 +860,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
 
         var key = NormalizeKey(seriesTitle);
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
         var now = DateTime.UtcNow;
         if (entity is null)
         {
@@ -840,9 +899,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             throw new ArgumentException("Series title is required", nameof(seriesTitle));
         }
 
-        var key = NormalizeKey(seriesTitle);
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
         if (entity is null)
         {
             // A user-selected name is only meaningful for a series the cache

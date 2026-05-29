@@ -421,6 +421,78 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
+    public async Task SetSeriesNameAsync_ResolvesByMatchedCanonicalTitle_AfterManualMatch()
+    {
+        // Reproduces the bug: a series matched to a different canonical title
+        // stays keyed by its original folder title, but the UI now refers to
+        // the series by its matched canonical title. Setting the name keyed by
+        // the matched title must update the original record (not miss it).
+        await _service.SetUserAliasesAsync("Naono Folder", Array.Empty<string>());
+        await _service.ApplyExternalMatchAsync(
+            "Naono Folder",
+            new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Berlin",
+                Aliases = new List<string> { "ベルリン" },
+                Source = "AniList"
+            });
+
+        // The original record key is derived from "Naono Folder", but the
+        // caller now uses the matched canonical title "Berlin".
+        var record = await _service.SetSeriesNameAsync("Berlin", "ベルリン");
+
+        Assert.NotNull(record);
+        Assert.Equal("naono-folder", record!.NormalizedKey);
+        Assert.Equal("ベルリン", record.SeriesName);
+        Assert.Equal("ベルリン", record.ResolvedSeriesName);
+
+        // A subsequent change to a different name must also take effect.
+        var changed = await _service.SetSeriesNameAsync("Berlin", "Berlin");
+        Assert.NotNull(changed);
+        Assert.Equal("naono-folder", changed!.NormalizedKey);
+        Assert.Equal("Berlin", changed.SeriesName);
+        Assert.Equal("Berlin", changed.ResolvedSeriesName);
+    }
+
+    [Fact]
+    public async Task GetByTitleAsync_ResolvesByMatchedCanonicalTitle_AfterManualMatch()
+    {
+        await _service.SetUserAliasesAsync("Naono Folder", new[] { "MyAlias" });
+        await _service.ApplyExternalMatchAsync(
+            "Naono Folder",
+            new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Berlin",
+                Aliases = new List<string> { "ベルリン" },
+                Source = "AniList"
+            });
+
+        // Looked up by the matched canonical title (the UI's display title).
+        var byCanonical = await _service.GetByTitleAsync("Berlin");
+        Assert.NotNull(byCanonical);
+        Assert.Equal("naono-folder", byCanonical!.NormalizedKey);
+        Assert.Contains("MyAlias", byCanonical.UserAliases);
+
+        // Looked up by a provider alias.
+        var byAlias = await _service.GetByTitleAsync("ベルリン");
+        Assert.NotNull(byAlias);
+        Assert.Equal("naono-folder", byAlias!.NormalizedKey);
+
+        // Exact-key lookup still works for the original title.
+        var byOriginal = await _service.GetByTitleAsync("Naono Folder");
+        Assert.NotNull(byOriginal);
+        Assert.Equal("naono-folder", byOriginal!.NormalizedKey);
+    }
+
+    [Fact]
+    public async Task GetByTitleAsync_ReturnsNull_WhenNoRecordMatches()
+    {
+        await _service.SetUserAliasesAsync("Batman", Array.Empty<string>());
+
+        Assert.Null(await _service.GetByTitleAsync("Totally Unrelated Series"));
+    }
+
+    [Fact]
     public async Task ApplyExternalMatchAsync_RejectsEmptyCandidate()
     {
         await Assert.ThrowsAsync<ArgumentException>(() =>

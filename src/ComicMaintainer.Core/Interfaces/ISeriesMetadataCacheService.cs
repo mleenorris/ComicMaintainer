@@ -17,6 +17,17 @@ public interface ISeriesMetadataCacheService
     Task<SeriesMetadataCacheRecord?> GetAsync(string normalizedKey, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Loads a single cache record by any of its known titles (canonical
+    /// title, user-selected name, provider/user aliases, or localized
+    /// titles). Falls back to a scan when the exact normalized-key lookup
+    /// misses, which happens after a manual match renames the series: the
+    /// record stays keyed by the original folder title while the UI now
+    /// refers to it by the matched canonical title. Returns null when no
+    /// record matches.
+    /// </summary>
+    Task<SeriesMetadataCacheRecord?> GetByTitleAsync(string seriesTitle, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Replaces the user-managed alias list for a series key. Returns the
     /// updated record. Aliases form the candidate pool the user can pick the
     /// displayed series name from (see <see cref="SetSeriesNameAsync"/>).

@@ -177,6 +177,29 @@ public class SeriesMetadataRefreshJobService : ISeriesMetadataRefreshJobService
             await BroadcastAsync(job);
         }
 
+        // A refresh run looks up the canonical title AND every alias of each
+        // series, so it can leave behind redundant "stale sibling" cache rows
+        // (e.g. a not_found result keyed by an alias already owned by the
+        // authoritative record). Prune them so they don't clutter the cache or
+        // shadow the authoritative record's resolved name. Best-effort: a
+        // failure here must not affect the job outcome or the retag step below.
+        try
+        {
+            var removed = await _cache.CleanupStaleSiblingRecordsAsync(cancellationToken);
+            if (removed > 0)
+            {
+                _logger.LogInformation(
+                    "Removed {Count} stale series-metadata cache record(s) after refresh job {JobId}",
+                    removed, job.JobId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to clean up stale series-metadata cache records after refresh job {JobId}",
+                job.JobId);
+        }
+
         // After the cache has been refreshed for every requested title, push
         // the changes down to the individual comic files so each ComicInfo.xml
         // is rewritten to reflect the freshly resolved canonical series name

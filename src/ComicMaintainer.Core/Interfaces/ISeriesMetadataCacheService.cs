@@ -169,4 +169,14 @@ public interface ISeriesMetadataCacheService
         string seriesTitle,
         string? seriesName,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Removes redundant "stale sibling" cache records: rows that carry no
+    /// user-specific data, have a non-positive lookup status (<c>null</c> /
+    /// <c>not_found</c> / <c>error</c>), and are subsumed by a strictly more
+    /// authoritative record that already owns their key as one of its titles.
+    /// These accumulate when a refresh issues a separate lookup per
+    /// canonical/alias title. Returns the number of records removed.
+    /// </summary>
+    Task<int> CleanupStaleSiblingRecordsAsync(CancellationToken cancellationToken = default);
 }

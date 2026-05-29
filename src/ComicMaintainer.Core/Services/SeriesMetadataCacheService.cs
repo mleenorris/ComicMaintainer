@@ -1029,4 +1029,90 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
 
         return ToRecord(entity);
     }
+
+    /// <summary>
+    /// Removes redundant "stale sibling" cache records. A folder refresh issues
+    /// a separate external lookup for a series' canonical title AND each alias,
+    /// so a single logical series can accumulate extra rows — typically a
+    /// <c>not_found</c> / <c>error</c> sibling keyed by an alias that is already
+    /// owned (as a canonical title, alias, or localized title) by a more
+    /// authoritative record. These siblings carry no unique data, yet they
+    /// clutter the cache and can shadow the authoritative record's resolved
+    /// name. This deletes any such sibling that (a) carries no user-specific
+    /// data (no pinned name, user aliases, preferred language, or user-uploaded
+    /// image), (b) has a non-positive lookup status (<c>null</c> /
+    /// <c>not_found</c> / <c>error</c>), and (c) is subsumed by another, strictly
+    /// more authoritative record. Returns the number of records removed.
+    /// </summary>
+    public async Task<int> CleanupStaleSiblingRecordsAsync(CancellationToken cancellationToken = default)
+    {
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entities = await db.SeriesMetadataCache.ToListAsync(cancellationToken);
+        if (entities.Count < 2)
+        {
+            return 0;
+        }
+
+        var toRemove = new List<SeriesMetadataCacheEntity>();
+        foreach (var candidate in entities)
+        {
+            if (!IsDeletableStaleSibling(candidate))
+            {
+                continue;
+            }
+
+            // Keep the sibling only if some other, strictly more authoritative
+            // record already claims its key as one of its own titles. That
+            // record owns the series, so the sibling is redundant and removing
+            // it cannot orphan a folder grouping.
+            var subsumed = entities.Any(other =>
+                !ReferenceEquals(other, candidate)
+                && !string.Equals(other.NormalizedKey, candidate.NormalizedKey, StringComparison.Ordinal)
+                && RankLookupStatus(other.LookupStatus) > RankLookupStatus(candidate.LookupStatus)
+                && EntityMatchesTitleKey(other, candidate.NormalizedKey));
+
+            if (subsumed)
+            {
+                toRemove.Add(candidate);
+            }
+        }
+
+        if (toRemove.Count == 0)
+        {
+            return 0;
+        }
+
+        db.SeriesMetadataCache.RemoveRange(toRemove);
+        await db.SaveChangesAsync(cancellationToken);
+
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            _logger.LogInformation(
+                "Cleaned up {Count} stale sibling series-metadata cache record(s): {Keys}",
+                toRemove.Count,
+                LoggingHelper.SanitizeForLog(string.Join(", ", toRemove.Select(e => e.NormalizedKey))));
+        }
+
+        return toRemove.Count;
+    }
+
+    /// <summary>
+    /// True when a record carries no user-specific data and has a non-positive
+    /// lookup status, making it a candidate for stale-sibling cleanup. User
+    /// data (a pinned name, user aliases, a preferred language, or a
+    /// user-uploaded image) and positive statuses (<c>success</c> /
+    /// <c>manual</c> / <c>manual_match</c>) protect a record from deletion. A
+    /// <c>cleared</c> status is also protected: it encodes a deliberate user
+    /// decision to suppress external metadata.
+    /// </summary>
+    private static bool IsDeletableStaleSibling(SeriesMetadataCacheEntity entity)
+    {
+        if (!string.IsNullOrWhiteSpace(entity.SeriesName)) return false;
+        if (entity.UserAliases is { Count: > 0 }) return false;
+        if (!string.IsNullOrWhiteSpace(entity.PreferredLanguage)) return false;
+        if (string.Equals(entity.ImageStatus, "user", StringComparison.OrdinalIgnoreCase)) return false;
+
+        var status = entity.LookupStatus?.Trim().ToLowerInvariant();
+        return string.IsNullOrEmpty(status) || status == "not_found" || status == "error";
+    }
 }

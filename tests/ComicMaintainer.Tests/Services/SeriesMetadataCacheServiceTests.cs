@@ -513,6 +513,120 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
+    public async Task CleanupStaleSiblingRecordsAsync_RemovesSubsumedNotFoundSibling()
+    {
+        // The authoritative record owns the alias "Beruferu" (a not_found
+        // sibling got keyed by that alias during a refresh sweep). The sibling
+        // carries no unique data and is subsumed, so it should be removed.
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "berlin-saga",
+                CanonicalTitle = "Berlin Saga",
+                Aliases = new List<string> { "Beruferu" },
+                LookupStatus = "success",
+                Source = "AniList",
+                LastLookupUtc = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "beruferu",
+                CanonicalTitle = "Beruferu",
+                LookupStatus = "not_found",
+                LastLookupUtc = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var removed = await _service.CleanupStaleSiblingRecordsAsync();
+
+        Assert.Equal(1, removed);
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            Assert.NotNull(await db.SeriesMetadataCache.FindAsync("berlin-saga"));
+            Assert.Null(await db.SeriesMetadataCache.FindAsync("beruferu"));
+        }
+    }
+
+    [Fact]
+    public async Task CleanupStaleSiblingRecordsAsync_PreservesRecordsWithUserData()
+    {
+        // A subsumed sibling that carries user data (pinned name, user alias,
+        // preferred language, or a user image) must never be deleted.
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "berlin-saga",
+                CanonicalTitle = "Berlin Saga",
+                Aliases = new List<string> { "Beruferu" },
+                LookupStatus = "success",
+                LastLookupUtc = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "beruferu",
+                CanonicalTitle = "Beruferu",
+                LookupStatus = "not_found",
+                PreferredLanguage = "ja",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var removed = await _service.CleanupStaleSiblingRecordsAsync();
+
+        Assert.Equal(0, removed);
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            Assert.NotNull(await db.SeriesMetadataCache.FindAsync("beruferu"));
+        }
+    }
+
+    [Fact]
+    public async Task CleanupStaleSiblingRecordsAsync_KeepsUnrelatedAndAuthoritativeRecords()
+    {
+        // Two unrelated series plus a positive-status record sharing no key
+        // with a stronger record: nothing should be removed.
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "naruto",
+                CanonicalTitle = "Naruto",
+                LookupStatus = "success",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "bleach",
+                CanonicalTitle = "Bleach",
+                LookupStatus = "not_found",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var removed = await _service.CleanupStaleSiblingRecordsAsync();
+
+        Assert.Equal(0, removed);
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            Assert.Equal(2, await db.SeriesMetadataCache.CountAsync());
+        }
+    }
+
+    [Fact]
     public async Task GetByTitleAsync_ResolvesByMatchedCanonicalTitle_AfterManualMatch()
     {
         await _service.SetUserAliasesAsync("Naono Folder", new[] { "MyAlias" });

@@ -77,6 +77,70 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         return entity is null ? null : ToRecord(entity);
     }
 
+    public async Task<SeriesMetadataCacheRecord?> ResolveByTitleAsync(string seriesTitle, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            return null;
+        }
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await FindEntityByTitleAsync(db, seriesTitle, cancellationToken);
+        return entity is null ? null : ToRecord(entity);
+    }
+
+    /// <summary>
+    /// Locates the tracked entity that owns <paramref name="seriesTitle"/>.
+    /// Prefers an exact normalized-key match; when that misses, scans every
+    /// record for one whose canonical title, user-selected name, provider/user
+    /// alias, or localized title normalizes to the same key. Returns
+    /// <c>null</c> when nothing matches. Callers that create-on-miss should
+    /// keep using the normalized key for the new record.
+    /// </summary>
+    private async Task<SeriesMetadataCacheEntity?> FindEntityByTitleAsync(
+        ComicMaintainerDbContext db,
+        string seriesTitle,
+        CancellationToken cancellationToken)
+    {
+        var key = NormalizeKey(seriesTitle);
+        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        if (entity is not null)
+        {
+            return entity;
+        }
+
+        // The requested title did not map to a record key directly. A record's
+        // key is fixed at creation, so a later-chosen display name/alias can
+        // normalize to a different key. Scan for a record that owns the title.
+        var all = await db.SeriesMetadataCache.ToListAsync(cancellationToken);
+        return all.FirstOrDefault(e => EnumerateEntityTitles(e)
+            .Any(t => !string.IsNullOrWhiteSpace(t)
+                      && string.Equals(NormalizeKey(t), key, StringComparison.Ordinal)));
+    }
+
+    /// <summary>
+    /// Yields every title the system knows for a record: its canonical title,
+    /// the user-selected name, provider aliases, user aliases, and localized
+    /// titles. Used to resolve a record from any of its known names.
+    /// </summary>
+    private IEnumerable<string?> EnumerateEntityTitles(SeriesMetadataCacheEntity entity)
+    {
+        yield return entity.CanonicalTitle;
+        yield return entity.SeriesName;
+        if (entity.Aliases is not null)
+        {
+            foreach (var alias in entity.Aliases) yield return alias;
+        }
+        if (entity.UserAliases is not null)
+        {
+            foreach (var alias in entity.UserAliases) yield return alias;
+        }
+        foreach (var localized in DeserializeLocalizedTitles(entity.LocalizedTitlesJson))
+        {
+            yield return localized?.Title;
+        }
+    }
+
     public async Task<SeriesMetadataCacheRecord> SetUserAliasesAsync(
         string seriesTitle,
         IEnumerable<string> userAliases,
@@ -840,9 +904,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             throw new ArgumentException("Series title is required", nameof(seriesTitle));
         }
 
-        var key = NormalizeKey(seriesTitle);
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == key, cancellationToken);
+        var entity = await FindEntityByTitleAsync(db, seriesTitle, cancellationToken);
         if (entity is null)
         {
             // A user-selected name is only meaningful for a series the cache

@@ -17,6 +17,19 @@ public interface ISeriesMetadataCacheService
     Task<SeriesMetadataCacheRecord?> GetAsync(string normalizedKey, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Resolves a cache record from any free-form title. Tries an exact
+    /// normalized-key match first, then falls back to scanning every record
+    /// for one that owns the title (canonical title, user-selected name,
+    /// provider/user aliases, or a localized title). This is required because
+    /// a record's <see cref="SeriesMetadataCacheRecord.NormalizedKey"/> is
+    /// fixed at creation time from the original folder/lookup title and never
+    /// changes, so the resolved display title (e.g. a user-selected name or an
+    /// alias) can normalize to a different key than the record it belongs to.
+    /// Returns <c>null</c> when no record matches.
+    /// </summary>
+    Task<SeriesMetadataCacheRecord?> ResolveByTitleAsync(string seriesTitle, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Replaces the user-managed alias list for a series key. Returns the
     /// updated record. Aliases form the candidate pool the user can pick the
     /// displayed series name from (see <see cref="SetSeriesNameAsync"/>).

@@ -393,7 +393,7 @@ public class MetadataController : ControllerBase
         }
 
         var key = _cache.NormalizeKey(seriesTitle);
-        var record = await _cache.GetAsync(key, cancellationToken);
+        var record = await _cache.ResolveByTitleAsync(seriesTitle, cancellationToken);
         if (record is null)
         {
             return Ok(new SeriesMetadataCacheRecord

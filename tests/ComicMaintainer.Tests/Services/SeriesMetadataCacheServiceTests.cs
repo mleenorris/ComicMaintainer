@@ -455,6 +455,64 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
+    public async Task SetSeriesNameAsync_UpdatesAuthoritativeRecord_WhenSiblingsShareTitle()
+    {
+        // Reproduces the user-visible bug: a folder refresh issues a separate
+        // lookup for the canonical title AND each alias, so several cache
+        // records can end up describing the same logical series — typically one
+        // authoritative "success" record and one or more stale "not_found"
+        // siblings. The library renders the series using the most authoritative
+        // record (highest lookup-status rank, newest lookup). When the
+        // title-based resolver picked an arbitrary sibling, SetSeriesNameAsync
+        // pinned the name onto the wrong record, so the page reported success
+        // but the displayed name never changed. The resolver must therefore
+        // update the SAME authoritative record the library displays.
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            // Stale sibling, inserted first so a naive FirstOrDefault would win.
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "berlin-saga-stale",
+                CanonicalTitle = "Berlin Saga",
+                LookupStatus = "not_found",
+                LastLookupUtc = DateTime.UtcNow.AddDays(-2),
+                CreatedAt = DateTime.UtcNow.AddDays(-2),
+                UpdatedAt = DateTime.UtcNow.AddDays(-2)
+            });
+            // Authoritative record the library would display.
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "berlin-saga-tv",
+                CanonicalTitle = "Berlin Saga",
+                LookupStatus = "success",
+                Source = "AniList",
+                LastLookupUtc = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // Neither record is keyed by NormalizeKey("Berlin Saga"), so resolution
+        // falls back to scanning known titles where both records match.
+        var record = await _service.SetSeriesNameAsync("Berlin Saga", "Berlin Saga DX");
+
+        Assert.NotNull(record);
+        Assert.Equal("berlin-saga-tv", record!.NormalizedKey);
+        Assert.Equal("Berlin Saga DX", record.SeriesName);
+
+        // The authoritative record carries the pinned name; the stale sibling
+        // is left untouched so it cannot shadow the display title.
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            var authoritative = await db.SeriesMetadataCache.FindAsync("berlin-saga-tv");
+            var stale = await db.SeriesMetadataCache.FindAsync("berlin-saga-stale");
+            Assert.Equal("Berlin Saga DX", authoritative!.SeriesName);
+            Assert.Null(stale!.SeriesName);
+        }
+    }
+
+    [Fact]
     public async Task GetByTitleAsync_ResolvesByMatchedCanonicalTitle_AfterManualMatch()
     {
         await _service.SetUserAliasesAsync("Naono Folder", new[] { "MyAlias" });

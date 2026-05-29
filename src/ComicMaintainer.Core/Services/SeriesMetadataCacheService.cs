@@ -115,8 +115,48 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         // the original folder name) while the caller refers to the series by
         // its matched canonical title or one of its aliases. Resolve by
         // scanning known titles. Exact key is always preferred above.
+        //
+        // A single logical series can be described by several cache records
+        // (e.g. a folder refresh issues a separate lookup for the canonical
+        // title AND each alias, leaving one authoritative "success" record and
+        // one or more stale "not_found" siblings). The library renders the
+        // series using the most authoritative record (see
+        // SeriesLibraryService.ResolveRecordForGroup). We must mirror that
+        // ranking here so mutations (e.g. pinning a series name) land on the
+        // SAME record the library displays — otherwise the change is written to
+        // a stale sibling and the displayed name never updates.
         var candidates = await db.SeriesMetadataCache.ToListAsync(cancellationToken);
-        return candidates.FirstOrDefault(e => EntityMatchesTitleKey(e, key));
+        return candidates
+            .Where(e => EntityMatchesTitleKey(e, key))
+            .OrderByDescending(e => RankLookupStatus(e.LookupStatus))
+            .ThenByDescending(e => e.LastLookupUtc ?? DateTime.MinValue)
+            .ThenByDescending(e => e.UpdatedAt)
+            .FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Ranks a cache record's <c>LookupStatus</c> by how authoritative it is
+    /// for representing a series. Higher rank wins when several records share a
+    /// title. Kept in sync with <c>SeriesLibraryService.RankLookupStatus</c> so
+    /// title-based resolution selects the same record the library displays.
+    /// </summary>
+    private static int RankLookupStatus(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            return 0;
+        }
+
+        return status.ToLowerInvariant() switch
+        {
+            "manual_match" => 5,
+            "manual" => 4,
+            "success" => 3,
+            "not_found" => 2,
+            "error" => 1,
+            "cleared" => 0,
+            _ => 0
+        };
     }
 
     private bool EntityMatchesTitleKey(SeriesMetadataCacheEntity entity, string requestedKey)

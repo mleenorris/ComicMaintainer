@@ -1074,16 +1074,20 @@ public class FilesController : ControllerBase
                 failureMessage: "Combine folder move failed",
                 postLoopAsync: async (token) =>
                 {
-                    // Try to remove now-empty source directories.
+                    // Remove source directories the files were moved out of. A
+                    // directory is removed when it no longer contains any comic
+                    // archives (even if leftover non-comic files such as cover
+                    // images or ComicInfo.xml remain). If a comic failed to move
+                    // it stays behind, so we keep the folder for that case.
                     var removedDirectories = new List<string>();
                     foreach (var sourceDir in plan.SourceDirectories)
                     {
                         try
                         {
                             if (System.IO.Directory.Exists(sourceDir) &&
-                                !System.IO.Directory.EnumerateFileSystemEntries(sourceDir).Any())
+                                !DirectoryContainsComicArchives(sourceDir))
                             {
-                                System.IO.Directory.Delete(sourceDir);
+                                System.IO.Directory.Delete(sourceDir, recursive: true);
                                 removedDirectories.Add(sourceDir);
                             }
                         }
@@ -1346,6 +1350,20 @@ public class FilesController : ControllerBase
             SourceDirectories = sourceFolders.Select(f => f.Directory).ToList(),
             Moves = moves
         });
+    }
+
+    /// <summary>
+    /// Returns true if the directory (or any of its subdirectories) still
+    /// contains at least one comic archive. Used by the folder-combine flow to
+    /// decide whether a source directory can be safely deleted once its comics
+    /// have been moved out; leftover non-comic files (cover images,
+    /// ComicInfo.xml, etc.) do not block removal.
+    /// </summary>
+    private static bool DirectoryContainsComicArchives(string directory)
+    {
+        return System.IO.Directory
+            .EnumerateFiles(directory, "*", SearchOption.AllDirectories)
+            .Any(ComicFileExtensions.IsComicArchive);
     }
 
     /// <summary>

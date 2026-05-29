@@ -455,6 +455,178 @@ public class SeriesMetadataCacheServiceTests
     }
 
     [Fact]
+    public async Task SetSeriesNameAsync_UpdatesAuthoritativeRecord_WhenSiblingsShareTitle()
+    {
+        // Reproduces the user-visible bug: a folder refresh issues a separate
+        // lookup for the canonical title AND each alias, so several cache
+        // records can end up describing the same logical series — typically one
+        // authoritative "success" record and one or more stale "not_found"
+        // siblings. The library renders the series using the most authoritative
+        // record (highest lookup-status rank, newest lookup). When the
+        // title-based resolver picked an arbitrary sibling, SetSeriesNameAsync
+        // pinned the name onto the wrong record, so the page reported success
+        // but the displayed name never changed. The resolver must therefore
+        // update the SAME authoritative record the library displays.
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            // Stale sibling, inserted first so a naive FirstOrDefault would win.
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "berlin-saga-stale",
+                CanonicalTitle = "Berlin Saga",
+                LookupStatus = "not_found",
+                LastLookupUtc = DateTime.UtcNow.AddDays(-2),
+                CreatedAt = DateTime.UtcNow.AddDays(-2),
+                UpdatedAt = DateTime.UtcNow.AddDays(-2)
+            });
+            // Authoritative record the library would display.
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "berlin-saga-tv",
+                CanonicalTitle = "Berlin Saga",
+                LookupStatus = "success",
+                Source = "AniList",
+                LastLookupUtc = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        // Neither record is keyed by NormalizeKey("Berlin Saga"), so resolution
+        // falls back to scanning known titles where both records match.
+        var record = await _service.SetSeriesNameAsync("Berlin Saga", "Berlin Saga DX");
+
+        Assert.NotNull(record);
+        Assert.Equal("berlin-saga-tv", record!.NormalizedKey);
+        Assert.Equal("Berlin Saga DX", record.SeriesName);
+
+        // The authoritative record carries the pinned name; the stale sibling
+        // is left untouched so it cannot shadow the display title.
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            var authoritative = await db.SeriesMetadataCache.FindAsync("berlin-saga-tv");
+            var stale = await db.SeriesMetadataCache.FindAsync("berlin-saga-stale");
+            Assert.Equal("Berlin Saga DX", authoritative!.SeriesName);
+            Assert.Null(stale!.SeriesName);
+        }
+    }
+
+    [Fact]
+    public async Task CleanupStaleSiblingRecordsAsync_RemovesSubsumedNotFoundSibling()
+    {
+        // The authoritative record owns the alias "Beruferu" (a not_found
+        // sibling got keyed by that alias during a refresh sweep). The sibling
+        // carries no unique data and is subsumed, so it should be removed.
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "berlin-saga",
+                CanonicalTitle = "Berlin Saga",
+                Aliases = new List<string> { "Beruferu" },
+                LookupStatus = "success",
+                Source = "AniList",
+                LastLookupUtc = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "beruferu",
+                CanonicalTitle = "Beruferu",
+                LookupStatus = "not_found",
+                LastLookupUtc = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var removed = await _service.CleanupStaleSiblingRecordsAsync();
+
+        Assert.Equal(1, removed);
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            Assert.NotNull(await db.SeriesMetadataCache.FindAsync("berlin-saga"));
+            Assert.Null(await db.SeriesMetadataCache.FindAsync("beruferu"));
+        }
+    }
+
+    [Fact]
+    public async Task CleanupStaleSiblingRecordsAsync_PreservesRecordsWithUserData()
+    {
+        // A subsumed sibling that carries user data (pinned name, user alias,
+        // preferred language, or a user image) must never be deleted.
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "berlin-saga",
+                CanonicalTitle = "Berlin Saga",
+                Aliases = new List<string> { "Beruferu" },
+                LookupStatus = "success",
+                LastLookupUtc = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "beruferu",
+                CanonicalTitle = "Beruferu",
+                LookupStatus = "not_found",
+                PreferredLanguage = "ja",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var removed = await _service.CleanupStaleSiblingRecordsAsync();
+
+        Assert.Equal(0, removed);
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            Assert.NotNull(await db.SeriesMetadataCache.FindAsync("beruferu"));
+        }
+    }
+
+    [Fact]
+    public async Task CleanupStaleSiblingRecordsAsync_KeepsUnrelatedAndAuthoritativeRecords()
+    {
+        // Two unrelated series plus a positive-status record sharing no key
+        // with a stronger record: nothing should be removed.
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "naruto",
+                CanonicalTitle = "Naruto",
+                LookupStatus = "success",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "bleach",
+                CanonicalTitle = "Bleach",
+                LookupStatus = "not_found",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var removed = await _service.CleanupStaleSiblingRecordsAsync();
+
+        Assert.Equal(0, removed);
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            Assert.Equal(2, await db.SeriesMetadataCache.CountAsync());
+        }
+    }
+
+    [Fact]
     public async Task GetByTitleAsync_ResolvesByMatchedCanonicalTitle_AfterManualMatch()
     {
         await _service.SetUserAliasesAsync("Naono Folder", new[] { "MyAlias" });

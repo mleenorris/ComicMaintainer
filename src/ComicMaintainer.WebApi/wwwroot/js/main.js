@@ -7829,6 +7829,9 @@
                 current.push(value);
                 manageSeriesState.record.user_aliases = current;
                 renderManageSeriesUserAliases(manageSeriesState.record);
+                // Surface the new alias as a selectable "Series Name" option so
+                // it can immediately be picked as the sticky series name.
+                populateManageSeriesNameOptions(manageSeriesState.record);
             }
             input.value = '';
         }
@@ -7838,6 +7841,8 @@
             const current = manageSeriesState.record.user_aliases || [];
             manageSeriesState.record.user_aliases = current.filter(a => a.toLowerCase() !== alias.toLowerCase());
             renderManageSeriesUserAliases(manageSeriesState.record);
+            // Keep the "Series Name" dropdown in sync with the alias list.
+            populateManageSeriesNameOptions(manageSeriesState.record);
         }
 
         async function saveManageSeriesNames() {

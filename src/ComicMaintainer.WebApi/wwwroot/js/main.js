@@ -7895,6 +7895,10 @@
                 manageSeriesState.record = record;
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
+                renderManageSeriesImage(record);
+                // Keep the "Series Name" options in sync with the refreshed
+                // metadata, mirroring the manual-match path.
+                populateManageSeriesNameOptions(record);
                 const successStatuses = new Set(['success', 'manual_match']);
                 const isSuccess = successStatuses.has(record.lookup_status);
                 showMessage(isSuccess ? 'Metadata refreshed' : `Lookup status: ${record.lookup_status || 'unknown'}`, isSuccess ? 'success' : 'info');
@@ -8098,6 +8102,11 @@
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
                 renderManageSeriesImage(record);
+                // Refresh the "Series Name" options so the newly-matched
+                // canonical title / localized titles / provider aliases are
+                // immediately selectable — matching the dialog-open behavior so
+                // a manually-picked match behaves identically to an automatic one.
+                populateManageSeriesNameOptions(record);
                 showMessage('Match applied', 'success');
                 if (typeof loadSeriesLibrary === 'function') {
                     loadSeriesLibrary(1, true);
@@ -8135,6 +8144,9 @@
                 renderManageSeriesProviderAliases(record);
                 renderManageSeriesUserAliases(record);
                 renderManageSeriesImage(record);
+                // Cleared external metadata drops provider canonical/aliases, so
+                // refresh the "Series Name" options to drop stale choices.
+                populateManageSeriesNameOptions(record);
                 showMessage('External metadata cleared', 'success');
                 if (typeof loadSeriesLibrary === 'function') {
                     loadSeriesLibrary(1, true);

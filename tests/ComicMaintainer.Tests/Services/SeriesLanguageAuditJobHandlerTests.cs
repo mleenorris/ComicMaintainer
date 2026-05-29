@@ -83,12 +83,12 @@ public class SeriesLanguageAuditJobHandlerTests
                 new ComicFile { FilePath = "/a/1.cbz", Metadata = new ComicMetadata { Series = "One Piece" } },
             });
         _retag.Setup(r => r.QueueRetagForSeriesAsync(record, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Guid.NewGuid());
+            .ReturnsAsync(1);
 
         var handler = BuildHandler();
         var summary = await handler.ExecuteAsync("""{"autoCorrect":true}""", default);
 
-        Assert.Contains("queued 1 retag job(s)", summary);
+        Assert.Contains("flagged 1 series for metadata backfill", summary);
         _retag.Verify(
             r => r.QueueRetagForSeriesAsync(record, It.IsAny<CancellationToken>()),
             Times.Once);

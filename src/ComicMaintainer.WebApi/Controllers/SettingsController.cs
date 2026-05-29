@@ -322,19 +322,20 @@ public class SettingsController : ControllerBase
             await _settingsService.UpdateDefaultPreferredLanguageAsync(request?.Language, cancellationToken);
 
             // If the effective default actually changed, fire-and-forget a
-            // re-normalization sweep over every series that does NOT have a
-            // per-series override (those are unaffected by the global default).
+            // backfill flag over every series that does NOT have a per-series
+            // override (those are unaffected by the global default). The
+            // scheduled backfill job rewrites the on-disk <Series> tags later.
             if (!string.Equals(previous, requested, StringComparison.OrdinalIgnoreCase)
                 && _languageRetag is not null)
             {
                 try
                 {
-                    var retagJobId = await _languageRetag.QueueRetagForGlobalDefaultAsync(cancellationToken);
-                    if (retagJobId is not null)
+                    var flaggedCount = await _languageRetag.QueueRetagForGlobalDefaultAsync(cancellationToken);
+                    if (flaggedCount > 0)
                     {
                         _logger.LogInformation(
-                            "Queued per-file retag job {JobId} after global default preferred-language change from '{Previous}' to '{Updated}'",
-                            retagJobId.Value,
+                            "Flagged {FileCount} file(s) for metadata backfill after global default preferred-language change from '{Previous}' to '{Updated}'",
+                            flaggedCount,
                             LoggingHelper.SanitizeForLog(previous),
                             LoggingHelper.SanitizeForLog(requested));
                     }
@@ -342,7 +343,7 @@ public class SettingsController : ControllerBase
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex,
-                        "Failed to queue per-file retag after global default preferred-language change");
+                        "Failed to flag files for metadata backfill after global default preferred-language change");
                 }
             }
 

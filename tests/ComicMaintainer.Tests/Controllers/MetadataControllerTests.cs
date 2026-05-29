@@ -175,7 +175,7 @@ public class MetadataControllerTests
 
         var retag = new Mock<ISeriesLanguagePreferenceRetagService>();
         retag.Setup(r => r.QueueRetagForSeriesAsync(record, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Guid.NewGuid());
+            .ReturnsAsync(3);
 
         var controller = new MetadataController(
             _library.Object,

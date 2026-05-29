@@ -144,8 +144,8 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
 
             if (options.AutoCorrect)
             {
-                var jobId = await _retag.QueueRetagForSeriesAsync(record, cancellationToken);
-                if (jobId.HasValue)
+                var flagged = await _retag.QueueRetagForSeriesAsync(record, cancellationToken);
+                if (flagged > 0)
                 {
                     seriesQueued++;
                 }
@@ -153,7 +153,7 @@ public class SeriesLanguageAuditJobHandler : IScheduledJobHandler
         }
 
         var summary = options.AutoCorrect
-            ? $"Scanned {seriesScanned} series: {seriesWithMismatch} with language mismatch ({filesWithMismatch} file(s)); queued {seriesQueued} retag job(s)."
+            ? $"Scanned {seriesScanned} series: {seriesWithMismatch} with language mismatch ({filesWithMismatch} file(s)); flagged {seriesQueued} series for metadata backfill."
             : $"Scanned {seriesScanned} series: {seriesWithMismatch} with language mismatch ({filesWithMismatch} file(s)). Enable autoCorrect to retag.";
         _logger.LogInformation("{Summary}", summary);
         return summary;

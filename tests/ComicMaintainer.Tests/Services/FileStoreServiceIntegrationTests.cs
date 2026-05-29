@@ -194,4 +194,56 @@ public class FileStoreServiceIntegrationTests : IDisposable
             Assert.Null(entity);
         }
     }
+
+    [Fact]
+    public async Task MarkFilesNeedingBackfillAsync_BumpsMetadataVersionAndSurfacesToBackfillQueue()
+    {
+        // Arrange
+        var settings = new AppSettings { WatchedDirectory = _testDirectory };
+        var options = new TestOptionsMonitor<AppSettings>(settings);
+
+        var services = new ServiceCollection();
+        var dbName = $"TestDb_{Guid.NewGuid()}";
+        services.AddDbContext<ComicMaintainerDbContext>(opt => opt.UseInMemoryDatabase(dbName));
+        services.AddDbContextFactory<ComicMaintainerDbContext>(opt => opt.UseInMemoryDatabase(dbName));
+        var serviceProvider = services.BuildServiceProvider();
+
+        var logger = new Mock<ILogger<FileStoreService>>().Object;
+        var dbContextFactory = serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        var fileStoreService = new FileStoreService(options, logger, dbContextFactory);
+
+        var trackedPath = Path.Combine(_testDirectory, "tracked.cbz");
+        var duplicatePath = Path.Combine(_testDirectory, "dupe.cbz");
+        File.WriteAllText(trackedPath, "content");
+        File.WriteAllText(duplicatePath, "content");
+        await AddFileToDatabase(serviceProvider, trackedPath, "tracked.cbz", _testDirectory);
+        var dupeEntity = await AddFileToDatabase(serviceProvider, duplicatePath, "dupe.cbz", _testDirectory);
+        using (var scope = serviceProvider.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            var dupe = await dbContext.ComicFiles.FirstAsync(e => e.FilePath == duplicatePath);
+            dupe.IsDuplicate = true;
+            await dbContext.SaveChangesAsync();
+        }
+
+        // Act
+        var marked = await fileStoreService.MarkFilesNeedingBackfillAsync(
+            new[] { trackedPath, duplicatePath, "/not/tracked.cbz" });
+
+        // Assert - only the non-duplicate tracked file is flagged.
+        Assert.Equal(1, marked);
+        using (var scope = serviceProvider.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<ComicMaintainerDbContext>();
+            var entity = await dbContext.ComicFiles.FirstAsync(e => e.FilePath == trackedPath);
+            Assert.True(entity.MetadataVersion > entity.WrittenMetadataVersion,
+                "MetadataVersion should now exceed WrittenMetadataVersion so the backfill job picks it up.");
+            var dupe = await dbContext.ComicFiles.FirstAsync(e => e.FilePath == duplicatePath);
+            Assert.Equal(0, dupe.MetadataVersion);
+        }
+
+        var queued = await fileStoreService.GetFilesNeedingBackfillAsync(10);
+        Assert.Contains(queued, f => f.FilePath == trackedPath);
+        Assert.DoesNotContain(queued, f => f.FilePath == duplicatePath);
+    }
 }

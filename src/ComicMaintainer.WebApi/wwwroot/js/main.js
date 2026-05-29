@@ -553,9 +553,16 @@
                 // the freshly-loaded first page).
                 if (currentSeriesDetailId) {
                     loadSeriesIssues(currentSeriesDetailId, true);
-                } else {
-                    loadActiveLibraryView(1, false);
                 }
+                // When viewing the series list (no detail open) we intentionally
+                // do NOT rebuild the whole library on each per-file event. A
+                // background job (e.g. the metadata retag queued after a
+                // series-name change) emits one file_processed event per file,
+                // and reloading the list for every one of them makes the series
+                // list visibly flash/reload after each completion. The set of
+                // series shown doesn't change as individual files are retagged;
+                // any genuine list change (renames/moves) is coalesced into a
+                // single refresh by the debounced file_list_updated handler.
             }
             scheduleLibraryHealthRefresh();
         }

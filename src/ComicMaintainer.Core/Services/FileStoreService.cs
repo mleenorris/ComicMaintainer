@@ -1053,6 +1053,66 @@ public class FileStoreService : IFileStoreService
         _files.AddOrUpdate(filePath, updated, (_, _) => updated);
     }
 
+    public async Task<int> MarkFilesNeedingBackfillAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
+    {
+        var pathList = (filePaths ?? Enumerable.Empty<string>())
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (pathList.Count == 0)
+        {
+            return 0;
+        }
+
+        var marked = 0;
+        try
+        {
+            await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+            // Chunk to stay within SQLite's default IN-list limit.
+            const int chunkSize = 500;
+            for (var offset = 0; offset < pathList.Count; offset += chunkSize)
+            {
+                var chunk = pathList.GetRange(offset, Math.Min(chunkSize, pathList.Count - offset));
+                var entities = await dbContext.ComicFiles
+                    .Where(e => chunk.Contains(e.FilePath) && !e.IsDuplicate)
+                    .ToListAsync(cancellationToken);
+
+                foreach (var entity in entities)
+                {
+                    // Only bump when the file is actually up to date with disk;
+                    // bumping makes MetadataVersion > WrittenMetadataVersion so
+                    // GetFilesNeedingBackfillAsync surfaces it to the backfill job.
+                    if (entity.MetadataVersion < int.MaxValue)
+                    {
+                        entity.MetadataVersion++;
+                    }
+                    entity.UpdatedAt = DateTime.UtcNow;
+                    marked++;
+                }
+
+                if (entities.Count > 0)
+                {
+                    await dbContext.SaveChangesAsync(cancellationToken);
+
+                    // Mirror the bumped versions into the in-memory snapshot so
+                    // subsequent reads agree with the database.
+                    foreach (var entity in entities)
+                    {
+                        var updated = ToComicFile(entity);
+                        _files.AddOrUpdate(entity.FilePath, updated, (_, _) => updated);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to mark {Count} file(s) as needing metadata backfill", pathList.Count);
+        }
+
+        return marked;
+    }
+
     public async Task<int> CleanupStaleEntriesAsync(CancellationToken cancellationToken = default)
     {
         try

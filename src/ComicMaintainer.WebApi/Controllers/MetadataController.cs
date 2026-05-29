@@ -596,27 +596,27 @@ public class MetadataController : ControllerBase
                 request?.Language,
                 cancellationToken);
 
-            // Fire-and-forget: enqueue per-file re-normalization so every
-            // ComicInfo.xml in this series gets its <Series> rewritten to
-            // match the new language preference. We do not block the API
-            // response on the job; the standard processing-job/SSE pipeline
-            // surfaces progress.
+            // Fire-and-forget: flag every file in this series for a metadata
+            // backfill so each ComicInfo.xml's <Series> gets rewritten to match
+            // the new language preference when the scheduled backfill job runs.
+            // We do not block the API response, and we deliberately avoid an
+            // eager forced normalize so the library view doesn't churn.
             if (_languageRetag is not null)
             {
                 try
                 {
-                    var retagJobId = await _languageRetag.QueueRetagForSeriesAsync(record, cancellationToken);
-                    if (retagJobId is not null)
+                    var flaggedCount = await _languageRetag.QueueRetagForSeriesAsync(record, cancellationToken);
+                    if (flaggedCount > 0)
                     {
                         _logger.LogInformation(
-                            LoggingHelper.WithWebsitePrefix("Queued per-file retag job {JobId} after preferred-language change for {SeriesTitle}"),
-                            retagJobId.Value, LoggingHelper.SanitizeForLog(seriesTitle));
+                            LoggingHelper.WithWebsitePrefix("Flagged {FileCount} file(s) for metadata backfill after preferred-language change for {SeriesTitle}"),
+                            flaggedCount, LoggingHelper.SanitizeForLog(seriesTitle));
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex,
-                        LoggingHelper.WithWebsitePrefix("Failed to queue per-file retag after preferred-language change for {SeriesTitle}"),
+                        LoggingHelper.WithWebsitePrefix("Failed to flag files for metadata backfill after preferred-language change for {SeriesTitle}"),
                         LoggingHelper.SanitizeForLog(seriesTitle));
                 }
             }
@@ -689,24 +689,26 @@ public class MetadataController : ControllerBase
                 });
             }
 
-            // Fire-and-forget per-file retag so on-disk <Series> tags catch
-            // up with the new name (same flow as preferred-language changes).
+            // Fire-and-forget: flag matching files for a metadata backfill so
+            // their on-disk <Series> tags catch up with the new name when the
+            // scheduled backfill job runs (same DB-first flow as
+            // preferred-language changes; no eager forced normalize).
             if (_languageRetag is not null)
             {
                 try
                 {
-                    var retagJobId = await _languageRetag.QueueRetagForSeriesAsync(record, cancellationToken);
-                    if (retagJobId is not null)
+                    var flaggedCount = await _languageRetag.QueueRetagForSeriesAsync(record, cancellationToken);
+                    if (flaggedCount > 0)
                     {
                         _logger.LogInformation(
-                            LoggingHelper.WithWebsitePrefix("Queued per-file retag job {JobId} after series-name change for {SeriesTitle}"),
-                            retagJobId.Value, LoggingHelper.SanitizeForLog(seriesTitle));
+                            LoggingHelper.WithWebsitePrefix("Flagged {FileCount} file(s) for metadata backfill after series-name change for {SeriesTitle}"),
+                            flaggedCount, LoggingHelper.SanitizeForLog(seriesTitle));
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex,
-                        LoggingHelper.WithWebsitePrefix("Failed to queue per-file retag after series-name change for {SeriesTitle}"),
+                        LoggingHelper.WithWebsitePrefix("Failed to flag files for metadata backfill after series-name change for {SeriesTitle}"),
                         LoggingHelper.SanitizeForLog(seriesTitle));
                 }
             }

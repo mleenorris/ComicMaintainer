@@ -11,36 +11,35 @@ namespace ComicMaintainer.Core.Services;
 /// Default implementation of <see cref="ISeriesLanguagePreferenceRetagService"/>.
 /// Builds a set of "matching titles" for the affected series (canonical title +
 /// aliases + localized titles), scans the tracked file store for files whose
-/// <c>Metadata.Series</c> matches one of those titles, and submits them as a
-/// forced normalization job on <see cref="IComicProcessorService"/>. Mirrors
-/// the pattern used by
-/// <see cref="SeriesMetadataRefreshJobService"/>'s post-refresh retag step so
-/// progress / events flow through the standard processing-job plumbing.
+/// <c>Metadata.Series</c> (or parent folder name) matches one of those titles,
+/// and flags them for a metadata backfill via
+/// <see cref="IFileStoreService.MarkFilesNeedingBackfillAsync"/>. The scheduled
+/// metadata-backfill job then rewrites each file's ComicInfo.xml
+/// <c>&lt;Series&gt;</c> from the DB-authoritative metadata. This keeps the
+/// database as the source of truth and avoids the per-file churn of an eager
+/// forced normalization job.
 /// </summary>
 public class SeriesLanguagePreferenceRetagService : ISeriesLanguagePreferenceRetagService
 {
     private readonly IFileStoreService _fileStore;
-    private readonly IComicProcessorService _processor;
     private readonly ISeriesMetadataCacheService _cache;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesLanguagePreferenceRetagService> _logger;
 
     public SeriesLanguagePreferenceRetagService(
         IFileStoreService fileStore,
-        IComicProcessorService processor,
         ISeriesMetadataCacheService cache,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesLanguagePreferenceRetagService> logger)
     {
         _fileStore = fileStore;
-        _processor = processor;
         _cache = cache;
         _settings = settings;
         _logger = logger;
     }
 
     /// <inheritdoc />
-    public async Task<Guid?> QueueRetagForSeriesAsync(
+    public async Task<int> QueueRetagForSeriesAsync(
         SeriesMetadataCacheRecord record,
         CancellationToken cancellationToken = default)
     {
@@ -51,26 +50,26 @@ public class SeriesLanguagePreferenceRetagService : ISeriesLanguagePreferenceRet
             _logger.LogWarning(
                 "Preferred-language change for series '{Series}' will not rewrite per-file metadata because WatcherEnableNormalize is false.",
                 LoggingHelper.SanitizeForLog(record.CanonicalTitle));
-            return null;
+            return 0;
         }
 
         var titles = CollectTitlesForRecord(record);
         if (titles.Count == 0)
         {
-            return null;
+            return 0;
         }
 
-        return await QueueRetagForTitlesAsync(titles, cancellationToken);
+        return await MarkMatchingFilesForBackfillAsync(titles, cancellationToken);
     }
 
     /// <inheritdoc />
-    public async Task<Guid?> QueueRetagForGlobalDefaultAsync(CancellationToken cancellationToken = default)
+    public async Task<int> QueueRetagForGlobalDefaultAsync(CancellationToken cancellationToken = default)
     {
         if (!_settings.CurrentValue.WatcherEnableNormalize)
         {
             _logger.LogWarning(
                 "Global default preferred-language change will not rewrite per-file metadata because WatcherEnableNormalize is false.");
-            return null;
+            return 0;
         }
 
         var allRecords = await _cache.GetAllAsync(cancellationToken);
@@ -91,10 +90,10 @@ public class SeriesLanguagePreferenceRetagService : ISeriesLanguagePreferenceRet
 
         if (titles.Count == 0)
         {
-            return null;
+            return 0;
         }
 
-        return await QueueRetagForTitlesAsync(titles, cancellationToken);
+        return await MarkMatchingFilesForBackfillAsync(titles, cancellationToken);
     }
 
     /// <summary>
@@ -136,7 +135,7 @@ public class SeriesLanguagePreferenceRetagService : ISeriesLanguagePreferenceRet
         return titles;
     }
 
-    private async Task<Guid?> QueueRetagForTitlesAsync(
+    private async Task<int> MarkMatchingFilesForBackfillAsync(
         HashSet<string> titles,
         CancellationToken cancellationToken)
     {
@@ -161,15 +160,15 @@ public class SeriesLanguagePreferenceRetagService : ISeriesLanguagePreferenceRet
         if (matchedPaths.Count == 0)
         {
             _logger.LogInformation(
-                "Preferred-language change matched no tracked files; nothing to retag.");
-            return null;
+                "Preferred-language change matched no tracked files; nothing to backfill.");
+            return 0;
         }
 
-        var jobId = await _processor.NormalizeFilesAsync(matchedPaths, forceReprocess: true, cancellationToken);
+        var marked = await _fileStore.MarkFilesNeedingBackfillAsync(matchedPaths, cancellationToken);
         _logger.LogInformation(
-            "Queued normalization job {JobId} for {FileCount} files to apply updated preferred-language metadata.",
-            jobId, matchedPaths.Count);
-        return jobId;
+            "Flagged {FileCount} file(s) for metadata backfill to apply updated preferred-language/series-name metadata.",
+            marked);
+        return marked;
     }
 
     /// <summary>

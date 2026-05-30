@@ -2917,6 +2917,10 @@ public class FilesController : ControllerBase
         // returned a match (or one was set manually).
         "matched" => "matched",
         "unmatched" => "unmatched",
+        // Series-level filter for series that have gaps in their issue
+        // numbering. Like matched/unmatched, the file store treats this as a
+        // no-op; SeriesLibraryService applies it after grouping.
+        "missing" => "missing",
         _ => null
     };
 }

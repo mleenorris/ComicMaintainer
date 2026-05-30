@@ -707,6 +707,164 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
+    public async Task GetSeriesAsync_FilterByMissingIssues_ReturnsOnlySeriesWithGaps()
+    {
+        // "Gappy Series" has issues 1 and 3 (missing 2); "Complete Series" has
+        // issues 1 and 2 (no gap). "missing" is a series-level filter applied
+        // after grouping, so the file store is invoked with a null file filter.
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Gappy Series/Gappy Series 001.cbz",
+                FileName = "Gappy Series 001.cbz",
+                Directory = "/library/Gappy Series",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Gappy Series", Issue = "1" }
+            },
+            new()
+            {
+                FilePath = "/library/Gappy Series/Gappy Series 003.cbz",
+                FileName = "Gappy Series 003.cbz",
+                Directory = "/library/Gappy Series",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Gappy Series", Issue = "3" }
+            },
+            new()
+            {
+                FilePath = "/library/Complete Series/Complete Series 001.cbz",
+                FileName = "Complete Series 001.cbz",
+                Directory = "/library/Complete Series",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Complete Series", Issue = "1" }
+            },
+            new()
+            {
+                FilePath = "/library/Complete Series/Complete Series 002.cbz",
+                FileName = "Complete Series 002.cbz",
+                Directory = "/library/Complete Series",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Complete Series", Issue = "2" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var missing = await service.GetSeriesAsync(filter: "missing");
+
+        Assert.Single(missing.Series);
+        Assert.Equal("Gappy Series", missing.Series[0].Title);
+    }
+
+    [Fact]
+    public async Task GetSeriesSummariesAsync_FilterByMissingIssues_IgnoresDecimalSpecials()
+    {
+        // Issues 1, 1.5 and 2: the decimal "special" must not be treated as a
+        // gap, so this series is considered complete and excluded by the filter.
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Specials/Specials 001.cbz",
+                FileName = "Specials 001.cbz",
+                Directory = "/library/Specials",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Specials", Issue = "1" }
+            },
+            new()
+            {
+                FilePath = "/library/Specials/Specials 001.5.cbz",
+                FileName = "Specials 001.5.cbz",
+                Directory = "/library/Specials",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Specials", Issue = "1.5" }
+            },
+            new()
+            {
+                FilePath = "/library/Specials/Specials 002.cbz",
+                FileName = "Specials 002.cbz",
+                Directory = "/library/Specials",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Specials", Issue = "2" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync(filter: "missing");
+
+        Assert.Empty(result.Series);
+    }
+
+    [Fact]
+    public async Task GetSeriesSummariesAsync_FilterByMissingIssues_DecimalFillsWholeNumberGap()
+    {
+        // Issues 1, 2.5 and 3: the decimal "2.5" counts as a found issue for
+        // whole number 2, so there is no gap and the series is excluded.
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Decimals/Decimals 001.cbz",
+                FileName = "Decimals 001.cbz",
+                Directory = "/library/Decimals",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Decimals", Issue = "1" }
+            },
+            new()
+            {
+                FilePath = "/library/Decimals/Decimals 002.5.cbz",
+                FileName = "Decimals 002.5.cbz",
+                Directory = "/library/Decimals",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Decimals", Issue = "2.5" }
+            },
+            new()
+            {
+                FilePath = "/library/Decimals/Decimals 003.cbz",
+                FileName = "Decimals 003.cbz",
+                Directory = "/library/Decimals",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Decimals", Issue = "3" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync(filter: "missing");
+
+        Assert.Empty(result.Series);
+    }
+
+    [Fact]
     public async Task GetSeriesAsync_DoesNotMergeUnrelatedSeriesSharingOnlyDigitFromCjkAlias()
     {
         // Regression: two unrelated series whose only "shared" normalized

@@ -22,6 +22,7 @@ public class SeriesLibraryService : ISeriesLibraryService
     // BuildGroupsAsync so the file-store call sees a no-op file filter.
     private const string ProviderMatchedFilter = "matched";
     private const string ProviderUnmatchedFilter = "unmatched";
+    private const string MissingIssuesFilter = "missing";
 
     private readonly IFileStoreService _fileStore;
     private readonly IComicProcessorService _processor;
@@ -55,11 +56,11 @@ public class SeriesLibraryService : ISeriesLibraryService
         string? direction = "asc",
         CancellationToken cancellationToken = default)
     {
-        var (fileFilter, providerFilter) = SplitFilter(filter);
+        var (fileFilter, seriesFilter) = SplitFilter(filter);
         var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: true, cancellationToken);
 
         var groupedSeries = groups.Values
-            .Where(accumulator => MatchesProviderFilter(accumulator, providerFilter))
+            .Where(accumulator => MatchesSeriesFilter(accumulator, seriesFilter))
             .Select(accumulator =>
             {
                 accumulator.Issues = SortIssues(accumulator.Issues);
@@ -132,13 +133,13 @@ public class SeriesLibraryService : ISeriesLibraryService
         int? limit = null,
         CancellationToken cancellationToken = default)
     {
-        var (fileFilter, providerFilter) = SplitFilter(filter);
+        var (fileFilter, seriesFilter) = SplitFilter(filter);
         // Summary mode never opens an archive on disk, so even huge libraries
         // stay snappy. Per-issue details are loaded lazily by GetSeriesIssuesAsync.
         var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
 
         var summaries = groups.Values
-            .Where(accumulator => MatchesProviderFilter(accumulator, providerFilter))
+            .Where(accumulator => MatchesSeriesFilter(accumulator, seriesFilter))
             .Select(accumulator =>
             {
                 var sortedIssues = SortIssues(accumulator.Issues);
@@ -1263,7 +1264,7 @@ public class SeriesLibraryService : ISeriesLibraryService
     /// file store) and an optional series-level provider-match filter
     /// (<c>matched</c> or <c>unmatched</c>) applied after grouping.
     /// </summary>
-    private static (string? FileFilter, string? ProviderFilter) SplitFilter(string? filter)
+    private static (string? FileFilter, string? SeriesFilter) SplitFilter(string? filter)
     {
         if (string.IsNullOrWhiteSpace(filter))
         {
@@ -1271,7 +1272,8 @@ public class SeriesLibraryService : ISeriesLibraryService
         }
 
         if (string.Equals(filter, ProviderMatchedFilter, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(filter, ProviderUnmatchedFilter, StringComparison.OrdinalIgnoreCase))
+            || string.Equals(filter, ProviderUnmatchedFilter, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(filter, MissingIssuesFilter, StringComparison.OrdinalIgnoreCase))
         {
             return (null, filter.ToLowerInvariant());
         }
@@ -1280,17 +1282,22 @@ public class SeriesLibraryService : ISeriesLibraryService
     }
 
     /// <summary>
-    /// Returns true when the accumulator passes the requested provider-match
-    /// filter. A series is considered "matched" when it has a non-empty
-    /// metadata source (i.e. an external provider lookup or a manual entry
-    /// has produced data for the series). Unknown providerFilter values
-    /// disable the filter.
+    /// Returns true when the accumulator passes the requested series-level
+    /// filter. Series-level filters operate on the grouped series record rather
+    /// than on individual files: "matched"/"unmatched" key off provider-match
+    /// state, while "missing" keys off gaps in the issue numbering. Unknown or
+    /// empty filter values disable the filter.
     /// </summary>
-    private static bool MatchesProviderFilter(SeriesAccumulator accumulator, string? providerFilter)
+    private static bool MatchesSeriesFilter(SeriesAccumulator accumulator, string? seriesFilter)
     {
-        if (string.IsNullOrWhiteSpace(providerFilter))
+        if (string.IsNullOrWhiteSpace(seriesFilter))
         {
             return true;
+        }
+
+        if (string.Equals(seriesFilter, MissingIssuesFilter, StringComparison.OrdinalIgnoreCase))
+        {
+            return HasMissingIssues(accumulator);
         }
 
         // A series counts as "matched" when EITHER it has a recorded metadata
@@ -1302,12 +1309,62 @@ public class SeriesLibraryService : ISeriesLibraryService
         var hasMatch = !string.IsNullOrWhiteSpace(accumulator.MetadataSource)
             || string.Equals(accumulator.LookupStatus, "manual_match", StringComparison.OrdinalIgnoreCase)
             || string.Equals(accumulator.LookupStatus, "manual", StringComparison.OrdinalIgnoreCase);
-        return providerFilter switch
+        return seriesFilter switch
         {
             ProviderMatchedFilter => hasMatch,
             ProviderUnmatchedFilter => !hasMatch,
             _ => true
         };
+    }
+
+    /// <summary>
+    /// Returns true when the series has at least one gap in its consecutive
+    /// whole-number issue numbering (e.g. it has issues 1, 2 and 4 but not 3).
+    /// Decimal "specials"/half-chapters (e.g. 2.5) count as a found issue for
+    /// their whole number (2), so they can fill an otherwise-missing slot.
+    /// Non-numeric issue labels are ignored. A series needs at least two
+    /// distinct whole-number issues for a gap to be detectable.
+    /// </summary>
+    private static bool HasMissingIssues(SeriesAccumulator accumulator)
+    {
+        var wholeIssues = new HashSet<long>();
+        foreach (var issue in accumulator.Issues)
+        {
+            if (string.IsNullOrWhiteSpace(issue.Issue))
+            {
+                continue;
+            }
+
+            if (!double.TryParse(
+                    issue.Issue.Trim(),
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var value))
+            {
+                continue;
+            }
+
+            // A decimal special/half-chapter counts as a found issue for its
+            // whole number, so floor the value before recording it.
+            wholeIssues.Add((long)Math.Floor(value));
+        }
+
+        if (wholeIssues.Count < 2)
+        {
+            return false;
+        }
+
+        var min = wholeIssues.Min();
+        var max = wholeIssues.Max();
+        for (var i = min; i <= max; i++)
+        {
+            if (!wholeIssues.Contains(i))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static SeriesAccumulator? FindMatchingFilteredGroup(

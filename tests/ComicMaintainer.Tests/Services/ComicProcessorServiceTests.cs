@@ -1600,6 +1600,85 @@ public class ComicProcessorServiceTests : IDisposable
         Assert.False(File.Exists(filePath));
     }
 
+    [Fact]
+    public async Task RenameFilesAsync_UsesResolvedSeriesName_ConsistentWithProcessPath()
+    {
+        // A standalone rename must produce the same target filename as the full
+        // process pipeline, which resolves the series via the external/cache
+        // lookup before rendering the filename. Here ComicInfo.xml holds the raw
+        // folder-derived series "The Dark Knight" but the external lookup maps it
+        // to canonical "Batman", so the renamed file must use "Batman".
+        var seriesFolder = Path.Combine(_testDirectory, "The Dark Knight");
+        Directory.CreateDirectory(seriesFolder);
+
+        var filePath = Path.Combine(seriesFolder, "The Dark Knight - Chapter 7.cbz");
+        var comicInfoXml = @"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>The Dark Knight</Series>
+    <Number>7</Number>
+    <Title>Chapter 7</Title>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy");
+            }
+        }
+
+        _mockExternalSeriesMetadata
+            .Setup(service => service.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalSeriesMetadata
+            {
+                CanonicalTitle = "Batman",
+                Aliases = new List<string>(),
+                Source = "Test"
+            });
+
+        var mockSeriesMetadataCache = new Mock<ISeriesMetadataCacheService>();
+        mockSeriesMetadataCache.Setup(c => c.NormalizeKey(It.IsAny<string>()))
+            .Returns<string>(s => (s ?? string.Empty).ToLowerInvariant());
+        mockSeriesMetadataCache
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        mockSeriesMetadataCache
+            .Setup(c => c.SetUserAliasesAsync(
+                It.IsAny<string>(),
+                It.IsAny<IEnumerable<string>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadataCacheRecord());
+
+        using var service = new ComicProcessorService(
+            _mockOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockHistoryService.Object,
+            externalSeriesMetadata: _mockExternalSeriesMetadata.Object,
+            seriesMetadataCache: mockSeriesMetadataCache.Object);
+
+        // Act
+        var jobId = await service.RenameFilesAsync(new[] { filePath });
+        var job = await WaitForJobCompletionAsync(service, jobId);
+
+        // Assert: renamed using the resolved canonical series "Batman".
+        Assert.NotNull(job);
+        Assert.Equal(1, job!.ProcessedFiles);
+        Assert.Equal(0, job.FailedFiles);
+
+        var expectedRenamedFile = Path.Combine(seriesFolder, "Batman - Chapter 0007.cbz");
+        Assert.True(File.Exists(expectedRenamedFile),
+            $"Expected renamed file '{expectedRenamedFile}' not found. Files present: " +
+            string.Join(", ", Directory.GetFiles(seriesFolder).Select(Path.GetFileName)));
+        Assert.False(File.Exists(filePath));
+    }
+
     public void Dispose()
     {
         // Clean up test directory

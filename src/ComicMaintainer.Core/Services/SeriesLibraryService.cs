@@ -1320,10 +1320,10 @@ public class SeriesLibraryService : ISeriesLibraryService
     /// <summary>
     /// Returns true when the series has at least one gap in its consecutive
     /// whole-number issue numbering (e.g. it has issues 1, 2 and 4 but not 3).
-    /// Only whole-number issues participate: decimal "specials"/half-chapters
-    /// (e.g. 10.5) and non-numeric issue labels are ignored so they don't
-    /// produce false gaps. A series needs at least two distinct whole-number
-    /// issues for a gap to be detectable.
+    /// Decimal "specials"/half-chapters (e.g. 2.5) count as a found issue for
+    /// their whole number (2), so they can fill an otherwise-missing slot.
+    /// Non-numeric issue labels are ignored. A series needs at least two
+    /// distinct whole-number issues for a gap to be detectable.
     /// </summary>
     private static bool HasMissingIssues(SeriesAccumulator accumulator)
     {
@@ -1344,14 +1344,9 @@ public class SeriesLibraryService : ISeriesLibraryService
                 continue;
             }
 
-            // Ignore decimal specials/half-chapters: only whole numbers define
-            // the expected consecutive sequence.
-            if (value != Math.Floor(value))
-            {
-                continue;
-            }
-
-            wholeIssues.Add((long)value);
+            // A decimal special/half-chapter counts as a found issue for its
+            // whole number, so floor the value before recording it.
+            wholeIssues.Add((long)Math.Floor(value));
         }
 
         if (wholeIssues.Count < 2)

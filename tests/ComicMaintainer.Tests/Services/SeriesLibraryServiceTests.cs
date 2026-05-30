@@ -816,6 +816,55 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
+    public async Task GetSeriesSummariesAsync_FilterByMissingIssues_DecimalFillsWholeNumberGap()
+    {
+        // Issues 1, 2.5 and 3: the decimal "2.5" counts as a found issue for
+        // whole number 2, so there is no gap and the series is excluded.
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Decimals/Decimals 001.cbz",
+                FileName = "Decimals 001.cbz",
+                Directory = "/library/Decimals",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Decimals", Issue = "1" }
+            },
+            new()
+            {
+                FilePath = "/library/Decimals/Decimals 002.5.cbz",
+                FileName = "Decimals 002.5.cbz",
+                Directory = "/library/Decimals",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Decimals", Issue = "2.5" }
+            },
+            new()
+            {
+                FilePath = "/library/Decimals/Decimals 003.cbz",
+                FileName = "Decimals 003.cbz",
+                Directory = "/library/Decimals",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Decimals", Issue = "3" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync(filter: "missing");
+
+        Assert.Empty(result.Series);
+    }
+
+    [Fact]
     public async Task GetSeriesAsync_DoesNotMergeUnrelatedSeriesSharingOnlyDigitFromCjkAlias()
     {
         // Regression: two unrelated series whose only "shared" normalized

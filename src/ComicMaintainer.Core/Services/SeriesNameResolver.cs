@@ -296,14 +296,37 @@ public class SeriesNameResolver : ISeriesNameResolver
         return ResolveDisplayTitle(record, globalPreferred);
     }
 
+    /// <summary>
+    /// Resolve a cache record for a free-form candidate title. Prefers the
+    /// exact normalized-key lookup, then falls back to
+    /// <see cref="ISeriesMetadataCacheService.GetByTitleAsync"/>, which scans a
+    /// record's canonical title, user-selected name, aliases, and localized
+    /// titles. The fallback is what lets the resolver still find a series after
+    /// a manual match or a user-selected rename: the record stays keyed by the
+    /// original folder title while the file's <c>&lt;Series&gt;</c> (and folder)
+    /// now hold the matched/user-selected name. Without it the exact-key lookup
+    /// misses and the resolver falls through to a fresh external lookup that
+    /// returns the provider's canonical title, wrongly overriding the
+    /// user-selected name.
+    /// </summary>
+    private async Task<SeriesMetadataCacheRecord?> ResolveRecordByTitleAsync(string seriesName, CancellationToken cancellationToken)
+    {
+        if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;
+
+        var key = _cache.NormalizeKey(seriesName);
+        var record = string.IsNullOrWhiteSpace(key)
+            ? null
+            : await _cache.GetAsync(key, cancellationToken);
+        record ??= await _cache.GetByTitleAsync(seriesName, cancellationToken);
+        return record;
+    }
+
     private async Task<SeriesMetadataCacheRecord?> LookupUserSelectedRecordAsync(string seriesName, CancellationToken cancellationToken)
     {
         if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;
         try
         {
-            var key = _cache.NormalizeKey(seriesName);
-            if (string.IsNullOrWhiteSpace(key)) return null;
-            var record = await _cache.GetAsync(key, cancellationToken);
+            var record = await ResolveRecordByTitleAsync(seriesName, cancellationToken);
             return record is not null && !string.IsNullOrWhiteSpace(record.SeriesName)
                 ? record
                 : null;
@@ -321,9 +344,7 @@ public class SeriesNameResolver : ISeriesNameResolver
         if (_cache is null || string.IsNullOrWhiteSpace(seriesName)) return null;
         try
         {
-            var key = _cache.NormalizeKey(seriesName);
-            if (string.IsNullOrWhiteSpace(key)) return null;
-            var record = await _cache.GetAsync(key, cancellationToken);
+            var record = await ResolveRecordByTitleAsync(seriesName, cancellationToken);
             if (record is null || string.IsNullOrWhiteSpace(record.CanonicalTitle)) return null;
 
             var status = record.LookupStatus;
@@ -373,9 +394,7 @@ public class SeriesNameResolver : ISeriesNameResolver
             if (string.IsNullOrWhiteSpace(candidate)) continue;
             try
             {
-                var key = _cache.NormalizeKey(candidate);
-                if (string.IsNullOrWhiteSpace(key)) continue;
-                var record = await _cache.GetAsync(key, cancellationToken);
+                var record = await ResolveRecordByTitleAsync(candidate, cancellationToken);
                 if (record is not null
                     && string.Equals(record.LookupStatus, "cleared", StringComparison.OrdinalIgnoreCase))
                 {

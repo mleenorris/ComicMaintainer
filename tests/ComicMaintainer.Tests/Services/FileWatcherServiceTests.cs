@@ -89,9 +89,11 @@ public class FileWatcherServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task StartAsync_WhenDisabled_DoesNotStart()
+    public async Task StartAsync_WhenProcessingDisabled_StillStartsToMonitorNewFiles()
     {
-        // Arrange - create a new service with disabled watcher (both rename and normalize disabled)
+        // Arrange - create a new service with automatic processing disabled (both rename and
+        // normalize disabled). The watcher must still run so that new files are added to the
+        // file list even though they won't be renamed or normalized.
         var disabledSettings = new AppSettings
         {
             WatchedDirectory = _testDirectory,
@@ -111,7 +113,49 @@ public class FileWatcherServiceTests : IDisposable
         await disabledService.StartAsync();
 
         // Assert
-        Assert.False(disabledService.IsRunning);
+        Assert.True(disabledService.IsRunning);
+    }
+
+    [Fact]
+    public async Task OnFileCreated_WhenProcessingDisabled_AddsFileToStoreButDoesNotProcess()
+    {
+        // Arrange - automatic processing disabled, but the watcher still monitors for new files.
+        var disabledSettings = new AppSettings
+        {
+            WatchedDirectory = _testDirectory,
+            WatcherEnableRename = false,
+            WatcherEnableNormalize = false,
+            WatcherFileStabilityDelaySeconds = 1
+        };
+        var mockDisabledOptions = new Mock<IOptionsMonitor<AppSettings>>();
+        mockDisabledOptions.Setup(o => o.CurrentValue).Returns(disabledSettings);
+
+        using var disabledService = new FileWatcherService(
+            mockDisabledOptions.Object,
+            _mockLogger.Object,
+            _mockFileStore.Object,
+            _mockProcessor.Object);
+
+        await disabledService.StartAsync();
+        await Task.Delay(100);
+
+        var newFile = Path.Combine(_testDirectory, "new_comic.cbz");
+
+        // Act - create a new comic file
+        File.WriteAllText(newFile, "fake cbz content");
+        await Task.Delay(2000);
+
+        // Assert - the file is added to the store so it appears in the file list...
+        _mockFileStore.Verify(
+            fs => fs.AddFileAsync(newFile, It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce,
+            "New files must be added to the file list even when processing is disabled");
+
+        // ...but it is not renamed or normalized because processing is disabled.
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(newFile, It.IsAny<CancellationToken>()),
+            Times.Never,
+            "Files should not be processed when both rename and normalize are disabled");
     }
 
     [Fact]
@@ -518,10 +562,11 @@ public class FileWatcherServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SettingsChange_DisablesWatcher_StopsRunning()
+    public async Task SettingsChange_DisablesProcessing_KeepsWatcherRunning()
     {
-        // Arrange — use a TestOptionsMonitor so we can simulate a live settings change
-        // and verify the watcher stops without restarting the service.
+        // Arrange — use a TestOptionsMonitor so we can simulate a live settings change.
+        // Disabling automatic processing must NOT stop the watcher: it has to keep monitoring
+        // for new files so they are still added to the file list.
         var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings
         {
             WatchedDirectory = _testDirectory,
@@ -539,7 +584,7 @@ public class FileWatcherServiceTests : IDisposable
         await service.StartAsync();
         Assert.True(service.IsRunning);
 
-        // Act — flip both watcher toggles to false at runtime
+        // Act — flip both processing toggles to false at runtime
         monitor.Set(new AppSettings
         {
             WatchedDirectory = _testDirectory,
@@ -548,22 +593,18 @@ public class FileWatcherServiceTests : IDisposable
             WatcherFileStabilityDelaySeconds = 1
         });
 
-        // Allow async OnChange handler (which runs reconfiguration on the thread pool) to complete.
-        // Poll for up to 5 seconds rather than relying on a fixed sleep.
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (service.IsRunning && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(50);
-        }
+        // Give the async OnChange handler time to run; the watcher should remain running.
+        await Task.Delay(500);
 
-        // Assert — watcher should have stopped without requiring a process restart
-        Assert.False(service.IsRunning);
+        // Assert — watcher keeps monitoring even though processing is disabled
+        Assert.True(service.IsRunning);
     }
 
     [Fact]
-    public async Task SettingsChange_EnablesWatcher_StartsRunning()
+    public async Task SettingsChange_EnablesProcessing_WatcherStaysRunning()
     {
-        // Arrange — start with watcher disabled, then enable it via settings change.
+        // Arrange — start with automatic processing disabled. The watcher still runs to monitor
+        // for new files, then processing is enabled via settings change.
         var monitor = new TestOptionsMonitor<AppSettings>(new AppSettings
         {
             WatchedDirectory = _testDirectory,
@@ -579,7 +620,7 @@ public class FileWatcherServiceTests : IDisposable
             _mockProcessor.Object);
 
         await service.StartAsync();
-        Assert.False(service.IsRunning);
+        Assert.True(service.IsRunning);
 
         // Act — enable rename via settings change
         monitor.Set(new AppSettings
@@ -590,15 +631,10 @@ public class FileWatcherServiceTests : IDisposable
             WatcherFileStabilityDelaySeconds = 1
         });
 
-        // Allow async OnChange handler (which runs reconfiguration on the thread pool) to complete.
-        // Poll for up to 5 seconds rather than relying on a fixed sleep.
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (!service.IsRunning && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(50);
-        }
+        // Give the async OnChange handler time to run.
+        await Task.Delay(500);
 
-        // Assert — watcher should now be running without a process restart
+        // Assert — watcher is still running
         Assert.True(service.IsRunning);
     }
 

@@ -71,15 +71,17 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 && _watcher != null;
             var enabledFlipped = _enabled != newEnabled;
 
-            // Stop if currently running and either we should be disabled or the directory changed.
-            needsStop = _watcher != null && (!newEnabled || directoryChanged);
-            // Start if we should be running and either we are not running or the directory changed.
-            needsStart = newEnabled && (_watcher == null || directoryChanged);
+            // The live watcher always monitors for new files regardless of the rename/normalize
+            // toggles, so toggling "enabled" no longer starts or stops it. We only stop/rebind the
+            // watcher when the watched directory itself changes.
+            needsStop = _watcher != null && directoryChanged;
+            // Start (or rebind) whenever we are not currently watching or the directory changed.
+            needsStart = _watcher == null || directoryChanged;
 
             if (enabledFlipped || directoryChanged)
             {
                 _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
-                    "Detected settings change affecting watcher (enabled: {OldEnabled} -> {NewEnabled}, directoryChanged: {DirectoryChanged}). Reconfiguring..."),
+                    "Detected settings change affecting watcher (processing enabled: {OldEnabled} -> {NewEnabled}, directoryChanged: {DirectoryChanged}). Reconfiguring..."),
                     _enabled, newEnabled, directoryChanged);
             }
 
@@ -151,17 +153,15 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
         lock (_lock)
         {
-            // Watcher is enabled if either rename or normalize is enabled
+            // "Enabled" tracks whether automatic processing (rename/normalize) is on. It no longer
+            // gates the live file-system watcher: the watcher always monitors for new files so that
+            // any file added to the watched directory is at least recorded in the file list, even
+            // when both rename and normalize are turned off.
             _enabled = _settings.WatcherEnableRename || _settings.WatcherEnableNormalize;
 
             if (!watchedDirectoryExists)
             {
                 _logger.LogError(LoggingHelper.WithWatcherPrefix("Watched directory does not exist: {Directory}"), _settings.WatchedDirectory);
-            }
-            else if (!_enabled)
-            {
-                _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
-                    "Watcher is disabled (both rename and normalize are disabled); skipping live file-system monitoring but still performing initial directory scan so on-demand features (e.g. Scan Unmarked) work."));
             }
             else if (_watcher != null && _watcher.EnableRaisingEvents)
             {
@@ -169,6 +169,12 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             }
             else
             {
+                if (!_enabled)
+                {
+                    _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
+                        "Automatic processing is disabled (both rename and normalize are off); the watcher will still monitor for new files and keep the file list up to date without renaming or normalizing them."));
+                }
+
                 _watcher = new FileSystemWatcher(_settings.WatchedDirectory)
                 {
                     NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size,
@@ -187,9 +193,9 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File watcher started for directory: {Directory}"), _settings.WatchedDirectory);
             }
 
-            // The file store inventory is used by features that don't depend on the live watcher
-            // (e.g. the "Scan Unmarked" endpoint, file listings, counts). Initialize it once per
-            // process whenever the watched directory exists, even if the watcher itself is disabled.
+            // The file store inventory is used by features that don't depend on live watcher
+            // events (e.g. the "Scan Unmarked" endpoint, file listings, counts). Initialize it once
+            // per process whenever the watched directory exists.
             if (!_initialized && watchedDirectoryExists)
             {
                 shouldInitialize = true;
@@ -197,8 +203,8 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             }
         }
 
-        // Broadcast watcher status change (only when the watcher actually started this call;
-        // skipping when disabled preserves prior behaviour and avoids spurious status events).
+        // Broadcast watcher status change (only when the watcher actually started this call to
+        // avoid spurious status events on repeated StartAsync calls).
         if (watcherStarted && _eventBroadcaster != null)
         {
             try
@@ -218,8 +224,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             await _fileStore.InitializeFromDatabaseAsync(cancellationToken);
 
             // Perform initial scan of existing files so the in-memory store reflects what's on
-            // disk even when the live watcher is disabled. Only runs once per process (gated by
-            // _initialized) to match the previous behaviour.
+            // disk. Only runs once per process (gated by _initialized).
             _ = Task.Run(async () => await ScanExistingFilesAsync(cancellationToken));
         }
     }

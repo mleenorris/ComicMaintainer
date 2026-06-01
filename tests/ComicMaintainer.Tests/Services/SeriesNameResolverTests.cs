@@ -28,6 +28,44 @@ public class SeriesNameResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_RecordKeyedByOriginalTitle_FoundByUserSelectedName_NotOverriddenByExternal()
+    {
+        // The cache record is keyed by the ORIGINAL folder title ("kaibutsu") but
+        // the file/folder now carries the user-selected name. An exact-key lookup
+        // on the user-selected name misses, so the resolver must fall back to
+        // GetByTitleAsync and honor the user-selected name instead of doing a
+        // fresh external lookup that would return the provider's canonical title.
+        var resolver = BuildResolver();
+        var record = new SeriesMetadataCacheRecord
+        {
+            NormalizedKey = "kaibutsu",
+            CanonicalTitle = "Kaiju No. 8",
+            LookupStatus = "manual_match",
+            SeriesName = "Monster #8 (User Pick)"
+        };
+        // Exact-key lookup on the user-selected name misses...
+        _cache.Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+              .ReturnsAsync((SeriesMetadataCacheRecord?)null);
+        // ...but the title scan finds it.
+        _cache.Setup(c => c.GetByTitleAsync("Monster #8 (User Pick)", It.IsAny<CancellationToken>()))
+              .ReturnsAsync(record);
+        // If the resolver wrongly fell through to an external lookup it would pick up the canonical title.
+        _external.Setup(e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                 .ReturnsAsync(new ExternalSeriesMetadata { CanonicalTitle = "Kaiju No. 8" });
+
+        var result = await resolver.ResolveAsync(
+            "/library/Monster #8 (User Pick)/c1.cbz",
+            new ComicMetadata { Series = "Monster #8 (User Pick)" },
+            mutateCache: false);
+
+        Assert.Equal(SeriesNameResolutionStep.UserSelectedName, result.WinningStep);
+        Assert.Equal("Monster #8 (User Pick)", result.ResolvedSeries);
+        _external.Verify(
+            e => e.LookupSeriesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task ResolveAsync_UserSelectedNameRecord_Wins()
     {
         var resolver = BuildResolver();

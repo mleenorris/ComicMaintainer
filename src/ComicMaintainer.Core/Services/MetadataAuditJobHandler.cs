@@ -118,7 +118,7 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
             var (expected, explanation) = await ResolveExpectedSeriesWithExplanationAsync(file.FilePath, metadata, globalPreferred, cancellationToken);
             if (!string.IsNullOrWhiteSpace(expected)
                 && !string.IsNullOrWhiteSpace(metadata.Series)
-                && !string.Equals(metadata.Series, expected, StringComparison.OrdinalIgnoreCase))
+                && !SeriesMatchesExpected(metadata.Series, expected))
             {
                 seriesMismatch++;
                 var details = $"Series '{metadata.Series}' does not match expected '{expected}'.";
@@ -326,6 +326,21 @@ public class MetadataAuditJobHandler : IScheduledJobHandler
         }
 
         return (folderSeries, null);
+    }
+
+    /// <summary>
+    /// Determine whether the file's actual series tag matches the expected
+    /// resolved series. Applies the same comparison-time normalization that the
+    /// rest of the site uses (<see cref="ComicFileProcessor.NormalizeSeriesName"/>
+    /// with <c>forComparison: true</c>, which strips <c>(*)</c>/<c>[*]</c>
+    /// suffixes, normalizes apostrophes, and trims) so the audit doesn't flag
+    /// files the normalize pipeline already considers correct.
+    /// </summary>
+    private static bool SeriesMatchesExpected(string actualSeries, string expectedSeries)
+    {
+        var actual = ComicFileProcessor.NormalizeSeriesName(actualSeries, forComparison: true);
+        var expected = ComicFileProcessor.NormalizeSeriesName(expectedSeries, forComparison: true);
+        return string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
     }
 
     private static MetadataAuditOptions ParseOptions(string? optionsJson)

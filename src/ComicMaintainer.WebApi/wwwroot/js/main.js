@@ -222,6 +222,23 @@
         let unmarkedCount = 0;
         let perPage = DEFAULT_PER_PAGE; // Will be loaded from server preferences
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
+        // Single source of truth for header-filter button labels. Used both when
+        // restoring the saved filter on load and when the user changes it, so the
+        // label stays correct for every filter mode (previously the restore path
+        // omitted renamed/normalized/read/unread and showed a blank label).
+        const FILTER_LABELS = {
+            'all': '📚 All',
+            'unmarked': '⚠️ Unmarked',
+            'marked': '✅ Marked',
+            'duplicates': '🔁 Duplicates',
+            'renamed': '📝 Renamed',
+            'normalized': '📋 Normalized',
+            'read': '👁️ Read',
+            'unread': '📚 Unread',
+            'matched': '🔗 Matched',
+            'unmatched': '❓ Not Matched',
+            'missing': '🧩 Missing Issues'
+        };
         let libraryViewMode = 'series';
         // Series layout: null = auto (list on mobile portrait, compact otherwise),
         // or one of 'list', 'grid', 'compact' when explicitly chosen by the user.
@@ -1374,16 +1391,7 @@
                     filterMode = prefs.filterMode;
                     
                     // Update button label
-                    const filterLabels = {
-                        'all': '📚 All',
-                        'unmarked': '⚠️ Unmarked',
-                        'marked': '✅ Marked',
-                        'duplicates': '🔁 Duplicates',
-                        'matched': '🔗 Matched',
-                        'unmatched': '❓ Not Matched',
-                        'missing': '🧩 Missing Issues'
-                    };
-                    document.getElementById('headerFilterLabel').textContent = filterLabels[filterMode];
+                    document.getElementById('headerFilterLabel').textContent = FILTER_LABELS[filterMode] || FILTER_LABELS['all'];
                     
                     // Update active class on dropdown items
                     document.querySelectorAll('#headerFilterMenu .header-dropdown-item').forEach(item => {
@@ -1900,21 +1908,7 @@
             filterMode = mode;
             
             // Update dropdown label and active state
-            const filterLabels = {
-                'all': '📚 All',
-                'unmarked': '⚠️ Unmarked',
-                'marked': '✅ Marked',
-                'duplicates': '🔁 Duplicates',
-                'renamed': '📝 Renamed',
-                'normalized': '📋 Normalized',
-                'read': '👁️ Read',
-                'unread': '📚 Unread',
-                'matched': '🔗 Matched',
-                'unmatched': '❓ Not Matched',
-                'missing': '🧩 Missing Issues'
-            };
-            
-            document.getElementById('headerFilterLabel').textContent = filterLabels[mode];
+            document.getElementById('headerFilterLabel').textContent = FILTER_LABELS[mode] || FILTER_LABELS['all'];
             
             // Update active class on dropdown items
             document.querySelectorAll('#headerFilterMenu .header-dropdown-item').forEach(item => {

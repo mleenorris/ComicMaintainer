@@ -2277,7 +2277,6 @@
                     <label class="series-selection-all">
                         <input type="checkbox" id="seriesSelectAll"
                                ${allSelected ? 'checked' : ''}
-                               ${selectedCount > 0 && !allSelected ? 'data-indeterminate="true"' : ''}
                                onchange="toggleSelectAllSeries(this.checked)">
                         <span>Select all series</span>
                     </label>

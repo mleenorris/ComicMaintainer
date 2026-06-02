@@ -212,6 +212,13 @@
         
         let files = [];
         let selectedFiles = new Set();
+        // Series selected in the series list view. Selecting a series adds all
+        // of its file paths to `selectedFiles` so the existing "process /
+        // rename / normalize selected" actions operate on those files.
+        let selectedSeries = new Set();
+        // seriesId -> string[] of the file paths contributed to selectedFiles,
+        // so a deselect can remove exactly the paths a series added.
+        let selectedSeriesFilePaths = new Map();
         let currentEditFile = null;
         let collapsedDirectories = new Set();
         let searchQuery = '';
@@ -635,6 +642,7 @@
                         // the series library (which would lose scroll position
                         // and could close the detail view).
                         selectedFiles.clear();
+                        resetSeriesSelectionState();
                         if (libraryViewMode === 'series' && currentSeriesDetailId) {
                             await loadSeriesIssues(currentSeriesDetailId, true);
                             scheduleLibraryHealthRefresh();
@@ -1609,12 +1617,15 @@
         } catch (_e) { /* matchMedia may be unavailable */ }
 
         function updateLibraryViewLayout() {
-            const controlsWrapper = document.querySelector('#libraryFilesView .controls-wrapper');
+            // The processing controls now live inside the Library Health
+            // dropdown and are available in both the series list view and the
+            // series detail (files) view; their visibility is governed by the
+            // dropdown's expand/collapse state, not by the current view.
+            const controlsWrapper = document.querySelector('.controls-wrapper');
             const pagination = document.getElementById('pagination');
-            const showBulkActions = libraryViewMode === 'files' || (libraryViewMode === 'series' && !!currentSeriesDetailId);
 
             if (controlsWrapper) {
-                controlsWrapper.style.display = showBulkActions ? '' : 'none';
+                controlsWrapper.style.display = '';
             }
 
             if (libraryViewMode === 'series' && currentSeriesDetailId && pagination) {
@@ -1848,9 +1859,8 @@
             const renameUnmarkedBtn = document.querySelector('button[onclick="renameUnmarkedFiles()"]');
             const normalizeUnmarkedBtn = document.querySelector('button[onclick="normalizeUnmarkedFiles()"]');
             const filterUnmarkedBtn = document.getElementById('filterUnmarked');
-            const controlsWrapper = document.querySelector('#libraryFilesView .controls-wrapper');
-            const showBulkActions = libraryViewMode === 'files' || (libraryViewMode === 'series' && !!currentSeriesDetailId);
-            
+            const controlsWrapper = document.querySelector('.controls-wrapper');
+
             // Show or hide buttons based on whether there are unmarked files
             const hasUnmarkedFiles = unmarkedCount > 0;
             const displayStyle = hasUnmarkedFiles ? '' : 'none';
@@ -1859,7 +1869,9 @@
             if (renameUnmarkedBtn) renameUnmarkedBtn.style.display = displayStyle;
             if (normalizeUnmarkedBtn) normalizeUnmarkedBtn.style.display = displayStyle;
             if (filterUnmarkedBtn) filterUnmarkedBtn.style.display = displayStyle;
-            if (controlsWrapper) controlsWrapper.style.display = showBulkActions ? '' : 'none';
+            // The processing controls are always available (inside the Library
+            // Health dropdown); only their dropdown collapse state hides them.
+            if (controlsWrapper) controlsWrapper.style.display = '';
         }
         
         async function changePerPage() {
@@ -2219,6 +2231,11 @@
         function renderSeriesLibrary() {
             const fileList = document.getElementById('fileList');
 
+            // Drop any selected series that are no longer present in the
+            // currently loaded library list (e.g. after a filter change) so
+            // stale selections don't linger.
+            reconcileSeriesSelection();
+
             if (!seriesLibrary.length) {
                 fileList.innerHTML = `
                     <div class="empty-state">
@@ -2238,10 +2255,165 @@
                     : renderSeriesLibraryCompact();
 
             fileList.innerHTML = `
+                ${renderSeriesSelectionToolbar()}
                 ${body}
             `;
 
             hydrateProtectedImages(fileList);
+            updateSelectInfo();
+        }
+
+        // Small toolbar shown above the series grid/list letting the user
+        // select every loaded series at once (so the bulk process / rename /
+        // normalize actions in the Library Health dropdown operate on them) or
+        // clear the current selection.
+        function renderSeriesSelectionToolbar() {
+            const total = seriesLibrary.length;
+            const selectedCount = seriesLibrary.reduce(
+                (n, s) => n + (selectedSeries.has(s.id) ? 1 : 0), 0);
+            const allSelected = total > 0 && selectedCount === total;
+            return `
+                <div class="series-selection-toolbar">
+                    <label class="series-selection-all">
+                        <input type="checkbox" id="seriesSelectAll"
+                               ${allSelected ? 'checked' : ''}
+                               onchange="toggleSelectAllSeries(this.checked)">
+                        <span>Select all series</span>
+                    </label>
+                    <span class="series-selection-count" id="seriesSelectionCount">
+                        ${selectedCount > 0 ? `${selectedCount} series selected` : 'No series selected'}
+                    </span>
+                    <button type="button" class="btn btn-small" id="seriesSelectionClearBtn" onclick="clearSeriesSelection()" ${selectedCount > 0 ? '' : 'hidden'}>Clear</button>
+                </div>
+            `;
+        }
+
+        // Render the small selectable checkbox overlay shown on every series
+        // card/row. A <span role="checkbox"> is used (rather than a real
+        // <input>) so it is valid inside the surrounding <button> element; the
+        // click is stopped from bubbling so it toggles selection instead of
+        // opening the series.
+        function renderSeriesSelectBox(series) {
+            const checked = selectedSeries.has(series.id);
+            return `<span class="series-select-box${checked ? ' series-select-box--checked' : ''}"
+                role="checkbox" aria-checked="${checked ? 'true' : 'false'}" tabindex="0"
+                data-series-id="${escapeHtml(series.id)}"
+                title="Select series" aria-label="Select ${escapeHtml(series.title)}"
+                onclick="event.stopPropagation(); toggleSeriesSelection('${escapeJs(series.id)}', this.getAttribute('aria-checked') !== 'true')"
+                onkeydown="if(event.key===' '||event.key==='Enter'){event.preventDefault(); event.stopPropagation(); toggleSeriesSelection('${escapeJs(series.id)}', this.getAttribute('aria-checked') !== 'true');}">${checked ? '✓' : ''}</span>`;
+        }
+
+        // Fetch every file path belonging to a series (ignoring the active
+        // filter so the bulk action operates on the whole series), caching the
+        // result for the lifetime of the selection.
+        async function fetchSeriesFilePaths(seriesId) {
+            try {
+                const url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=-1&filter=all`);
+                const response = await fetch(url, {
+                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) return [];
+                const data = await response.json();
+                const issues = Array.isArray(data.issues) ? data.issues : [];
+                return issues
+                    .map(issue => issue.file_path)
+                    .filter(path => typeof path === 'string' && path.length > 0);
+            } catch (err) {
+                console.error('fetchSeriesFilePaths failed', err);
+                return [];
+            }
+        }
+
+        // Toggle selection of a single series in the series list view. Selecting
+        // a series adds all of its file paths to `selectedFiles` so the bulk
+        // process / rename / normalize actions act on those files.
+        async function toggleSeriesSelection(seriesId, checked) {
+            if (!seriesId) return;
+            if (checked) {
+                if (selectedSeries.has(seriesId)) return;
+                selectedSeries.add(seriesId);
+                // Reflect the pending state immediately, then resolve files.
+                updateSeriesSelectionUI();
+                const paths = await fetchSeriesFilePaths(seriesId);
+                // The user may have deselected while the request was in flight.
+                if (!selectedSeries.has(seriesId)) return;
+                selectedSeriesFilePaths.set(seriesId, paths);
+                paths.forEach(p => selectedFiles.add(p));
+            } else {
+                selectedSeries.delete(seriesId);
+                const paths = selectedSeriesFilePaths.get(seriesId) || [];
+                paths.forEach(p => selectedFiles.delete(p));
+                selectedSeriesFilePaths.delete(seriesId);
+            }
+            updateSeriesSelectionUI();
+            updateSelectInfo();
+        }
+
+        async function toggleSelectAllSeries(checked) {
+            if (checked) {
+                await Promise.all(seriesLibrary.map(s => toggleSeriesSelection(s.id, true)));
+            } else {
+                clearSeriesSelection();
+            }
+        }
+
+        function clearSeriesSelection() {
+            for (const [, paths] of selectedSeriesFilePaths) {
+                paths.forEach(p => selectedFiles.delete(p));
+            }
+            selectedSeries.clear();
+            selectedSeriesFilePaths.clear();
+            updateSeriesSelectionUI();
+            updateSelectInfo();
+        }
+
+        // Clear only the series-selection bookkeeping. Used by code paths that
+        // already clear `selectedFiles` wholesale (job completion, DB reset,
+        // bulk delete) so stale series highlights don't linger.
+        function resetSeriesSelectionState() {
+            selectedSeries.clear();
+            selectedSeriesFilePaths.clear();
+        }
+
+        // Drop selected series that are no longer present in the loaded library
+        // list, releasing the file paths they contributed.
+        function reconcileSeriesSelection() {
+            if (!selectedSeries.size) return;
+            const present = new Set(seriesLibrary.map(s => s.id));
+            for (const id of Array.from(selectedSeries)) {
+                if (!present.has(id)) {
+                    const paths = selectedSeriesFilePaths.get(id) || [];
+                    paths.forEach(p => selectedFiles.delete(p));
+                    selectedSeries.delete(id);
+                    selectedSeriesFilePaths.delete(id);
+                }
+            }
+        }
+
+        // Update the series list selection state in place (without rebuilding
+        // the whole grid, which would reset the scroll position). Falls back to
+        // a full render only when the list hasn't been rendered yet.
+        function updateSeriesSelectionUI() {
+            if (!(libraryViewMode === 'series' && !currentSeriesDetailId)) return;
+            const boxes = document.querySelectorAll('.series-select-box[data-series-id]');
+            if (!boxes.length) return;
+            boxes.forEach(box => {
+                const id = box.dataset.seriesId;
+                const checked = selectedSeries.has(id);
+                box.classList.toggle('series-select-box--checked', checked);
+                box.setAttribute('aria-checked', checked ? 'true' : 'false');
+                box.textContent = checked ? '✓' : '';
+                const card = box.closest('.series-card, .series-list-row');
+                if (card) {
+                    card.classList.toggle(
+                        card.classList.contains('series-list-row')
+                            ? 'series-list-row--selected'
+                            : 'series-card--selected',
+                        checked);
+                }
+            });
+            syncSeriesSelectionControls();
         }
 
         // Cover-only cards with title overlaid on the cover (original behaviour).
@@ -2249,7 +2421,8 @@
             return `
                 <div class="series-grid series-grid--compact">
                     ${seriesLibrary.map(series => `
-                        <button class="series-card" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                        <button class="series-card${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                            ${renderSeriesSelectBox(series)}
                             <div class="series-cover-wrapper">
                                 <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
                                 <div class="series-cover-overlay"></div>
@@ -2272,7 +2445,8 @@
             return `
                 <div class="series-grid series-grid--titled">
                     ${seriesLibrary.map(series => `
-                        <button class="series-card series-card--titled" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                        <button class="series-card series-card--titled${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                            ${renderSeriesSelectBox(series)}
                             <div class="series-cover-wrapper">
                                 <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
                                 <span class="series-count-badge">${series.issue_count}</span>
@@ -2295,7 +2469,8 @@
             return `
                 <div class="series-list" role="list">
                     ${seriesLibrary.map(series => `
-                        <button class="series-list-row" type="button" role="listitem" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                        <button class="series-list-row${selectedSeries.has(series.id) ? ' series-list-row--selected' : ''}" type="button" role="listitem" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                            ${renderSeriesSelectBox(series)}
                             <div class="series-list-thumb-wrapper">
                                 <img class="series-list-thumb" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
                             </div>
@@ -3655,7 +3830,7 @@
                 if (clearSelectedStatusItem) clearSelectedStatusItem.disabled = true;
                 if (removeMetadataSelectedItem) removeMetadataSelectedItem.disabled = true;
             } else {
-                info.textContent = `${count} file${count > 1 ? 's' : ''} selected`;
+                info.textContent = describeCurrentSelection(count);
                 batchBtn.disabled = false;
                 if (deleteSelectedBtn) deleteSelectedBtn.disabled = false;
                 if (processSelectedItem) processSelectedItem.disabled = false;
@@ -3666,8 +3841,42 @@
                 if (clearSelectedStatusItem) clearSelectedStatusItem.disabled = false;
                 if (removeMetadataSelectedItem) removeMetadataSelectedItem.disabled = false;
             }
+            syncSeriesSelectionControls();
         }
-        
+
+        // Build the "N file(s) selected" message, also noting how many series
+        // are selected when operating from the series list view.
+        function describeCurrentSelection(fileCount) {
+            const fileText = `${fileCount} file${fileCount > 1 ? 's' : ''} selected`;
+            if (libraryViewMode === 'series' && !currentSeriesDetailId && selectedSeries.size > 0) {
+                const seriesCount = selectedSeries.size;
+                return `${seriesCount} series · ${fileText}`;
+            }
+            return fileText;
+        }
+
+        // Keep the series-list selection toolbar (count text + select-all
+        // checkbox indeterminate state) in sync with the current selection.
+        function syncSeriesSelectionControls() {
+            const countEl = document.getElementById('seriesSelectionCount');
+            if (countEl) {
+                const n = selectedSeries.size;
+                countEl.textContent = n > 0 ? `${n} series selected` : 'No series selected';
+            }
+            const selectAll = document.getElementById('seriesSelectAll');
+            if (selectAll) {
+                const total = seriesLibrary.length;
+                const selected = seriesLibrary.reduce(
+                    (acc, s) => acc + (selectedSeries.has(s.id) ? 1 : 0), 0);
+                selectAll.checked = total > 0 && selected === total;
+                selectAll.indeterminate = selected > 0 && selected < total;
+            }
+            const clearBtn = document.getElementById('seriesSelectionClearBtn');
+            if (clearBtn) {
+                clearBtn.hidden = selectedSeries.size === 0;
+            }
+        }
+
         function updateSelectAllCheckbox() {
             const selectAllCheckbox = document.getElementById('selectAll');
             if (!selectAllCheckbox) return;
@@ -6005,6 +6214,7 @@
                     // Clear in-memory selection state — the file list is now empty.
                     if (typeof selectedFiles !== 'undefined' && selectedFiles && typeof selectedFiles.clear === 'function') {
                         selectedFiles.clear();
+                        resetSeriesSelectionState();
                     }
                     // The server emits file_list_updated on completion, which
                     // triggers handleFileListUpdatedEvent → in-place refresh.
@@ -7092,6 +7302,7 @@
                 // point on and SSE events (job_updated / file_processed /
                 // file_list_updated) will refresh the library in place.
                 selectedFiles.clear();
+                resetSeriesSelectionState();
 
                 // Track via the standard SSE-driven progress modal.
                 await trackJobStatus(jobId, `Deleting ${totalItems} file(s)...`);

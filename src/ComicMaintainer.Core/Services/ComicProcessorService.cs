@@ -734,6 +734,26 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                 // ComicInfo.xml.
                 await EnsureChapterMetadataPreservedAsync(filePath, metadata, cancellationToken);
 
+                // Resolve the normalized series name before generating the new
+                // filename so a standalone rename produces the exact same target
+                // name as the full process pipeline (ProcessFileCoreAsync), where
+                // the normalize phase resolves the series first and the rename
+                // phase then renders the filename from that resolved name. Without
+                // this, renaming via the rename endpoint / file-naming audit would
+                // use the raw <Series> from ComicInfo.xml and could yield a
+                // different filename than the watcher/process path for the same
+                // file. The resolved name is applied in-memory for filename
+                // generation only; rewriting ComicInfo.xml remains the normalize
+                // operation's responsibility.
+                var resolvedSeries = await ResolveNormalizedSeriesAsync(metadata, filePath, cancellationToken);
+                if (!string.IsNullOrEmpty(resolvedSeries) && metadata.Series != resolvedSeries)
+                {
+                    _logger.LogDebug(
+                        "RenameFileAsync: Using resolved series name for filename: {SeriesName}",
+                        LoggingHelper.SanitizeForLog(resolvedSeries));
+                    metadata.Series = resolvedSeries;
+                }
+
                 _logger.LogDebug("RenameFileAsync: Generating new filename for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 var newFilePath = GenerateFileName(metadata, filePath);
                 _logger.LogDebug("RenameFileAsync: Generated filename: {NewFilePath} (Original: {OriginalFilePath})", 

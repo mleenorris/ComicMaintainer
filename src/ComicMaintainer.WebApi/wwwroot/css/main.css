@@ -410,6 +410,37 @@
         .settings-dropdown-item-logout {
             color: #c0392b;
         }
+
+        /* Mobile-only brand + watcher status block shown at the top of the
+           options dropdown. Hidden on desktop where the logo and watcher
+           status live directly in the header. */
+        .settings-dropdown-brand {
+            display: none;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 15px;
+            border-bottom: 1px solid var(--border-primary);
+        }
+        .settings-dropdown-brand-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            flex-shrink: 0;
+        }
+        .settings-dropdown-brand .watcher-status-indicator {
+            margin: 0;
+            min-width: 0;
+            padding: 0;
+            justify-content: flex-start;
+            font-size: 13px;
+            color: var(--text-primary);
+            background: none;
+            border: none;
+            cursor: default;
+        }
+        .settings-dropdown-brand .watcher-status-indicator .watcher-text {
+            display: inline;
+        }
         
         .container {
             max-width: 1400px;
@@ -2787,14 +2818,19 @@
             }
             
             .header-content {
-                flex-wrap: wrap;
+                flex-wrap: nowrap;
                 gap: 6px;
             }
             
-            /* Shrink the header logo SVG on phones to reclaim vertical space. */
+            /* Move the header logo into the options dropdown on phones so the
+               header stays on a single line (⋮, search, filter, sort). */
             .header-content > svg {
-                width: 32px;
-                height: 32px;
+                display: none;
+            }
+
+            /* Reveal the brand + watcher status block inside the dropdown. */
+            .settings-dropdown-brand {
+                display: flex;
             }
             
             .header h1 {
@@ -2809,7 +2845,8 @@
             .header-controls {
                 flex: 1;
                 gap: 6px;
-                width: 100%;
+                width: auto;
+                min-width: 0;
             }
             
             .header-search {
@@ -2875,6 +2912,12 @@
                 grid-template-columns: 1fr;
             }
             
+            /* Header watcher status is relocated into the options dropdown on
+               phones (see #watcherStatusMenu); hide the header copy. */
+            #watcherStatus {
+                display: none;
+            }
+
             .watcher-status-indicator {
                 padding: 8px;
                 font-size: 16px;

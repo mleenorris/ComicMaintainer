@@ -2756,39 +2756,64 @@
             return missing;
         }
 
+        // Parse a free-form issue identifier into a numeric value when it
+        // represents a number, including decimals (e.g. "1", "001", "1.5").
+        // Returns null for non-numeric values like "Annual" or empty strings.
+        function parseNumericIssueValue(value) {
+            if (value === null || value === undefined) return null;
+            const text = String(value).trim();
+            if (!text) return null;
+            // Require the whole token to be a non-negative number (optionally
+            // with a single decimal part) so "1a" or "Annual" are not mistaken
+            // for issue numbers.
+            if (!/^\d+(\.\d+)?$/.test(text)) return null;
+            const n = parseFloat(text);
+            if (!Number.isFinite(n) || n < 0) return null;
+            return n;
+        }
+
         // Build the grid items array for the series-issues-grid, interleaving
-        // missing-issue placeholders in their proper position (sorted by
-        // integer issue number) so the user can visually see which issues are
-        // missing alongside the issues they own. Issues without an integer
-        // issue number are appended at the end in their original order.
+        // missing-issue placeholders in their proper position (by integer issue
+        // number) so the user can visually see which issues are missing
+        // alongside the issues they own. Numeric issues (including decimals such
+        // as "1.5") are ordered by their numeric value so they appear in their
+        // proper position. Issues without a numeric issue number (e.g. "Annual")
+        // are appended at the end in their original order.
         function buildSeriesIssuesGridItems(issues) {
             const items = [];
-            const integerIssues = [];
-            const nonIntegerIssues = [];
+            const numericIssues = [];
+            const nonNumericIssues = [];
             for (const issue of issues || []) {
-                const n = parseIntegerIssueNumber(issue && issue.issue);
-                if (n === null) {
-                    nonIntegerIssues.push(issue);
+                const v = parseNumericIssueValue(issue && issue.issue);
+                if (v === null) {
+                    nonNumericIssues.push(issue);
                 } else {
-                    integerIssues.push({ number: n, issue });
+                    numericIssues.push({ value: v, issue });
                 }
             }
-            integerIssues.sort((a, b) => a.number - b.number);
+            // Merge present numeric issues with missing-integer placeholders and
+            // order everything by numeric value so decimals slot between the
+            // integers they fall between (e.g. 1.5 sits between #1 and #2).
+            const entries = numericIssues.map(ni => ({ value: ni.value, kind: 'issue', issue: ni.issue }));
             const missing = computeMissingIssueNumbers(issues);
-            const missingSet = new Set(missing);
-            const presentSet = new Set(integerIssues.map(i => i.number));
-            const maxIssue = integerIssues.length ? integerIssues[integerIssues.length - 1].number : 0;
-            for (let n = 1; n <= maxIssue; n++) {
-                if (presentSet.has(n)) {
-                    const match = integerIssues.find(i => i.number === n);
-                    if (match) items.push({ kind: 'issue', issue: match.issue });
-                } else if (missingSet.has(n)) {
-                    items.push({ kind: 'missing', number: n });
-                }
+            for (const n of missing) {
+                entries.push({ value: n, kind: 'missing', number: n });
             }
-            // Append issues whose number is not a plain integer (e.g. "1.5",
-            // "Annual") after the numbered range so they remain visible.
-            for (const issue of nonIntegerIssues) {
+            // Stable sort by value; on ties keep a deterministic order (missing
+            // placeholders after real issues, though values never collide today).
+            entries
+                .map((entry, index) => ({ entry, index }))
+                .sort((a, b) => (a.entry.value - b.entry.value) || (a.index - b.index))
+                .forEach(({ entry }) => {
+                    if (entry.kind === 'missing') {
+                        items.push({ kind: 'missing', number: entry.number });
+                    } else {
+                        items.push({ kind: 'issue', issue: entry.issue });
+                    }
+                });
+            // Append issues whose number is not numeric (e.g. "Annual") after the
+            // numbered range so they remain visible.
+            for (const issue of nonNumericIssues) {
                 items.push({ kind: 'issue', issue });
             }
             return items;

@@ -1112,6 +1112,46 @@ public class FileStoreServiceTests
     }
 
     [Fact]
+    public async Task UpdateFilePathAsync_NewPathRowAlreadyExists_PreservesNormalizedStateFromOldRow()
+    {
+        // Regression: when the FileSystemWatcher observes a rename as a Created event it
+        // inserts a default stub row for the target path before the processor migrates the
+        // original record. UpdateFilePathAsync must merge the authoritative processing state
+        // (e.g. IsNormalized set by a preceding normalize) from the old row onto the surviving
+        // new-path row rather than dropping it. Otherwise a normalize-then-rename sequence
+        // leaves the file permanently "unprocessed".
+        var oldPath = Path.Combine(_testDirectory, "collide_old.cbz");
+        var newPath = Path.Combine(_testDirectory, "collide_new.cbz");
+        File.WriteAllText(oldPath, "content");
+        await _service.AddFileAsync(oldPath);
+        await _service.MarkFileNormalizedAsync(oldPath, true);
+
+        // Physically move the file and simulate the watcher pre-creating a default stub row
+        // for the new path (IsRenamed=false, IsNormalized=false).
+        File.Move(oldPath, newPath);
+        await _service.AddFileAsync(newPath);
+
+        // Act - processor migrates the original record onto the (already existing) new path
+        await _service.UpdateFilePathAsync(oldPath, newPath);
+
+        // Assert - normalized state from the old row is preserved on the surviving row
+        var files = await _service.GetAllFilesAsync();
+        Assert.DoesNotContain(files, f => f.FilePath == oldPath);
+        var updated = files.FirstOrDefault(f => f.FilePath == newPath);
+        Assert.NotNull(updated);
+        Assert.True(updated!.IsNormalized, "IsNormalized should be preserved when merging into an existing new-path row");
+
+        // And the database (which the file list UI reads from) must agree.
+        await using var dbContext = await _serviceProvider
+            .GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>()
+            .CreateDbContextAsync();
+        Assert.False(await dbContext.ComicFiles.AnyAsync(e => e.FilePath == oldPath));
+        var dbEntity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == newPath);
+        Assert.NotNull(dbEntity);
+        Assert.True(dbEntity!.IsNormalized, "Database IsNormalized should be preserved after the merge");
+    }
+
+    [Fact]
     public async Task ApplyUserMetadataEditAsync_BumpsVersionAndSetsUserEditFlags()
     {
         var filePath = Path.Combine(_testDirectory, "metadata-edit.cbz");

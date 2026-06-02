@@ -880,10 +880,37 @@ public class FileStoreService : IFileStoreService
                 }
                 else
                 {
-                    // New path already exists - remove the stale old row and keep the newer one
+                    // New path already has a row. This happens when the FileSystemWatcher
+                    // observes the move as a Created event and inserts a default stub row
+                    // for the target *before* the processor migrates the original record.
+                    // The old-path row is the authoritative carrier of processing state for
+                    // this physical file (e.g. IsNormalized set by a preceding normalize),
+                    // so merge that state onto the surviving row instead of discarding it.
+                    // Without this merge, a normalize-then-rename sequence loses IsNormalized
+                    // (the stub's default false wins), leaving the file permanently
+                    // "unprocessed" until it is normalized again.
+                    newEntity.IsRenamed = newEntity.IsRenamed || entity.IsRenamed;
+                    newEntity.IsNormalized = newEntity.IsNormalized || entity.IsNormalized;
+                    newEntity.IsDuplicate = newEntity.IsDuplicate || entity.IsDuplicate;
+                    newEntity.IsRead = newEntity.IsRead || entity.IsRead;
+                    newEntity.IsProcessed = ComputeProcessedState(newEntity.IsRenamed, newEntity.IsNormalized);
+
+                    // Carry over metadata/version stamps when the stub row lacks them so a
+                    // later stale-retag/backfill pass does not needlessly reprocess the file.
+                    if (newEntity.SeriesMetadataVersion == 0 && entity.SeriesMetadataVersion != 0)
+                        newEntity.SeriesMetadataVersion = entity.SeriesMetadataVersion;
+                    if (newEntity.MetadataVersion == 0 && entity.MetadataVersion != 0)
+                        newEntity.MetadataVersion = entity.MetadataVersion;
+                    if (newEntity.WrittenMetadataVersion == 0 && entity.WrittenMetadataVersion != 0)
+                        newEntity.WrittenMetadataVersion = entity.WrittenMetadataVersion;
+                    if (newEntity.Metadata == null && entity.Metadata != null)
+                        newEntity.Metadata = entity.Metadata;
+
+                    newEntity.UpdatedAt = DateTime.UtcNow;
+
                     dbContext.ComicFiles.Remove(entity);
                     await dbContext.SaveChangesAsync(cancellationToken);
-                    _logger.LogDebug("Removed stale old-path entry after duplicate new-path detected: {OldPath}", SanitizeForLogging(oldPath));
+                    _logger.LogDebug("Merged processing state from stale old-path entry into existing new-path row: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
                 }
             }
             else

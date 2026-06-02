@@ -2513,10 +2513,14 @@
             return remapped;
         }
 
-        // Page size used when incrementally loading a series's issue list.
-        // Tuned so the first paint of a large (100+ issue) series renders
-        // quickly while still amortising request overhead across batches.
+        // The entire issue list of a series is loaded in a single request
+        // (per_page=-1 instructs the API to return all issues at once). The
+        // file lists now load quickly enough that incremental/lazy paging is
+        // no longer needed. SERIES_ISSUES_PAGE_SIZE is retained only as the
+        // cache entry's default perPage placeholder.
         const SERIES_ISSUES_PAGE_SIZE = 100;
+        // Sentinel per_page value sent to the API to request every issue.
+        const SERIES_ISSUES_LOAD_ALL = -1;
 
         async function loadSeriesIssues(seriesId, force = false, page = 1) {
             if (!seriesId) return;
@@ -2556,7 +2560,7 @@
             entry.loadingPages.add(page);
 
             try {
-                let url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_PAGE_SIZE}&page=${page}`);
+                let url = apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}&page=${page}`);
                 if (filterMode !== 'all') {
                     url += `&filter=${encodeURIComponent(filterMode)}`;
                 }

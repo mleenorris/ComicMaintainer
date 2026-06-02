@@ -7333,33 +7333,42 @@
         }
         
         function updateWatcherStatusDisplay(running, enabled) {
-            const statusIndicator = document.getElementById('watcherStatus');
-            const iconElement = statusIndicator.querySelector('.watcher-icon');
-            const textElement = statusIndicator.querySelector('.watcher-text');
-            
-            // Remove previous status classes
-            statusIndicator.classList.remove('running', 'stopped');
-            
+            const indicators = [
+                document.getElementById('watcherStatus'),
+                document.getElementById('watcherStatusMenu')
+            ].filter(Boolean);
+            if (indicators.length === 0) return;
+
+            let icon, text, title, statusClass;
             if (running === null || enabled === null) {
                 // Unknown status
-                iconElement.textContent = '❓';
-                textElement.textContent = 'Status Unknown';
-                statusIndicator.title = 'Unable to determine watcher status';
+                icon = '❓';
+                text = 'Status Unknown';
+                title = 'Unable to determine watcher status';
+                statusClass = null;
             } else if (running) {
-                statusIndicator.classList.add('running');
-                iconElement.textContent = '✅';
-                textElement.textContent = 'Watcher Running';
-                statusIndicator.title = 'File watcher is running and monitoring for changes';
+                icon = '✅';
+                text = 'Watcher Running';
+                title = 'File watcher is running and monitoring for changes';
+                statusClass = 'running';
             } else {
-                statusIndicator.classList.add('stopped');
-                iconElement.textContent = '⛔';
-                textElement.textContent = 'Watcher Stopped';
-                if (enabled) {
-                    statusIndicator.title = 'File watcher is enabled but not running';
-                } else {
-                    statusIndicator.title = 'File watcher is disabled';
-                }
+                icon = '⛔';
+                text = 'Watcher Stopped';
+                title = enabled
+                    ? 'File watcher is enabled but not running'
+                    : 'File watcher is disabled';
+                statusClass = 'stopped';
             }
+
+            indicators.forEach(statusIndicator => {
+                statusIndicator.classList.remove('running', 'stopped');
+                if (statusClass) statusIndicator.classList.add(statusClass);
+                const iconElement = statusIndicator.querySelector('.watcher-icon');
+                const textElement = statusIndicator.querySelector('.watcher-text');
+                if (iconElement) iconElement.textContent = icon;
+                if (textElement) textElement.textContent = text;
+                statusIndicator.title = title;
+            });
         }
 
         // ====================================================================

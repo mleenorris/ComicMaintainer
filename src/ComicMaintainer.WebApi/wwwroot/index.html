@@ -276,13 +276,14 @@
                      </button>
                      <p id="libraryHealthSummary" class="library-health-summary" role="status" aria-live="polite"></p>
                  </div>
-                 <div class="library-health-actions">
-                     <button class="btn btn-small" onclick="refreshLibraryHealth()" aria-label="Refresh library health" title="Refresh">🔄<span class="btn-label"> Refresh</span></button>
-                     <button class="btn btn-small btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" hidden>🔁<span class="btn-label"> Review Duplicates</span></button>
-                     <button class="btn btn-small" id="combineFoldersBtn" onclick="openCombineFoldersModal()" hidden>📁<span class="btn-label"> Combine Folders</span></button>
-                 </div>
              </div>
              <div class="library-health-body" id="libraryHealthBody">
+             <div class="library-health-actions">
+                 <button class="btn btn-small" onclick="refreshLibraryHealth()" aria-label="Refresh library health" title="Refresh">🔄<span class="btn-label"> Refresh</span></button>
+                 <button class="btn btn-small" onclick="refreshFiles()" aria-label="Refresh library" title="Refresh library">🔄<span class="btn-label"> Refresh Library</span></button>
+                 <button class="btn btn-small btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" hidden>🔁<span class="btn-label"> Review Duplicates</span></button>
+                 <button class="btn btn-small" id="combineFoldersBtn" onclick="openCombineFoldersModal()" hidden>📁<span class="btn-label"> Combine Folders</span></button>
+             </div>
              <div class="library-health-grid">
                  <button class="library-health-card success" type="button" onclick="setHeaderFilter('marked')">
                      <span class="library-health-label">Processed</span>
@@ -311,10 +312,6 @@
                  <p>Add comics to your watched folder, or use <strong>Scan Unmarked</strong> from the ⋮ menu to bring them in. Once files appear here, you'll see processing status, duplicates, and folders ready to combine.</p>
                  <button class="btn btn-primary btn-small" onclick="scanUnmarkedFiles()">🔍 Scan Unmarked</button>
              </div>
-             </div>
-         </section>
-
-         <section id="libraryFilesView">
              <div class="controls-wrapper">
                  <div class="actions-bar">
                     <div class="button-group">
@@ -424,7 +421,10 @@
                 <span class="select-info" id="selectInfo">No files selected</span>
             </div>
             </div>
+            </div>
+         </section>
 
+         <section id="libraryFilesView">
             <div class="content-wrapper">
                 <div class="series-layout-toolbar-mobile" id="seriesLayoutToolbarMobile" role="group" aria-label="Series layout" hidden>
                     <button type="button" class="series-layout-mobile-btn" id="seriesLayoutListBtnMobile" onclick="setSeriesLayout('list')" aria-label="List layout">

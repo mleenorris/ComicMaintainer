@@ -351,6 +351,43 @@ public class SeriesLibraryService : ISeriesLibraryService
             }
         }
 
+        // Final, cheap, unbounded pass: any issue still missing its number
+        // (e.g. files beyond the archive-upgrade budget, or files whose archive
+        // has no <Number>) gets its number parsed from the file name in memory.
+        // This guarantees the issue badge, ordering, and missing-issue grid are
+        // populated for every file in the series, not just the first
+        // SeriesIssuesMaxArchiveUpgrades of them.
+        for (var i = 0; i < pageIssues.Count; i++)
+        {
+            var issue = pageIssues[i];
+            if (!string.IsNullOrWhiteSpace(issue.Issue))
+            {
+                continue;
+            }
+            var parsedIssue = ResolveIssueNumber(issue);
+            if (string.IsNullOrWhiteSpace(parsedIssue))
+            {
+                continue;
+            }
+            pageIssues[i] = new SeriesIssueDto
+            {
+                FilePath = issue.FilePath,
+                FileName = issue.FileName,
+                Title = issue.Title,
+                Issue = parsedIssue,
+                Volume = issue.Volume,
+                Publisher = issue.Publisher,
+                Year = issue.Year,
+                Size = issue.Size,
+                Modified = issue.Modified,
+                Processed = issue.Processed,
+                Renamed = issue.Renamed,
+                Normalized = issue.Normalized,
+                Duplicate = issue.Duplicate,
+                Read = issue.Read
+            };
+        }
+
         return new SeriesIssuesResult
         {
             Id = accumulator.Id,
@@ -930,7 +967,7 @@ public class SeriesLibraryService : ISeriesLibraryService
     private static List<SeriesIssueDto> SortIssues(IEnumerable<SeriesIssueDto> issues)
     {
         return issues
-            .OrderBy(issue => ExtractIssueSortKey(issue.Issue), new NaturalStringComparer())
+            .OrderBy(issue => ExtractIssueSortKey(ResolveIssueNumber(issue)), new NaturalStringComparer())
             .ThenBy(issue => issue.FileName, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -1077,6 +1114,27 @@ public class SeriesLibraryService : ISeriesLibraryService
 
     private static string ExtractIssueSortKey(string? issue)
         => string.IsNullOrWhiteSpace(issue) ? "~" : issue;
+
+    /// <summary>
+    /// Returns the issue number for a DTO, falling back to a cheap, in-memory
+    /// parse of the file name when the cached metadata lacks one. This keeps
+    /// the issue badge, ordering, and missing-issue grid populated for every
+    /// file in a series — including series with more than
+    /// <see cref="AppSettings.SeriesIssuesMaxArchiveUpgrades"/> files, where the
+    /// best-effort archive-upgrade loop would otherwise stop reading titles
+    /// from disk and leave later issues' overlays blank.
+    /// </summary>
+    private static string? ResolveIssueNumber(SeriesIssueDto issue)
+    {
+        if (!string.IsNullOrWhiteSpace(issue.Issue))
+        {
+            return issue.Issue;
+        }
+
+        return string.IsNullOrWhiteSpace(issue.FileName)
+            ? null
+            : ComicFileProcessor.ParseChapterNumber(issue.FileName);
+    }
 
     private static void AddAliasIfNew(SeriesAccumulator accumulator, IEnumerable<string> aliases, string canonicalTitle)
     {

@@ -388,6 +388,49 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
+    public async Task GetSeriesIssuesAsync_PopulatesIssueNumberFromFileNameBeyondUpgradeCap()
+    {
+        // 50 files with no cached Issue/Title. With the archive-upgrade cap set
+        // to 5, the disk-read loop only fills metadata for a handful of files.
+        // Every returned issue must still expose a number — parsed cheaply from
+        // the file name — so the overlay badge, ordering, and missing-issue grid
+        // populate for the whole series, not just the first cap-many files.
+        var files = Enumerable.Range(1, 50).Select(i => new ComicFile
+        {
+            FilePath = $"/library/Batman/Batman {i:000}.cbz",
+            FileName = $"Batman {i:000}.cbz",
+            Directory = "/library/Batman",
+            FileSize = 100,
+            LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddDays(i),
+            Metadata = new ComicMetadata { Series = "Batman" }
+        }).Cast<ComicFile>().ToList();
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>())).ReturnsAsync(files);
+        // Archive upgrades never supply an Issue, so the only source of issue
+        // numbers for upgraded files is the file-name fallback as well.
+        _processor.Setup(p => p.GetSeriesMetadataAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadata { Series = "Batman", Title = "Upgraded" });
+
+        var monitor = new Mock<IOptionsMonitor<AppSettings>>();
+        monitor.Setup(m => m.CurrentValue).Returns(new AppSettings { SeriesIssuesMaxArchiveUpgrades = 5 });
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, monitor.Object, _logger.Object);
+
+        var summaries = await service.GetSeriesSummariesAsync();
+        var seriesId = summaries.Series.Single().Id;
+
+        var result = await service.GetSeriesIssuesAsync(seriesId, perPage: -1);
+
+        Assert.NotNull(result);
+        Assert.Equal(50, result!.IssueCount);
+        Assert.Equal(50, result.Issues.Count);
+        // Every issue — including those past the upgrade cap — has a number.
+        Assert.All(result.Issues, issue => Assert.False(string.IsNullOrWhiteSpace(issue.Issue)));
+        // Numbers reflect the file names and are returned in natural order.
+        Assert.Equal(
+            Enumerable.Range(1, 50).Select(i => i.ToString()).ToList(),
+            result.Issues.Select(i => i.Issue!).ToList());
+    }
+
+    [Fact]
     public async Task GetSeriesIssuesAsync_SkipsArchiveUpgradeWhenCachedTitleAndIssuePresent()
     {
         var files = new List<ComicFile>

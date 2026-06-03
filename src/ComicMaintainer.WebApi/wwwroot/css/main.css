@@ -1955,12 +1955,6 @@
             font-size: 13px;
         }
 
-        .library-health-actions {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
         .library-health-grid {
             display: grid;
             /* Compact 2×2 / responsive auto-fit so the stat bubbles stay

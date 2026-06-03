@@ -1002,7 +1002,7 @@
             color: var(--text-secondary);
         }
 
-
+        .series-cover-wrapper {
             position: relative;
             width: 100%;
             aspect-ratio: 2 / 3;

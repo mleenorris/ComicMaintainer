@@ -285,12 +285,6 @@
                  </div>
              </div>
              <div class="library-health-body" id="libraryHealthBody">
-             <div class="library-health-actions">
-                 <button class="btn btn-small" onclick="refreshLibraryHealth()" aria-label="Refresh library health" title="Refresh">🔄<span class="btn-label"> Refresh</span></button>
-                 <button class="btn btn-small" onclick="refreshFiles()" aria-label="Refresh library" title="Refresh library">🔄<span class="btn-label"> Refresh Library</span></button>
-                 <button class="btn btn-small btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" hidden>🔁<span class="btn-label"> Review Duplicates</span></button>
-                 <button class="btn btn-small" id="combineFoldersBtn" onclick="openCombineFoldersModal()" hidden>📁<span class="btn-label"> Combine Folders</span></button>
-             </div>
              <div class="library-health-grid">
                  <button class="library-health-card success" type="button" onclick="setHeaderFilter('marked')">
                      <span class="library-health-label">Processed</span>
@@ -424,6 +418,10 @@
                     
                     <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>✏️<span> Update</span></button>
                     <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteSelectedBtn" disabled>🗑️<span> Delete</span></button>
+                    <button class="btn" onclick="refreshLibraryHealth()" aria-label="Refresh library health" title="Refresh">🔄<span class="btn-label"> Refresh</span></button>
+                    <button class="btn" onclick="refreshFiles()" aria-label="Refresh library" title="Refresh library">🔄<span class="btn-label"> Refresh Library</span></button>
+                    <button class="btn btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" hidden>🔁<span class="btn-label"> Review Duplicates</span></button>
+                    <button class="btn" id="combineFoldersBtn" onclick="openCombineFoldersModal()" hidden>📁<span class="btn-label"> Combine Folders</span></button>
                 </div>
                 <span class="select-info" id="selectInfo">No files selected</span>
             </div>

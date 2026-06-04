@@ -80,6 +80,13 @@ public class SeriesMetadataCacheRecord
     public List<LocalizedTitle> LocalizedTitles { get; set; } = new();
 
     /// <summary>
+    /// Plain-text synopsis / summary captured from the last successful external
+    /// lookup, shown at the top of the series page. Null when unavailable.
+    /// </summary>
+    [JsonPropertyName("synopsis")]
+    public string? Synopsis { get; set; }
+
+    /// <summary>
     /// Monotonic version bumped on every cache mutation that should
     /// invalidate stale per-file metadata stamps. Surfaced so external
     /// callers can verify the version a UI screen was rendered against.

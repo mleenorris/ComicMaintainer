@@ -193,7 +193,7 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
         var query = Uri.EscapeDataString(seriesName);
         var apiKey = Uri.EscapeDataString(settings.ComicVineApiKey ?? string.Empty);
         var baseUrl = settings.ComicVineBaseUrl.TrimEnd('/');
-        return $"{baseUrl}/search/?api_key={apiKey}&format=json&resources=volume&limit={limit}&field_list=name,aliases,image&query={query}";
+        return $"{baseUrl}/search/?api_key={apiKey}&format=json&resources=volume&limit={limit}&field_list=name,aliases,image,deck,description&query={query}";
     }
 
     private static IReadOnlyList<ExternalSeriesMetadata> ParseResults(JsonElement root)
@@ -244,11 +244,37 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
                 Source = "ComicVine",
                 ImageUrl = imageUrl,
                 ThumbnailUrl = thumbnailUrl,
+                Synopsis = ExtractSynopsis(item),
                 LocalizedTitles = localizedTitles
             });
         }
 
         return output;
+    }
+
+    /// <summary>
+    /// Reads the ComicVine description, preferring the short plain-text
+    /// <c>deck</c> and falling back to the longer HTML <c>description</c>.
+    /// </summary>
+    private static string? ExtractSynopsis(JsonElement item)
+    {
+        if (item.TryGetProperty("deck", out var deck)
+            && deck.ValueKind == JsonValueKind.String)
+        {
+            var normalizedDeck = SynopsisTextNormalizer.Normalize(deck.GetString());
+            if (!string.IsNullOrWhiteSpace(normalizedDeck))
+            {
+                return normalizedDeck;
+            }
+        }
+
+        if (item.TryGetProperty("description", out var description)
+            && description.ValueKind == JsonValueKind.String)
+        {
+            return SynopsisTextNormalizer.Normalize(description.GetString());
+        }
+
+        return null;
     }
 
     /// <summary>

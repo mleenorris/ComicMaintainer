@@ -78,7 +78,8 @@ public class SeriesLibraryService : ISeriesLibraryService
                     CoverFilePath = accumulator.Issues.FirstOrDefault()?.FilePath ?? string.Empty,
                     HasExternalImage = accumulator.HasExternalImage,
                     ExternalImageUrl = BuildExternalImageUrl(accumulator),
-                    Issues = accumulator.Issues
+                    Issues = accumulator.Issues,
+                    Synopsis = accumulator.Synopsis
                 };
             })
             .ToList();
@@ -212,13 +213,57 @@ public class SeriesLibraryService : ISeriesLibraryService
                 HasExternalImage = item.Accumulator.HasExternalImage,
                 ExternalImageUrl = BuildExternalImageUrl(item.Accumulator),
                 LookupStatus = item.Accumulator.LookupStatus,
-                LastLookupUtc = item.Accumulator.LastLookupUtc
+                LastLookupUtc = item.Accumulator.LastLookupUtc,
+                Synopsis = item.Accumulator.Synopsis
             }).ToList(),
             Page = page,
             TotalPages = totalPages,
             TotalSeries = totalSeries,
             Offset = effectiveOffset
         };
+    }
+
+    public async Task<IReadOnlyList<SeriesOverviewEntry>> GetSeriesOverviewEntriesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        // Overview never reads archives on disk; it relies on the cached
+        // grouping so the home page stays fast even for huge libraries.
+        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+
+        var entries = new List<SeriesOverviewEntry>(groups.Count);
+        foreach (var accumulator in groups.Values)
+        {
+            var sortedIssues = SortIssues(accumulator.Issues);
+            var cover = sortedIssues.FirstOrDefault()?.FilePath ?? string.Empty;
+
+            entries.Add(new SeriesOverviewEntry
+            {
+                Summary = new SeriesSummaryDto
+                {
+                    Id = accumulator.Id,
+                    Title = accumulator.DisplayTitle,
+                    CanonicalTitle = accumulator.CanonicalTitle,
+                    Aliases = NormalizeAliases(accumulator.Aliases),
+                    MetadataSource = accumulator.MetadataSource,
+                    IssueCount = accumulator.Issues.Count,
+                    TotalSize = accumulator.TotalSize,
+                    LatestModified = ToUnixTime(accumulator.LatestModified),
+                    CoverFilePath = cover,
+                    HasExternalImage = accumulator.HasExternalImage,
+                    ExternalImageUrl = BuildExternalImageUrl(accumulator),
+                    LookupStatus = accumulator.LookupStatus,
+                    LastLookupUtc = accumulator.LastLookupUtc,
+                    Synopsis = accumulator.Synopsis
+                },
+                EarliestCreatedAt = accumulator.EarliestCreatedAt == DateTime.MaxValue
+                    ? DateTime.MinValue
+                    : accumulator.EarliestCreatedAt,
+                LatestCreatedAt = accumulator.LatestCreatedAt,
+                FilePaths = accumulator.Issues.Select(i => i.FilePath).ToList()
+            });
+        }
+
+        return entries;
     }
 
     public async Task<SeriesIssuesResult?> GetSeriesIssuesAsync(
@@ -277,7 +322,8 @@ public class SeriesLibraryService : ISeriesLibraryService
                     LastLookupUtc = unfilteredAccumulator.LastLookupUtc,
                     Aliases = new List<string>(unfilteredAccumulator.Aliases),
                     HasExternalImage = unfilteredAccumulator.HasExternalImage,
-                    ImageNormalizedKey = unfilteredAccumulator.ImageNormalizedKey
+                    ImageNormalizedKey = unfilteredAccumulator.ImageNormalizedKey,
+                    Synopsis = unfilteredAccumulator.Synopsis
                     // Issues intentionally left empty: the active filter
                     // excludes every file in this series.
                 };
@@ -751,7 +797,8 @@ public class SeriesLibraryService : ISeriesLibraryService
                     LastLookupUtc = record?.LastLookupUtc,
                     Aliases = new List<string>(),
                     HasExternalImage = record is not null && record.HasImage,
-                    ImageNormalizedKey = record?.NormalizedKey
+                    ImageNormalizedKey = record?.NormalizedKey,
+                    Synopsis = record?.Synopsis
                 };
 
                 if (record is not null)
@@ -782,6 +829,14 @@ public class SeriesLibraryService : ISeriesLibraryService
             accumulator.LatestModified = accumulator.LatestModified < file.LastModified
                 ? file.LastModified
                 : accumulator.LatestModified;
+            if (file.CreatedAt < accumulator.EarliestCreatedAt)
+            {
+                accumulator.EarliestCreatedAt = file.CreatedAt;
+            }
+            if (file.CreatedAt > accumulator.LatestCreatedAt)
+            {
+                accumulator.LatestCreatedAt = file.CreatedAt;
+            }
 
             accumulator.Issues.Add(new SeriesIssueDto
             {
@@ -1478,6 +1533,15 @@ public class SeriesLibraryService : ISeriesLibraryService
         public List<SeriesIssueDto> Issues { get; set; } = new();
         public long TotalSize { get; set; }
         public DateTime LatestModified { get; set; } = DateTime.MinValue;
+
+        /// <summary>Earliest CreatedAt across this series' files (when the series first appeared).</summary>
+        public DateTime EarliestCreatedAt { get; set; } = DateTime.MaxValue;
+
+        /// <summary>Latest CreatedAt across this series' files (most recent file added).</summary>
+        public DateTime LatestCreatedAt { get; set; } = DateTime.MinValue;
+
+        /// <summary>Plain-text synopsis from the matched external metadata record, if any.</summary>
+        public string? Synopsis { get; set; }
 
         /// <summary>True when a series-level cover image is cached locally.</summary>
         public bool HasExternalImage { get; set; }

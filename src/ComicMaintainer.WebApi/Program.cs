@@ -503,6 +503,7 @@ builder.Services.AddSingleton<ISettingsService, SettingsService>();
 builder.Services.AddSingleton<IComicReaderService, ComicReaderService>();
 builder.Services.AddSingleton<IFileCoverCacheService, FileCoverCacheService>();
 builder.Services.AddSingleton<ISeriesLibraryService, SeriesLibraryService>();
+builder.Services.AddSingleton<IOverviewService, OverviewService>();
 builder.Services.AddSingleton<ISeriesMetadataCacheService, SeriesMetadataCacheService>();
 builder.Services.AddSingleton<ISeriesMetadataRefreshJobService, SeriesMetadataRefreshJobService>();
 builder.Services.AddSingleton<ISeriesLanguagePreferenceRetagService, SeriesLanguagePreferenceRetagService>();

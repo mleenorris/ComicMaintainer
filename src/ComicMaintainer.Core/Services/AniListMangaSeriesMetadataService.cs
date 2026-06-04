@@ -37,6 +37,7 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
             media(search: $search, type: MANGA, countryOfOrigin: "JP", sort: SEARCH_MATCH) {
               title { romaji english native }
               synonyms
+              description(asHtml: false)
               coverImage { extraLarge large medium }
             }
           }
@@ -326,11 +327,23 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
                 Source = "AniListManga",
                 ImageUrl = imageUrl,
                 ThumbnailUrl = thumbnailUrl,
+                Synopsis = ExtractSynopsis(item),
                 LocalizedTitles = localizedTitles
             });
         }
 
         return output;
+    }
+
+    /// <summary>Reads the AniList <c>description</c> field as plain text.</summary>
+    private static string? ExtractSynopsis(JsonElement media)
+    {
+        if (media.TryGetProperty("description", out var description)
+            && description.ValueKind == JsonValueKind.String)
+        {
+            return SynopsisTextNormalizer.Normalize(description.GetString());
+        }
+        return null;
     }
 
     /// <summary>

@@ -21,6 +21,13 @@ public class ExternalSeriesMetadata
     public string? ThumbnailUrl { get; set; }
 
     /// <summary>
+    /// Plain-text synopsis / summary / description of the series as reported by
+    /// the provider, with any provider-specific HTML or BBCode stripped. Null
+    /// when the provider returns no description.
+    /// </summary>
+    public string? Synopsis { get; set; }
+
+    /// <summary>
     /// Optional confidence score (0–100) describing how well this candidate
     /// matches a user query. Populated by the search/scoring layer (not by
     /// providers themselves). 100 = exact normalized match on the canonical

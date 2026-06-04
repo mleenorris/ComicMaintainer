@@ -688,6 +688,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 LastLookupUtc = now,
                 LookupStatus = lookupStatus,
                 LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(match)),
+                Synopsis = SynopsisTextNormalizer.Normalize(match.Synopsis),
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -703,6 +704,14 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             entity.LastLookupUtc = now;
             entity.LocalizedTitlesJson = SerializeLocalizedTitles(BuildLocalizedTitles(match));
             entity.LookupStatus = lookupStatus;
+            // Refresh the synopsis when the provider returned one; preserve the
+            // existing synopsis when this match carries none (e.g. a manual
+            // match selected from a candidate without a description).
+            var normalizedSynopsis = SynopsisTextNormalizer.Normalize(match.Synopsis);
+            if (!string.IsNullOrWhiteSpace(normalizedSynopsis))
+            {
+                entity.Synopsis = normalizedSynopsis;
+            }
             entity.UpdatedAt = now;
             BumpMetadataVersion(entity);
         }
@@ -742,6 +751,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         entity.LastLookupUtc = null;
         entity.LookupStatus = "cleared";
         entity.LocalizedTitlesJson = null;
+        entity.Synopsis = null;
 
         // Revert the provider-derived canonical title to the normalized key
         // so the UI shows a recognisable placeholder rather than a stale
@@ -788,7 +798,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             ImageStatus = entity.ImageStatus,
             PreferredLanguage = entity.PreferredLanguage,
             LocalizedTitles = DeserializeLocalizedTitles(entity.LocalizedTitlesJson),
-            MetadataVersion = entity.MetadataVersion
+            MetadataVersion = entity.MetadataVersion,
+            Synopsis = entity.Synopsis
         };
 
         // Compute the single authoritative name via the shared resolver so

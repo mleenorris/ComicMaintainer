@@ -275,11 +275,46 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
                 Source = "MangaDex",
                 ImageUrl = imageUrl,
                 ThumbnailUrl = thumbnailUrl,
+                Synopsis = ExtractSynopsis(attributes),
                 LocalizedTitles = localizedTitles
             });
         }
 
         return output;
+    }
+
+    /// <summary>
+    /// Reads the MangaDex localized <c>description</c> object, preferring the
+    /// English entry and falling back to the first available language.
+    /// </summary>
+    private static string? ExtractSynopsis(JsonElement attributes)
+    {
+        if (!attributes.TryGetProperty("description", out var description)
+            || description.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        string? raw = null;
+        if (description.TryGetProperty("en", out var enDesc) && enDesc.ValueKind == JsonValueKind.String)
+        {
+            raw = enDesc.GetString();
+        }
+
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            foreach (var property in description.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(property.Value.GetString()))
+                {
+                    raw = property.Value.GetString();
+                    break;
+                }
+            }
+        }
+
+        return SynopsisTextNormalizer.Normalize(raw);
     }
 
     /// <summary>

@@ -27,6 +27,7 @@ public class ComicFile
     public string Directory { get; set; } = string.Empty;
     public long FileSize { get; set; }
     public DateTime LastModified { get; set; }
+    public DateTime CreatedAt { get; set; }
     public bool IsProcessed { get; set; }
     public bool IsRenamed { get; set; }
     public bool IsNormalized { get; set; }

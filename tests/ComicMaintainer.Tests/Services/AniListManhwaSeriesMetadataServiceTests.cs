@@ -71,6 +71,41 @@ public class AniListManhwaSeriesMetadataServiceTests
     }
 
     [Fact]
+    public async Task LookupSeriesAsync_PopulatesSynopsisAsPlainText()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+            {
+              "data": {
+                "Page": {
+                  "media": [
+                    {
+                      "title": { "english": "Solo Leveling" },
+                      "description": "The weakest hunter <b>Sung Jin-Woo</b> rises.<br>A system awakens."
+                    }
+                  ]
+                }
+              }
+            }
+            """, Encoding.UTF8, "application/json")
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableAniListMetadata = true,
+            AniListBaseUrl = "https://graphql.anilist.example"
+        });
+
+        var result = await service.LookupSeriesAsync("Solo Leveling");
+
+        Assert.NotNull(result);
+        Assert.False(string.IsNullOrWhiteSpace(result!.Synopsis));
+        Assert.Contains("Sung Jin-Woo", result.Synopsis);
+        Assert.DoesNotContain("<b>", result.Synopsis);
+    }
+
+    [Fact]
     public async Task LookupSeriesAsync_MatchesByAlias_NativeTitle()
     {
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)

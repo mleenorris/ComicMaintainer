@@ -80,6 +80,41 @@ public class AniListMangaSeriesMetadataServiceTests
     }
 
     [Fact]
+    public async Task LookupSeriesAsync_PopulatesSynopsisAsPlainText()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+            {
+              "data": {
+                "Page": {
+                  "media": [
+                    {
+                      "title": { "english": "Attack on Titan" },
+                      "description": "Humanity fights <i>titans</i>.<br>Behind walls."
+                    }
+                  ]
+                }
+              }
+            }
+            """, Encoding.UTF8, "application/json")
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableAniListMetadata = true,
+            AniListBaseUrl = "https://graphql.anilist.example"
+        });
+
+        var result = await service.LookupSeriesAsync("Attack on Titan");
+
+        Assert.NotNull(result);
+        Assert.False(string.IsNullOrWhiteSpace(result!.Synopsis));
+        Assert.Contains("titans", result.Synopsis);
+        Assert.DoesNotContain("<i>", result.Synopsis);
+    }
+
+    [Fact]
     public async Task LookupSeriesAsync_MatchesByAlias_NativeTitle()
     {
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)

@@ -1443,13 +1443,20 @@ public class SeriesLibraryService : ISeriesLibraryService
         var wholeIssues = new HashSet<long>();
         foreach (var issue in accumulator.Issues)
         {
-            if (string.IsNullOrWhiteSpace(issue.Issue))
+            // Summary mode never opens archives on disk, so issue.Issue is often
+            // blank for comics that only encode the chapter number in their file
+            // name. Resolve it the same way the badge/ordering/missing-issue grid
+            // do (parsing the file name as a fallback); otherwise gap detection
+            // would see too few whole numbers and wrongly report no missing
+            // issues for the entire library.
+            var issueNumber = ResolveIssueNumber(issue);
+            if (string.IsNullOrWhiteSpace(issueNumber))
             {
                 continue;
             }
 
             if (!double.TryParse(
-                    issue.Issue.Trim(),
+                    issueNumber.Trim(),
                     System.Globalization.NumberStyles.Float,
                     System.Globalization.CultureInfo.InvariantCulture,
                     out var value))

@@ -1347,6 +1347,188 @@
         }
         
         // Initialization function that runs after DOM is ready
+        // ── Top-level SPA routing ─────────────────────────────────────────────
+        // Hash-based routes keep the app a static SPA while giving each
+        // top-level page a shareable/bookmarkable URL and working browser
+        // back/forward:
+        //   #/home          → overview page (default landing)
+        //   #/library       → full series library (grid/list, filters, bulk)
+        //   #/series/{id}    → a single series' page (synopsis + files)
+        let currentView = 'home';           // 'home' | 'library' | 'series'
+        let seriesDetailOrigin = 'library'; // where the series "Back" returns to
+        let overviewLoaded = false;
+
+        function parseHash() {
+            const raw = (window.location.hash || '').replace(/^#/, '');
+            if (raw.startsWith('/series/')) {
+                return { view: 'series', seriesId: decodeURIComponent(raw.slice('/series/'.length)) };
+            }
+            if (raw === '/library') return { view: 'library' };
+            return { view: 'home' };
+        }
+
+        // Navigate to a route. Setting the hash fires `hashchange`, which the
+        // router handles; if the hash is already set we re-run the handler so
+        // repeat clicks still refresh the view.
+        function navigate(hash) {
+            if (window.location.hash === hash) {
+                handleRouteChange();
+            } else {
+                window.location.hash = hash;
+            }
+        }
+
+        function handleRouteChange() {
+            const route = parseHash();
+            currentView = route.view;
+            applyViewVisibility(route.view);
+            if (route.view === 'home') {
+                renderOverview();
+            } else if (route.view === 'series') {
+                renderSeriesDetailView(route.seriesId);
+            } else {
+                // Library list: ensure we're not stuck in a detail panel.
+                if (currentSeriesDetailId) {
+                    disconnectSeriesIssuesObserver();
+                    currentSeriesDetailId = null;
+                    currentSeriesDetailTitleKeys = null;
+                    currentSeriesDetailSeries = null;
+                }
+                renderLibraryView();
+            }
+            updateNavActiveState();
+        }
+
+        // Show/hide the top-level sections and the header controls that only
+        // make sense inside the library / series contexts.
+        function applyViewVisibility(view) {
+            const isHome = view === 'home';
+            const isLibraryList = view === 'library';
+            const overview = document.getElementById('overviewView');
+            const health = document.getElementById('libraryHealthDashboard');
+            const files = document.getElementById('libraryFilesView');
+            if (overview) overview.hidden = !isHome;
+            if (health) health.style.display = isHome ? 'none' : '';
+            if (files) files.style.display = isHome ? 'none' : '';
+
+            // Search / filter / sort apply to the library and series files.
+            const headerSearch = document.querySelector('.header-search');
+            const headerFilter = document.querySelector('.header-filter-dropdown');
+            const headerSort = document.querySelector('.header-sort-dropdown');
+            [headerSearch, headerFilter, headerSort].forEach(el => {
+                if (el) el.style.display = isHome ? 'none' : '';
+            });
+
+            // The list/grid/compact layout toggle is only meaningful on the
+            // full library grid (not the overview or a single series page).
+            const layoutToggle = document.getElementById('seriesLayoutToggle');
+            const layoutToolbarMobile = document.getElementById('seriesLayoutToolbarMobile');
+            if (layoutToggle) layoutToggle.hidden = !isLibraryList;
+            if (layoutToolbarMobile) layoutToolbarMobile.hidden = !isLibraryList;
+        }
+
+        function updateNavActiveState() {
+            document.getElementById('navOverviewBtn')?.classList.toggle('active', currentView === 'home');
+            document.getElementById('navLibraryBtn')?.classList.toggle('active', currentView === 'library' || currentView === 'series');
+        }
+
+        // Render the full library list (reuses the existing series grid/list).
+        function renderLibraryView() {
+            if (seriesLibrary.length) {
+                renderSeriesLibrary();
+            } else if (!seriesLoading) {
+                loadActiveLibraryView();
+            }
+            updatePagination();
+            updateLibraryViewLayout();
+        }
+
+        // Open a single series' page. Resilient to deep-links / refreshes where
+        // the library list hasn't been fetched yet.
+        async function renderSeriesDetailView(seriesId) {
+            if (!seriesId) { navigate('#/library'); return; }
+            if (!seriesLibrary.length && !seriesLoading) {
+                await loadActiveLibraryView();
+            }
+            currentSeriesDetailId = seriesId;
+            const found = seriesLibrary.find(item => item && item.id === seriesId);
+            captureSeriesDetailIdentity(found);
+            if (found) currentSeriesDetailSeries = found;
+            renderSeriesDetail(seriesId);
+            loadSeriesIssues(seriesId);
+            updateLibraryViewLayout();
+        }
+
+        // ── Overview page ─────────────────────────────────────────────────────
+        async function renderOverview() {
+            const container = document.getElementById('overviewRows');
+            if (!container) return;
+            if (!overviewLoaded) {
+                container.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading overview...</p></div>`;
+            }
+            let data;
+            try {
+                const resp = await fetch(apiUrl('/api/overview'), {
+                    headers: getAuthHeaders ? getAuthHeaders() : undefined,
+                    credentials: 'same-origin'
+                });
+                if (!resp.ok) throw new Error('overview ' + resp.status);
+                data = await resp.json();
+            } catch (err) {
+                console.error('Failed to load overview', err);
+                container.innerHTML = `<div class="empty-state"><p>Couldn't load your overview. <button type="button" class="btn btn-small" onclick="renderOverview()">Retry</button></p></div>`;
+                return;
+            }
+            overviewLoaded = true;
+            const rows = [
+                { title: '▶ Continue Reading', items: data.continue_reading || [], empty: 'Nothing in progress yet.', resume: true, seeAll: false },
+                { title: '🆕 Series Updates', items: data.series_updates || [], empty: 'No new files in the last 30 days.', resume: false, seeAll: true },
+                { title: '✨ Newly Added Series', items: data.newly_added_series || [], empty: 'No new series in the last 30 days.', resume: false, seeAll: true }
+            ];
+            container.innerHTML = rows.map(renderOverviewRow).join('');
+            hydrateProtectedImages(container);
+        }
+
+        function renderOverviewRow(row) {
+            const cards = row.items.length
+                ? row.items.map(series => renderOverviewCard(series, row.resume)).join('')
+                : `<div class="overview-empty">${escapeHtml(row.empty)}</div>`;
+            return `
+                <section class="overview-row">
+                    <div class="overview-row-header">
+                        <h2 class="overview-row-title">${escapeHtml(row.title)}</h2>
+                        ${row.seeAll && row.items.length ? `<button type="button" class="overview-see-all" onclick="navigate('#/library')">See all →</button>` : ''}
+                    </div>
+                    <div class="overview-carousel">${cards}</div>
+                </section>
+            `;
+        }
+
+        function renderOverviewCard(series, resume) {
+            const cover = series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path;
+            const fallback = series.has_external_image && series.external_image_url ? series.cover_file_path : '';
+            const resumeBtn = (resume && series.resume_file_path)
+                ? `<button type="button" class="overview-resume-btn" onclick="event.stopPropagation(); readComic('${escapeJs(series.resume_file_path)}')">▶ Resume</button>`
+                : '';
+            return `
+                <div class="overview-card">
+                    <button class="series-card overview-series-card" type="button" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
+                        <div class="series-cover-wrapper">
+                            <img class="series-cover" data-protected-image="${escapeHtml(cover)}" data-protected-image-fallback="${escapeHtml(fallback)}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                            <div class="series-cover-overlay"></div>
+                            <span class="series-count-badge">${series.issue_count}</span>
+                            ${renderLookupStatusBadge(series)}
+                            <div class="series-card-body">
+                                <h3 class="series-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
+                                <div class="series-meta">${formatFileSize(series.total_size)}</div>
+                            </div>
+                        </div>
+                    </button>
+                    ${resumeBtn}
+                </div>
+            `;
+        }
+
         async function initializeApp() {
             // Initialize non-async operations immediately
             initTheme();
@@ -1438,6 +1620,15 @@
             // Errors are handled here to avoid unhandled promise rejections.
             jobCheckPromise.catch(error => console.error('Failed to check active job:', error));
             libraryHealthPromise.catch(error => console.error('Failed to load library health:', error));
+
+            // Wire up hash-based routing and render the initial view. Default
+            // new sessions to the overview page (#/home).
+            window.addEventListener('hashchange', handleRouteChange);
+            if (!window.location.hash || window.location.hash === '#') {
+                window.location.hash = '#/home';
+            } else {
+                handleRouteChange();
+            }
 
             // Restore "where we were" if the user is coming back from the
             // reader. Runs after the initial library view has had a chance
@@ -1592,7 +1783,10 @@
         function updateSeriesLayoutButtons() {
             const toggle = document.getElementById('seriesLayoutToggle');
             const mobileToolbar = document.getElementById('seriesLayoutToolbarMobile');
-            const inSeriesMode = libraryViewMode === 'series';
+            // The layout toggle only applies to the full library grid/list — not
+            // the overview page or a single series' page.
+            const inSeriesMode = libraryViewMode === 'series'
+                && (typeof currentView === 'undefined' || currentView === 'library');
             if (toggle) toggle.hidden = !inSeriesMode;
             if (mobileToolbar) mobileToolbar.hidden = !inSeriesMode;
             if (!inSeriesMode) return;
@@ -2631,14 +2825,10 @@
         }
 
         function openSeriesDetail(seriesId) {
-            currentSeriesDetailId = seriesId;
-            const found = seriesLibrary.find(item => item && item.id === seriesId);
-            captureSeriesDetailIdentity(found);
-            if (found) currentSeriesDetailSeries = found;
-            renderSeriesDetail(seriesId);
-            // Kick off the issues fetch right away so the detail content
-            // appears as soon as it's available.
-            loadSeriesIssues(seriesId);
+            // Remember where we came from so Back returns to the right place,
+            // then navigate to the series route (the router renders the detail).
+            seriesDetailOrigin = (currentView === 'home') ? 'home' : 'library';
+            navigate('#/series/' + encodeURIComponent(seriesId));
         }
 
         function closeSeriesDetail() {
@@ -2646,9 +2836,7 @@
             currentSeriesDetailId = null;
             currentSeriesDetailTitleKeys = null;
             currentSeriesDetailSeries = null;
-            renderSeriesLibrary();
-            updatePagination();
-            updateLibraryViewLayout();
+            navigate(seriesDetailOrigin === 'home' ? '#/home' : '#/library');
         }
 
         // Normalize a title-like value for case-insensitive comparison.
@@ -3155,6 +3343,30 @@
                                 </div>`;
         }
 
+        // Renders the external-metadata synopsis block shown at the top of the
+        // series page. Long synopses are clamped with a Show more / Show less
+        // toggle. Returns an empty string when the series has no synopsis.
+        function renderSeriesSynopsis(series) {
+            const synopsis = series && typeof series.synopsis === 'string' ? series.synopsis.trim() : '';
+            if (!synopsis) return '';
+            const isLong = synopsis.length > 320;
+            return `
+                <div class="series-detail-synopsis${isLong ? ' series-detail-synopsis--clamped' : ''}" data-synopsis-block>
+                    <p class="series-detail-synopsis-text">${escapeHtml(synopsis)}</p>
+                    ${isLong ? `<button type="button" class="series-detail-synopsis-toggle" onclick="toggleSeriesSynopsis(this)">Show more</button>` : ''}
+                </div>
+            `;
+        }
+
+        // Expands/collapses a clamped synopsis block.
+        function toggleSeriesSynopsis(btn) {
+            const block = btn.closest('[data-synopsis-block]');
+            if (!block) return;
+            const expanded = block.classList.toggle('series-detail-synopsis--expanded');
+            block.classList.toggle('series-detail-synopsis--clamped', !expanded);
+            btn.textContent = expanded ? 'Show less' : 'Show more';
+        }
+
         function renderSeriesDetail(seriesId) {
             const fileList = document.getElementById('fileList');
             // Restore/close any open action menu (which may be portaled to
@@ -3232,6 +3444,7 @@
                                 <div class="series-detail-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
                                 ${series.aliases?.length ? `<div class="series-detail-meta">Also known as: ${escapeHtml(series.aliases.join(', '))}</div>` : ''}
                                 ${series.metadata_source ? `<div class="series-detail-meta">Source: ${escapeHtml(series.metadata_source)}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
+                                ${renderSeriesSynopsis(series)}
                                 <div class="series-detail-actions">
                                     ${issues.length ? `<button type="button" class="btn btn-small" onclick="readComic('${escapeJs(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
                                     <div class="file-actions-dropdown series-actions-dropdown">

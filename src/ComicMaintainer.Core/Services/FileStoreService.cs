@@ -101,6 +101,7 @@ public class FileStoreService : IFileStoreService
             Directory = entity.Directory,
             FileSize = entity.FileSize,
             LastModified = entity.LastModified,
+            CreatedAt = entity.CreatedAt,
             IsProcessed = ComputeProcessedState(entity.IsRenamed, entity.IsNormalized),
             IsRenamed = entity.IsRenamed,
             IsNormalized = entity.IsNormalized,

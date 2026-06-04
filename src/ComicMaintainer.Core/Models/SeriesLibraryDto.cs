@@ -89,6 +89,10 @@ public class SeriesLibraryDto
 
     [JsonPropertyName("issues")]
     public List<SeriesIssueDto> Issues { get; set; } = new();
+
+    /// <summary>Plain-text synopsis from external metadata; null when none.</summary>
+    [JsonPropertyName("synopsis")]
+    public string? Synopsis { get; set; }
 }
 
 public class SeriesLibraryResult
@@ -150,6 +154,10 @@ public class SeriesSummaryDto
     /// <summary>UTC timestamp of the last external metadata lookup, if any.</summary>
     [JsonPropertyName("last_lookup_utc")]
     public DateTime? LastLookupUtc { get; set; }
+
+    /// <summary>Plain-text synopsis from external metadata; null when none.</summary>
+    [JsonPropertyName("synopsis")]
+    public string? Synopsis { get; set; }
 }
 
 public class SeriesSummaryResult

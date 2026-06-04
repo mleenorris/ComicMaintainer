@@ -83,5 +83,14 @@ public interface ISeriesLibraryService
     Task<IReadOnlyList<SeriesFolderDto>> GetFoldersForNormalizedKeyAsync(
         string normalizedKey,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns one lightweight projection per series (no disk reads), carrying
+    /// the summary card plus the created-at timestamps and file paths needed to
+    /// build the overview/home page rows. Reflects the same grouping as the
+    /// library so a series appears identically in both surfaces.
+    /// </summary>
+    Task<IReadOnlyList<SeriesOverviewEntry>> GetSeriesOverviewEntriesAsync(
+        CancellationToken cancellationToken = default);
 }
 

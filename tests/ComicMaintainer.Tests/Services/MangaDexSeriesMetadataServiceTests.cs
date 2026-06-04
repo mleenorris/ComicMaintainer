@@ -71,6 +71,41 @@ public class MangaDexSeriesMetadataServiceTests
     }
 
     [Fact]
+    public async Task LookupSeriesAsync_PopulatesSynopsisAsPlainText()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+            {
+              "data": [
+                {
+                  "attributes": {
+                    "title": { "en": "Solo Leveling" },
+                    "description": {
+                      "en": "A weak hunter named <b>Sung Jin-Woo</b> becomes the strongest.\n\nVisit [here](https://example.com)."
+                    }
+                  }
+                }
+              ]
+            }
+            """, Encoding.UTF8, "application/json")
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        });
+
+        var result = await service.LookupSeriesAsync("Solo Leveling");
+
+        Assert.NotNull(result);
+        Assert.False(string.IsNullOrWhiteSpace(result!.Synopsis));
+        Assert.Contains("Sung Jin-Woo", result.Synopsis);
+        Assert.DoesNotContain("<b>", result.Synopsis);
+    }
+
+    [Fact]
     public async Task LookupSeriesAsync_MatchesByAlias()
     {
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)

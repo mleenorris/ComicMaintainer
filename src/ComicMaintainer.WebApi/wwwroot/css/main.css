@@ -155,6 +155,42 @@
             gap: 8px;
             flex: 1;
         }
+
+        /* ── Primary top-level navigation (Overview / Library) ── */
+        .header-nav {
+            display: flex;
+            gap: 4px;
+            flex: 0 0 auto;
+        }
+
+        .header-nav-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 6px 12px;
+            border: 1px solid var(--border-primary);
+            border-radius: 8px;
+            background: var(--bg-secondary, transparent);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .header-nav-btn:hover {
+            background: var(--bg-hover);
+        }
+
+        .header-nav-btn.active {
+            background: var(--accent-primary, #4a90d9);
+            border-color: var(--accent-primary, #4a90d9);
+            color: #fff;
+        }
+
+        @media (max-width: 600px) {
+            .header-nav-label { display: none; }
+        }
         
         .header-search {
             position: relative;
@@ -1077,6 +1113,130 @@
             color: var(--text-muted);
             font-size: 12px;
             line-height: 1.5;
+        }
+
+        /* ── Series synopsis (external metadata) ── */
+        .series-detail-synopsis {
+            position: relative;
+            margin-top: 6px;
+            font-size: 13px;
+            line-height: 1.55;
+            color: var(--text-secondary, var(--text-muted));
+            max-width: 70ch;
+        }
+
+        .series-detail-synopsis-text {
+            margin: 0;
+            white-space: pre-line;
+        }
+
+        .series-detail-synopsis--clamped .series-detail-synopsis-text {
+            display: -webkit-box;
+            -webkit-line-clamp: 4;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .series-detail-synopsis-toggle {
+            margin-top: 4px;
+            padding: 0;
+            background: none;
+            border: none;
+            color: var(--accent-primary, #4a90d9);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .series-detail-synopsis-toggle:hover {
+            text-decoration: underline;
+        }
+
+        /* ── Overview page (home) ── */
+        .overview-rows {
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
+            padding: 16px 0;
+        }
+
+        .overview-row {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .overview-row-header {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 0 4px;
+        }
+
+        .overview-row-title {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+        }
+
+        .overview-see-all {
+            background: none;
+            border: none;
+            color: var(--accent-primary, #4a90d9);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .overview-see-all:hover { text-decoration: underline; }
+
+        .overview-carousel {
+            display: flex;
+            gap: 14px;
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding: 4px 4px 12px;
+            scroll-snap-type: x proximity;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .overview-card {
+            flex: 0 0 auto;
+            width: 160px;
+            scroll-snap-align: start;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .overview-series-card {
+            width: 100%;
+        }
+
+        .overview-resume-btn {
+            width: 100%;
+            padding: 6px 8px;
+            border: none;
+            border-radius: 8px;
+            background: var(--accent-primary, #4a90d9);
+            color: #fff;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .overview-resume-btn:hover { filter: brightness(1.08); }
+
+        .overview-empty {
+            color: var(--text-muted);
+            font-size: 14px;
+            padding: 16px 8px;
+        }
+
+        @media (max-width: 600px) {
+            .overview-card { width: 132px; }
         }
 
         /* ── Series detail view ── */

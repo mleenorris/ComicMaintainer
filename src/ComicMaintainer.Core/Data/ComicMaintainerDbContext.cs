@@ -449,4 +449,11 @@ public class SeriesMetadataCacheEntity
     /// first scan).
     /// </summary>
     public int MetadataVersion { get; set; } = 1;
+
+    /// <summary>
+    /// Plain-text synopsis / summary captured from the last successful external
+    /// metadata lookup, displayed at the top of the series page. Null when the
+    /// provider returned no description or the series is unmatched.
+    /// </summary>
+    public string? Synopsis { get; set; }
 }

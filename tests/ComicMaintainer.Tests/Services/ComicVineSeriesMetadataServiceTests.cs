@@ -54,6 +54,37 @@ public class ComicVineSeriesMetadataServiceTests
     }
 
     [Fact]
+    public async Task LookupSeriesAsync_PopulatesSynopsisPreferringDeck()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""
+            {
+              "results": [
+                {
+                  "name": "Batman",
+                  "deck": "The Dark Knight protects Gotham.",
+                  "description": "<p>A much longer <i>HTML</i> description.</p>"
+                }
+              ]
+            }
+            """, Encoding.UTF8, "application/json")
+        });
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableExternalSeriesMetadata = true,
+            ComicVineApiKey = "test-key",
+            ComicVineBaseUrl = "https://comicvine.example/api"
+        });
+
+        var result = await service.LookupSeriesAsync("Batman");
+
+        Assert.NotNull(result);
+        Assert.Equal("The Dark Knight protects Gotham.", result!.Synopsis);
+    }
+
+    [Fact]
     public async Task CheckHealthAsync_DisabledProvider_ReportsDisabled()
     {
         var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));

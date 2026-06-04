@@ -1,10 +1,14 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Reader.Interfaces;
+using ComicMaintainer.Core.Reader.Models;
+using ComicMaintainer.Core.Reader.Services;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.Extensions.Options;
+using System.Security.Claims;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
@@ -21,19 +25,22 @@ public class ComicReaderController : ControllerBase
     private readonly IFileCoverCacheService _coverCache;
     private readonly ILogger<ComicReaderController> _logger;
     private readonly IOptionsMonitor<AppSettings> _settings;
+    private readonly IReadingProgressService _readingProgress;
 
     public ComicReaderController(
         IComicReaderService readerService,
         IFileStoreService fileStore,
         IFileCoverCacheService coverCache,
         ILogger<ComicReaderController> logger,
-        IOptionsMonitor<AppSettings> settings)
+        IOptionsMonitor<AppSettings> settings,
+        IReadingProgressService readingProgress)
     {
         _readerService = readerService;
         _fileStore = fileStore;
         _coverCache = coverCache;
         _logger = logger;
         _settings = settings;
+        _readingProgress = readingProgress;
     }
 
     /// <summary>
@@ -312,6 +319,7 @@ public class ComicReaderController : ControllerBase
         try
         {
             await _fileStore.MarkFileReadAsync(filePath, true, cancellationToken);
+            await RecordUserProgressAsync(filePath, markComplete: true, page: null, cancellationToken);
             _logger.LogDebug("Marked file as read: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return Ok();
         }
@@ -349,6 +357,7 @@ public class ComicReaderController : ControllerBase
         try
         {
             await _fileStore.SaveReadingProgressAsync(filePath, page, cancellationToken);
+            await RecordUserProgressAsync(filePath, markComplete: false, page: page, cancellationToken);
             _logger.LogDebug("Saved reading progress for {FilePath}: page {Page}", LoggingHelper.SanitizePathForLog(filePath), page);
             return Ok();
         }
@@ -386,6 +395,50 @@ public class ComicReaderController : ControllerBase
         {
             _logger.LogError(ex, "Error getting reading progress for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error getting reading progress" });
+        }
+    }
+
+    /// <summary>
+    /// Records durable per-user reading progress for the authenticated user.
+    /// ContentId follows the reader convention of using the file path. This
+    /// powers the per-user "Continue Reading" overview row and is best-effort:
+    /// failures here never fail the originating request.
+    /// </summary>
+    private async Task RecordUserProgressAsync(string filePath, bool markComplete, int? page, CancellationToken cancellationToken)
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId))
+        {
+            return;
+        }
+
+        try
+        {
+            var totalPages = await _readerService.GetPageCountAsync(filePath);
+            if (totalPages <= 0)
+            {
+                return;
+            }
+
+            var existing = await _readingProgress.GetProgressAsync(userId, filePath, cancellationToken)
+                ?? new ReadingProgress
+                {
+                    UserId = userId,
+                    ContentId = filePath,
+                    TotalPages = totalPages
+                };
+
+            existing.TotalPages = totalPages;
+            var targetPage = markComplete
+                ? totalPages
+                : Math.Clamp(page ?? existing.CurrentPage, 1, totalPages);
+
+            ReadingProgressCalculator.ApplyProgress(existing, targetPage, DateTime.UtcNow);
+            await _readingProgress.SaveProgressAsync(existing, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to record per-user reading progress for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
         }
     }
 }

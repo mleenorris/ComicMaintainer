@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Reader.Interfaces;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -38,7 +39,8 @@ public class ComicReaderControllerTests
             _fileStoreMock.Object,
             _coverCacheMock.Object,
             _loggerMock.Object,
-            _settingsMock.Object
+            _settingsMock.Object,
+            Mock.Of<IReadingProgressService>()
         );
     }
 

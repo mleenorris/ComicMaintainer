@@ -190,6 +190,10 @@
                     </div>
                 </div>
                 <div class="header-controls">
+                    <nav class="header-nav" id="headerNav" aria-label="Primary">
+                        <button type="button" class="header-nav-btn" id="navOverviewBtn" onclick="navigate('#/home')">🏠<span class="header-nav-label"> Overview</span></button>
+                        <button type="button" class="header-nav-btn" id="navLibraryBtn" onclick="navigate('#/library')">📚<span class="header-nav-label"> Library</span></button>
+                    </nav>
                     <button id="progressIndicator" class="progress-indicator-btn" onclick="restoreProgressModal()" style="display: none;" title="Show progress">
                         <span id="progressIndicatorText">⏳ Processing...</span>
                     </button>
@@ -273,6 +277,17 @@
          <div id="messageContainer"></div>
  
          <div class="visually-hidden" id="mobileLibraryViewStatus" aria-live="polite"></div>
+
+         <section id="overviewView" hidden>
+             <div class="content-wrapper">
+                 <div id="overviewRows" class="overview-rows">
+                     <div class="loading">
+                         <div class="spinner"></div>
+                         <p>Loading overview...</p>
+                     </div>
+                 </div>
+             </div>
+         </section>
 
          <section class="library-health-dashboard library-health-dashboard--collapsed" id="libraryHealthDashboard" aria-labelledby="libraryHealthTitle">
              <div class="library-health-header">

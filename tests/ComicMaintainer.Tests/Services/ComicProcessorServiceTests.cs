@@ -90,9 +90,11 @@ public class ComicProcessorServiceTests : IDisposable
 
         // Assert
         Assert.True(result);
-        // Verify that both rename and normalize operations were marked as successful
+        // Verify that both rename and normalize operations were marked as successful.
+        // Normalize is asserted on the new path after the rename (in addition to the
+        // pre-rename mark), so it may be recorded more than once.
         _mockFileStore.Verify(f => f.MarkFileRenamedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
-        _mockFileStore.Verify(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
+        _mockFileStore.Verify(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [Fact]
@@ -833,8 +835,10 @@ public class ComicProcessorServiceTests : IDisposable
 
         // Assert
         Assert.True(result);
-        // File should be marked as normalized since it has valid ComicInfo.xml
-        _mockFileStore.Verify(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
+        // File should be marked as normalized since it has valid ComicInfo.xml.
+        // The full process pipeline re-asserts the normalized flag on the renamed
+        // path after the move, so it may be recorded more than once.
+        _mockFileStore.Verify(f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.AtLeastOnce);
     }
 
     [Fact]
@@ -2267,6 +2271,116 @@ public class ComicProcessorServiceTests : IDisposable
                 It.Is<string>(p => Path.GetFileNameWithoutExtension(p).Contains("Chapter")),
                 It.IsAny<CancellationToken>(),
                 It.IsAny<bool>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task RenameFilesAsync_FileWasNormalized_ReassertsNormalizedOnNewPath()
+    {
+        // Regression: when a file is normalized and then renamed (the "normalize
+        // unmarked" then "rename unmarked" flow), the rename must keep the file
+        // marked normalized at its new path so it shows as processed. The
+        // FileSystemWatcher can race and remove the authoritative old-path row
+        // before UpdateFilePathAsync migrates it, which would otherwise drop the
+        // normalized flag and force the user to normalize again.
+        var fileName = "Spider-Man - Chapter 3.cbz";
+        var filePath = Path.Combine(_testDirectory, fileName);
+
+        var comicInfoXml = @"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>Spider-Man</Series>
+    <Number>3</Number>
+    <Title>Chapter 3</Title>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy");
+            }
+        }
+
+        // The file was already normalized before the rename.
+        _mockFileStore
+            .Setup(f => f.IsFileNormalizedAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var jobId = await _service.RenameFilesAsync(new[] { filePath });
+        var job = await WaitForJobCompletionAsync(_service, jobId);
+
+        // Assert: the rename moved the file and re-asserted the normalized state on
+        // the new path so the file remains fully processed.
+        Assert.NotNull(job);
+        Assert.Equal(1, job!.ProcessedFiles);
+
+        var expectedPath = Path.Combine(_testDirectory, "Spider-Man - Chapter 0003.cbz");
+        _mockFileStore.Verify(
+            f => f.MarkFileRenamedAsync(expectedPath, true, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockFileStore.Verify(
+            f => f.MarkFileNormalizedAsync(expectedPath, true, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task RenameFilesAsync_FileWasNotNormalized_DoesNotMarkNewPathNormalized()
+    {
+        // Counterpart to the re-assert test: a rename of a not-yet-normalized file
+        // must not fabricate a normalized flag on the new path.
+        var fileName = "Hulk - Chapter 9.cbz";
+        var filePath = Path.Combine(_testDirectory, fileName);
+
+        var comicInfoXml = @"<?xml version=""1.0""?>
+<ComicInfo>
+    <Series>Hulk</Series>
+    <Number>9</Number>
+    <Title>Chapter 9</Title>
+</ComicInfo>";
+
+        using (var archive = ZipFile.Open(filePath, ZipArchiveMode.Create))
+        {
+            var comicInfoEntry = archive.CreateEntry("ComicInfo.xml");
+            using (var writer = new StreamWriter(comicInfoEntry.Open()))
+            {
+                writer.Write(comicInfoXml);
+            }
+            var imageEntry = archive.CreateEntry("page001.jpg");
+            using (var writer = new StreamWriter(imageEntry.Open()))
+            {
+                writer.Write("dummy");
+            }
+        }
+
+        _mockFileStore
+            .Setup(f => f.IsFileNormalizedAsync(filePath, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _mockFileStore.Setup(f => f.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        // Act
+        var jobId = await _service.RenameFilesAsync(new[] { filePath });
+        var job = await WaitForJobCompletionAsync(_service, jobId);
+
+        // Assert
+        Assert.NotNull(job);
+        Assert.Equal(1, job!.ProcessedFiles);
+
+        var expectedPath = Path.Combine(_testDirectory, "Hulk - Chapter 0009.cbz");
+        _mockFileStore.Verify(
+            f => f.MarkFileRenamedAsync(expectedPath, true, It.IsAny<CancellationToken>()),
+            Times.Once);
+        _mockFileStore.Verify(
+            f => f.MarkFileNormalizedAsync(It.IsAny<string>(), true, It.IsAny<CancellationToken>()),
             Times.Never);
     }
 }

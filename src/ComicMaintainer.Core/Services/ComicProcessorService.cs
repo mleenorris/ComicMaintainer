@@ -250,6 +250,15 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                         // as already tracked and does not re-queue it for processing.
                         await _fileStore.UpdateFilePathAsync(oldFilePath, newFilePath, cancellationToken);
                         await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
+
+                        // The normalize phase above marked the (old-path) row normalized. Re-assert
+                        // that on the new path so the move can't drop it if the watcher removed the
+                        // old row before UpdateFilePathAsync migrated it (Delete+Create race),
+                        // which would otherwise leave the file showing as unprocessed.
+                        if (normalizeSuccess)
+                        {
+                            await _fileStore.MarkFileNormalizedAsync(newFilePath, true, cancellationToken);
+                        }
                         
                         await LogHistoryWithChangesAsync(newFilePath, "Rename", true, null, 
                             beforeFilename, afterFilename, metadata, metadata, cancellationToken);
@@ -779,7 +788,18 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                     // Capture before/after filenames for history
                     var beforeFilename = Path.GetFileName(filePath);
                     var afterFilename = Path.GetFileName(newFilePath);
-                    
+
+                    // Capture the old path's normalized state *before* the move so it can be
+                    // re-asserted on the new path afterwards. UpdateFilePathAsync normally
+                    // carries this state forward, but the FileSystemWatcher can observe the
+                    // move as a Delete(old)+Create(new) pair and remove the authoritative
+                    // old-path row before the processor migrates it. When that happens the
+                    // merge in UpdateFilePathAsync has nothing to merge from and the new row
+                    // keeps the watcher stub's default IsNormalized=false, so a
+                    // normalize-then-rename sequence would leave the file "unprocessed" until
+                    // it is normalized again. Re-stamping the captured state closes that gap.
+                    var wasNormalized = await _fileStore.IsFileNormalizedAsync(filePath, cancellationToken);
+
                     // File.Move will throw IOException if target exists, which we catch and handle
                     // This avoids race condition from check-then-act pattern
                     File.Move(filePath, newFilePath);
@@ -795,6 +815,13 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                     // already used by ProcessFileCoreAsync.
                     await _fileStore.UpdateFilePathAsync(filePath, newFilePath, cancellationToken);
                     await _fileStore.MarkFileRenamedAsync(newFilePath, true, cancellationToken);
+
+                    // Re-assert the captured normalized state on the new path so it survives
+                    // even if the watcher removed the old row before UpdateFilePathAsync ran.
+                    if (wasNormalized)
+                    {
+                        await _fileStore.MarkFileNormalizedAsync(newFilePath, true, cancellationToken);
+                    }
                     
                     _logger.LogInformation("File renamed successfully: {NewPath}", LoggingHelper.SanitizePathForLog(newFilePath));
                     await LogHistoryWithChangesAsync(newFilePath, "Rename", true, null, 

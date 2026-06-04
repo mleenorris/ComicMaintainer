@@ -229,6 +229,23 @@
         let unmarkedCount = 0;
         let perPage = DEFAULT_PER_PAGE; // Will be loaded from server preferences
         let filterMode = 'all'; // 'all', 'marked', 'unmarked', 'duplicates'
+        // Single source of truth for header-filter button labels. Used both when
+        // restoring the saved filter on load and when the user changes it, so the
+        // label stays correct for every filter mode (previously the restore path
+        // omitted renamed/normalized/read/unread and showed a blank label).
+        const FILTER_LABELS = {
+            'all': '📚 All',
+            'unmarked': '⚠️ Unmarked',
+            'marked': '✅ Marked',
+            'duplicates': '🔁 Duplicates',
+            'renamed': '📝 Renamed',
+            'normalized': '📋 Normalized',
+            'read': '👁️ Read',
+            'unread': '📚 Unread',
+            'matched': '🔗 Matched',
+            'unmatched': '❓ Not Matched',
+            'missing': '🧩 Missing Issues'
+        };
         let libraryViewMode = 'series';
         // Series layout: null = auto (list on mobile portrait, compact otherwise),
         // or one of 'list', 'grid', 'compact' when explicitly chosen by the user.
@@ -247,10 +264,20 @@
         let folderTotal = 0;
         let folderOffset = 0;
         let folderLoading = false;
+        // Set when a fresh (non-append) folder reload is requested while another
+        // load is in flight, so we re-fetch with the latest filter/search/sort
+        // once the in-flight request settles instead of dropping the request.
+        let folderReloadPending = false;
         const folderFiles = new Map(); // path -> { status: 'loading'|'loaded'|'error', files: [] }
         let seriesOffset = 0;
         let seriesTotal = 0;
         let seriesLoading = false;
+        // Set when a fresh (non-append) series reload is requested while another
+        // load is in flight (e.g. the user changes the filter twice in quick
+        // succession). The in-flight request captured the previous filter, so we
+        // must re-fetch once it settles; otherwise the list stays on the old
+        // filter (label updated, content stale) until a manual page refresh.
+        let seriesReloadPending = false;
         let scrollObserver = null;
         let currentSeriesDetailId = null;
         // Title-based identity for the open series detail. The series id is a
@@ -1382,16 +1409,7 @@
                     filterMode = prefs.filterMode;
                     
                     // Update button label
-                    const filterLabels = {
-                        'all': '📚 All',
-                        'unmarked': '⚠️ Unmarked',
-                        'marked': '✅ Marked',
-                        'duplicates': '🔁 Duplicates',
-                        'matched': '🔗 Matched',
-                        'unmatched': '❓ Not Matched',
-                        'missing': '🧩 Missing Issues'
-                    };
-                    document.getElementById('headerFilterLabel').textContent = filterLabels[filterMode];
+                    document.getElementById('headerFilterLabel').textContent = FILTER_LABELS[filterMode] || FILTER_LABELS['all'];
                     
                     // Update active class on dropdown items
                     document.querySelectorAll('#headerFilterMenu .header-dropdown-item').forEach(item => {
@@ -1680,7 +1698,18 @@
                 refresh = !!legacyRefresh;
             }
 
-            if (seriesLoading) return;
+            if (seriesLoading) {
+                // A load is already in flight. For a fresh (non-append) reload —
+                // e.g. the user changed the filter/search/sort — remember that a
+                // reload is needed so we re-fetch with the latest query once the
+                // in-flight request settles. Without this the request would be
+                // silently dropped and the list would stay on the previous filter
+                // (label updated, content stale) until a manual page refresh.
+                if (!append) {
+                    seriesReloadPending = true;
+                }
+                return;
+            }
 
             if (refresh || !append) {
                 seriesLibrary = [];
@@ -1753,6 +1782,13 @@
                 showMessage('Failed to load series: ' + error.message, 'error');
             } finally {
                 seriesLoading = false;
+                if (seriesReloadPending) {
+                    // A filter/search/sort change arrived while this load was in
+                    // flight. Re-run with the latest selection so the displayed
+                    // series match the current filter without a page refresh.
+                    seriesReloadPending = false;
+                    loadSeriesLibrary({ refresh: false });
+                }
             }
         }
 
@@ -1766,7 +1802,14 @@
                 refresh = opts;
             }
 
-            if (folderLoading) return;
+            if (folderLoading) {
+                // Mirror the series loader: don't drop a fresh (non-append)
+                // reload requested while a load is in flight; re-run it after.
+                if (!append) {
+                    folderReloadPending = true;
+                }
+                return;
+            }
 
             // For non-append calls, reset the folder summary list (we re-fetch
             // from offset 0). When the call is an explicit refresh, also clear
@@ -1840,6 +1883,10 @@
                 showMessage('Failed to load files: ' + error.message, 'error');
             } finally {
                 folderLoading = false;
+                if (folderReloadPending) {
+                    folderReloadPending = false;
+                    loadFolders({ refresh: false });
+                }
             }
         }
 
@@ -1912,21 +1959,7 @@
             filterMode = mode;
             
             // Update dropdown label and active state
-            const filterLabels = {
-                'all': '📚 All',
-                'unmarked': '⚠️ Unmarked',
-                'marked': '✅ Marked',
-                'duplicates': '🔁 Duplicates',
-                'renamed': '📝 Renamed',
-                'normalized': '📋 Normalized',
-                'read': '👁️ Read',
-                'unread': '📚 Unread',
-                'matched': '🔗 Matched',
-                'unmatched': '❓ Not Matched',
-                'missing': '🧩 Missing Issues'
-            };
-            
-            document.getElementById('headerFilterLabel').textContent = filterLabels[mode];
+            document.getElementById('headerFilterLabel').textContent = FILTER_LABELS[mode] || FILTER_LABELS['all'];
             
             // Update active class on dropdown items
             document.querySelectorAll('#headerFilterMenu .header-dropdown-item').forEach(item => {

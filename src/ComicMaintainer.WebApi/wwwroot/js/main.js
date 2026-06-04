@@ -2830,6 +2830,9 @@
             }
             const gridItems = buildSeriesIssuesGridItems(cached.issues);
             const allLoaded = cached.allLoaded;
+            // Close any open action menu first so a menu that was portaled to
+            // <body> is restored before its host card is replaced below.
+            closeAllDropdowns();
             grid.innerHTML = gridItems.map(renderSeriesIssueGridItemHtml).join('')
                 + (!allLoaded ? `<div id="seriesIssuesSentinel" class="series-issues-sentinel" aria-hidden="true"><div class="spinner spinner-small"></div></div>` : '');
             // Update the "showing N of M" counter in the selection bar.
@@ -3121,6 +3124,9 @@
 
         function renderSeriesDetail(seriesId) {
             const fileList = document.getElementById('fileList');
+            // Restore/close any open action menu (which may be portaled to
+            // <body>) before the panel's DOM is rebuilt below.
+            closeAllDropdowns();
             let series = seriesLibrary.find(item => item.id === seriesId);
             if (!series && seriesId === currentSeriesDetailId) {
                 // A metadata refresh may have changed the union-find
@@ -3383,6 +3389,10 @@
 
         function renderFileList() {
             const fileList = document.getElementById('fileList');
+
+            // Restore/close any open action menu (which may be portaled to
+            // <body>) before the list's DOM is rebuilt below.
+            closeAllDropdowns();
 
             // Prune selections for files in *loaded* folders; leave selections in
             // unloaded folders alone so the user doesn't lose them.
@@ -7089,6 +7099,43 @@
             }
         }
         
+        // Tracks a dropdown menu that has been temporarily relocated to
+        // <body> while open. The menu uses position: fixed, but several of its
+        // natural ancestors (e.g. the series issue cards) establish a
+        // containing block for fixed descendants via CSS `transform` (the hover
+        // lift) and clip overflow, which re-bases and cuts off the menu. Moving
+        // the open menu to <body> guarantees its fixed coordinates resolve
+        // against the viewport so it is positioned and shown correctly.
+        let portaledDropdown = null; // { menu, placeholder }
+
+        function restorePortaledDropdown() {
+            if (!portaledDropdown) {
+                return;
+            }
+            const { menu, placeholder } = portaledDropdown;
+            if (placeholder && placeholder.parentNode) {
+                placeholder.parentNode.insertBefore(menu, placeholder);
+                placeholder.remove();
+            }
+            // Clear inline positioning so the menu doesn't retain stale
+            // coordinates the next time it is opened.
+            menu.style.top = '';
+            menu.style.left = '';
+            portaledDropdown = null;
+        }
+
+        function portalDropdownToBody(dropdown) {
+            // Only portal once; if it's already relocated, leave it in place.
+            if (portaledDropdown && portaledDropdown.menu === dropdown) {
+                return;
+            }
+            restorePortaledDropdown();
+            const placeholder = document.createComment('dropdown-placeholder');
+            dropdown.parentNode.insertBefore(placeholder, dropdown);
+            document.body.appendChild(dropdown);
+            portaledDropdown = { menu: dropdown, placeholder };
+        }
+
         function toggleDropdown(event, filepath) {
             event.stopPropagation();
             
@@ -7100,23 +7147,26 @@
                 return;
             }
             
-            // Close all other dropdowns
-            document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
-                if (menu.id !== dropdownId) {
-                    menu.classList.remove('show');
-                    menu.classList.remove('show-above');
-                }
-            });
-            
-            // Toggle this dropdown
+            // Remember whether this menu was already open before we close
+            // everything (closing also restores any portaled menu).
             const isCurrentlyShown = dropdown.classList.contains('show');
-            dropdown.classList.toggle('show');
-            
-            // If we're showing the dropdown, position it relative to the button
-            if (!isCurrentlyShown) {
+            closeAllDropdowns();
+            if (isCurrentlyShown) {
+                // It was open; closeAllDropdowns has now hidden it. Toggle off.
+                return;
+            }
+
+            // Show this dropdown
+            dropdown.classList.add('show');
+
+            // Position it relative to the button
+            {
                 // Remove any previous positioning class
                 dropdown.classList.remove('show-above');
-                
+                // Relocate to <body> so position: fixed resolves against the
+                // viewport regardless of any transformed/clipping ancestor.
+                portalDropdownToBody(dropdown);
+
                 // Get the dropdown button position
                 const button = event.target.closest('.dropdown-toggle');
                 if (button) {
@@ -7176,9 +7226,6 @@
                     dropdown.style.top = `${top}px`;
                     dropdown.style.left = `${left}px`;
                 }
-            } else {
-                // If we're hiding it, also remove the positioning class
-                dropdown.classList.remove('show-above');
             }
         }
         
@@ -7187,6 +7234,8 @@
                 menu.classList.remove('show');
                 menu.classList.remove('show-above');
             });
+            // Return any portaled menu to its original location in the DOM.
+            restorePortaledDropdown();
             // Also close filter dropdown
             const filterMenu = document.getElementById('filterDropdownMenu');
             if (filterMenu) {
@@ -7196,7 +7245,10 @@
         
         // Close dropdowns when clicking outside
         document.addEventListener('click', function(event) {
-            if (!event.target.closest('.file-actions-dropdown')) {
+            // The open action menu may be portaled to <body> (outside its
+            // originating .file-actions-dropdown), so also treat clicks within
+            // a .dropdown-menu as "inside".
+            if (!event.target.closest('.file-actions-dropdown') && !event.target.closest('.dropdown-menu')) {
                 closeAllDropdowns();
             }
             // Close header filter dropdown when clicking outside

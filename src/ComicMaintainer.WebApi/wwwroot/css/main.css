@@ -3543,8 +3543,10 @@
            cover-art background. */
         .series-lookup-badge {
             position: absolute;
-            top: 6px;
-            left: 6px;
+            /* Sit beside the selection checkbox (left 8px + 24px wide) instead
+               of behind it, leaving a small gap. */
+            top: 9px;
+            left: 40px;
             min-width: 22px;
             height: 22px;
             padding: 0 6px;

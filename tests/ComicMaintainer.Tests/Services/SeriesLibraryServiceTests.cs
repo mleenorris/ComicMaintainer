@@ -908,6 +908,48 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
+    public async Task GetSeriesSummariesAsync_FilterByMissingIssues_ResolvesIssueNumberFromFileName()
+    {
+        // Summary mode never opens archives, so cached metadata without an Issue
+        // value is common. The issue number is encoded only in the file name
+        // (1 and 3, missing 2), so the gap must still be detected.
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Gappy Series/Gappy Series 001.cbz",
+                FileName = "Gappy Series 001.cbz",
+                Directory = "/library/Gappy Series",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Gappy Series" }
+            },
+            new()
+            {
+                FilePath = "/library/Gappy Series/Gappy Series 003.cbz",
+                FileName = "Gappy Series 003.cbz",
+                Directory = "/library/Gappy Series",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Gappy Series" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync(filter: "missing");
+
+        Assert.Single(result.Series);
+        Assert.Equal("Gappy Series", result.Series[0].Title);
+    }
+
+    [Fact]
     public async Task GetSeriesAsync_DoesNotMergeUnrelatedSeriesSharingOnlyDigitFromCjkAlias()
     {
         // Regression: two unrelated series whose only "shared" normalized

@@ -69,6 +69,11 @@ public class SettingsController : ControllerBase
             mangadex_base_url = _appSettings.CurrentValue.MangaDexBaseUrl,
             enable_anilist_metadata = _appSettings.CurrentValue.EnableAniListMetadata,
             anilist_base_url = _appSettings.CurrentValue.AniListBaseUrl,
+            enable_suwayomi_downloads = _appSettings.CurrentValue.EnableSuwayomiDownloads,
+            suwayomi_base_url = _appSettings.CurrentValue.SuwayomiBaseUrl,
+            suwayomi_username = _appSettings.CurrentValue.SuwayomiUsername,
+            // Never echo the stored password back to clients; only report whether one is set.
+            suwayomi_password_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.SuwayomiPassword),
             default_library_view = _appSettings.CurrentValue.DefaultLibraryView,
             default_preferred_language = _appSettings.CurrentValue.DefaultPreferredLanguage
         };
@@ -403,6 +408,45 @@ public class SettingsController : ControllerBase
     public Task<ActionResult> SetExternalSeriesMetadata([FromBody] ExternalSeriesMetadataSettingsRequest request, CancellationToken cancellationToken = default)
         => UpdateExternalSeriesMetadata(request, cancellationToken);
 
+    [HttpPut("suwayomi")]
+    public async Task<ActionResult> UpdateSuwayomi([FromBody] SuwayomiSettingsRequest request, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _settingsService.UpdateSuwayomiEnabledAsync(request.Enabled, cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(request.BaseUrl))
+            {
+                await _settingsService.UpdateSuwayomiBaseUrlAsync(request.BaseUrl.Trim(), cancellationToken);
+            }
+
+            var trimmedUsername = string.IsNullOrWhiteSpace(request.Username)
+                ? null
+                : request.Username.Trim();
+            await _settingsService.UpdateSuwayomiUsernameAsync(trimmedUsername, cancellationToken);
+
+            // Only update the password when the client explicitly supplied a value
+            // (null means "leave unchanged"; empty string means "clear").
+            if (request.Password is not null)
+            {
+                var password = request.Password.Length == 0 ? null : request.Password;
+                await _settingsService.UpdateSuwayomiPasswordAsync(password, cancellationToken);
+            }
+
+            return Ok(new { message = "Suwayomi settings updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update Suwayomi settings");
+            return StatusCode(500, new { error = "Failed to update Suwayomi settings" });
+        }
+    }
+
+    [HttpPost("suwayomi")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public Task<ActionResult> SetSuwayomi([FromBody] SuwayomiSettingsRequest request, CancellationToken cancellationToken = default)
+        => UpdateSuwayomi(request, cancellationToken);
+
     [HttpPost("cleanup-database")]
     public async Task<ActionResult> CleanupDatabase(CancellationToken cancellationToken = default)
     {
@@ -576,5 +620,17 @@ public class SettingsController : ControllerBase
         public string? MangaDexBaseUrl { get; set; }
         public bool EnableAniList { get; set; }
         public string? AniListBaseUrl { get; set; }
+    }
+
+    public class SuwayomiSettingsRequest
+    {
+        public bool Enabled { get; set; }
+        public string? BaseUrl { get; set; }
+        public string? Username { get; set; }
+        /// <summary>
+        /// New password. When null the stored password is left unchanged; pass an
+        /// empty string to clear it.
+        /// </summary>
+        public string? Password { get; set; }
     }
 }

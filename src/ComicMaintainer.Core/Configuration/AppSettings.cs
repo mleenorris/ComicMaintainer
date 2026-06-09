@@ -63,6 +63,32 @@ public class AppSettings
     /// </summary>
     public int AniListRequestsPerMinute { get; set; } = 28;
 
+    // Suwayomi (Tachidesk) sidecar download integration. When enabled, users
+    // can ask a running Suwayomi server to download missing issues of a series.
+    // The source/extension used is whatever the matching series already tracked
+    // in Suwayomi's library is bound to; the actual downloading is handled by
+    // Suwayomi, outside this application.
+    public bool EnableSuwayomiDownloads { get; set; }
+
+    /// <summary>
+    /// Base URL of the Suwayomi server (e.g. <c>http://suwayomi:4567</c>). The
+    /// GraphQL endpoint <c>/api/graphql</c> is appended automatically.
+    /// </summary>
+    public string SuwayomiBaseUrl { get; set; } = "http://localhost:4567";
+
+    /// <summary>Optional HTTP Basic-auth username for the Suwayomi server.</summary>
+    public string? SuwayomiUsername { get; set; }
+
+    /// <summary>Optional HTTP Basic-auth password for the Suwayomi server.</summary>
+    public string? SuwayomiPassword { get; set; }
+
+    /// <summary>
+    /// Client-side rate limit for Suwayomi GraphQL requests. Suwayomi is a
+    /// self-hosted sidecar so the limit mainly protects it from request
+    /// bursts; defaults to 5/sec.
+    /// </summary>
+    public int SuwayomiRequestsPerSecond { get; set; } = 5;
+
     /// <summary>
     /// When true (the default), external metadata refreshes also try to
     /// download a series cover image from the chosen provider and persist it

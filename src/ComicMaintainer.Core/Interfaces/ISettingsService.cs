@@ -68,6 +68,10 @@ public interface ISettingsService
     Task UpdateMangaDexBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
     Task UpdateAniListEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task UpdateAniListBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
+    Task UpdateSuwayomiEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
+    Task UpdateSuwayomiBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
+    Task UpdateSuwayomiUsernameAsync(string? username, CancellationToken cancellationToken = default);
+    Task UpdateSuwayomiPasswordAsync(string? password, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Update the global default preferred language used as a fallback when a

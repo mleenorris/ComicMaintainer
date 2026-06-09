@@ -557,6 +557,16 @@ builder.Services.AddSingleton<IExternalSeriesMetadataService>(sp =>
         ],
         sp.GetRequiredService<ILogger<CompositeExternalSeriesMetadataService>>()));
 
+// Suwayomi (Tachidesk) sidecar download integration.
+builder.Services.AddHttpClient(SuwayomiDownloadService.HttpClientName)
+    .ConfigureHttpClient(client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(30);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
+    });
+builder.Services.AddSingleton<ISuwayomiDownloadService, SuwayomiDownloadService>();
+
+
 // Reader foundation services
 builder.Services.AddSingleton<IReadingProgressService, ReadingProgressService>();
 builder.Services.AddSingleton<IReaderPreferenceService, ReaderPreferenceService>();

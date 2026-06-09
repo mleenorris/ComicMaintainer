@@ -168,6 +168,27 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("AniListBaseUrl", baseUrl, cancellationToken);
     }
 
+    public async Task UpdateSuwayomiEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("EnableSuwayomiDownloads", enabled, cancellationToken);
+    }
+
+    public async Task UpdateSuwayomiBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("SuwayomiBaseUrl", baseUrl, cancellationToken);
+    }
+
+    public async Task UpdateSuwayomiUsernameAsync(string? username, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("SuwayomiUsername", username, cancellationToken);
+    }
+
+    public async Task UpdateSuwayomiPasswordAsync(string? password, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("SuwayomiPassword", password, cancellationToken);
+    }
+
+
     public async Task UpdateDefaultPreferredLanguageAsync(string? language, CancellationToken cancellationToken = default)
     {
         // Null/empty is allowed (clears the default); otherwise validate

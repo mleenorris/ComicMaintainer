@@ -29,6 +29,21 @@ services:
     networks:
       - comicmaintainer
 
+  # Optional Suwayomi (Tachidesk) sidecar used by the "download missing issues"
+  # feature. Enable it under Settings → Suwayomi Downloads and point the base
+  # URL at http://suwayomi:4567. Add and track the series in Suwayomi first; the
+  # source/extension already bound to that series is used for the downloads.
+  # suwayomi:
+  #   image: ghcr.io/suwayomi/tachidesk:stable
+  #   container_name: suwayomi
+  #   ports:
+  #     - "4567:4567"
+  #   volumes:
+  #     - ./suwayomi:/home/suwayomi/.local/share/Tachidesk
+  #   restart: unless-stopped
+  #   networks:
+  #     - comicmaintainer
+
 networks:
   comicmaintainer:
     driver: bridge

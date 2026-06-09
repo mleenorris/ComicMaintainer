@@ -1439,6 +1439,13 @@
             line-height: 1.4;
         }
 
+        /* "Download all missing" action pushed to the trailing edge of the banner. */
+        .series-detail-missing-download {
+            margin-left: auto;
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+
         /* Inline duplicate badge displayed inside the issue card so the
            duplicate status is communicated visually as well as via the
            outline color above. */

@@ -937,6 +937,35 @@
                     <label for="aniListBaseUrl">AniList GraphQL Endpoint</label>
                     <input type="text" id="aniListBaseUrl" name="aniListBaseUrl" placeholder="https://graphql.anilist.co" autocomplete="off">
                 </div>
+
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Suwayomi Downloads</h3>
+                <div class="form-group">
+                    <label for="enableSuwayomiDownloads" style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="enableSuwayomiDownloads" name="enableSuwayomiDownloads" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <span>Enable Suwayomi downloads</span>
+                    </label>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        When enabled, the series view lets you download missing issues by asking a running <strong>Suwayomi</strong> (Tachidesk) server to fetch them. The source/extension used is whatever the matching series is already tracked under in Suwayomi's library. The actual downloading is handled by Suwayomi, outside this app.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="suwayomiBaseUrl">Suwayomi Base URL</label>
+                    <input type="text" id="suwayomiBaseUrl" name="suwayomiBaseUrl" placeholder="http://localhost:4567" autocomplete="off">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Base URL of the Suwayomi server. The GraphQL endpoint (<code>/api/graphql</code>) is appended automatically.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="suwayomiUsername">Username (optional)</label>
+                    <input type="text" id="suwayomiUsername" name="suwayomiUsername" placeholder="Basic-auth username" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="suwayomiPassword">Password (optional)</label>
+                    <input type="password" id="suwayomiPassword" name="suwayomiPassword" placeholder="Leave blank to keep current" autocomplete="new-password">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Only needed if your Suwayomi server uses HTTP Basic authentication. Leave blank to keep the stored password unchanged.
+                    </small>
+                </div>
                 
                 <h3 style="margin-bottom: 10px; margin-top: 35px; color: #e74c3c; border-bottom: 2px solid #e74c3c; padding-bottom: 8px;">⚠️ Danger Zone</h3>
                 <div class="form-group" style="border: 2px solid #e74c3c; border-radius: 8px; padding: 20px; background: var(--bg-hover);">

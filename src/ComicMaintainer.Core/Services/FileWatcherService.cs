@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Utilities;
@@ -23,6 +24,27 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     private bool _initialized = false;
     private readonly IDisposable? _settingsChangeSubscription;
     private bool _disposed;
+
+    /// <summary>
+    /// Pending per-file processing requests, keyed by full path. A burst of file-system events for
+    /// the same path coalesces into a single delayed run: each new event cancels the previously
+    /// scheduled debounce and re-arms it, so we only act once the file has stopped changing and we
+    /// never queue duplicate work while a change is still pending for that path.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingProcessing =
+        new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Paths currently being processed, used to prevent concurrent processing of the same file.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, byte> _inFlight = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Paths the watcher recently modified itself (via the processor renaming/rewriting archives).
+    /// File-system events that arrive for these paths within a short window are the watcher's own
+    /// changes echoing back and are ignored so we don't re-process work we just performed.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, DateTime> _recentlyProcessed = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Returns the current AppSettings snapshot. Reading via the monitor on every access ensures
@@ -126,6 +148,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
         _disposed = true;
         _settingsChangeSubscription?.Dispose();
+        CancelAllPending();
 
         lock (_lock)
         {
@@ -304,17 +327,11 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 try
                 {
                     await _fileStore.AddFileAsync(file, cancellationToken);
-                    
-                    // Check if file should be processed based on settings and current state
-                    var shouldProcess = await ShouldProcessFileAsync(file, cancellationToken);
-                    if (!shouldProcess)
-                    {
-                        continue;
-                    }
-                    
-                    // Process each file after a delay to avoid overwhelming the system
-                    await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds), cancellationToken);
-                    await _processor.ProcessFileAsync(file, cancellationToken);
+
+                    // Route through the coalescing scheduler so multiple files (and any follow-up
+                    // change events they trigger) are debounced and de-duplicated instead of each
+                    // blocking on its own stability delay.
+                    ScheduleProcessing(file);
                 }
                 catch (Exception ex)
                 {
@@ -332,6 +349,8 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
+        CancelAllPending();
+
         lock (_lock)
         {
             if (_watcher != null)
@@ -394,19 +413,18 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File created: {Path}"), e.FullPath);
             _ = Task.Run(async () =>
             {
-                await _fileStore.AddFileAsync(e.FullPath);
-                
-                // Check if file should be processed based on settings and current state
-                var shouldProcess = await ShouldProcessFileAsync(e.FullPath);
-                if (!shouldProcess)
+                try
                 {
-                    return;
+                    await _fileStore.AddFileAsync(e.FullPath);
                 }
-                
-                // Debounce and process
-                await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
-                await _processor.ProcessFileAsync(e.FullPath);
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error adding created file to store: {Path}"), e.FullPath);
+                }
             });
+
+            // Debounce and process (coalesces with any other pending events for this path).
+            ScheduleProcessing(e.FullPath);
         }
     }
 
@@ -421,21 +439,11 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         if (IsComicFile(e.FullPath))
         {
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File changed: {Path}"), e.FullPath);
-            _ = Task.Run(async () =>
-            {
-                // Wait for file to stabilise before deciding whether to process.
-                // Checking state *after* the delay means any in-flight processor operation
-                // that triggered the change event will have updated the database by now.
-                await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
 
-                var shouldProcess = await ShouldProcessFileAsync(e.FullPath);
-                if (!shouldProcess)
-                {
-                    return;
-                }
-                
-                await _processor.ProcessFileAsync(e.FullPath);
-            });
+            // Debounce and process. Scheduling here coalesces the storm of Changed events that a
+            // single copy/write produces (and any change the processor itself makes) into one run,
+            // and the stability check inside the scheduled work happens only after the file settles.
+            ScheduleProcessing(e.FullPath);
         }
     }
 
@@ -452,6 +460,10 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         if (IsComicFile(e.FullPath))
         {
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File renamed: {OldPath} -> {NewPath}"), e.OldFullPath, e.FullPath);
+
+            // Any work still pending for the old path is now stale.
+            CancelPending(e.OldFullPath);
+
             _ = Task.Run(async () =>
             {
                 try
@@ -459,26 +471,16 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                     // Preserve processing state from the old path - avoids re-processing files
                     // that were renamed by the processor itself.
                     await _fileStore.UpdateFilePathAsync(e.OldFullPath, e.FullPath);
-
-                    // Wait for stability *before* consulting the database so that any concurrent
-                    // processor operation that triggered this rename has had time to finish and
-                    // update the tracked state.
-                    await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds));
-
-                    // Check if further processing is required now that the state is settled.
-                    var shouldProcess = await ShouldProcessFileAsync(e.FullPath);
-                    if (!shouldProcess)
-                    {
-                        return;
-                    }
-                    
-                    await _processor.ProcessFileAsync(e.FullPath);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error processing renamed file: {Path}"), e.FullPath);
+                    _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error updating renamed file path: {Path}"), e.FullPath);
                 }
             });
+
+            // Debounce and process the new path. Scheduling consults the (now updated) state only
+            // after the stability delay, so a rename performed by the processor itself is skipped.
+            ScheduleProcessing(e.FullPath);
         }
     }
 
@@ -491,10 +493,179 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         }
         
         _logger.LogInformation(LoggingHelper.WithWatcherPrefix("File deleted: {Path}"), e.FullPath);
+
+        // Drop any pending processing for a file that no longer exists.
+        CancelPending(e.FullPath);
+        _recentlyProcessed.TryRemove(e.FullPath, out _);
+
         _ = Task.Run(async () =>
         {
             await _fileStore.RemoveFileAsync(e.FullPath);
         });
+    }
+
+    /// <summary>
+    /// Schedules a file for processing after the configured stability delay, coalescing repeated
+    /// events for the same path. If a request for this path is already pending, its debounce timer
+    /// is reset so the bursty stream of file-system events a single operation produces collapses
+    /// into one processing run. Self-induced changes (files the watcher just renamed/normalized) and
+    /// files already being processed are skipped to eliminate redundant work.
+    /// </summary>
+    private void ScheduleProcessing(string filePath)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        // Ignore events that are just the watcher's own recent change echoing back from the OS.
+        if (IsSelfInducedChange(filePath))
+        {
+            _logger.LogDebug(LoggingHelper.WithWatcherPrefix("Ignoring self-induced change for recently processed file: {File}"), filePath);
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+
+        // Coalesce: install this request as the pending one for the path, cancelling any earlier
+        // debounce so only the most recent event in a burst survives.
+        _pendingProcessing.AddOrUpdate(filePath, cts, (_, existing) =>
+        {
+            try
+            {
+                existing.Cancel();
+                existing.Dispose();
+            }
+            catch
+            {
+                // Best-effort cancellation of the superseded debounce.
+            }
+            return cts;
+        });
+
+        var token = cts.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // Debounce window. A newer event for the same path cancels this token and re-arms
+                // a fresh delay, so we only proceed once the file has been quiet for the full delay.
+                await Task.Delay(TimeSpan.FromSeconds(_settings.WatcherFileStabilityDelaySeconds), token);
+            }
+            catch (OperationCanceledException)
+            {
+                return; // Superseded by a newer event (or shutdown); that request will run instead.
+            }
+
+            // Claim the pending slot. If we are no longer the registered request, a newer event has
+            // taken over and will perform the work, so defer to it.
+            if (!_pendingProcessing.TryRemove(new KeyValuePair<string, CancellationTokenSource>(filePath, cts)))
+            {
+                return;
+            }
+            cts.Dispose();
+
+            // Prevent processing the same file concurrently. If a run is already in flight, re-arm
+            // the debounce so the file is re-evaluated once that run finishes rather than now.
+            if (!_inFlight.TryAdd(filePath, 0))
+            {
+                ScheduleProcessing(filePath);
+                return;
+            }
+
+            try
+            {
+                var shouldProcess = await ShouldProcessFileAsync(filePath);
+                if (!shouldProcess)
+                {
+                    return;
+                }
+
+                // Mark before and after processing: the processor rewrites/renames the archive,
+                // which fires fresh file-system events that we must recognise as our own.
+                MarkSelfInducedChange(filePath);
+                await _processor.ProcessFileAsync(filePath);
+                MarkSelfInducedChange(filePath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, LoggingHelper.WithWatcherPrefix("Error processing file: {File}"), filePath);
+            }
+            finally
+            {
+                _inFlight.TryRemove(filePath, out _);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Cancels and discards any pending (debounced) processing request for the given path.
+    /// </summary>
+    private void CancelPending(string filePath)
+    {
+        if (_pendingProcessing.TryRemove(filePath, out var cts))
+        {
+            try
+            {
+                cts.Cancel();
+                cts.Dispose();
+            }
+            catch
+            {
+                // Best-effort cancellation.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cancels every pending processing request (used on stop/dispose).
+    /// </summary>
+    private void CancelAllPending()
+    {
+        foreach (var key in _pendingProcessing.Keys.ToList())
+        {
+            CancelPending(key);
+        }
+    }
+
+    /// <summary>
+    /// Records that the watcher itself just modified a path so that the resulting file-system
+    /// events can be recognised as self-induced and ignored.
+    /// </summary>
+    private void MarkSelfInducedChange(string filePath)
+    {
+        _recentlyProcessed[filePath] = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Returns true if the given path was modified by the watcher within the suppression window,
+    /// meaning the event is the watcher's own change echoing back and should be ignored.
+    /// </summary>
+    private bool IsSelfInducedChange(string filePath)
+    {
+        PruneRecentlyProcessed(out var window);
+        if (_recentlyProcessed.TryGetValue(filePath, out var when) && DateTime.UtcNow - when < window)
+        {
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Removes expired entries from the self-induced-change tracker to keep it bounded.
+    /// </summary>
+    private void PruneRecentlyProcessed(out TimeSpan window)
+    {
+        var windowSeconds = Math.Max(_settings.WatcherFileStabilityDelaySeconds, 5);
+        window = TimeSpan.FromSeconds(windowSeconds);
+        var cutoff = DateTime.UtcNow - window;
+        foreach (var kvp in _recentlyProcessed)
+        {
+            if (kvp.Value < cutoff)
+            {
+                _recentlyProcessed.TryRemove(kvp.Key, out _);
+            }
+        }
     }
 
     private static bool IsComicFile(string path)

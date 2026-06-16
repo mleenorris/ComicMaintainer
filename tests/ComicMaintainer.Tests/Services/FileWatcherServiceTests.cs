@@ -638,6 +638,66 @@ public class FileWatcherServiceTests : IDisposable
         Assert.True(service.IsRunning);
     }
 
+    [Fact]
+    public async Task OnFileChanged_CoalescesRapidChangesIntoSingleProcessingRun()
+    {
+        // Arrange - a comic file that is not yet processed.
+        var comicFile = Path.Combine(_testDirectory, "bursty_comic.cbz");
+        _mockFileStore.Setup(fs => fs.IsFileProcessedAsync(comicFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        File.WriteAllText(comicFile, "initial content");
+
+        await _service.StartAsync();
+        await Task.Delay(WatcherInitDelayMs);
+
+        // Act - generate a burst of change events well within the 1s stability delay. Each event
+        // should reset the debounce so they collapse into a single processing run.
+        for (var i = 0; i < 10; i++)
+        {
+            File.AppendAllText(comicFile, $"chunk {i}");
+            await Task.Delay(50);
+        }
+
+        // Wait for the debounce window to elapse and processing to occur.
+        await Task.Delay(ProcessingDelayMs);
+
+        // Assert - despite many change events, the file is processed at most once.
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(comicFile, It.IsAny<CancellationToken>()),
+            Times.AtMostOnce,
+            "Rapid change events for the same file should coalesce into a single processing run");
+    }
+
+    [Fact]
+    public async Task OnFileChanged_IgnoresSelfInducedChangeAfterProcessing()
+    {
+        // Arrange - a comic file that needs processing. After it is processed once, a change event
+        // that the processor's own rewrite would produce must be ignored (treated as self-induced).
+        var comicFile = Path.Combine(_testDirectory, "self_induced.cbz");
+        _mockFileStore.Setup(fs => fs.IsFileProcessedAsync(comicFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        File.WriteAllText(comicFile, "initial content");
+
+        await _service.StartAsync();
+        await Task.Delay(WatcherInitDelayMs);
+
+        // Act - trigger an initial change that gets processed.
+        File.AppendAllText(comicFile, "external change");
+        await Task.Delay(ProcessingDelayMs);
+
+        // Simulate the processor's own write echoing back as another change event.
+        File.AppendAllText(comicFile, "processor rewrite");
+        await Task.Delay(ProcessingDelayMs);
+
+        // Assert - the file is processed only once; the self-induced change is ignored.
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(comicFile, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "A change echoing the watcher's own processing should not trigger reprocessing");
+    }
+
     public void Dispose()
     {
         _service.StopAsync().Wait();

@@ -204,12 +204,16 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                     Filter = "*.*",
                     IncludeSubdirectories = true
                 };
+                // Enlarge the internal buffer so bursts of file-system events (e.g. a large batch of
+                // new files landing at once) are less likely to overflow and be dropped by the OS.
+                _watcher.InternalBufferSize = ClampInternalBufferSize(_settings.WatcherInternalBufferSizeKB);
                 _activeWatchedDirectory = _settings.WatchedDirectory;
 
                 _watcher.Created += OnFileCreated;
                 _watcher.Changed += OnFileChanged;
                 _watcher.Renamed += OnFileRenamed;
                 _watcher.Deleted += OnFileDeleted;
+                _watcher.Error += OnWatcherError;
 
                 _watcher.EnableRaisingEvents = true;
                 watcherStarted = true;
@@ -502,6 +506,103 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         {
             await _fileStore.RemoveFileAsync(e.FullPath);
         });
+    }
+
+    /// <summary>
+    /// Handles FileSystemWatcher errors. The most important case is an
+    /// <see cref="InternalBufferOverflowException"/>: when a large number of file-system events
+    /// arrive faster than they can be drained, the OS drops events that we never see. Those files
+    /// would otherwise stay unprocessed until the service is restarted. To recover, we rescan the
+    /// watched directory and re-queue any comic files so the missed ones get picked up.
+    /// </summary>
+    private void OnWatcherError(object sender, ErrorEventArgs e)
+    {
+        var ex = e.GetException();
+        _logger.LogError(ex, LoggingHelper.WithWatcherPrefix(
+            "File watcher reported an error; some file-system events may have been lost. Triggering a recovery rescan."));
+
+        // Recover off the event thread so we don't block the watcher's notification pipeline.
+        _ = Task.Run(async () => await RecoverFromMissedEventsAsync());
+    }
+
+    /// <summary>
+    /// Re-enumerates the watched directory and re-queues every comic file for processing. Used to
+    /// recover after a watcher buffer overflow (or other watcher error) where individual file
+    /// events were dropped. Files already in their final state are cheaply skipped by the
+    /// stability/should-process checks inside <see cref="ScheduleProcessing"/>.
+    /// </summary>
+    private async Task RecoverFromMissedEventsAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        string? directory;
+        lock (_lock)
+        {
+            directory = _activeWatchedDirectory;
+        }
+
+        if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+        {
+            _logger.LogWarning(LoggingHelper.WithWatcherPrefix(
+                "Recovery rescan skipped: watched directory is unavailable: {Directory}"), directory);
+            return;
+        }
+
+        try
+        {
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
+                "Starting recovery rescan of directory: {Directory}"), directory);
+
+            var comicFiles = Directory.EnumerateFiles(directory, "*.*", SearchOption.AllDirectories)
+                .Where(IsComicFile)
+                .ToList();
+
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
+                "Recovery rescan found {Count} comic files; re-queuing for processing"), comicFiles.Count);
+
+            foreach (var file in comicFiles)
+            {
+                if (_disposed)
+                {
+                    break;
+                }
+
+                try
+                {
+                    await _fileStore.AddFileAsync(file);
+                    ScheduleProcessing(file);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, LoggingHelper.WithWatcherPrefix(
+                        "Error re-queuing file during recovery rescan: {File}"), file);
+                }
+            }
+
+            _logger.LogInformation(LoggingHelper.WithWatcherPrefix(
+                "Recovery rescan completed: {Directory}"), directory);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWatcherPrefix(
+                "Error during recovery rescan of directory: {Directory}"), directory);
+        }
+    }
+
+    /// <summary>
+    /// Clamps the configured internal buffer size (in KB) to the range the OS accepts. The minimum
+    /// useful size is 4 KB and Windows caps the buffer at 64 KB; values outside that range are
+    /// coerced so a misconfiguration can't disable the watcher.
+    /// </summary>
+    private static int ClampInternalBufferSize(int configuredKB)
+    {
+        const int minBytes = 4 * 1024;
+        const int maxBytes = 64 * 1024;
+        var bytes = configuredKB * 1024;
+        return Math.Clamp(bytes, minBytes, maxBytes);
     }
 
     /// <summary>

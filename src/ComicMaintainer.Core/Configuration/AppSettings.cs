@@ -26,6 +26,15 @@ public class AppSettings
     public int WatcherDirectoryScanDelaySeconds { get; set; } = 2;
     public bool WatcherEnableRename { get; set; } = true;
     public bool WatcherEnableNormalize { get; set; } = true;
+
+    /// <summary>
+    /// Size (in kilobytes) of the FileSystemWatcher internal buffer. A larger buffer lets the
+    /// watcher hold more pending file-system events before the OS drops them, which is important
+    /// when a large batch of files arrives at once. The OS caps this at 64 KB and the default of
+    /// 8 KB overflows easily under bursty loads. Overflows are still recovered via a directory
+    /// rescan, but a larger buffer avoids the overflow in the first place.
+    /// </summary>
+    public int WatcherInternalBufferSizeKB { get; set; } = 64;
     
     // Database cleanup settings
     public int DatabaseCleanupIntervalHours { get; set; } = 12;

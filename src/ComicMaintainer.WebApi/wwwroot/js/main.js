@@ -1453,7 +1453,18 @@
             currentSeriesDetailId = seriesId;
             const found = seriesLibrary.find(item => item && item.id === seriesId);
             captureSeriesDetailIdentity(found);
-            if (found) currentSeriesDetailSeries = found;
+            if (found) {
+                currentSeriesDetailSeries = found;
+            } else if (!currentSeriesDetailSeries || currentSeriesDetailSeries.id !== seriesId) {
+                // The series isn't on the currently-loaded library page — this
+                // happens when opening a series from the overview/home page (or
+                // a deep link) where only the first library page, or no page at
+                // all, has been fetched. Seed a minimal placeholder so
+                // renderSeriesDetail keeps the panel open and shows a loading
+                // state instead of immediately closing it; loadSeriesIssues
+                // refreshes it with the real metadata from the issues response.
+                currentSeriesDetailSeries = { id: seriesId, title: '', total_size: 0, issue_count: 0 };
+            }
             renderSeriesDetail(seriesId);
             loadSeriesIssues(seriesId);
             updateLibraryViewLayout();
@@ -6145,6 +6156,18 @@
             }
         }
         
+        // Refresh the appropriate view after a read-status mutation. When a
+        // series detail view is open, reload just that series's issues in-place
+        // so the read state (and the per-issue Mark Read/Unread toggle) updates
+        // without rebuilding the whole series library or losing the detail view.
+        async function refreshAfterReadStatusChange() {
+            if (libraryViewMode === 'series' && currentSeriesDetailId) {
+                await loadSeriesIssues(currentSeriesDetailId, true);
+            } else {
+                await loadActiveLibraryView(1, true);
+            }
+        }
+
         async function markFileRead(filepath) {
             try {
                 showMessage('Marking file as read...', 'info');
@@ -6165,7 +6188,7 @@
                 }
                 
                 showMessage('File marked as read!', 'success');
-                await loadActiveLibraryView(1, true);
+                await refreshAfterReadStatusChange();
             } catch (error) {
                 showMessage('Failed to mark file as read: ' + error.message, 'error');
             }
@@ -6191,7 +6214,7 @@
                 }
                 
                 showMessage('File marked as unread!', 'success');
-                await loadActiveLibraryView(1, true);
+                await refreshAfterReadStatusChange();
             } catch (error) {
                 showMessage('Failed to mark file as unread: ' + error.message, 'error');
             }
@@ -6234,7 +6257,7 @@
                 }
                 
                 showMessage('All files marked as read!', 'success');
-                await loadActiveLibraryView(1, true);
+                await refreshAfterReadStatusChange();
             } catch (error) {
                 showMessage('Failed to mark files as read: ' + error.message, 'error');
             }
@@ -6264,7 +6287,7 @@
                 }
                 
                 showMessage('All files marked as unread!', 'success');
-                await loadActiveLibraryView(1, true);
+                await refreshAfterReadStatusChange();
             } catch (error) {
                 showMessage('Failed to mark files as unread: ' + error.message, 'error');
             }
@@ -6295,7 +6318,7 @@
                 }
                 
                 showMessage(`${selectedFiles.size} file(s) marked as read!`, 'success');
-                await loadActiveLibraryView(1, true);
+                await refreshAfterReadStatusChange();
             } catch (error) {
                 showMessage('Failed to mark files as read: ' + error.message, 'error');
             }
@@ -6326,7 +6349,7 @@
                 }
                 
                 showMessage(`${selectedFiles.size} file(s) marked as unread!`, 'success');
-                await loadActiveLibraryView(1, true);
+                await refreshAfterReadStatusChange();
             } catch (error) {
                 showMessage('Failed to mark files as unread: ' + error.message, 'error');
             }

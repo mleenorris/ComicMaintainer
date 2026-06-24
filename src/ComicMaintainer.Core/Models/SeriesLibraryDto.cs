@@ -47,6 +47,31 @@ public class SeriesIssueDto
     public bool Read { get; set; }
 }
 
+/// <summary>
+/// Result of resolving the issue adjacent to a given file <em>within the same
+/// series</em>. Used by the reader's seamless next/previous navigation so it
+/// never spills over into a different series when it reaches the first/last
+/// issue of the current one.
+/// </summary>
+public class AdjacentIssueResult
+{
+    /// <summary>
+    /// True when the requested file was located in a series in the library.
+    /// When false the caller should treat the file as not found.
+    /// </summary>
+    public bool Found { get; set; }
+
+    /// <summary>
+    /// True when an adjacent issue exists within the same series in the
+    /// requested direction. False when the file is the first/last issue.
+    /// </summary>
+    public bool HasAdjacent { get; set; }
+
+    public string? FilePath { get; set; }
+
+    public string? FileName { get; set; }
+}
+
 public class SeriesLibraryDto
 {
     [JsonPropertyName("id")]

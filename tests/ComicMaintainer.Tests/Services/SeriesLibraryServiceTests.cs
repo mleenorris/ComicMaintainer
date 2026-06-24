@@ -1265,6 +1265,55 @@ public class SeriesLibraryServiceTests
         Assert.Null(result);
     }
 
+    [Fact]
+    public async Task GetAdjacentIssueAsync_StaysWithinSameSeries_AtLastIssueReportsNoAdjacent()
+    {
+        // Two distinct series in the library. The last issue of "Series A"
+        // must NOT spill over into "Series B" when asked for the next issue.
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = "/library/Series A/Series A 001.cbz", FileName = "Series A 001.cbz", Directory = "/library/Series A", FileSize = 100, Metadata = new ComicMetadata { Series = "Series A", Issue = "1" } },
+            new() { FilePath = "/library/Series A/Series A 002.cbz", FileName = "Series A 002.cbz", Directory = "/library/Series A", FileSize = 100, Metadata = new ComicMetadata { Series = "Series A", Issue = "2" } },
+            new() { FilePath = "/library/Series B/Series B 001.cbz", FileName = "Series B 001.cbz", Directory = "/library/Series B", FileSize = 100, Metadata = new ComicMetadata { Series = "Series B", Issue = "1" } }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        // Next from the last issue of Series A: no adjacent issue.
+        var atEnd = await service.GetAdjacentIssueAsync("/library/Series A/Series A 002.cbz", "next");
+        Assert.True(atEnd.Found);
+        Assert.False(atEnd.HasAdjacent);
+
+        // Next from the first issue of Series A: the second issue (same series).
+        var next = await service.GetAdjacentIssueAsync("/library/Series A/Series A 001.cbz", "next");
+        Assert.True(next.Found);
+        Assert.True(next.HasAdjacent);
+        Assert.Equal("/library/Series A/Series A 002.cbz", next.FilePath);
+
+        // Previous from the second issue: back to the first (same series).
+        var prev = await service.GetAdjacentIssueAsync("/library/Series A/Series A 002.cbz", "prev");
+        Assert.True(prev.Found);
+        Assert.True(prev.HasAdjacent);
+        Assert.Equal("/library/Series A/Series A 001.cbz", prev.FilePath);
+    }
+
+    [Fact]
+    public async Task GetAdjacentIssueAsync_FileNotInLibrary_ReportsNotFound()
+    {
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ComicFile>());
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetAdjacentIssueAsync("/library/Nope/Nope 001.cbz", "next");
+
+        Assert.False(result.Found);
+        Assert.False(result.HasAdjacent);
+    }
+
     private static string NormalizeKey(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))

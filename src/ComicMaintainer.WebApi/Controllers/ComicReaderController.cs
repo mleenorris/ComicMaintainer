@@ -26,6 +26,7 @@ public class ComicReaderController : ControllerBase
     private readonly ILogger<ComicReaderController> _logger;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly IReadingProgressService _readingProgress;
+    private readonly ISeriesLibraryService _seriesLibrary;
 
     public ComicReaderController(
         IComicReaderService readerService,
@@ -33,7 +34,8 @@ public class ComicReaderController : ControllerBase
         IFileCoverCacheService coverCache,
         ILogger<ComicReaderController> logger,
         IOptionsMonitor<AppSettings> settings,
-        IReadingProgressService readingProgress)
+        IReadingProgressService readingProgress,
+        ISeriesLibraryService seriesLibrary)
     {
         _readerService = readerService;
         _fileStore = fileStore;
@@ -41,6 +43,7 @@ public class ComicReaderController : ControllerBase
         _logger = logger;
         _settings = settings;
         _readingProgress = readingProgress;
+        _seriesLibrary = seriesLibrary;
     }
 
     /// <summary>
@@ -267,28 +270,23 @@ public class ComicReaderController : ControllerBase
 
         try
         {
-            var allFiles = await _fileStore.GetFilteredFilesAsync(null);
-            var sortedFiles = allFiles.OrderBy(f => f.FileName).ToList();
-            
-            var currentIndex = sortedFiles.FindIndex(f => f.FilePath == filePath);
-            
-            if (currentIndex == -1)
+            var adjacent = await _seriesLibrary.GetAdjacentIssueAsync(filePath, direction);
+
+            if (!adjacent.Found)
             {
                 return NotFound(new { error = "Current file not found in library" });
             }
 
-            int adjacentIndex = direction.ToLower() == "next" ? currentIndex + 1 : currentIndex - 1;
-            
-            if (adjacentIndex < 0 || adjacentIndex >= sortedFiles.Count)
+            if (!adjacent.HasAdjacent)
             {
                 return Ok(new { hasAdjacent = false, filePath = (string?)null, fileName = (string?)null });
             }
 
-            var adjacentFile = sortedFiles[adjacentIndex];
-            return Ok(new { 
-                hasAdjacent = true, 
-                filePath = adjacentFile.FilePath, 
-                fileName = adjacentFile.FileName 
+            return Ok(new
+            {
+                hasAdjacent = true,
+                filePath = adjacent.FilePath,
+                fileName = adjacent.FileName
             });
         }
         catch (Exception ex)

@@ -266,6 +266,60 @@ public class SeriesLibraryService : ISeriesLibraryService
         return entries;
     }
 
+    public async Task<AdjacentIssueResult> GetAdjacentIssueAsync(
+        string filePath,
+        string direction = "next",
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return new AdjacentIssueResult { Found = false };
+        }
+
+        // Use the unfiltered grouping so adjacency reflects the whole series
+        // regardless of any active library filter, and never reads archives
+        // off disk so the reader's next/previous prefetch stays fast.
+        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+
+        var owningSeries = groups.Values.FirstOrDefault(accumulator =>
+            accumulator.Issues.Any(issue =>
+                string.Equals(issue.FilePath, filePath, StringComparison.Ordinal)));
+
+        if (owningSeries is null)
+        {
+            return new AdjacentIssueResult { Found = false };
+        }
+
+        var sortedIssues = SortIssues(owningSeries.Issues);
+        var currentIndex = sortedIssues.FindIndex(issue =>
+            string.Equals(issue.FilePath, filePath, StringComparison.Ordinal));
+
+        if (currentIndex == -1)
+        {
+            return new AdjacentIssueResult { Found = false };
+        }
+
+        var adjacentIndex = string.Equals(direction, "next", StringComparison.OrdinalIgnoreCase)
+            ? currentIndex + 1
+            : currentIndex - 1;
+
+        if (adjacentIndex < 0 || adjacentIndex >= sortedIssues.Count)
+        {
+            // First/last issue of the series: there is intentionally no
+            // adjacent issue, so the reader shows "end of series".
+            return new AdjacentIssueResult { Found = true, HasAdjacent = false };
+        }
+
+        var adjacent = sortedIssues[adjacentIndex];
+        return new AdjacentIssueResult
+        {
+            Found = true,
+            HasAdjacent = true,
+            FilePath = adjacent.FilePath,
+            FileName = adjacent.FileName
+        };
+    }
+
     public async Task<SeriesIssuesResult?> GetSeriesIssuesAsync(
         string seriesId,
         string? filter = null,

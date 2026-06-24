@@ -85,6 +85,20 @@ public interface ISeriesLibraryService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Resolves the issue immediately before/after <paramref name="filePath"/>
+    /// <em>within the same series</em>, using the identical grouping and sort
+    /// order the library/series-detail views use. This keeps the reader's
+    /// seamless next/previous navigation inside a single series instead of
+    /// spilling into an unrelated series when the first/last issue is reached.
+    /// </summary>
+    /// <param name="filePath">The current issue's file path.</param>
+    /// <param name="direction">"next" (default) or "previous".</param>
+    Task<AdjacentIssueResult> GetAdjacentIssueAsync(
+        string filePath,
+        string direction = "next",
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Returns one lightweight projection per series (no disk reads), carrying
     /// the summary card plus the created-at timestamps and file paths needed to
     /// build the overview/home page rows. Reflects the same grouping as the

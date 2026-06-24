@@ -1732,7 +1732,7 @@
                 if (nextInfo.hasAdjacent && nextInfo.filePath) {
                     window.location.replace(`/reader.html?file=${encodeURIComponent(nextInfo.filePath)}`);
                 } else {
-                    showMessage('You are at the last comic in the list', 'info');
+                    showMessage('No more issues in this series', 'info');
                 }
             } catch (error) {
                 console.error('Error navigating to next comic:', error);
@@ -1753,7 +1753,7 @@
                 if (prevInfo.hasAdjacent && prevInfo.filePath) {
                     window.location.replace(`/reader.html?file=${encodeURIComponent(prevInfo.filePath)}#lastpage`);
                 } else {
-                    showMessage('You are at the first comic in the list', 'info');
+                    showMessage('This is the first issue in this series', 'info');
                 }
             } catch (error) {
                 console.error('Error navigating to previous comic:', error);

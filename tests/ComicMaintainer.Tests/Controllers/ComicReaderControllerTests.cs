@@ -17,6 +17,7 @@ public class ComicReaderControllerTests
     private readonly Mock<IFileCoverCacheService> _coverCacheMock;
     private readonly Mock<ILogger<ComicReaderController>> _loggerMock;
     private readonly Mock<IOptionsMonitor<AppSettings>> _settingsMock;
+    private readonly Mock<ISeriesLibraryService> _seriesLibraryMock;
     private readonly ComicReaderController _controller;
     private readonly AppSettings _settings;
 
@@ -27,6 +28,7 @@ public class ComicReaderControllerTests
         _coverCacheMock = new Mock<IFileCoverCacheService>();
         _loggerMock = new Mock<ILogger<ComicReaderController>>();
         _settingsMock = new Mock<IOptionsMonitor<AppSettings>>();
+        _seriesLibraryMock = new Mock<ISeriesLibraryService>();
         
         _settings = new AppSettings
         {
@@ -40,7 +42,8 @@ public class ComicReaderControllerTests
             _coverCacheMock.Object,
             _loggerMock.Object,
             _settingsMock.Object,
-            Mock.Of<IReadingProgressService>()
+            Mock.Of<IReadingProgressService>(),
+            _seriesLibraryMock.Object
         );
     }
 
@@ -60,15 +63,15 @@ public class ComicReaderControllerTests
     {
         // Arrange
         var currentFile = "/test/watched/comic1.cbz";
-        var files = new List<ComicFile>
-        {
-            new() { FilePath = "/test/watched/comic1.cbz", FileName = "comic1.cbz" },
-            new() { FilePath = "/test/watched/comic2.cbz", FileName = "comic2.cbz" },
-            new() { FilePath = "/test/watched/comic3.cbz", FileName = "comic3.cbz" }
-        };
-
-        _fileStoreMock.Setup(f => f.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(files);
+        _seriesLibraryMock
+            .Setup(s => s.GetAdjacentIssueAsync(currentFile, "next", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AdjacentIssueResult
+            {
+                Found = true,
+                HasAdjacent = true,
+                FilePath = "/test/watched/comic2.cbz",
+                FileName = "comic2.cbz"
+            });
 
         // Act
         var result = await _controller.GetAdjacentFile(currentFile, "next");
@@ -95,15 +98,15 @@ public class ComicReaderControllerTests
     {
         // Arrange
         var currentFile = "/test/watched/comic2.cbz";
-        var files = new List<ComicFile>
-        {
-            new() { FilePath = "/test/watched/comic1.cbz", FileName = "comic1.cbz" },
-            new() { FilePath = "/test/watched/comic2.cbz", FileName = "comic2.cbz" },
-            new() { FilePath = "/test/watched/comic3.cbz", FileName = "comic3.cbz" }
-        };
-
-        _fileStoreMock.Setup(f => f.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(files);
+        _seriesLibraryMock
+            .Setup(s => s.GetAdjacentIssueAsync(currentFile, "prev", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AdjacentIssueResult
+            {
+                Found = true,
+                HasAdjacent = true,
+                FilePath = "/test/watched/comic1.cbz",
+                FileName = "comic1.cbz"
+            });
 
         // Act
         var result = await _controller.GetAdjacentFile(currentFile, "prev");
@@ -125,17 +128,11 @@ public class ComicReaderControllerTests
     [Fact]
     public async Task GetAdjacentFile_AtEnd_ReturnsNoAdjacent()
     {
-        // Arrange
+        // Arrange — last issue of the series: no adjacent "next".
         var currentFile = "/test/watched/comic3.cbz";
-        var files = new List<ComicFile>
-        {
-            new() { FilePath = "/test/watched/comic1.cbz", FileName = "comic1.cbz" },
-            new() { FilePath = "/test/watched/comic2.cbz", FileName = "comic2.cbz" },
-            new() { FilePath = "/test/watched/comic3.cbz", FileName = "comic3.cbz" }
-        };
-
-        _fileStoreMock.Setup(f => f.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(files);
+        _seriesLibraryMock
+            .Setup(s => s.GetAdjacentIssueAsync(currentFile, "next", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AdjacentIssueResult { Found = true, HasAdjacent = false });
 
         // Act
         var result = await _controller.GetAdjacentFile(currentFile, "next");
@@ -154,16 +151,11 @@ public class ComicReaderControllerTests
     [Fact]
     public async Task GetAdjacentFile_AtBeginning_ReturnsNoAdjacent()
     {
-        // Arrange
+        // Arrange — first issue of the series: no adjacent "prev".
         var currentFile = "/test/watched/comic1.cbz";
-        var files = new List<ComicFile>
-        {
-            new() { FilePath = "/test/watched/comic1.cbz", FileName = "comic1.cbz" },
-            new() { FilePath = "/test/watched/comic2.cbz", FileName = "comic2.cbz" }
-        };
-
-        _fileStoreMock.Setup(f => f.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(files);
+        _seriesLibraryMock
+            .Setup(s => s.GetAdjacentIssueAsync(currentFile, "prev", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AdjacentIssueResult { Found = true, HasAdjacent = false });
 
         // Act
         var result = await _controller.GetAdjacentFile(currentFile, "prev");
@@ -184,13 +176,9 @@ public class ComicReaderControllerTests
     {
         // Arrange
         var currentFile = "/test/watched/nonexistent.cbz";
-        var files = new List<ComicFile>
-        {
-            new() { FilePath = "/test/watched/comic1.cbz", FileName = "comic1.cbz" }
-        };
-
-        _fileStoreMock.Setup(f => f.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(files);
+        _seriesLibraryMock
+            .Setup(s => s.GetAdjacentIssueAsync(currentFile, "next", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AdjacentIssueResult { Found = false });
 
         // Act
         var result = await _controller.GetAdjacentFile(currentFile, "next");

@@ -1460,6 +1460,46 @@
             pointer-events: none;
         }
 
+        /* Read/unread status corner shown on every issue card: a colored
+           triangle in the bottom-right corner. Green check = read, blue dot =
+           unread. Stays in sync with issue.read after marking read/unread. */
+        .series-issue-read-corner {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 34px;
+            height: 34px;
+            z-index: 3;
+            clip-path: polygon(100% 0, 100% 100%, 0 100%);
+        }
+
+        .series-issue-read-corner::after {
+            position: absolute;
+            bottom: 1px;
+            right: 3px;
+            line-height: 1;
+            color: #fff;
+        }
+
+        .series-issue-read-corner--read {
+            background: #2ea44f;
+        }
+
+        .series-issue-read-corner--read::after {
+            content: '✓';
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .series-issue-read-corner--unread {
+            background: var(--accent-primary, #4a90d9);
+        }
+
+        .series-issue-read-corner--unread::after {
+            content: '●';
+            font-size: 8px;
+        }
+
         .series-issue-select {
             position: absolute;
             top: 10px;

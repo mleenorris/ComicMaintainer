@@ -3286,13 +3286,14 @@
             }
             const issue = item.issue;
             return `
-                                <div class="series-issue-card ${selectedFiles.has(issue.file_path) ? 'series-issue-card--selected' : ''} ${issue.duplicate ? 'series-issue-card--duplicate' : ''}" data-file-path="${escapeHtml(issue.file_path)}">
+                                <div class="series-issue-card ${issue.read ? 'series-issue-card--read' : 'series-issue-card--unread'} ${selectedFiles.has(issue.file_path) ? 'series-issue-card--selected' : ''} ${issue.duplicate ? 'series-issue-card--duplicate' : ''}" data-file-path="${escapeHtml(issue.file_path)}">
                                     <label class="series-issue-select" aria-label="Select ${escapeHtml(issue.title || issue.file_name)}" onclick="event.stopPropagation()">
                                         <input type="checkbox"
                                                ${selectedFiles.has(issue.file_path) ? 'checked' : ''}
                                                onchange="toggleFileSelection('${escapeJs(issue.file_path)}', this.checked)">
                                     </label>
                                     ${issue.duplicate ? `<span class="series-issue-duplicate-badge" title="Duplicate">🔁 Duplicate</span>` : ''}
+                                    <span class="series-issue-read-corner series-issue-read-corner--${issue.read ? 'read' : 'unread'}" title="${issue.read ? 'Read' : 'Unread'}" aria-label="${issue.read ? 'Read' : 'Unread'}"></span>
                                     <button type="button" class="series-issue-cover-button" aria-label="Read ${escapeHtml(issue.title || issue.file_name)}" onclick="readComic('${escapeJs(issue.file_path)}')">
                                         <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy">
                                         <div class="series-issue-cover-overlay"></div>

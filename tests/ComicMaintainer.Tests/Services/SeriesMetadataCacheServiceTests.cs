@@ -18,6 +18,7 @@ public class SeriesMetadataCacheServiceTests
     private readonly Mock<IExternalSeriesMetadataService> _external = new();
     private readonly Mock<ISeriesImageStore> _imageStore = new();
     private readonly Mock<ISeriesFolderCoverWriter> _folderCoverWriter = new();
+    private readonly Mock<ISeriesArchiveCoverWriter> _archiveCoverWriter = new();
 
     public SeriesMetadataCacheServiceTests()
     {
@@ -37,6 +38,7 @@ public class SeriesMetadataCacheServiceTests
             _external.Object,
             _imageStore.Object,
             _folderCoverWriter.Object,
+            _archiveCoverWriter.Object,
             settingsMonitor.Object,
             new Mock<ILogger<SeriesMetadataCacheService>>().Object);
     }

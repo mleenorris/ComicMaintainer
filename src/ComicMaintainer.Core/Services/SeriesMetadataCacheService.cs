@@ -27,6 +27,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
     private readonly IExternalSeriesMetadataService _externalMetadata;
     private readonly ISeriesImageStore _imageStore;
     private readonly ISeriesFolderCoverWriter _folderCoverWriter;
+    private readonly ISeriesArchiveCoverWriter _archiveCoverWriter;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesMetadataCacheService> _logger;
 
@@ -35,6 +36,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         IExternalSeriesMetadataService externalMetadata,
         ISeriesImageStore imageStore,
         ISeriesFolderCoverWriter folderCoverWriter,
+        ISeriesArchiveCoverWriter archiveCoverWriter,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesMetadataCacheService> logger)
     {
@@ -42,6 +44,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         _externalMetadata = externalMetadata;
         _imageStore = imageStore;
         _folderCoverWriter = folderCoverWriter;
+        _archiveCoverWriter = archiveCoverWriter;
         _settings = settings;
         _logger = logger;
     }
@@ -587,6 +590,17 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 LoggingHelper.SanitizeForLog(entity.NormalizedKey));
         }
 
+        try
+        {
+            await _archiveCoverWriter.RemoveAsync(entity.NormalizedKey, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "Failed to remove embedded first-archive series cover for {Key}",
+                LoggingHelper.SanitizeForLog(entity.NormalizedKey));
+        }
+
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -621,6 +635,21 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 sourcePath,
                 entity.ImageContentType,
                 cancellationToken);
+
+            try
+            {
+                await _archiveCoverWriter.WriteAsync(
+                    entity.NormalizedKey,
+                    sourcePath,
+                    entity.ImageContentType,
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex,
+                    "Failed to embed first-archive series cover for {Key}",
+                    LoggingHelper.SanitizeForLog(entity.NormalizedKey));
+            }
         }
         catch (Exception ex)
         {

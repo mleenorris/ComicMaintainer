@@ -38,6 +38,12 @@ public interface ISettingsService
     Task UpdateWatcherEnableNormalizeAsync(bool enabled, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Update whether the cached series cover image is embedded into the first
+    /// issue's archive as a <c>cover.&lt;ext&gt;</c> entry.
+    /// </summary>
+    Task UpdateWriteCoverToFirstArchiveAsync(bool enabled, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Update the GitHub token setting
     /// </summary>
     Task UpdateGitHubTokenAsync(string? token, CancellationToken cancellationToken = default);

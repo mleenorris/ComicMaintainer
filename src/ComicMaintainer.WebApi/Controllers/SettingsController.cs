@@ -70,7 +70,8 @@ public class SettingsController : ControllerBase
             enable_anilist_metadata = _appSettings.CurrentValue.EnableAniListMetadata,
             anilist_base_url = _appSettings.CurrentValue.AniListBaseUrl,
             default_library_view = _appSettings.CurrentValue.DefaultLibraryView,
-            default_preferred_language = _appSettings.CurrentValue.DefaultPreferredLanguage
+            default_preferred_language = _appSettings.CurrentValue.DefaultPreferredLanguage,
+            write_cover_to_first_archive = _appSettings.CurrentValue.WriteCoverToFirstArchive
         };
         
         _logger.LogDebug("Returning settings: FilenameFormat={FilenameFormat}, IssueNumberPadding={IssueNumberPadding}, WatcherEnableRename={WatcherEnableRename}, WatcherEnableNormalize={WatcherEnableNormalize}, LogMaxBytes={LogMaxBytes}, DatabaseCleanupIntervalHours={DatabaseCleanupIntervalHours}",
@@ -237,6 +238,34 @@ public class SettingsController : ControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public Task<ActionResult> SetWatcherEnableNormalize([FromBody] WatcherEnableNormalizeRequest request, CancellationToken cancellationToken = default)
         => UpdateWatcherEnableNormalize(request, cancellationToken);
+
+    [HttpGet("write-cover-to-first-archive")]
+    public ActionResult<object> GetWriteCoverToFirstArchive()
+    {
+        return Ok(new { enabled = _appSettings.CurrentValue.WriteCoverToFirstArchive });
+    }
+
+    [HttpPut("write-cover-to-first-archive")]
+    public async Task<ActionResult> UpdateWriteCoverToFirstArchive([FromBody] WriteCoverToFirstArchiveRequest request, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Write cover to first archive update requested: {Enabled}", request.Enabled);
+
+        try
+        {
+            await _settingsService.UpdateWriteCoverToFirstArchiveAsync(request.Enabled, cancellationToken);
+            return Ok(new { message = "Write cover to first archive updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update write cover to first archive");
+            return StatusCode(500, new { error = "Failed to update write cover to first archive" });
+        }
+    }
+
+    [HttpPost("write-cover-to-first-archive")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public Task<ActionResult> SetWriteCoverToFirstArchive([FromBody] WriteCoverToFirstArchiveRequest request, CancellationToken cancellationToken = default)
+        => UpdateWriteCoverToFirstArchive(request, cancellationToken);
 
     [HttpGet("database-cleanup-interval-hours")]
     public ActionResult<object> GetDatabaseCleanupIntervalHours()
@@ -547,6 +576,11 @@ public class SettingsController : ControllerBase
     }
 
     public class WatcherEnableNormalizeRequest
+    {
+        public bool Enabled { get; set; }
+    }
+
+    public class WriteCoverToFirstArchiveRequest
     {
         public bool Enabled { get; set; }
     }

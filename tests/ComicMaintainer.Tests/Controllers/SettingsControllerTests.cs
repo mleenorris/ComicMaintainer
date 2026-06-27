@@ -171,6 +171,35 @@ public class SettingsControllerTests
         _settingsServiceMock.Verify(s => s.UpdateIssueNumberPaddingAsync(request.Padding, It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public void GetAllSettings_IncludesWriteCoverToFirstArchive()
+    {
+        // Act
+        var result = _controller.GetAllSettings();
+
+        // Assert
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
+        Assert.NotNull(objectResult.Value);
+
+        var prop = objectResult.Value!.GetType().GetProperty("write_cover_to_first_archive");
+        Assert.NotNull(prop);
+    }
+
+    [Fact]
+    public async Task UpdateWriteCoverToFirstArchive_ReturnsOk()
+    {
+        // Arrange
+        var request = new SettingsController.WriteCoverToFirstArchiveRequest { Enabled = false };
+
+        // Act
+        var result = await _controller.UpdateWriteCoverToFirstArchive(request);
+
+        // Assert
+        Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateWriteCoverToFirstArchiveAsync(false, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     // UpdateWatcherEnabled removed - use UpdateWatcherEnableRename and UpdateWatcherEnableNormalize instead
 
     [Fact]

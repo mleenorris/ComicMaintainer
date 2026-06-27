@@ -26,6 +26,10 @@ public class SeriesImagesController : ControllerBase
     private readonly IExternalSeriesMetadataService _externalMetadata;
     private readonly ILogger<SeriesImagesController> _logger;
 
+    // Guards the background "embed into all first archives" run so concurrent
+    // requests don't kick off overlapping passes over the whole library.
+    private static int _embedAllInProgress;
+
     public SeriesImagesController(
         ISeriesMetadataCacheService cache,
         ISeriesImageStore imageStore,
@@ -256,6 +260,81 @@ public class SeriesImagesController : ControllerBase
                 LoggingHelper.SanitizeForLog(normalizedKey));
             return StatusCode(500, "Error clearing series image");
         }
+    }
+
+    /// <summary>
+    /// Embed the cached series cover image into the first issue's archive
+    /// (CBZ) for a single series, as a page that sorts ahead of the real pages
+    /// so readers display it as the cover. Runs regardless of the
+    /// WriteCoverToFirstArchive setting. Returns 200 with whether the archive
+    /// was (re)written, 404 when the series has no cached image / no resolvable
+    /// first issue.
+    /// </summary>
+    [HttpPost("{normalizedKey}/embed-to-first-archive")]
+    public async Task<IActionResult> EmbedToFirstArchive(string normalizedKey, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            return BadRequest("Series key is required");
+        }
+
+        try
+        {
+            var record = await _cache.GetAsync(normalizedKey, cancellationToken);
+            if (record is null || !record.HasImage)
+            {
+                return NotFound(new { error = "No cached cover image to embed for this series." });
+            }
+
+            var written = await _cache.EmbedCoverInFirstArchiveAsync(normalizedKey, cancellationToken);
+            return Ok(new { embedded = written });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error embedding cover into first archive for {Key}"),
+                LoggingHelper.SanitizeForLog(normalizedKey));
+            return StatusCode(500, "Error embedding cover into first archive");
+        }
+    }
+
+    /// <summary>
+    /// Embed each series' cached cover image into its first issue's archive
+    /// for every series that has a cached image. The work can rewrite many
+    /// archives, so it runs in the background and returns 202 immediately.
+    /// Concurrent runs are coalesced into one.
+    /// </summary>
+    [HttpPost("embed-to-first-archive-all")]
+    public IActionResult EmbedToFirstArchiveAll()
+    {
+        if (Interlocked.CompareExchange(ref _embedAllInProgress, 1, 0) != 0)
+        {
+            return Accepted(new { started = false, message = "An embed-all run is already in progress." });
+        }
+
+        // Fire-and-forget: ISeriesMetadataCacheService is a singleton, so the
+        // captured reference stays valid for the lifetime of the app. The
+        // CancellationToken is intentionally None so the run survives the
+        // request completing.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var written = await _cache.EmbedCoverInAllFirstArchivesAsync(CancellationToken.None);
+                _logger.LogInformation(
+                    LoggingHelper.WithWebsitePrefix("Embedded covers into {Count} first issue archive(s)"),
+                    written);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error embedding covers into first archives for all series"));
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _embedAllInProgress, 0);
+            }
+        });
+
+        return Accepted(new { started = true });
     }
 
     public class ApplyFromProviderRequest

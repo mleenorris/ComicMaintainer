@@ -106,6 +106,17 @@ public class AppSettings
     public bool WriteCoverToSeriesFolder { get; set; } = true;
 
     /// <summary>
+    /// When true, setting a series cover image (user upload, provider apply,
+    /// or background refresh download) also embeds a copy of that cover into
+    /// the <em>first issue's</em> archive (CBZ) as a page that sorts ahead of
+    /// the real pages, so readers that derive the cover from the first page
+    /// show the chosen cover. Defaults to false because it rewrites the first
+    /// issue's archive on disk; the explicit "embed cover in first issue"
+    /// action runs regardless of this flag.
+    /// </summary>
+    public bool WriteCoverToFirstArchive { get; set; } = false;
+
+    /// <summary>
     /// Default preferred language (one of <c>en</c>, <c>ja</c>, <c>ko</c>,
     /// <c>zh</c>, or null/empty for "no preference") applied when a series
     /// has no per-series override. When a matching localized title is

@@ -27,6 +27,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
     private readonly IExternalSeriesMetadataService _externalMetadata;
     private readonly ISeriesImageStore _imageStore;
     private readonly ISeriesFolderCoverWriter _folderCoverWriter;
+    private readonly ISeriesArchiveCoverWriter _archiveCoverWriter;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesMetadataCacheService> _logger;
 
@@ -35,6 +36,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         IExternalSeriesMetadataService externalMetadata,
         ISeriesImageStore imageStore,
         ISeriesFolderCoverWriter folderCoverWriter,
+        ISeriesArchiveCoverWriter archiveCoverWriter,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesMetadataCacheService> logger)
     {
@@ -42,6 +44,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         _externalMetadata = externalMetadata;
         _imageStore = imageStore;
         _folderCoverWriter = folderCoverWriter;
+        _archiveCoverWriter = archiveCoverWriter;
         _settings = settings;
         _logger = logger;
     }
@@ -587,6 +590,17 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 LoggingHelper.SanitizeForLog(entity.NormalizedKey));
         }
 
+        try
+        {
+            await _archiveCoverWriter.RemoveAsync(entity.NormalizedKey, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "Failed to remove embedded first-archive cover for {Key}",
+                LoggingHelper.SanitizeForLog(entity.NormalizedKey));
+        }
+
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
     }
@@ -621,12 +635,99 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 sourcePath,
                 entity.ImageContentType,
                 cancellationToken);
+
+            // Best-effort, opt-in (WriteCoverToFirstArchive) embed of the same
+            // cover into the first issue's archive. force:false so the auto
+            // path respects the setting; the explicit user action forces it.
+            await _archiveCoverWriter.WriteAsync(
+                entity.NormalizedKey,
+                sourcePath,
+                entity.ImageContentType,
+                force: false,
+                cancellationToken);
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex,
                 "Failed to write on-disk series cover for {Key}",
                 LoggingHelper.SanitizeForLog(entity.NormalizedKey));
+        }
+    }
+
+    public async Task<bool> EmbedCoverInFirstArchiveAsync(
+        string normalizedKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            return false;
+        }
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await db.SeriesMetadataCache.FirstOrDefaultAsync(e => e.NormalizedKey == normalizedKey, cancellationToken);
+        if (entity is null)
+        {
+            return false;
+        }
+
+        return await EmbedCoverForEntityAsync(entity, cancellationToken);
+    }
+
+    public async Task<int> EmbedCoverInAllFirstArchivesAsync(CancellationToken cancellationToken = default)
+    {
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entities = await db.SeriesMetadataCache
+            .Where(e => e.LocalImageFile != null && e.LocalImageFile != "")
+            .ToListAsync(cancellationToken);
+
+        var written = 0;
+        foreach (var entity in entities)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (await EmbedCoverForEntityAsync(entity, cancellationToken))
+            {
+                written++;
+            }
+        }
+        return written;
+    }
+
+    /// <summary>
+    /// Force-embed the cached cover image for <paramref name="entity"/> into
+    /// its first issue's archive, bypassing the WriteCoverToFirstArchive flag
+    /// (this path backs the explicit user action). Best-effort; returns true
+    /// when the first issue's archive was (re)written.
+    /// </summary>
+    private async Task<bool> EmbedCoverForEntityAsync(
+        SeriesMetadataCacheEntity entity,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(entity.LocalImageFile)
+            || string.IsNullOrEmpty(entity.ImageContentType))
+        {
+            return false;
+        }
+
+        try
+        {
+            var sourcePath = _imageStore.ResolveAbsolutePath(entity.LocalImageFile);
+            if (string.IsNullOrEmpty(sourcePath))
+            {
+                return false;
+            }
+            return await _archiveCoverWriter.WriteAsync(
+                entity.NormalizedKey,
+                sourcePath,
+                entity.ImageContentType,
+                force: true,
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "Failed to embed first-archive cover for {Key}",
+                LoggingHelper.SanitizeForLog(entity.NormalizedKey));
+            return false;
         }
     }
 

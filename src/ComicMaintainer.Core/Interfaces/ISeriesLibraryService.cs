@@ -85,6 +85,19 @@ public interface ISeriesLibraryService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Resolves the file path of the first issue of the series whose
+    /// external-image cache key matches <paramref name="normalizedKey"/>,
+    /// using the identical grouping and sort order the library/series-detail
+    /// views use (so "first issue" means the same thing everywhere). Returns
+    /// null when no series currently in the library is associated with that
+    /// key. Used by <see cref="ISeriesArchiveCoverWriter"/> to embed a copy of
+    /// the cover image into the first issue's archive.
+    /// </summary>
+    Task<string?> GetFirstIssueFilePathForNormalizedKeyAsync(
+        string normalizedKey,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Resolves the issue immediately before/after <paramref name="filePath"/>
     /// <em>within the same series</em>, using the identical grouping and sort
     /// order the library/series-detail views use. This keeps the reader's

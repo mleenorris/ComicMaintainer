@@ -179,4 +179,24 @@ public interface ISeriesMetadataCacheService
     /// canonical/alias title. Returns the number of records removed.
     /// </summary>
     Task<int> CleanupStaleSiblingRecordsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Embed the cached cover image for the series identified by
+    /// <paramref name="normalizedKey"/> into its first issue's archive (CBZ),
+    /// as a page that sorts ahead of the real pages. Runs regardless of the
+    /// <c>WriteCoverToFirstArchive</c> setting (it backs the explicit user
+    /// action). Best-effort and idempotent. Returns true when the first
+    /// issue's archive was (re)written; false when there is no cached image,
+    /// no resolvable first issue, or the archive already carried the cover.
+    /// </summary>
+    Task<bool> EmbedCoverInFirstArchiveAsync(
+        string normalizedKey,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Embed the cached cover image into the first issue's archive for every
+    /// series that has a cached image. Best-effort and idempotent; returns the
+    /// number of first issues whose archive was (re)written.
+    /// </summary>
+    Task<int> EmbedCoverInAllFirstArchivesAsync(CancellationToken cancellationToken = default);
 }

@@ -726,6 +726,44 @@ public class SeriesLibraryService : ISeriesLibraryService
             .ToList();
     }
 
+    public async Task<string?> GetFirstIssueFilePathForNormalizedKeyAsync(
+        string normalizedKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            return null;
+        }
+
+        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+
+        // Gather every issue from the accumulator(s) that match the cover key
+        // (same matching rules as GetFoldersForNormalizedKeyAsync) and sort
+        // them with the identical comparer the library/series-detail views use
+        // so "first issue" resolves consistently across the app.
+        var matchedIssues = new List<SeriesIssueDto>();
+        foreach (var accumulator in groups.Values)
+        {
+            var matchesImageKey = !string.IsNullOrEmpty(accumulator.ImageNormalizedKey)
+                && string.Equals(accumulator.ImageNormalizedKey, normalizedKey, StringComparison.OrdinalIgnoreCase);
+            var matchesId = !matchesImageKey
+                && string.Equals(accumulator.Id, normalizedKey, StringComparison.OrdinalIgnoreCase);
+            if (!matchesImageKey && !matchesId)
+            {
+                continue;
+            }
+
+            matchedIssues.AddRange(accumulator.Issues);
+        }
+
+        if (matchedIssues.Count == 0)
+        {
+            return null;
+        }
+
+        var sorted = SortIssues(matchedIssues);
+        return sorted.FirstOrDefault(issue => !string.IsNullOrWhiteSpace(issue.FilePath))?.FilePath;
+    }
     /// <summary>
     /// Loads the file store, resolves grouping titles and external cache info,
     /// and returns a dictionary of series accumulators keyed by their union-find

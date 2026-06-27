@@ -421,6 +421,9 @@
                             <button class="action-dropdown-item" onclick="matchAllUnmatchedSeries(); closeAllActionDropdowns();">
                                 🔍 Match All Unmatched Series
                             </button>
+                            <button class="action-dropdown-item" onclick="embedAllSeriesCoversInFirstArchives(); closeAllActionDropdowns();" title="Embed each series' cover image into its first issue's archive so readers display it as the series cover. Runs in the background.">
+                                📥 Embed Covers in First Issues (All Series)
+                            </button>
                             <div class="dropdown-divider"></div>
                             <button class="action-dropdown-item" id="removeMetadataSelectedItem" onclick="removeMetadataSelected(); closeAllActionDropdowns();" disabled title="Strip the embedded ComicInfo.xml from each selected file and mark them unprocessed so they can be re-processed.">
                                 🧹 Remove Metadata Selected
@@ -1265,6 +1268,7 @@
                                  <input type="file" id="manageSeriesImageInput" accept="image/jpeg,image/png,image/webp" style="display: none;" onchange="uploadManageSeriesImage()">
                                  <button class="btn btn-small" type="button" onclick="document.getElementById('manageSeriesImageInput').click()">📷 Upload Image</button>
                                  <button class="btn btn-small" type="button" onclick="openFetchSeriesImageFromProvider()" title="Search the configured external metadata providers for a cover image">🌐 Fetch from Provider</button>
+                                 <button class="btn btn-small" type="button" onclick="embedSeriesCoverInFirstArchive()" title="Embed the current cover image into the first issue's archive so readers display it as the series cover">📥 Embed in First Issue</button>
                                  <button class="btn btn-small" type="button" onclick="clearManageSeriesImage()">🗑️ Clear Image</button>
                              </div>
                              <div id="manageSeriesImageProviderPanel" style="display: none; margin-top: 8px; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary);">

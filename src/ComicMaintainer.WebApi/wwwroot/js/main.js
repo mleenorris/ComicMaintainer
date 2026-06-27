@@ -8096,6 +8096,74 @@
             }
         }
 
+        // ---- Embed cover into first issue's archive -----------------------
+
+        async function embedSeriesCoverInFirstArchive() {
+            const record = manageSeriesState.record;
+            const key = record && record.series_id;
+            if (!key) {
+                showMessage('No series selected', 'info');
+                return;
+            }
+            if (!record.has_image) {
+                showMessage('No cached cover image to embed. Upload or fetch one first.', 'info');
+                return;
+            }
+            try {
+                const response = await fetch(
+                    apiUrl(`/api/series-images/${encodeURIComponent(key)}/embed-to-first-archive`),
+                    { method: 'POST', headers: getAuthHeaders() }
+                );
+                if (!response.ok) {
+                    let msg = 'Failed to embed cover into first issue';
+                    if (response.status === 404) {
+                        msg = 'No cached cover image or no writable first issue (CBZ) found for this series.';
+                    } else {
+                        try { const j = await response.json(); if (j && j.error) msg = j.error; } catch {}
+                    }
+                    showMessage(msg, 'error');
+                    return;
+                }
+                const result = await response.json();
+                showMessage(
+                    result && result.embedded
+                        ? 'Cover embedded into the first issue.'
+                        : 'First issue already has this cover (no changes needed).',
+                    'success');
+            } catch (err) {
+                console.error('embedSeriesCoverInFirstArchive failed', err);
+                showMessage('Failed to embed cover into first issue', 'error');
+            }
+        }
+
+        async function embedAllSeriesCoversInFirstArchives() {
+            if (!confirm(
+                'Embed each series\u2019 cover image into its first issue\u2019s archive (CBZ)?\n\n' +
+                'This rewrites the first issue of every series that has a cached cover. ' +
+                'It runs in the background and may take a while for large libraries. Continue?')) {
+                return;
+            }
+            try {
+                const response = await fetch(
+                    apiUrl('/api/series-images/embed-to-first-archive-all'),
+                    { method: 'POST', headers: getAuthHeaders() }
+                );
+                if (!response.ok) {
+                    showMessage('Failed to start embedding covers', 'error');
+                    return;
+                }
+                const result = await response.json();
+                showMessage(
+                    result && result.started
+                        ? 'Started embedding covers into first issues. This runs in the background.'
+                        : (result && result.message) || 'An embed-all run is already in progress.',
+                    result && result.started ? 'success' : 'info');
+            } catch (err) {
+                console.error('embedAllSeriesCoversInFirstArchives failed', err);
+                showMessage('Failed to start embedding covers', 'error');
+            }
+        }
+
         // ---- Fetch series image from external provider --------------------
 
         function openFetchSeriesImageFromProvider() {

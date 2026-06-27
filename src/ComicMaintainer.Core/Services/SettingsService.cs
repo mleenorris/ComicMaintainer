@@ -92,6 +92,11 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("WatcherEnableNormalize", enabled, cancellationToken);
     }
 
+    public async Task UpdateWriteCoverToFirstArchiveAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("WriteCoverToFirstArchive", enabled, cancellationToken);
+    }
+
     public async Task UpdateGitHubTokenAsync(string? token, CancellationToken cancellationToken = default)
     {
         await UpdateSettingAsync("GitHubToken", token, cancellationToken);

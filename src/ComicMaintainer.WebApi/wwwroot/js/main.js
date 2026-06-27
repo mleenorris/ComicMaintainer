@@ -1220,6 +1220,36 @@
             }
         }
         
+        async function updateWriteCoverToFirstArchive() {
+            const enabled = document.getElementById('writeCoverToFirstArchiveCheckbox').checked;
+            
+            try {
+                const response = await fetch(apiUrl('/api/settings/write-cover-to-first-archive'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ enabled: enabled })
+                });
+                
+                if (handleAuthError(response)) {
+                    document.getElementById('writeCoverToFirstArchiveCheckbox').checked = !enabled;
+                    return;
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const statusText = enabled ? 'enabled' : 'disabled';
+                showMessage(`Embed cover into first issue archive ${statusText} successfully!`, 'success');
+            } catch (error) {
+                showMessage('Failed to update cover embed setting: ' + error.message, 'error');
+                document.getElementById('writeCoverToFirstArchiveCheckbox').checked = !enabled;
+            }
+        }
+        
         // Fetch and display version
         async function loadVersion() {
             try {
@@ -6424,6 +6454,12 @@
                 
                 // Load watcher enable normalize status
                 document.getElementById('watcherEnableNormalizeCheckbox').checked = settingsData.watcher_enable_normalize;
+                
+                // Load series cover embed status
+                const writeCoverCheckbox = document.getElementById('writeCoverToFirstArchiveCheckbox');
+                if (writeCoverCheckbox) {
+                    writeCoverCheckbox.checked = !!settingsData.write_cover_to_first_archive;
+                }
                 
                 // Load log max size (convert bytes to MB)
                 const BYTES_PER_MB = 1048576;

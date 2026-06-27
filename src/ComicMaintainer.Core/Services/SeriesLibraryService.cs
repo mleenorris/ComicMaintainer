@@ -794,6 +794,7 @@ public class SeriesLibraryService : ISeriesLibraryService
         // external providers on every library load.
         var cacheRecords = await _metadataCache.GetAllAsync(cancellationToken);
         var aliasIndex = BuildAliasIndex(cacheRecords);
+        var imageTitleIndex = BuildImageTitleIndex(cacheRecords);
 
         var unionFind = new UnionFind<string>(StringComparer.OrdinalIgnoreCase);
         var groupingKeyByFile = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -885,7 +886,14 @@ public class SeriesLibraryService : ISeriesLibraryService
                 // image whenever any record in the group has one, matching the
                 // Manage Names modal (which looks the image up by title).
                 var imageRecord = ResolveImageRecordForGroup(representative, cacheRecords, unionFind)
-                    ?? (record is not null && record.HasImage ? record : null);
+                    ?? (record is not null && record.HasImage ? record : null)
+                    // Final fallback: the image may live on a record that the
+                    // union-find never bridged to this group because it is only
+                    // reachable by a localized title or pinned name (the grouping
+                    // follows canonical titles + aliases). Match by the group's
+                    // known titles so the card surfaces the same image the
+                    // Manage Names modal resolves by title.
+                    ?? ResolveImageRecordByTitle(imageTitleIndex, displayTitle, canonicalTitle, groupingTitle);
 
                 accumulator = new SeriesAccumulator
                 {
@@ -1480,6 +1488,127 @@ public class SeriesLibraryService : ISeriesLibraryService
         }
 
         return best;
+    }
+
+    /// <summary>
+    /// Indexes every image-bearing cache record by ALL of its known titles —
+    /// canonical title, user-selected name, user aliases, provider aliases, and
+    /// provider-supplied localized titles — so a file group can adopt an image
+    /// even when the union-find grouping never bridged to that record (the
+    /// grouping only follows canonical titles + aliases, so a record reachable
+    /// only by a localized title or pinned name is otherwise missed). This
+    /// mirrors <c>SeriesMetadataCacheService.GetByTitleAsync</c>, which the
+    /// Manage Names modal uses to surface the image, keeping the library card
+    /// and the modal in agreement. When several image records share a title
+    /// key, a user-uploaded image wins over a downloaded one, with the most
+    /// recently downloaded/uploaded image breaking ties. Ambiguous keys (e.g.
+    /// digit-only) are skipped so they cannot bridge unrelated series.
+    /// </summary>
+    private static Dictionary<string, SeriesMetadataCacheRecord> BuildImageTitleIndex(
+        IReadOnlyList<SeriesMetadataCacheRecord> records)
+    {
+        var index = new Dictionary<string, SeriesMetadataCacheRecord>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var record in records)
+        {
+            if (!record.HasImage)
+            {
+                continue;
+            }
+
+            foreach (var title in EnumerateImageRecordTitles(record))
+            {
+                if (string.IsNullOrWhiteSpace(title))
+                {
+                    continue;
+                }
+
+                var key = NormalizeKey(title);
+                if (IsAmbiguousNormalizedKey(key))
+                {
+                    continue;
+                }
+
+                if (!index.TryGetValue(key, out var incumbent)
+                    || IsBetterImageRecord(record, incumbent))
+                {
+                    index[key] = record;
+                }
+            }
+        }
+
+        return index;
+    }
+
+    /// <summary>
+    /// Enumerates every title an image-bearing record can be addressed by. Kept
+    /// in sync with <c>SeriesMetadataCacheService.EntityMatchesTitleKey</c> so
+    /// the library card resolves the same image the Manage Names modal shows.
+    /// </summary>
+    private static IEnumerable<string> EnumerateImageRecordTitles(SeriesMetadataCacheRecord record)
+    {
+        yield return record.NormalizedKey;
+        if (!string.IsNullOrWhiteSpace(record.CanonicalTitle)) yield return record.CanonicalTitle;
+        if (!string.IsNullOrWhiteSpace(record.SeriesName)) yield return record.SeriesName!;
+        foreach (var alias in record.UserAliases ?? Enumerable.Empty<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
+        }
+        foreach (var alias in record.Aliases ?? Enumerable.Empty<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(alias)) yield return alias;
+        }
+        foreach (var localized in record.LocalizedTitles ?? Enumerable.Empty<LocalizedTitle>())
+        {
+            if (localized is not null && !string.IsNullOrWhiteSpace(localized.Title)) yield return localized.Title;
+        }
+    }
+
+    /// <summary>
+    /// Ranks one image-bearing record against another, mirroring
+    /// <see cref="ResolveImageRecordForGroup"/>: a user-uploaded image wins over
+    /// a downloaded one, with the most recently downloaded/uploaded image
+    /// breaking ties.
+    /// </summary>
+    private static bool IsBetterImageRecord(SeriesMetadataCacheRecord candidate, SeriesMetadataCacheRecord incumbent)
+    {
+        if (candidate.IsUserImage != incumbent.IsUserImage)
+        {
+            return candidate.IsUserImage;
+        }
+        return IsMoreRecent(candidate.ImageDownloadedUtc, incumbent.ImageDownloadedUtc);
+    }
+
+    /// <summary>
+    /// Resolves an image record for a group by matching any of the group's
+    /// known titles against <paramref name="imageTitleIndex"/>. Used as a
+    /// fallback when no image record sits inside the group's union-find
+    /// component. Returns null when no title matches.
+    /// </summary>
+    private static SeriesMetadataCacheRecord? ResolveImageRecordByTitle(
+        IReadOnlyDictionary<string, SeriesMetadataCacheRecord> imageTitleIndex,
+        params string?[] titles)
+    {
+        foreach (var title in titles)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                continue;
+            }
+
+            var key = NormalizeKey(title);
+            if (IsAmbiguousNormalizedKey(key))
+            {
+                continue;
+            }
+
+            if (imageTitleIndex.TryGetValue(key, out var record))
+            {
+                return record;
+            }
+        }
+
+        return null;
     }
     /// for representing a series. Higher rank wins when multiple cache
     /// records share a union-find component (see <see cref="ResolveRecordForGroup"/>).

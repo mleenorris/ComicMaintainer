@@ -1182,6 +1182,65 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
+    public async Task GetSeriesSummariesAsync_SurfacesImageFromRecordMatchedOnlyByLocalizedTitle()
+    {
+        // The files group under a localized title (e.g. the English display
+        // name used by the folder) that does NOT appear in any record's
+        // canonical title or alias list — it only exists as a provider-supplied
+        // localized title on the image-bearing record. The union-find grouping
+        // (which keys off canonical titles + aliases) therefore never bridges
+        // the file group to that record, but the Manage Names modal — which
+        // resolves the record by ANY known title including localized ones —
+        // shows its image. The library card must surface the same image.
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Solo Leveling/Solo Leveling 001.cbz",
+                FileName = "Solo Leveling 001.cbz",
+                Directory = "/library/Solo Leveling",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Solo Leveling", Issue = "1" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "ore-dake-level-up-na-ken",
+                    CanonicalTitle = "Ore Dake Level Up na Ken",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>(),
+                    LocalizedTitles = new List<LocalizedTitle>
+                    {
+                        new("Solo Leveling", "en")
+                    },
+                    Source = "MangaDex",
+                    LookupStatus = "success",
+                    LocalImageFile = "solo-leveling.jpg",
+                    ImageContentType = "image/jpeg",
+                    ImageStatus = "downloaded",
+                    ImageDownloadedUtc = new DateTime(2024, 5, 2, 0, 0, 0, DateTimeKind.Utc),
+                    LastLookupUtc = new DateTime(2024, 5, 2, 0, 0, 0, DateTimeKind.Utc)
+                }
+            });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync();
+
+        var series = Assert.Single(result.Series);
+        Assert.True(series.HasExternalImage);
+        Assert.Equal("/api/series-images/ore-dake-level-up-na-ken", series.ExternalImageUrl);
+    }
+
+    [Fact]
     public async Task GetSeriesAsync_CollapsesDuplicateCanonicalTitlesAcrossRecords()
     {
         // Two cache records share the canonical title "Berserk" but live

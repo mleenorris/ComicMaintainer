@@ -113,13 +113,18 @@ public class AppSettings
     /// series cover from the first issue's archive contents (rather than a
     /// sidecar file) display the same cover ComicMaintainer's UI shows.
     ///
-    /// <para>Defaults to <c>false</c> because, unlike
+    /// <para>Defaults to <c>true</c> so the provider/user series image is
+    /// always persisted both as the on-disk folder sidecar
+    /// (<see cref="WriteCoverToSeriesFolder"/>) and embedded into the first
+    /// issue, keeping the downloaded cover authoritative everywhere instead
+    /// of leaving the first issue's placeholder page in place. Unlike
     /// <see cref="WriteCoverToSeriesFolder"/>, this rewrites the comic
-    /// archive in place. The write is idempotent (skipped when the archive
+    /// archive in place; the write is idempotent (skipped when the archive
     /// already contains a byte-identical cover) and only ever targets
-    /// writable CBZ archives.</para>
+    /// writable CBZ archives. Set to <c>false</c> to leave the first issue
+    /// archive untouched.</para>
     /// </summary>
-    public bool WriteCoverToFirstArchive { get; set; } = false;
+    public bool WriteCoverToFirstArchive { get; set; } = true;
 
     /// <summary>
     /// Default preferred language (one of <c>en</c>, <c>ja</c>, <c>ko</c>,

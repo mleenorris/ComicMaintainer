@@ -92,6 +92,15 @@ public class SeriesArchiveCoverWriterTests : IDisposable
     }
 
     [Fact]
+    public void WriteCoverToFirstArchive_DefaultsToEnabled()
+    {
+        // The downloaded/user series image must be persisted into the first
+        // issue archive by default (alongside the folder sidecar) so the
+        // provider cover is authoritative on disk instead of the placeholder.
+        Assert.True(new AppSettings().WriteCoverToFirstArchive);
+    }
+
+    [Fact]
     public async Task WriteAsync_FeatureDisabled_DoesNothing()
     {
         _appSettings = new AppSettings { WriteCoverToFirstArchive = false };

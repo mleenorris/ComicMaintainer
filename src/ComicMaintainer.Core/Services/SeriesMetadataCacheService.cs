@@ -28,6 +28,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
     private readonly ISeriesImageStore _imageStore;
     private readonly ISeriesFolderCoverWriter _folderCoverWriter;
     private readonly ISeriesArchiveCoverWriteQueue _archiveCoverQueue;
+    private readonly ISeriesArchiveCoverWriter _archiveCoverWriter;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesMetadataCacheService> _logger;
 
@@ -37,6 +38,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         ISeriesImageStore imageStore,
         ISeriesFolderCoverWriter folderCoverWriter,
         ISeriesArchiveCoverWriteQueue archiveCoverQueue,
+        ISeriesArchiveCoverWriter archiveCoverWriter,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesMetadataCacheService> logger)
     {
@@ -45,6 +47,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         _imageStore = imageStore;
         _folderCoverWriter = folderCoverWriter;
         _archiveCoverQueue = archiveCoverQueue;
+        _archiveCoverWriter = archiveCoverWriter;
         _settings = settings;
         _logger = logger;
     }
@@ -599,8 +602,16 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         return ToRecord(entity);
     }
 
+    public Task<bool> ReapplyImageArtifactsAsync(
+        string seriesTitle,
+        CancellationToken cancellationToken = default)
+    {
+        return ReapplyImageArtifactsAsync(seriesTitle, embedArchiveInline: false, cancellationToken);
+    }
+
     public async Task<bool> ReapplyImageArtifactsAsync(
         string seriesTitle,
+        bool embedArchiveInline,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(seriesTitle))
@@ -626,7 +637,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             return false;
         }
 
-        await TryWriteFolderCoverAsync(entity, cancellationToken, force: true);
+        await TryWriteFolderCoverAsync(entity, cancellationToken, force: true, embedArchiveInline: embedArchiveInline);
         return true;
     }
 
@@ -641,7 +652,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
     private async Task TryWriteFolderCoverAsync(
         SeriesMetadataCacheEntity entity,
         CancellationToken cancellationToken,
-        bool force = false)
+        bool force = false,
+        bool embedArchiveInline = false)
     {
         if (string.IsNullOrEmpty(entity.LocalImageFile)
             || string.IsNullOrEmpty(entity.ImageContentType))
@@ -663,14 +675,30 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 force,
                 cancellationToken);
 
-            // Embedded first-archive cover writes are deferred to the background
-            // queue: rewriting the archive on disk is comparatively expensive
-            // and does not need to block the metadata update.
-            _archiveCoverQueue.EnqueueWrite(
-                entity.NormalizedKey,
-                sourcePath,
-                entity.ImageContentType,
-                force);
+            if (embedArchiveInline)
+            {
+                // Embed the first-archive cover synchronously so an explicit,
+                // user-initiated re-apply surfaces real progress (the archive
+                // rewrite is the slow part) instead of completing instantly and
+                // deferring the heavy work to the background queue invisibly.
+                await _archiveCoverWriter.WriteAsync(
+                    entity.NormalizedKey,
+                    sourcePath,
+                    entity.ImageContentType,
+                    force,
+                    cancellationToken);
+            }
+            else
+            {
+                // Embedded first-archive cover writes are deferred to the background
+                // queue: rewriting the archive on disk is comparatively expensive
+                // and does not need to block the metadata update.
+                _archiveCoverQueue.EnqueueWrite(
+                    entity.NormalizedKey,
+                    sourcePath,
+                    entity.ImageContentType,
+                    force);
+            }
         }
         catch (Exception ex)
         {

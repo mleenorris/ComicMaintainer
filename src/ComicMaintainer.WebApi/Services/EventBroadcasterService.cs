@@ -18,8 +18,8 @@ namespace ComicMaintainer.WebApi.Services;
 ///   <item><description><c>job_updated</c> — emitted by
 ///     <see cref="BroadcastJobUpdateAsync"/> for batch-processing jobs
 ///     (process / rename / normalize / metadata update / remove-metadata /
-///     bulk-delete / combine-folders). Payload includes <c>job_id</c>,
-///     <c>status</c>, and a <c>progress</c> sub-object with
+///     bulk-delete / combine-folders / series-cover embed). Payload includes
+///     <c>job_id</c>, <c>status</c>, and a <c>progress</c> sub-object with
 ///     <c>processed</c>, <c>total</c>, <c>success</c>, <c>errors</c>,
 ///     <c>percentage</c>.</description></item>
 ///   <item><description><c>file_processed</c> — emitted by

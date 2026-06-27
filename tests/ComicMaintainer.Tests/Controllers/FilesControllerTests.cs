@@ -235,6 +235,8 @@ public class FilesControllerTests
                 Title = "Batman",
                 CanonicalTitle = "Batman",
                 IssueCount = 1,
+                HasExternalImage = true,
+                ExternalImageUrl = "/api/series-images/batman",
                 Issues = new List<SeriesIssueDto> { new() { FilePath = "/test/Batman 001.cbz", FileName = "Batman 001.cbz" } },
                 Page = 1,
                 PerPage = 50,
@@ -246,6 +248,10 @@ public class FilesControllerTests
         var ok = Assert.IsType<OkObjectResult>(result.Result);
         var idProp = ok.Value!.GetType().GetProperty("id");
         Assert.Equal("batman", idProp!.GetValue(ok.Value));
+        var hasImageProp = ok.Value!.GetType().GetProperty("has_external_image");
+        Assert.Equal(true, hasImageProp!.GetValue(ok.Value));
+        var imageUrlProp = ok.Value!.GetType().GetProperty("external_image_url");
+        Assert.Equal("/api/series-images/batman", imageUrlProp!.GetValue(ok.Value));
     }
 
     [Fact]

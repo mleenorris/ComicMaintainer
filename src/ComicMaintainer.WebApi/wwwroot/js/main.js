@@ -3021,6 +3021,8 @@
                                 aliases: data.aliases,
                                 metadata_source: data.metadata_source,
                                 cover_file_path: data.cover_file_path,
+                                has_external_image: data.has_external_image,
+                                external_image_url: data.external_image_url,
                                 issue_count: data.issue_count,
                                 total_size: data.total_size
                             }
@@ -7816,7 +7818,18 @@
                     return;
                 }
                 const data = await response.json();
-                showMessage(`Updated covers for ${data.updatedSeries || 0} of ${data.totalSeries || 0} series.`, 'success');
+                const updated = data.updatedSeries || 0;
+                const total = data.totalSeries || 0;
+                const skipped = data.skippedSeries || (total - updated);
+                if (updated > 0) {
+                    showMessage(
+                        `Updated covers for ${updated} of ${total} series.${skipped > 0 ? ` ${skipped} skipped (no cached image).` : ''}`,
+                        'success');
+                } else {
+                    showMessage(
+                        `No covers updated: none of the ${total} series have a cached provider image to apply.`,
+                        'info');
+                }
                 if (typeof loadSeriesLibrary === 'function') {
                     loadSeriesLibrary(1, true);
                 }
@@ -7855,7 +7868,18 @@
                     return;
                 }
                 const data = await response.json();
-                showMessage(`Updated covers for ${data.updatedSeries || 0} of ${data.totalSeries || 0} selected series.`, 'success');
+                const updated = data.updatedSeries || 0;
+                const total = data.totalSeries || 0;
+                const skipped = data.skippedSeries || (total - updated);
+                if (updated > 0) {
+                    showMessage(
+                        `Updated covers for ${updated} of ${total} selected series.${skipped > 0 ? ` ${skipped} skipped (no cached image).` : ''}`,
+                        'success');
+                } else {
+                    showMessage(
+                        `No covers updated: none of the ${total} selected series have a cached provider image to apply.`,
+                        'info');
+                }
                 if (typeof loadSeriesLibrary === 'function') {
                     loadSeriesLibrary(1, true);
                 }

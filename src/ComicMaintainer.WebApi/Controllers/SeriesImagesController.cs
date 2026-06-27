@@ -22,17 +22,20 @@ public class SeriesImagesController : ControllerBase
     private const long MaxUploadBytes = 20L * 1024 * 1024;
 
     private readonly ISeriesMetadataCacheService _cache;
+    private readonly ISeriesLibraryService _library;
     private readonly ISeriesImageStore _imageStore;
     private readonly IExternalSeriesMetadataService _externalMetadata;
     private readonly ILogger<SeriesImagesController> _logger;
 
     public SeriesImagesController(
         ISeriesMetadataCacheService cache,
+        ISeriesLibraryService library,
         ISeriesImageStore imageStore,
         IExternalSeriesMetadataService externalMetadata,
         ILogger<SeriesImagesController> logger)
     {
         _cache = cache;
+        _library = library;
         _imageStore = imageStore;
         _externalMetadata = externalMetadata;
         _logger = logger;
@@ -234,6 +237,90 @@ public class SeriesImagesController : ControllerBase
     }
 
     /// <summary>
+    /// Re-apply the current cached cover image to every series in the library,
+    /// forcing the folder/first-archive cover writers even when their
+    /// automatic-write feature flags are disabled.
+    /// </summary>
+    [HttpPost("apply-current/all")]
+    public async Task<ActionResult<object>> ApplyCurrentToAll(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var library = await _library.GetSeriesAsync(perPage: -1, cancellationToken: cancellationToken);
+            var titles = library.Series
+                .Select(s => string.IsNullOrWhiteSpace(s.CanonicalTitle) ? s.Title : s.CanonicalTitle)
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var updated = 0;
+            foreach (var title in titles)
+            {
+                if (await _cache.ReapplyImageArtifactsAsync(title, cancellationToken))
+                {
+                    updated++;
+                }
+            }
+
+            return Ok(new
+            {
+                totalSeries = titles.Count,
+                updatedSeries = updated,
+                skippedSeries = titles.Count - updated
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error re-applying cached series images for all series"));
+            return StatusCode(500, "Error updating series covers");
+        }
+    }
+
+    /// <summary>
+    /// Re-apply the current cached cover image to a specific set of series,
+    /// forcing the folder/first-archive cover writers even when their
+    /// automatic-write feature flags are disabled.
+    /// </summary>
+    [HttpPost("apply-current/selected")]
+    public async Task<ActionResult<object>> ApplyCurrentToSelected(
+        [FromBody] ApplyCurrentSelectedRequest? request,
+        CancellationToken cancellationToken)
+    {
+        var titles = request?.Series?
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (titles is null || titles.Count == 0)
+        {
+            return BadRequest("No series specified");
+        }
+
+        try
+        {
+            var updated = 0;
+            foreach (var title in titles)
+            {
+                if (await _cache.ReapplyImageArtifactsAsync(title, cancellationToken))
+                {
+                    updated++;
+                }
+            }
+
+            return Ok(new
+            {
+                totalSeries = titles.Count,
+                updatedSeries = updated,
+                skippedSeries = titles.Count - updated
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error re-applying cached series images for selected series"));
+            return StatusCode(500, "Error updating series covers");
+        }
+    }
+
+    /// <summary>
     /// Delete the cached series image (downloaded or user-uploaded). The next
     /// metadata refresh is then free to re-download an external image.
     /// </summary>
@@ -262,5 +349,10 @@ public class SeriesImagesController : ControllerBase
     {
         public string ImageUrl { get; set; } = string.Empty;
         public string? Source { get; set; }
+    }
+
+    public class ApplyCurrentSelectedRequest
+    {
+        public List<string> Series { get; set; } = new();
     }
 }

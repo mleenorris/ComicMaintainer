@@ -62,9 +62,10 @@ public class SeriesFolderCoverWriter : ISeriesFolderCoverWriter
         string normalizedKey,
         string sourceFilePath,
         string contentType,
+        bool force = false,
         CancellationToken cancellationToken = default)
     {
-        if (!_settings.CurrentValue.WriteCoverToSeriesFolder) return;
+        if (!force && !_settings.CurrentValue.WriteCoverToSeriesFolder) return;
         if (string.IsNullOrWhiteSpace(normalizedKey)) return;
         if (string.IsNullOrWhiteSpace(sourceFilePath) || !File.Exists(sourceFilePath))
         {

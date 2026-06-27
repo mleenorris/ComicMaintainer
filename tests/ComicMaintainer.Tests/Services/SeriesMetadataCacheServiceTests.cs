@@ -18,6 +18,7 @@ public class SeriesMetadataCacheServiceTests
     private readonly Mock<IExternalSeriesMetadataService> _external = new();
     private readonly Mock<ISeriesImageStore> _imageStore = new();
     private readonly Mock<ISeriesFolderCoverWriter> _folderCoverWriter = new();
+    private readonly Mock<ISeriesArchiveCoverWriter> _archiveCoverWriter = new();
 
     public SeriesMetadataCacheServiceTests()
     {
@@ -37,6 +38,7 @@ public class SeriesMetadataCacheServiceTests
             _external.Object,
             _imageStore.Object,
             _folderCoverWriter.Object,
+            _archiveCoverWriter.Object,
             settingsMonitor.Object,
             new Mock<ILogger<SeriesMetadataCacheService>>().Object);
     }
@@ -373,6 +375,42 @@ public class SeriesMetadataCacheServiceTests
             _service.ApplyExternalImageAsync("", "https://example.com/x.png", null));
         await Assert.ThrowsAsync<ArgumentException>(() =>
             _service.ApplyExternalImageAsync("Batman", "", null));
+    }
+
+    [Fact]
+    public async Task ReapplyImageArtifactsAsync_ForcesCoverWriters_WhenCachedImageExists()
+    {
+        _imageStore.Setup(s => s.DownloadAsync(
+                It.IsAny<string>(),
+                "https://example.com/cover.png",
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("batman-xyz.png", "image/png", 4096));
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-xyz.png"))
+            .Returns("/library/cache/batman-xyz.png");
+
+        await _service.ApplyExternalImageAsync(
+            "Batman",
+            "https://example.com/cover.png",
+            source: "ComicVine");
+
+        var updated = await _service.ReapplyImageArtifactsAsync("Batman");
+
+        Assert.True(updated);
+        _folderCoverWriter.Verify(w => w.WriteAsync("batman", "/library/cache/batman-xyz.png", "image/png", true, It.IsAny<CancellationToken>()), Times.Once);
+        _archiveCoverWriter.Verify(w => w.WriteAsync("batman", "/library/cache/batman-xyz.png", "image/png", true, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ReapplyImageArtifactsAsync_ReturnsFalse_WhenSeriesHasNoCachedImage()
+    {
+        await _service.SetUserAliasesAsync("Batman", Array.Empty<string>());
+
+        var updated = await _service.ReapplyImageArtifactsAsync("Batman");
+
+        Assert.False(updated);
+        _folderCoverWriter.Verify(w => w.WriteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        _archiveCoverWriter.Verify(w => w.WriteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

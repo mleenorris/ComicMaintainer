@@ -393,6 +393,21 @@ public class FileWatcherService : IFileWatcherService, IDisposable
         // No-op: watcher is now controlled by rename/normalize settings
     }
 
+    /// <summary>
+    /// Public entry point for application code that modifies a watched file on
+    /// purpose (e.g. embedding a series cover into the first archive) and wants
+    /// the resulting file-system events suppressed instead of reprocessed.
+    /// </summary>
+    public void SuppressProcessing(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return;
+        }
+
+        MarkSelfInducedChange(filePath);
+    }
+
     private void OnFileCreated(object sender, FileSystemEventArgs e)
     {
         // Ignore temporary files immediately to avoid unnecessary processing

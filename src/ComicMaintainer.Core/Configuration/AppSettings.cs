@@ -106,6 +106,22 @@ public class AppSettings
     public bool WriteCoverToSeriesFolder { get; set; } = true;
 
     /// <summary>
+    /// When true, every time a series cover image is set (user upload,
+    /// provider apply, or background refresh download) a copy is also
+    /// embedded inside the <em>first</em> comic archive of the series as a
+    /// <c>cover.&lt;ext&gt;</c> entry. This lets readers that derive the
+    /// series cover from the first issue's archive contents (rather than a
+    /// sidecar file) display the same cover ComicMaintainer's UI shows.
+    ///
+    /// <para>Defaults to <c>false</c> because, unlike
+    /// <see cref="WriteCoverToSeriesFolder"/>, this rewrites the comic
+    /// archive in place. The write is idempotent (skipped when the archive
+    /// already contains a byte-identical cover) and only ever targets
+    /// writable CBZ archives.</para>
+    /// </summary>
+    public bool WriteCoverToFirstArchive { get; set; } = false;
+
+    /// <summary>
     /// Default preferred language (one of <c>en</c>, <c>ja</c>, <c>ko</c>,
     /// <c>zh</c>, or null/empty for "no preference") applied when a series
     /// has no per-series override. When a matching localized title is

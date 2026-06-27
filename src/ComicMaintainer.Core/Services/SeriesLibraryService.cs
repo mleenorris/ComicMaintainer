@@ -726,6 +726,41 @@ public class SeriesLibraryService : ISeriesLibraryService
             .ToList();
     }
 
+    public async Task<string?> GetFirstIssueFilePathForNormalizedKeyAsync(
+        string normalizedKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedKey))
+        {
+            return null;
+        }
+
+        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+
+        // Match by ImageNormalizedKey first (the authoritative cache key for
+        // the cover image); fall back to a case-insensitive match against the
+        // accumulator id so callers that pass an unmatched series key still
+        // resolve the right series. Mirrors GetFoldersForNormalizedKeyAsync.
+        foreach (var accumulator in groups.Values)
+        {
+            var matchesImageKey = !string.IsNullOrEmpty(accumulator.ImageNormalizedKey)
+                && string.Equals(accumulator.ImageNormalizedKey, normalizedKey, StringComparison.OrdinalIgnoreCase);
+            var matchesId = !matchesImageKey
+                && string.Equals(accumulator.Id, normalizedKey, StringComparison.OrdinalIgnoreCase);
+            if (!matchesImageKey && !matchesId)
+            {
+                continue;
+            }
+
+            var sortedIssues = SortIssues(accumulator.Issues);
+            return sortedIssues
+                .Select(issue => issue.FilePath)
+                .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// Loads the file store, resolves grouping titles and external cache info,
     /// and returns a dictionary of series accumulators keyed by their union-find

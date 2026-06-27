@@ -88,6 +88,17 @@ public interface ISeriesMetadataCacheService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Re-apply the currently cached series image to the series's on-disk cover
+    /// targets (folder cover sidecars and first-archive embed), forcing the
+    /// writers even when their automatic-write feature flags are disabled.
+    /// Returns <c>false</c> when the series cannot be resolved or has no cached
+    /// image to apply.
+    /// </summary>
+    Task<bool> ReapplyImageArtifactsAsync(
+        string seriesTitle,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Manually adopt an externally-supplied candidate as the cached
     /// metadata for the series. Used when the automatic best-match was wrong
     /// and the user picks a different candidate from the search results.

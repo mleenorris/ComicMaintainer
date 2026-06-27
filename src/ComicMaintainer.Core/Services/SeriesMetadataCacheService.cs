@@ -27,7 +27,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
     private readonly IExternalSeriesMetadataService _externalMetadata;
     private readonly ISeriesImageStore _imageStore;
     private readonly ISeriesFolderCoverWriter _folderCoverWriter;
-    private readonly ISeriesArchiveCoverWriter _archiveCoverWriter;
+    private readonly ISeriesArchiveCoverWriteQueue _archiveCoverQueue;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesMetadataCacheService> _logger;
 
@@ -36,7 +36,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         IExternalSeriesMetadataService externalMetadata,
         ISeriesImageStore imageStore,
         ISeriesFolderCoverWriter folderCoverWriter,
-        ISeriesArchiveCoverWriter archiveCoverWriter,
+        ISeriesArchiveCoverWriteQueue archiveCoverQueue,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesMetadataCacheService> logger)
     {
@@ -44,7 +44,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         _externalMetadata = externalMetadata;
         _imageStore = imageStore;
         _folderCoverWriter = folderCoverWriter;
-        _archiveCoverWriter = archiveCoverWriter;
+        _archiveCoverQueue = archiveCoverQueue;
         _settings = settings;
         _logger = logger;
     }
@@ -590,16 +590,10 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 LoggingHelper.SanitizeForLog(entity.NormalizedKey));
         }
 
-        try
-        {
-            await _archiveCoverWriter.RemoveAsync(entity.NormalizedKey, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex,
-                "Failed to remove embedded first-archive series cover for {Key}",
-                LoggingHelper.SanitizeForLog(entity.NormalizedKey));
-        }
+        // Embedded first-archive cover removal is deferred to the background
+        // queue: rewriting the archive on disk is comparatively expensive and
+        // does not need to block the metadata update.
+        _archiveCoverQueue.EnqueueRemove(entity.NormalizedKey);
 
         await db.SaveChangesAsync(cancellationToken);
         return ToRecord(entity);
@@ -669,21 +663,14 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 force,
                 cancellationToken);
 
-            try
-            {
-                await _archiveCoverWriter.WriteAsync(
-                    entity.NormalizedKey,
-                    sourcePath,
-                    entity.ImageContentType,
-                    force,
-                    cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex,
-                    "Failed to embed first-archive series cover for {Key}",
-                    LoggingHelper.SanitizeForLog(entity.NormalizedKey));
-            }
+            // Embedded first-archive cover writes are deferred to the background
+            // queue: rewriting the archive on disk is comparatively expensive
+            // and does not need to block the metadata update.
+            _archiveCoverQueue.EnqueueWrite(
+                entity.NormalizedKey,
+                sourcePath,
+                entity.ImageContentType,
+                force);
         }
         catch (Exception ex)
         {

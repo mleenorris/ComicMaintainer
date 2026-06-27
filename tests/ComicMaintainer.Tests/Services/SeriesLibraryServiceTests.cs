@@ -1117,6 +1117,71 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
+    public async Task GetSeriesSummariesAsync_SurfacesImageFromSiblingRecordInSameGroup()
+    {
+        // The cover image can live on a different record in the same union-find
+        // component than the rank-selected "best" record. Here the user's
+        // "manual_match" record (which wins on lookup-status rank) has no
+        // image, while the automatic "success" sibling carries the downloaded
+        // cover. The library card must still surface the provider image.
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Series Alt/Series 001.cbz",
+                FileName = "Series 001.cbz",
+                Directory = "/library/Series Alt",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Series", Issue = "1" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "series-alt",
+                    CanonicalTitle = "Series Alt",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>(),
+                    Source = "MangaDex",
+                    LookupStatus = "success",
+                    LocalImageFile = "series-alt.jpg",
+                    ImageContentType = "image/jpeg",
+                    ImageStatus = "downloaded",
+                    ImageDownloadedUtc = new DateTime(2024, 5, 2, 0, 0, 0, DateTimeKind.Utc),
+                    LastLookupUtc = new DateTime(2024, 5, 2, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new()
+                {
+                    NormalizedKey = "series",
+                    CanonicalTitle = "Series",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>(),
+                    Source = "AniList",
+                    LookupStatus = "manual_match",
+                    LastLookupUtc = new DateTime(2024, 5, 1, 0, 0, 0, DateTimeKind.Utc)
+                }
+            });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync();
+
+        var series = Assert.Single(result.Series);
+        // Lookup status still reflects the authoritative manual match…
+        Assert.Equal("manual_match", series.LookupStatus);
+        // …but the image is surfaced from the sibling "success" record.
+        Assert.True(series.HasExternalImage);
+        Assert.Equal("/api/series-images/series-alt", series.ExternalImageUrl);
+    }
+
+    [Fact]
     public async Task GetSeriesAsync_CollapsesDuplicateCanonicalTitlesAcrossRecords()
     {
         // Two cache records share the canonical title "Berserk" but live

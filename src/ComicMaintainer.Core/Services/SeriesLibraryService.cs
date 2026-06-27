@@ -876,6 +876,17 @@ public class SeriesLibraryService : ISeriesLibraryService
 
             if (!groups.TryGetValue(representative, out var accumulator))
             {
+                // The cached cover image may live on a *different* record in
+                // the same union-find component than the rank-selected "best"
+                // record (e.g. an automatic-refresh "success" sibling carries
+                // the downloaded image while the user's "manual_match" record
+                // — which wins on lookup-status rank — has none). Resolve the
+                // image independently so the library card shows the provider
+                // image whenever any record in the group has one, matching the
+                // Manage Names modal (which looks the image up by title).
+                var imageRecord = ResolveImageRecordForGroup(representative, cacheRecords, unionFind)
+                    ?? (record is not null && record.HasImage ? record : null);
+
                 accumulator = new SeriesAccumulator
                 {
                     Id = representative,
@@ -885,8 +896,8 @@ public class SeriesLibraryService : ISeriesLibraryService
                     LookupStatus = record?.LookupStatus,
                     LastLookupUtc = record?.LastLookupUtc,
                     Aliases = new List<string>(),
-                    HasExternalImage = record is not null && record.HasImage,
-                    ImageNormalizedKey = record?.NormalizedKey,
+                    HasExternalImage = imageRecord is not null,
+                    ImageNormalizedKey = imageRecord?.NormalizedKey ?? record?.NormalizedKey,
                     Synopsis = record?.Synopsis
                 };
 
@@ -1428,7 +1439,48 @@ public class SeriesLibraryService : ISeriesLibraryService
     }
 
     /// <summary>
-    /// Ranks a cache record's <c>LookupStatus</c> by how authoritative it is
+    /// Picks the cache record in a union-find component that actually carries a
+    /// cached cover image. A single logical series can span multiple records
+    /// (canonical + alias refreshes), and the image may sit on a different
+    /// record than the one chosen by <see cref="ResolveRecordForGroup"/> for
+    /// its lookup status. User-uploaded images win over downloaded ones, with
+    /// the most recently downloaded/uploaded image breaking ties, so the
+    /// library card surfaces the same image the Manage Names modal shows.
+    /// </summary>
+    private static SeriesMetadataCacheRecord? ResolveImageRecordForGroup(
+        string representative,
+        IReadOnlyList<SeriesMetadataCacheRecord> records,
+        UnionFind<string> unionFind)
+    {
+        SeriesMetadataCacheRecord? best = null;
+        var bestIsUser = false;
+        DateTime? bestDownloaded = null;
+
+        foreach (var record in records)
+        {
+            if (!record.HasImage)
+            {
+                continue;
+            }
+            if (!unionFind.Contains(record.NormalizedKey)
+                || !string.Equals(unionFind.Find(record.NormalizedKey), representative, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var isUser = record.IsUserImage;
+            if (best is null
+                || (isUser && !bestIsUser)
+                || (isUser == bestIsUser && IsMoreRecent(record.ImageDownloadedUtc, bestDownloaded)))
+            {
+                best = record;
+                bestIsUser = isUser;
+                bestDownloaded = record.ImageDownloadedUtc;
+            }
+        }
+
+        return best;
+    }
     /// for representing a series. Higher rank wins when multiple cache
     /// records share a union-find component (see <see cref="ResolveRecordForGroup"/>).
     /// Kept in sync with the front-end badge mapping in <c>main.js</c>:

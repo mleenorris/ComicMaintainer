@@ -69,9 +69,10 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
         string normalizedKey,
         string sourceFilePath,
         string contentType,
+        bool force = false,
         CancellationToken cancellationToken = default)
     {
-        if (!_settings.CurrentValue.WriteCoverToFirstArchive) return;
+        if (!force && !_settings.CurrentValue.WriteCoverToFirstArchive) return;
         if (string.IsNullOrWhiteSpace(normalizedKey)) return;
         if (string.IsNullOrWhiteSpace(sourceFilePath) || !File.Exists(sourceFilePath))
         {

@@ -605,6 +605,37 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         return ToRecord(entity);
     }
 
+    public async Task<bool> ReapplyImageArtifactsAsync(
+        string seriesTitle,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(seriesTitle))
+        {
+            throw new ArgumentException("Series title is required", nameof(seriesTitle));
+        }
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var entity = await ResolveEntityByTitleAsync(db, seriesTitle, cancellationToken);
+        if (entity is null
+            || string.IsNullOrWhiteSpace(entity.LocalImageFile)
+            || string.IsNullOrWhiteSpace(entity.ImageContentType)
+            || string.IsNullOrWhiteSpace(entity.ImageStatus)
+            || string.Equals(entity.ImageStatus, "none", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entity.ImageStatus, "failed", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var sourcePath = _imageStore.ResolveAbsolutePath(entity.LocalImageFile);
+        if (string.IsNullOrWhiteSpace(sourcePath))
+        {
+            return false;
+        }
+
+        await TryWriteFolderCoverAsync(entity, cancellationToken, force: true);
+        return true;
+    }
+
     /// <summary>
     /// Best-effort: copy the freshly-persisted cached cover image into each
     /// on-disk folder that backs the series, as <c>cover.&lt;ext&gt;</c>. The
@@ -615,7 +646,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
     /// </summary>
     private async Task TryWriteFolderCoverAsync(
         SeriesMetadataCacheEntity entity,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool force = false)
     {
         if (string.IsNullOrEmpty(entity.LocalImageFile)
             || string.IsNullOrEmpty(entity.ImageContentType))
@@ -634,6 +666,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 entity.NormalizedKey,
                 sourcePath,
                 entity.ImageContentType,
+                force,
                 cancellationToken);
 
             try
@@ -642,6 +675,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                     entity.NormalizedKey,
                     sourcePath,
                     entity.ImageContentType,
+                    force,
                     cancellationToken);
             }
             catch (Exception ex)

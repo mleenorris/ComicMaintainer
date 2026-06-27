@@ -26,6 +26,7 @@ public interface ISeriesFolderCoverWriter
         string normalizedKey,
         string sourceFilePath,
         string contentType,
+        bool force = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>

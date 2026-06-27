@@ -4085,6 +4085,8 @@
             const markSelectedUnreadItem = document.getElementById('markSelectedUnreadItem');
             const clearSelectedStatusItem = document.getElementById('clearSelectedStatusItem');
             const removeMetadataSelectedItem = document.getElementById('removeMetadataSelectedItem');
+            const updateSeriesCoversSelectedItem = document.getElementById('updateSeriesCoversSelectedItem');
+            const canUpdateSelectedSeriesCovers = libraryViewMode === 'series' && !currentSeriesDetailId && selectedSeries.size > 0;
             
             if (count === 0) {
                 info.textContent = 'No files selected';
@@ -4109,6 +4111,7 @@
                 if (clearSelectedStatusItem) clearSelectedStatusItem.disabled = false;
                 if (removeMetadataSelectedItem) removeMetadataSelectedItem.disabled = false;
             }
+            if (updateSeriesCoversSelectedItem) updateSeriesCoversSelectedItem.disabled = !canUpdateSelectedSeriesCovers;
             syncSeriesSelectionControls();
         }
 
@@ -7755,6 +7758,86 @@
             } catch (err) {
                 console.error('matchAllUnmatchedSeries failed', err);
                 showMessage('Failed to queue match-unmatched', 'error');
+            }
+        }
+
+        function getSelectedSeriesTitlesForCoverUpdate() {
+            if (!(libraryViewMode === 'series' && !currentSeriesDetailId)) {
+                return [];
+            }
+            const seen = new Set();
+            return seriesLibrary
+                .filter(series => selectedSeries.has(series.id))
+                .map(series => (series.canonical_title || series.title || '').trim())
+                .filter(title => {
+                    if (!title) return false;
+                    const key = title.toLowerCase();
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                });
+        }
+
+        async function updateAllSeriesCovers() {
+            if (!confirm('Re-apply the current cached series image to cover sidecars and first-issue archives for ALL series in the library? This may rewrite archive files and can take a while.')) {
+                return;
+            }
+            try {
+                const response = await fetch(apiUrl('/api/series-images/apply-current/all'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                    credentials: 'same-origin'
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    const error = await response.text();
+                    showMessage('Failed to update series covers: ' + error, 'error');
+                    return;
+                }
+                const data = await response.json();
+                showMessage(`Updated covers for ${data.updatedSeries || 0} of ${data.totalSeries || 0} series.`, 'success');
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
+            } catch (err) {
+                console.error('updateAllSeriesCovers failed', err);
+                showMessage('Failed to update series covers', 'error');
+            }
+        }
+
+        async function updateSelectedSeriesCovers() {
+            const series = getSelectedSeriesTitlesForCoverUpdate();
+            if (!series.length) {
+                showMessage('Select at least one series from the library view', 'error');
+                return;
+            }
+            if (!confirm(`Re-apply the current cached series image to ${series.length} selected series${series.length === 1 ? '' : 'es'}? This may rewrite archive files.`)) {
+                return;
+            }
+            try {
+                const response = await fetch(apiUrl('/api/series-images/apply-current/selected'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ series })
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    const error = await response.text();
+                    showMessage('Failed to update selected series covers: ' + error, 'error');
+                    return;
+                }
+                const data = await response.json();
+                showMessage(`Updated covers for ${data.updatedSeries || 0} of ${data.totalSeries || 0} selected series.`, 'success');
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
+            } catch (err) {
+                console.error('updateSelectedSeriesCovers failed', err);
+                showMessage('Failed to update selected series covers', 'error');
             }
         }
 

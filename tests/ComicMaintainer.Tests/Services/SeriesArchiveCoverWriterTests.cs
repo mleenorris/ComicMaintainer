@@ -105,6 +105,22 @@ public class SeriesArchiveCoverWriterTests : IDisposable
     }
 
     [Fact]
+    public async Task WriteAsync_ForceEnabled_WritesEvenWhenFeatureDisabled()
+    {
+        _appSettings = new AppSettings { WriteCoverToFirstArchive = false };
+        var cbz = CreateCbz("issue1.cbz", "01.jpg");
+        var coverBytes = new byte[] { 3, 2, 1 };
+        var coverSrc = CreateCoverImage(coverBytes);
+        _library.Setup(l => l.GetFirstIssueFilePathForNormalizedKeyAsync("series-a", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cbz);
+
+        await CreateWriter().WriteAsync("series-a", coverSrc, "image/jpeg", true);
+
+        Assert.Contains("cover.jpg", ListEntries(cbz));
+        Assert.Equal(coverBytes, ReadEntry(cbz, "cover.jpg"));
+    }
+
+    [Fact]
     public async Task WriteAsync_ReplacesDifferentExtensionCover()
     {
         var cbz = CreateCbz("issue1.cbz", "cover.png", "01.jpg");

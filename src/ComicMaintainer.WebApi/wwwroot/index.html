@@ -421,6 +421,12 @@
                             <button class="action-dropdown-item" onclick="matchAllUnmatchedSeries(); closeAllActionDropdowns();">
                                 🔍 Match All Unmatched Series
                             </button>
+                            <button class="action-dropdown-item" onclick="updateAllSeriesCovers(); closeAllActionDropdowns();" title="Re-apply the current cached series image to cover sidecars and first-issue archives for every series in the library.">
+                                🖼️ Update Covers All Series
+                            </button>
+                            <button class="action-dropdown-item" id="updateSeriesCoversSelectedItem" onclick="updateSelectedSeriesCovers(); closeAllActionDropdowns();" disabled title="Re-apply the current cached series image to the selected series. Available from the top-level series library view.">
+                                🖼️ Update Covers Selected Series
+                            </button>
                             <div class="dropdown-divider"></div>
                             <button class="action-dropdown-item" id="removeMetadataSelectedItem" onclick="removeMetadataSelected(); closeAllActionDropdowns();" disabled title="Strip the embedded ComicInfo.xml from each selected file and mark them unprocessed so they can be re-processed.">
                                 🧹 Remove Metadata Selected

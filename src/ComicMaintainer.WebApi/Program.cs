@@ -510,6 +510,8 @@ builder.Services.AddSingleton<ISeriesLanguagePreferenceRetagService, SeriesLangu
 builder.Services.AddSingleton<ISeriesImageStore, SeriesImageStore>();
 builder.Services.AddSingleton<ISeriesFolderCoverWriter, SeriesFolderCoverWriter>();
 builder.Services.AddSingleton<ISeriesArchiveCoverWriter, SeriesArchiveCoverWriter>();
+builder.Services.AddSingleton<SeriesArchiveCoverWriteQueue>();
+builder.Services.AddSingleton<ISeriesArchiveCoverWriteQueue>(sp => sp.GetRequiredService<SeriesArchiveCoverWriteQueue>());
 builder.Services.AddHttpClient(SeriesImageStore.HttpClientName)
     .ConfigureHttpClient(client =>
     {
@@ -567,6 +569,9 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 
 // Add hosted service for file watcher
 builder.Services.AddHostedService<FileWatcherHostedService>();
+
+// Add hosted service that drains the background series archive cover write queue
+builder.Services.AddHostedService<SeriesArchiveCoverWriteQueueHostedService>();
 
 // Add hosted service for database cleanup
 builder.Services.AddHostedService<DatabaseCleanupHostedService>();

@@ -18,7 +18,7 @@ public class SeriesMetadataCacheServiceTests
     private readonly Mock<IExternalSeriesMetadataService> _external = new();
     private readonly Mock<ISeriesImageStore> _imageStore = new();
     private readonly Mock<ISeriesFolderCoverWriter> _folderCoverWriter = new();
-    private readonly Mock<ISeriesArchiveCoverWriter> _archiveCoverWriter = new();
+    private readonly Mock<ISeriesArchiveCoverWriteQueue> _archiveCoverQueue = new();
 
     public SeriesMetadataCacheServiceTests()
     {
@@ -38,7 +38,7 @@ public class SeriesMetadataCacheServiceTests
             _external.Object,
             _imageStore.Object,
             _folderCoverWriter.Object,
-            _archiveCoverWriter.Object,
+            _archiveCoverQueue.Object,
             settingsMonitor.Object,
             new Mock<ILogger<SeriesMetadataCacheService>>().Object);
     }
@@ -398,7 +398,7 @@ public class SeriesMetadataCacheServiceTests
 
         Assert.True(updated);
         _folderCoverWriter.Verify(w => w.WriteAsync("batman", "/library/cache/batman-xyz.png", "image/png", true, It.IsAny<CancellationToken>()), Times.Once);
-        _archiveCoverWriter.Verify(w => w.WriteAsync("batman", "/library/cache/batman-xyz.png", "image/png", true, It.IsAny<CancellationToken>()), Times.Once);
+        _archiveCoverQueue.Verify(w => w.EnqueueWrite("batman", "/library/cache/batman-xyz.png", "image/png", true), Times.Once);
     }
 
     [Fact]
@@ -410,7 +410,7 @@ public class SeriesMetadataCacheServiceTests
 
         Assert.False(updated);
         _folderCoverWriter.Verify(w => w.WriteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
-        _archiveCoverWriter.Verify(w => w.WriteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        _archiveCoverQueue.Verify(w => w.EnqueueWrite(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
     }
 
     [Fact]

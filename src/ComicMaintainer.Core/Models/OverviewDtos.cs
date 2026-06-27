@@ -45,7 +45,10 @@ public class OverviewSeriesCard : SeriesSummaryDto
 /// </summary>
 public class OverviewResult
 {
-    /// <summary>Series the current user has started but not finished reading.</summary>
+    /// <summary>
+    /// Series the current user is still working through: an issue is partially
+    /// read, or an issue was completed while later issues remain unread.
+    /// </summary>
     [JsonPropertyName("continue_reading")]
     public List<OverviewSeriesCard> ContinueReading { get; set; } = new();
 

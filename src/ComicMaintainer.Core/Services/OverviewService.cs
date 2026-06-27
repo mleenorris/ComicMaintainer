@@ -56,22 +56,24 @@ public class OverviewService : IOverviewService
     {
         await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-        // In-progress = started (some progress recorded) but not completed.
-        var inProgress = await db.ReadingProgresses
+        // Pull every record that represents real reading activity for the user:
+        // either an in-progress issue (some progress, not completed) or a
+        // completed issue. Completed records are needed so a series stays in
+        // Continue Reading after an issue is finished but more issues remain.
+        var activity = await db.ReadingProgresses
             .AsNoTracking()
             .Where(p => p.UserId == userId
-                && p.CompletedAt == null
-                && p.PercentComplete > 0)
+                && (p.CompletedAt != null || p.PercentComplete > 0))
             .ToListAsync(cancellationToken);
 
-        if (inProgress.Count == 0)
+        if (activity.Count == 0)
         {
             return new List<OverviewSeriesCard>();
         }
 
         // ContentId follows the reader's convention of using the file path.
         var progressByPath = new Dictionary<string, ReadingProgressEntity>(StringComparer.OrdinalIgnoreCase);
-        foreach (var p in inProgress)
+        foreach (var p in activity)
         {
             // Keep the most recently read record per file path.
             if (!progressByPath.TryGetValue(p.ContentId, out var existing)
@@ -84,26 +86,54 @@ public class OverviewService : IOverviewService
         var cards = new List<(OverviewSeriesCard Card, DateTime LastReadAt)>();
         foreach (var entry in entries)
         {
-            ReadingProgressEntity? best = null;
+            // The most recently read issue (in-progress or completed) anchors the
+            // user's place in the series.
+            ReadingProgressEntity? anchor = null;
             foreach (var path in entry.FilePaths)
             {
                 if (progressByPath.TryGetValue(path, out var match)
-                    && (best is null || match.LastReadAt > best.LastReadAt))
+                    && (anchor is null || match.LastReadAt > anchor.LastReadAt))
                 {
-                    best = match;
+                    anchor = match;
                 }
             }
 
-            if (best is null)
+            if (anchor is null)
             {
                 continue;
             }
 
+            string resumePath;
+            int resumePage;
+
+            if (anchor.CompletedAt is null)
+            {
+                // Still in the middle of an issue: resume exactly where we left off.
+                resumePath = anchor.ContentId;
+                resumePage = anchor.CurrentPage;
+            }
+            else
+            {
+                // The most recent issue is finished. Resume at the next issue that
+                // has not been completed yet. If none remain, the series is fully
+                // caught up and should drop off Continue Reading.
+                var next = FindNextUnreadIssue(entry.FilePaths, anchor.ContentId, progressByPath);
+                if (next is null)
+                {
+                    continue;
+                }
+
+                resumePath = next;
+                resumePage = progressByPath.TryGetValue(next, out var nextProgress)
+                    ? nextProgress.CurrentPage
+                    : 0;
+            }
+
             var card = ToCard(entry.Summary);
-            card.ResumeFilePath = best.ContentId;
-            card.ResumePage = best.CurrentPage;
-            card.LastReadUtc = best.LastReadAt;
-            cards.Add((card, best.LastReadAt));
+            card.ResumeFilePath = resumePath;
+            card.ResumePage = resumePage;
+            card.LastReadUtc = anchor.LastReadAt;
+            cards.Add((card, anchor.LastReadAt));
         }
 
         return cards
@@ -111,6 +141,39 @@ public class OverviewService : IOverviewService
             .Take(RowCap)
             .Select(c => c.Card)
             .ToList();
+    }
+
+    /// <summary>
+    /// Returns the first issue (in series order) after <paramref name="completedPath"/>
+    /// that the user has not completed, or null if every later issue is finished.
+    /// </summary>
+    private static string? FindNextUnreadIssue(
+        IReadOnlyList<string> orderedPaths,
+        string completedPath,
+        IReadOnlyDictionary<string, ReadingProgressEntity> progressByPath)
+    {
+        var startIndex = -1;
+        for (var i = 0; i < orderedPaths.Count; i++)
+        {
+            if (string.Equals(orderedPaths[i], completedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                startIndex = i;
+                break;
+            }
+        }
+
+        for (var i = startIndex + 1; i < orderedPaths.Count; i++)
+        {
+            var path = orderedPaths[i];
+            // Unread (no record) or started-but-not-completed issues qualify.
+            if (!progressByPath.TryGetValue(path, out var progress)
+                || progress.CompletedAt is null)
+            {
+                return path;
+            }
+        }
+
+        return null;
     }
 
     private static List<OverviewSeriesCard> BuildSeriesUpdates(

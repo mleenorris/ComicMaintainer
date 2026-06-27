@@ -773,7 +773,45 @@
         let currentComicName = '';
         let token = '';
         let readingMode = 'manga'; // 'manga' or 'webcomic'
+        // Tracks which (comic, page) pairs have been requested/loaded in webcomic
+        // mode. Keyed by `${filePath}#${pageNum}` so pages from different comics
+        // that share the same page number never collide when several comics are
+        // stitched together in the continuous scroll container.
         let loadedPages = new Set();
+        // Per-comic metadata for the continuous scroll container so prefetching
+        // can resolve page bounds / titles for whichever comic an image belongs
+        // to (filePath -> { totalPages, name }).
+        let comicMeta = new Map();
+
+        // Build the key used to track loaded pages for a specific comic.
+        function pageLoadedKey(filePath, pageNum) {
+            return `${filePath}#${pageNum}`;
+        }
+
+        // Insert a page image into the continuous container keeping it ordered
+        // within its own comic (so pages from other stitched comics are not
+        // disturbed and async arrivals land in the right spot).
+        function insertWebcomicImage(container, img, filePath, pageNum) {
+            const images = Array.from(container.querySelectorAll('img[data-page]'));
+            let insertBefore = null;
+            let lastSameComic = null;
+            for (const existing of images) {
+                if (existing.dataset.comic !== filePath) continue;
+                const p = parseInt(existing.dataset.page);
+                if (!isNaN(p) && p > pageNum) {
+                    insertBefore = existing;
+                    break;
+                }
+                lastSameComic = existing;
+            }
+            if (insertBefore) {
+                container.insertBefore(img, insertBefore);
+            } else if (lastSameComic) {
+                container.insertBefore(img, lastSameComic.nextSibling);
+            } else {
+                container.appendChild(img);
+            }
+        }
         let isLoadingNext = false;
         let nextComicInfo = null;
         let hasScrolledToBottom = false;
@@ -992,6 +1030,10 @@
             
             const container = document.getElementById('webcomicContainer');
             loadedPages.clear();
+            comicMeta.clear();
+            // Register the comic we are starting with so prefetching knows its
+            // page bounds.
+            comicMeta.set(comicFilePath, { totalPages: totalPages, name: currentComicName });
             allImagesLoaded = false;
             
             // Reset current visible page
@@ -1034,9 +1076,9 @@
         }
         
         // Calculate prefetch indices based on current page and buffer
-        function calculatePrefetchIndices(pageNum = currentPage) {
+        function calculatePrefetchIndices(pageNum = currentPage, comicTotalPages = totalPages) {
             const startIdx = Math.max(1, pageNum - bufferPages);
-            const endIdx = Math.min(totalPages, pageNum + bufferPages);
+            const endIdx = Math.min(comicTotalPages, pageNum + bufferPages);
             return [startIdx, endIdx];
         }
         
@@ -1056,7 +1098,8 @@
 
         // Load a single page in webcomic mode
         async function loadWebcomicPage(pageNum, container) {
-            if (loadedPages.has(pageNum)) return;
+            const loadKey = pageLoadedKey(comicFilePath, pageNum);
+            if (loadedPages.has(loadKey)) return;
             
             try {
                 const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
@@ -1086,6 +1129,7 @@
                 img.src = imageUrl;
                 img.alt = `Page ${pageNum}`;
                 img.dataset.page = pageNum;
+                img.dataset.comic = comicFilePath;
                 container.appendChild(img);
                 
                 // Observe the image for visibility tracking
@@ -1093,18 +1137,19 @@
                     pageObserver.observe(img);
                 }
                 
-                loadedPages.add(pageNum);
+                loadedPages.add(loadKey);
             } catch (error) {
                 console.error(`Error loading page ${pageNum}:`, error);
             }
         }
         
         // Load a single page in webcomic mode (async, non-blocking)
-        function loadWebcomicPageAsync(pageNum, container) {
-            if (loadedPages.has(pageNum)) return;
+        function loadWebcomicPageAsync(pageNum, container, filePath = comicFilePath) {
+            const loadKey = pageLoadedKey(filePath, pageNum);
+            if (loadedPages.has(loadKey)) return;
             
             // Mark as being loaded
-            loadedPages.add(pageNum);
+            loadedPages.add(loadKey);
             
             const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
             const fetchOptions = {
@@ -1118,7 +1163,7 @@
             }
             
             fetch(
-                `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
+                `/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`,
                 fetchOptions
             )
             .then(response => {
@@ -1132,16 +1177,10 @@
                 img.src = imageUrl;
                 img.alt = `Page ${pageNum}`;
                 img.dataset.page = pageNum;
+                img.dataset.comic = filePath;
                 
-                // Insert in correct position
-                const existingImages = Array.from(container.querySelectorAll('img[data-page]'));
-                const insertBefore = existingImages.find(img => parseInt(img.dataset.page) > pageNum);
-                
-                if (insertBefore) {
-                    container.insertBefore(img, insertBefore);
-                } else {
-                    container.appendChild(img);
-                }
+                // Insert in correct position within this comic's pages
+                insertWebcomicImage(container, img, filePath, pageNum);
                 
                 // Observe the image for visibility tracking
                 if (pageObserver) {
@@ -1153,7 +1192,7 @@
             .catch(error => {
                 console.error(`Error loading page ${pageNum}:`, error);
                 // Remove from loaded set so we can retry
-                loadedPages.delete(pageNum);
+                loadedPages.delete(loadKey);
             });
         }
 
@@ -1204,7 +1243,9 @@
                     
                     if (closestImage) {
                         const pageNum = parseInt(closestImage.dataset.page);
-                        if (!isNaN(pageNum) && pageNum !== currentPage) {
+                        const filePath = closestImage.dataset.comic || comicFilePath;
+                        if (!isNaN(pageNum) && (pageNum !== currentPage || filePath !== comicFilePath)) {
+                            setActiveComic(filePath);
                             currentPage = pageNum;
                             currentVisiblePage = pageNum;
                             updatePageInfoInWebcomicMode();
@@ -1268,8 +1309,9 @@
                     // Trigger prefetch when a page becomes visible
                     if (entry.isIntersecting) {
                         const pageNum = parseInt(entry.target.dataset.page);
+                        const filePath = entry.target.dataset.comic || comicFilePath;
                         if (!isNaN(pageNum)) {
-                            prefetchPages(pageNum);
+                            prefetchPages(pageNum, filePath);
                         }
                     }
                 });
@@ -1277,7 +1319,13 @@
                 // Update currentPage and currentVisiblePage based on the most visible image
                 if (mostVisible && mostVisible.isIntersecting) {
                     const pageNum = parseInt(mostVisible.target.dataset.page);
+                    const filePath = mostVisible.target.dataset.comic || comicFilePath;
                     if (!isNaN(pageNum)) {
+                        // The visible page may belong to a different stitched comic
+                        // than the one currently considered "active"; sync the
+                        // active comic context so progress is saved to the right
+                        // file and the title/bounds stay correct.
+                        setActiveComic(filePath);
                         if (pageNum !== currentPage) {
                             currentPage = pageNum;
                             // Save progress as the user scrolls
@@ -1301,9 +1349,25 @@
             });
         }
         
+        // Switch the "active" comic context (used while scrolling through a
+        // continuous stream of stitched comics) so progress saving, the title
+        // bar and page bounds follow whichever comic is currently on screen.
+        function setActiveComic(filePath) {
+            if (!filePath || filePath === comicFilePath) return;
+            const meta = comicMeta.get(filePath);
+            if (!meta) return;
+            comicFilePath = filePath;
+            currentComicName = meta.name;
+            totalPages = meta.totalPages;
+            const titleEl = document.getElementById('comicTitle');
+            if (titleEl) titleEl.textContent = meta.name;
+        }
+
         // Prefetch pages based on current page and scroll direction
-        function prefetchPages(visiblePage) {
-            const [startIdx, endIdx] = calculatePrefetchIndices(visiblePage);
+        function prefetchPages(visiblePage, filePath = comicFilePath) {
+            const meta = comicMeta.get(filePath);
+            const comicTotalPages = meta ? meta.totalPages : totalPages;
+            const [startIdx, endIdx] = calculatePrefetchIndices(visiblePage, comicTotalPages);
             
             console.log('Prefetching pages', startIdx, 'to', endIdx, 'from visible page', visiblePage);
             
@@ -1311,8 +1375,8 @@
             if (!container) return;
             
             for (let i = startIdx; i <= endIdx; i++) {
-                if (!loadedPages.has(i)) {
-                    loadWebcomicPageAsync(i, container);
+                if (!loadedPages.has(pageLoadedKey(filePath, i))) {
+                    loadWebcomicPageAsync(i, container, filePath);
                 }
             }
         }
@@ -1421,9 +1485,12 @@
                     // Update current comic info
                     comicFilePath = nextComicInfo.filePath;
                     currentComicName = data.fileName;
-                    const previousTotalPages = totalPages;
                     totalPages = data.pageCount;
                     document.getElementById('comicTitle').textContent = data.fileName;
+                    
+                    // Register the new comic so prefetching can resolve its page
+                    // bounds / title when its images come into view.
+                    comicMeta.set(comicFilePath, { totalPages: totalPages, name: currentComicName });
                     
                     // Reset hasMarkedAsRead for the new comic
                     hasMarkedAsRead = false;
@@ -1432,29 +1499,35 @@
                     currentPage = 1;
                     currentVisiblePage = 1;
                     
-                    // Create a marker at the start of the new comic for scrolling
+                    // Create a marker at the start of the new comic for scrolling.
+                    // Use a unique id per transition so older markers (from earlier
+                    // comic-to-comic transitions) are never accidentally selected,
+                    // which previously caused the view to jump back to an earlier
+                    // comic's start.
                     const startMarker = document.createElement('div');
-                    startMarker.id = 'newComicStartMarker';
+                    startMarker.id = `newComicStartMarker-${encodeURIComponent(comicFilePath)}`;
+                    startMarker.className = 'new-comic-start-marker';
                     startMarker.dataset.comicPath = comicFilePath;
                     container.appendChild(startMarker);
                     
                     // Use buffered loading for next comic (Kavita approach)
-                    const [startIdx, endIdx] = calculatePrefetchIndices(1);
+                    const [startIdx, endIdx] = calculatePrefetchIndices(1, totalPages);
                     console.log('Loading next comic, prefetching pages', startIdx, 'to', endIdx);
                     
                     // Load buffered pages of next comic
                     for (let i = startIdx; i <= endIdx; i++) {
-                        await loadWebcomicPageForNextComic(i, container, previousTotalPages);
+                        await loadWebcomicPageForNextComic(i, container, comicFilePath);
                     }
                     
                     // Wait for new images to load
                     await waitForImagesToLoad();
                     
-                    // Scroll to the start marker (beginning of new comic) immediately
+                    // Scroll to the start marker (beginning of new comic) immediately.
+                    // Use the marker reference we just created rather than a shared id
+                    // lookup so we always target the correct (newest) comic start.
                     const content = document.getElementById('readerContent');
-                    const marker = document.getElementById('newComicStartMarker');
-                    if (marker && content) {
-                        const markerPosition = marker.offsetTop;
+                    if (startMarker && content) {
+                        const markerPosition = startMarker.offsetTop;
                         content.scrollTop = markerPosition;
                         console.log('Scrolled to new comic start at position:', markerPosition);
                         
@@ -1473,11 +1546,9 @@
         }
         
         // Load a page for the next comic (needed to maintain correct page numbering)
-        async function loadWebcomicPageForNextComic(pageNum, container, pageOffset) {
-            // Use a modified page number for the data attribute to avoid conflicts
-            const globalPageNum = pageOffset + pageNum;
-            
-            if (loadedPages.has(globalPageNum)) return;
+        async function loadWebcomicPageForNextComic(pageNum, container, filePath) {
+            const loadKey = pageLoadedKey(filePath, pageNum);
+            if (loadedPages.has(loadKey)) return;
             
             try {
                 const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
@@ -1492,7 +1563,7 @@
                 }
                 
                 const response = await fetch(
-                    `/api/ComicReader/page?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
+                    `/api/ComicReader/page?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`,
                     fetchOptions
                 );
 
@@ -1506,8 +1577,8 @@
                 const img = document.createElement('img');
                 img.src = imageUrl;
                 img.alt = `Page ${pageNum}`;
-                img.dataset.page = pageNum; // Use actual page number for new comic
-                img.dataset.globalPage = globalPageNum; // Track global position
+                img.dataset.page = pageNum; // Local page number within the new comic
+                img.dataset.comic = filePath; // Track which comic this page belongs to
                 container.appendChild(img);
                 
                 // Observe the image for visibility tracking
@@ -1515,7 +1586,7 @@
                     pageObserver.observe(img);
                 }
                 
-                loadedPages.add(globalPageNum);
+                loadedPages.add(loadKey);
                 return img;
             } catch (error) {
                 console.error(`Error loading page ${pageNum}:`, error);

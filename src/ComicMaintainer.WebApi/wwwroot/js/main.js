@@ -4089,7 +4089,7 @@
             const clearSelectedStatusItem = document.getElementById('clearSelectedStatusItem');
             const removeMetadataSelectedItem = document.getElementById('removeMetadataSelectedItem');
             const updateSeriesCoversSelectedItem = document.getElementById('updateSeriesCoversSelectedItem');
-            const canUpdateSelectedSeriesCovers = libraryViewMode === 'series' && !currentSeriesDetailId && selectedSeries.size > 0;
+            const canUpdateSelectedSeriesCovers = getSelectedSeriesTitlesForCoverUpdate().length > 0;
             
             if (count === 0) {
                 info.textContent = 'No files selected';
@@ -6367,7 +6367,7 @@
             loadActiveLibraryView(1, true);
         }
         
-        function showMessage(message, type = 'info') {
+        function showMessage(message, type = 'info', options = {}) {
             const container = document.getElementById('messageContainer');
             const messageEl = document.createElement('div');
             messageEl.className = `message ${type}`;
@@ -6375,9 +6375,16 @@
             
             container.appendChild(messageEl);
             
-            setTimeout(() => {
-                messageEl.remove();
-            }, 5000);
+            // Persistent messages (autoDismiss === false) stay until the caller
+            // removes the returned element, e.g. to show progress for a
+            // long-running operation. The element is always returned so callers
+            // can update or dismiss it.
+            if (options.autoDismiss !== false) {
+                setTimeout(() => {
+                    messageEl.remove();
+                }, options.duration || 5000);
+            }
+            return messageEl;
         }
         
         async function openSettings() {
@@ -7765,8 +7772,18 @@
         }
 
         function getSelectedSeriesTitlesForCoverUpdate() {
-            if (!(libraryViewMode === 'series' && !currentSeriesDetailId)) {
+            if (libraryViewMode !== 'series') {
                 return [];
+            }
+            // Series detail view: a single series is "selected" simply by being
+            // open, so target that series even though the multi-select
+            // checkboxes (and `selectedSeries`) only apply to the top-level grid.
+            if (currentSeriesDetailId) {
+                const detail = currentSeriesDetailSeries;
+                const title = detail
+                    ? (detail.canonical_title || detail.title || '').trim()
+                    : '';
+                return title ? [title] : [];
             }
             const seen = new Set();
             return seriesLibrary
@@ -7785,6 +7802,7 @@
             if (!confirm('Re-apply the current cached series image to cover sidecars and first-issue archives for ALL series in the library? This may rewrite archive files and can take a while.')) {
                 return;
             }
+            const progress = showMessage('Updating covers for all series… this may take a while.', 'info', { autoDismiss: false });
             try {
                 const response = await fetch(apiUrl('/api/series-images/apply-current/all'), {
                     method: 'POST',
@@ -7805,6 +7823,8 @@
             } catch (err) {
                 console.error('updateAllSeriesCovers failed', err);
                 showMessage('Failed to update series covers', 'error');
+            } finally {
+                if (progress) progress.remove();
             }
         }
 
@@ -7817,6 +7837,7 @@
             if (!confirm(`Re-apply the current cached series image to ${series.length} selected series${series.length === 1 ? '' : 'es'}? This may rewrite archive files.`)) {
                 return;
             }
+            const progress = showMessage(`Updating covers for ${series.length} selected series${series.length === 1 ? '' : 'es'}…`, 'info', { autoDismiss: false });
             try {
                 const response = await fetch(apiUrl('/api/series-images/apply-current/selected'), {
                     method: 'POST',
@@ -7841,6 +7862,8 @@
             } catch (err) {
                 console.error('updateSelectedSeriesCovers failed', err);
                 showMessage('Failed to update selected series covers', 'error');
+            } finally {
+                if (progress) progress.remove();
             }
         }
 
@@ -7852,6 +7875,7 @@
             if (!confirm(`Re-apply the current cached series image to "${seriesTitle}"? This may rewrite the first-issue archive file.`)) {
                 return;
             }
+            const progress = showMessage(`Updating covers for "${seriesTitle}"…`, 'info', { autoDismiss: false });
             try {
                 const response = await fetch(apiUrl('/api/series-images/apply-current/selected'), {
                     method: 'POST',
@@ -7880,6 +7904,8 @@
             } catch (err) {
                 console.error('updateSeriesCoversDirect failed', err);
                 showMessage('Failed to update series covers', 'error');
+            } finally {
+                if (progress) progress.remove();
             }
         }
 

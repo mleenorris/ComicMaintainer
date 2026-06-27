@@ -1107,4 +1107,104 @@ public class SeriesMetadataCacheServiceTests
         Assert.True(selected!.MetadataVersion > initialVersion,
             $"Expected MetadataVersion to be bumped (was {initialVersion}, now {selected.MetadataVersion}).");
     }
+
+    [Fact]
+    public async Task EmbedCoverInFirstArchiveAsync_ForcesArchiveWrite_WhenImageCached()
+    {
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "batman",
+                CanonicalTitle = "Batman",
+                Aliases = new List<string>(),
+                UserAliases = new List<string>(),
+                LocalImageFile = "batman-abc.jpg",
+                ImageContentType = "image/jpeg",
+                ImageStatus = "downloaded",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-abc.jpg")).Returns("/cache/batman-abc.jpg");
+        _archiveCoverWriter
+            .Setup(w => w.WriteAsync("batman", "/cache/batman-abc.jpg", "image/jpeg", true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var written = await _service.EmbedCoverInFirstArchiveAsync("batman");
+
+        Assert.True(written);
+        _archiveCoverWriter.Verify(
+            w => w.WriteAsync("batman", "/cache/batman-abc.jpg", "image/jpeg", true, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task EmbedCoverInFirstArchiveAsync_ReturnsFalse_WhenNoCachedImage()
+    {
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "no-image",
+                CanonicalTitle = "No Image",
+                Aliases = new List<string>(),
+                UserAliases = new List<string>(),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var written = await _service.EmbedCoverInFirstArchiveAsync("no-image");
+
+        Assert.False(written);
+        _archiveCoverWriter.Verify(
+            w => w.WriteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task EmbedCoverInAllFirstArchivesAsync_OnlyProcessesSeriesWithImages()
+    {
+        await using (var db = await _dbContextFactory.CreateDbContextAsync())
+        {
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "with-image",
+                CanonicalTitle = "With Image",
+                Aliases = new List<string>(),
+                UserAliases = new List<string>(),
+                LocalImageFile = "img.jpg",
+                ImageContentType = "image/jpeg",
+                ImageStatus = "downloaded",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            db.SeriesMetadataCache.Add(new SeriesMetadataCacheEntity
+            {
+                NormalizedKey = "without-image",
+                CanonicalTitle = "Without Image",
+                Aliases = new List<string>(),
+                UserAliases = new List<string>(),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        _imageStore.Setup(s => s.ResolveAbsolutePath("img.jpg")).Returns("/cache/img.jpg");
+        _archiveCoverWriter
+            .Setup(w => w.WriteAsync("with-image", "/cache/img.jpg", "image/jpeg", true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var count = await _service.EmbedCoverInAllFirstArchivesAsync();
+
+        Assert.Equal(1, count);
+        _archiveCoverWriter.Verify(
+            w => w.WriteAsync("without-image", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
 }

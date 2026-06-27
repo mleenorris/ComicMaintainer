@@ -2521,6 +2521,7 @@
                     <span class="series-selection-count" id="seriesSelectionCount">
                         ${selectedCount > 0 ? `${selectedCount} series selected` : 'No series selected'}
                     </span>
+                    <button type="button" class="btn btn-small" id="seriesSelectionEmbedCoverBtn" onclick="embedSelectedSeriesCoversInFirstArchives()" ${selectedCount > 0 ? '' : 'hidden'} title="Embed each selected series' cover image into its first issue's archive so readers display it as the series cover.">📥 Embed Covers in First Issues</button>
                     <button type="button" class="btn btn-small" id="seriesSelectionClearBtn" onclick="clearSeriesSelection()" ${selectedCount > 0 ? '' : 'hidden'}>Clear</button>
                 </div>
             `;
@@ -4142,6 +4143,10 @@
             const clearBtn = document.getElementById('seriesSelectionClearBtn');
             if (clearBtn) {
                 clearBtn.hidden = selectedSeries.size === 0;
+            }
+            const embedCoverBtn = document.getElementById('seriesSelectionEmbedCoverBtn');
+            if (embedCoverBtn) {
+                embedCoverBtn.hidden = selectedSeries.size === 0;
             }
         }
 
@@ -8133,6 +8138,48 @@
             } catch (err) {
                 console.error('embedSeriesCoverInFirstArchive failed', err);
                 showMessage('Failed to embed cover into first issue', 'error');
+            }
+        }
+
+        async function embedSelectedSeriesCoversInFirstArchives() {
+            const titles = [];
+            for (const s of seriesLibrary) {
+                if (selectedSeries.has(s.id) && s.title) {
+                    titles.push(s.title);
+                }
+            }
+            if (!titles.length) {
+                showMessage('No series selected', 'info');
+                return;
+            }
+            if (!confirm(
+                `Embed the cover image into the first issue\u2019s archive (CBZ) for ${titles.length} selected series?\n\n` +
+                'Only series that have a cached cover and a writable first issue are updated. Continue?')) {
+                return;
+            }
+            try {
+                const response = await fetch(
+                    apiUrl('/api/series-images/embed-to-first-archive-batch'),
+                    {
+                        method: 'POST',
+                        headers: Object.assign({ 'Content-Type': 'application/json' }, getAuthHeaders()),
+                        body: JSON.stringify({ titles })
+                    }
+                );
+                if (!response.ok) {
+                    let msg = 'Failed to embed covers for selected series';
+                    try { const j = await response.json(); if (j && j.error) msg = j.error; } catch {}
+                    showMessage(msg, 'error');
+                    return;
+                }
+                const result = await response.json();
+                showMessage(
+                    `Embedded covers into ${result.embedded} of ${result.total} selected series` +
+                    (result.with_image < result.total ? ` (${result.total - result.with_image} had no cached cover)` : '') + '.',
+                    'success');
+            } catch (err) {
+                console.error('embedSelectedSeriesCoversInFirstArchives failed', err);
+                showMessage('Failed to embed covers for selected series', 'error');
             }
         }
 

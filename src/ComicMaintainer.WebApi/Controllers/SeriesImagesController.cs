@@ -337,9 +337,66 @@ public class SeriesImagesController : ControllerBase
         return Accepted(new { started = true });
     }
 
+    /// <summary>
+    /// Embed the cached series cover image into the first issue's archive for
+    /// each of the supplied series (by title). Used by the library's
+    /// "selected series" action. Runs inline (the selection is user-bounded)
+    /// and returns per-batch counts. Titles that have no cached image or no
+    /// resolvable first issue are skipped.
+    /// </summary>
+    [HttpPost("embed-to-first-archive-batch")]
+    public async Task<IActionResult> EmbedToFirstArchiveBatch(
+        [FromBody] EmbedBatchRequest? request,
+        CancellationToken cancellationToken)
+    {
+        var titles = request?.Titles?
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? new List<string>();
+
+        if (titles.Count == 0)
+        {
+            return BadRequest(new { error = "At least one series title is required." });
+        }
+
+        var total = titles.Count;
+        var withImage = 0;
+        var embedded = 0;
+
+        foreach (var title in titles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var record = await _cache.GetByTitleAsync(title, cancellationToken);
+                if (record is null || !record.HasImage || string.IsNullOrWhiteSpace(record.NormalizedKey))
+                {
+                    continue;
+                }
+                withImage++;
+                if (await _cache.EmbedCoverInFirstArchiveAsync(record.NormalizedKey, cancellationToken))
+                {
+                    embedded++;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, LoggingHelper.WithWebsitePrefix("Error embedding cover into first archive for series {Title}"),
+                    LoggingHelper.SanitizeForLog(title));
+            }
+        }
+
+        return Ok(new { total, with_image = withImage, embedded });
+    }
+
     public class ApplyFromProviderRequest
     {
         public string ImageUrl { get; set; } = string.Empty;
         public string? Source { get; set; }
+    }
+
+    public class EmbedBatchRequest
+    {
+        public List<string>? Titles { get; set; }
     }
 }

@@ -1908,6 +1908,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Automatic version bump on merge to master
 
+
+## [2.0.264] - 2026-06-27
+
+### Changed
+- Automatic version bump on merge to master
+
 ## [1.0.0] - 2024
 
 ### Added

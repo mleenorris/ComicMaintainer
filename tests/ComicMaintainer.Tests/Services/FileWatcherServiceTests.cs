@@ -698,6 +698,32 @@ public class FileWatcherServiceTests : IDisposable
             "A change echoing the watcher's own processing should not trigger reprocessing");
     }
 
+    [Fact]
+    public async Task SuppressProcessing_IgnoresSubsequentChange()
+    {
+        // Arrange - a comic file that would otherwise be processed on change.
+        var comicFile = Path.Combine(_testDirectory, "suppressed.cbz");
+        _mockFileStore.Setup(fs => fs.IsFileProcessedAsync(comicFile, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        File.WriteAllText(comicFile, "initial content");
+
+        await _service.StartAsync();
+        await Task.Delay(WatcherInitDelayMs);
+
+        // Act - flag the file as a self-induced change (as the cover writer does)
+        // immediately before modifying it.
+        _service.SuppressProcessing(comicFile);
+        File.AppendAllText(comicFile, "cover embed rewrite");
+        await Task.Delay(ProcessingDelayMs);
+
+        // Assert - the suppressed change must not trigger processing.
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(comicFile, It.IsAny<CancellationToken>()),
+            Times.Never,
+            "A change flagged via SuppressProcessing should not trigger processing");
+    }
+
     public void Dispose()
     {
         _service.StopAsync().Wait();

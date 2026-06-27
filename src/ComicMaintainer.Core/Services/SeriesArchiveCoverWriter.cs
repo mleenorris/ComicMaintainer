@@ -123,7 +123,12 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
 
         try
         {
-            RewriteArchive(archivePath, coverEntryName, coverBytes);
+            RewriteArchive(
+                archivePath,
+                coverEntryName,
+                coverBytes,
+                onBeforeReplace: () => SuppressWatcherProcessing(archivePath),
+                onAfterReplace: () => SuppressWatcherProcessing(archivePath));
         }
         catch (Exception ex)
         {
@@ -157,7 +162,12 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
         {
             // Passing no cover bytes removes any managed cover.* entry without
             // adding a replacement.
-            RewriteArchive(archivePath, coverEntryName: null, coverBytes: null);
+            RewriteArchive(
+                archivePath,
+                coverEntryName: null,
+                coverBytes: null,
+                onBeforeReplace: () => SuppressWatcherProcessing(archivePath),
+                onAfterReplace: () => SuppressWatcherProcessing(archivePath));
         }
         catch (Exception ex)
         {
@@ -190,6 +200,32 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
     }
 
     /// <summary>
+    /// Marks the archive path as a self-induced change on the file watcher so
+    /// the cover rewrite does not get picked up and reprocessed. Resolved
+    /// lazily through a fresh scope to keep singleton construction acyclic.
+    /// </summary>
+    private void SuppressWatcherProcessing(string archivePath)
+    {
+        if (string.IsNullOrWhiteSpace(archivePath))
+        {
+            return;
+        }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var watcher = scope.ServiceProvider.GetService<IFileWatcherService>();
+            watcher?.SuppressProcessing(archivePath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex,
+                "Failed to suppress watcher processing for first-archive cover write {Path}",
+                LoggingHelper.SanitizePathForLog(archivePath));
+        }
+    }
+
+    /// <summary>
     /// Rewrite <paramref name="archivePath"/> so that it contains exactly the
     /// desired managed cover state. When <paramref name="coverBytes"/> is
     /// non-null the archive ends up with a single <paramref name="coverEntryName"/>
@@ -201,7 +237,12 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
     /// always preserved. The new archive is written to a sibling temp file and
     /// atomically moved into place.
     /// </summary>
-    private static void RewriteArchive(string archivePath, string? coverEntryName, byte[]? coverBytes)
+    private static void RewriteArchive(
+        string archivePath,
+        string? coverEntryName,
+        byte[]? coverBytes,
+        Action? onBeforeReplace = null,
+        Action? onAfterReplace = null)
     {
         using var source = ZipArchive.Open(archivePath);
 
@@ -275,7 +316,15 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
             // Release the source handle before replacing the file on disk.
             source.Dispose();
 
+            // Flag the imminent on-disk change as self-induced so the file
+            // watcher does not reprocess the archive we are about to rewrite.
+            onBeforeReplace?.Invoke();
+
             File.Move(tempFile, archivePath, overwrite: true);
+
+            // Re-flag after the move: the overwrite fires its own file-system
+            // events, which may arrive slightly after the pre-move mark.
+            onAfterReplace?.Invoke();
         }
         catch
         {

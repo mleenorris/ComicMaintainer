@@ -3477,6 +3477,9 @@
                                             <button class="dropdown-item" onclick="refreshSeriesFolder('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="Refresh metadata for every folder/alias that groups under this series">
                                                 📁 Refresh Folder
                                             </button>
+                                            <button class="dropdown-item" onclick="updateSeriesCoversDirect('${escapeJs(series.title)}'); closeAllDropdowns();" title="Re-apply the current cached series image to this series' cover sidecars and first-issue archive. This may rewrite the archive file.">
+                                                🖼️ Update Covers
+                                            </button>
                                             <div class="dropdown-divider"></div>
                                             <button class="dropdown-item" onclick="resetSeriesProcessedStatus('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
                                                 ♻️ Reset Processed Status
@@ -7838,6 +7841,45 @@
             } catch (err) {
                 console.error('updateSelectedSeriesCovers failed', err);
                 showMessage('Failed to update selected series covers', 'error');
+            }
+        }
+
+        // Re-apply the current cached series image to a single series from the
+        // series-detail actions menu. Mirrors updateSelectedSeriesCovers but
+        // targets exactly one series by title.
+        async function updateSeriesCoversDirect(seriesTitle) {
+            if (!seriesTitle) return;
+            if (!confirm(`Re-apply the current cached series image to "${seriesTitle}"? This may rewrite the first-issue archive file.`)) {
+                return;
+            }
+            try {
+                const response = await fetch(apiUrl('/api/series-images/apply-current/selected'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ series: [seriesTitle] })
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    const error = await response.text();
+                    showMessage('Failed to update series covers: ' + error, 'error');
+                    return;
+                }
+                const data = await response.json();
+                if ((data.updatedSeries || 0) > 0) {
+                    showMessage(`Updated covers for "${seriesTitle}".`, 'success');
+                } else {
+                    showMessage(`No cached image to apply for "${seriesTitle}".`, 'info');
+                }
+                if (typeof loadSeriesLibrary === 'function') {
+                    loadSeriesLibrary(1, true);
+                }
+            } catch (err) {
+                console.error('updateSeriesCoversDirect failed', err);
+                showMessage('Failed to update series covers', 'error');
             }
         }
 

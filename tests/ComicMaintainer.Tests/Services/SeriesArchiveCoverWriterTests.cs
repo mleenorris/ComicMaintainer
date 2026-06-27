@@ -13,6 +13,7 @@ public class SeriesArchiveCoverWriterTests : IDisposable
 {
     private readonly string _testDirectory;
     private readonly Mock<ISeriesLibraryService> _library = new();
+    private readonly Mock<IFileWatcherService> _watcher = new();
     private readonly Mock<IOptionsMonitor<AppSettings>> _settings = new();
     private AppSettings _appSettings = new() { WriteCoverToFirstArchive = true };
 
@@ -27,6 +28,7 @@ public class SeriesArchiveCoverWriterTests : IDisposable
     {
         var services = new ServiceCollection();
         services.AddScoped(_ => _library.Object);
+        services.AddScoped(_ => _watcher.Object);
         var provider = services.BuildServiceProvider();
         var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
         return new SeriesArchiveCoverWriter(
@@ -154,6 +156,38 @@ public class SeriesArchiveCoverWriterTests : IDisposable
         await writer.WriteAsync("series-a", coverSrc, "image/jpeg");
 
         Assert.Equal(firstWrite, File.GetLastWriteTimeUtc(cbz));
+    }
+
+    [Fact]
+    public async Task WriteAsync_SuppressesWatcherProcessing_WhenArchiveRewritten()
+    {
+        var cbz = CreateCbz("issue1.cbz", "01.jpg");
+        var coverSrc = CreateCoverImage(new byte[] { 9, 8, 7 });
+        _library.Setup(l => l.GetFirstIssueFilePathForNormalizedKeyAsync("series-a", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cbz);
+
+        await CreateWriter().WriteAsync("series-a", coverSrc, "image/jpeg");
+
+        _watcher.Verify(w => w.SuppressProcessing(cbz), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task WriteAsync_IdenticalCover_DoesNotSuppressWatcher()
+    {
+        var coverBytes = new byte[] { 7, 7, 7 };
+        var cbz = CreateCbz("issue1.cbz", "01.jpg");
+        var coverSrc = CreateCoverImage(coverBytes);
+        _library.Setup(l => l.GetFirstIssueFilePathForNormalizedKeyAsync("series-a", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(cbz);
+
+        var writer = CreateWriter();
+        await writer.WriteAsync("series-a", coverSrc, "image/jpeg");
+        _watcher.Invocations.Clear();
+
+        // Second identical write is a no-op: no rewrite, so no suppression.
+        await writer.WriteAsync("series-a", coverSrc, "image/jpeg");
+
+        _watcher.Verify(w => w.SuppressProcessing(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]

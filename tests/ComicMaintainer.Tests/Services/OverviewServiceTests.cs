@@ -157,6 +157,136 @@ public class OverviewServiceTests
         var result = await service.GetOverviewAsync("user-1");
         Assert.Empty(result.ContinueReading);
     }
+
+    [Fact]
+    public async Task GetOverviewAsync_ContinueReading_IncludesSeriesWithCompletedIssueAndRemainingIssues()
+    {
+        var now = DateTime.UtcNow;
+        var factory = CreateFactory(out var options);
+
+        // user-1 finished issue 1 of a 3-issue series and hasn't started issue 2.
+        await using (var db = new ComicMaintainerDbContext(options))
+        {
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "user-1",
+                ContentId = "/lib/ongoing/1.cbz",
+                CurrentPage = 20,
+                TotalPages = 20,
+                PercentComplete = 100,
+                LastReadAt = now.AddHours(-1),
+                CompletedAt = now.AddHours(-1)
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var entries = new List<SeriesOverviewEntry>
+        {
+            Entry("ongoing", now.AddDays(-200), now.AddDays(-100),
+                "/lib/ongoing/1.cbz", "/lib/ongoing/2.cbz", "/lib/ongoing/3.cbz"),
+        };
+
+        var service = CreateService(entries, factory);
+
+        var result = await service.GetOverviewAsync("user-1");
+
+        var card = Assert.Single(result.ContinueReading);
+        Assert.Equal("ongoing", card.Id);
+        // Resume target is the next unread issue, starting at the beginning.
+        Assert.Equal("/lib/ongoing/2.cbz", card.ResumeFilePath);
+        Assert.Equal(0, card.ResumePage);
+    }
+
+    [Fact]
+    public async Task GetOverviewAsync_ContinueReading_ExcludesFullyCompletedSeries()
+    {
+        var now = DateTime.UtcNow;
+        var factory = CreateFactory(out var options);
+
+        // Every issue in the series is completed -> nothing left to continue.
+        await using (var db = new ComicMaintainerDbContext(options))
+        {
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "user-1",
+                ContentId = "/lib/finished/1.cbz",
+                CurrentPage = 20,
+                TotalPages = 20,
+                PercentComplete = 100,
+                LastReadAt = now.AddHours(-2),
+                CompletedAt = now.AddHours(-2)
+            });
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "user-1",
+                ContentId = "/lib/finished/2.cbz",
+                CurrentPage = 18,
+                TotalPages = 18,
+                PercentComplete = 100,
+                LastReadAt = now.AddHours(-1),
+                CompletedAt = now.AddHours(-1)
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var entries = new List<SeriesOverviewEntry>
+        {
+            Entry("finished", now.AddDays(-200), now.AddDays(-100),
+                "/lib/finished/1.cbz", "/lib/finished/2.cbz"),
+        };
+
+        var service = CreateService(entries, factory);
+
+        var result = await service.GetOverviewAsync("user-1");
+        Assert.Empty(result.ContinueReading);
+    }
+
+    [Fact]
+    public async Task GetOverviewAsync_ContinueReading_PrefersInProgressIssueOverCompleted()
+    {
+        var now = DateTime.UtcNow;
+        var factory = CreateFactory(out var options);
+
+        // Issue 1 finished earlier; issue 2 is currently in progress.
+        await using (var db = new ComicMaintainerDbContext(options))
+        {
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "user-1",
+                ContentId = "/lib/mix/1.cbz",
+                CurrentPage = 20,
+                TotalPages = 20,
+                PercentComplete = 100,
+                LastReadAt = now.AddHours(-3),
+                CompletedAt = now.AddHours(-3)
+            });
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "user-1",
+                ContentId = "/lib/mix/2.cbz",
+                CurrentPage = 7,
+                TotalPages = 20,
+                PercentComplete = 35,
+                LastReadAt = now.AddMinutes(-10),
+                CompletedAt = null
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var entries = new List<SeriesOverviewEntry>
+        {
+            Entry("mix", now.AddDays(-200), now.AddDays(-100),
+                "/lib/mix/1.cbz", "/lib/mix/2.cbz", "/lib/mix/3.cbz"),
+        };
+
+        var service = CreateService(entries, factory);
+
+        var result = await service.GetOverviewAsync("user-1");
+
+        var card = Assert.Single(result.ContinueReading);
+        Assert.Equal("/lib/mix/2.cbz", card.ResumeFilePath);
+        Assert.Equal(7, card.ResumePage);
+    }
 }
 
 internal sealed class OverviewTestDbContextFactory : IDbContextFactory<ComicMaintainerDbContext>

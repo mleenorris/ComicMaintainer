@@ -259,7 +259,9 @@ public class SeriesLibraryService : ISeriesLibraryService
                     ? DateTime.MinValue
                     : accumulator.EarliestCreatedAt,
                 LatestCreatedAt = accumulator.LatestCreatedAt,
-                FilePaths = accumulator.Issues.Select(i => i.FilePath).ToList()
+                // Emit file paths in series (issue) order so the overview can
+                // resolve the "next unread issue" when resuming a series.
+                FilePaths = sortedIssues.Select(i => i.FilePath).ToList()
             });
         }
 

@@ -290,6 +290,8 @@ public class FilesController : ControllerBase
                 aliases = result.Aliases,
                 metadata_source = result.MetadataSource,
                 cover_file_path = result.CoverFilePath,
+                has_external_image = result.HasExternalImage,
+                external_image_url = result.ExternalImageUrl,
                 issue_count = result.IssueCount,
                 total_size = result.TotalSize,
                 issues = result.Issues,

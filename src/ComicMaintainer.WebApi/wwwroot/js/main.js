@@ -7840,40 +7840,57 @@
             if (!confirm('Re-apply the current cached series image to cover sidecars and first-issue archives for ALL series in the library? This may rewrite archive files and can take a while.')) {
                 return;
             }
-            const progress = showMessage('Updating covers for all series… this may take a while.', 'info', { autoDismiss: false });
+            showProgressModal('Starting cover update...');
             try {
                 const response = await fetch(apiUrl('/api/series-images/apply-current/all'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                     credentials: 'same-origin'
                 });
-                if (handleAuthError(response)) return;
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
                 if (!response.ok) {
                     const error = await response.text();
+                    closeProgressModal();
                     showMessage('Failed to update series covers: ' + error, 'error');
                     return;
                 }
                 const data = await response.json();
-                const updated = data.updatedSeries || 0;
-                const total = data.totalSeries || 0;
-                const skipped = data.skippedSeries || (total - updated);
-                if (updated > 0) {
-                    showMessage(
-                        `Updated covers for ${updated} of ${total} series.${skipped > 0 ? ` ${skipped} skipped (no cached image).` : ''}`,
-                        'success');
-                } else {
-                    showMessage(
-                        `No covers updated: none of the ${total} series have a cached provider image to apply.`,
-                        'info');
-                }
-                if (typeof loadSeriesLibrary === 'function') {
-                    loadSeriesLibrary(1, true);
-                }
+                await trackSeriesCoverJob(data, 'Embedding Covers (All Series)...');
             } catch (err) {
                 console.error('updateAllSeriesCovers failed', err);
+                closeProgressModal();
                 showMessage('Failed to update series covers', 'error');
-            } finally {
-                if (progress) progress.remove();
+            }
+        }
+
+        // Shared handler for the series-cover apply endpoints, which now return a
+        // background job (job_id / total_items) and run through the same SSE
+        // progress pipeline as process / rename / normalize so the user can see
+        // each series' cover being embedded. An empty job id (or zero items)
+        // means no series had a cached image to apply.
+        async function trackSeriesCoverJob(data, title) {
+            const jobId = data && (data.job_id || data.jobId);
+            const totalItems = data ? (data.total_items || 0) : 0;
+            const skipped = data ? (data.skippedSeries || 0) : 0;
+            const EMPTY_JOB_ID = '00000000-0000-0000-0000-000000000000';
+            if (!jobId || jobId === EMPTY_JOB_ID || totalItems === 0) {
+                closeProgressModal();
+                showMessage(
+                    skipped > 0
+                        ? `No covers embedded: none of the ${skipped} series have a cached image to apply.`
+                        : 'No covers embedded: no series have a cached image to apply.',
+                    'info');
+                return;
+            }
+            showMessage(
+                `Embedding covers for ${totalItems} series in background${skipped > 0 ? ` (${skipped} skipped — no cached image)` : ''}`,
+                'info');
+            await trackJobStatus(jobId, title);
+            if (typeof loadSeriesLibrary === 'function') {
+                loadSeriesLibrary(1, true);
             }
         }
 
@@ -7886,7 +7903,7 @@
             if (!confirm(`Re-apply the current cached series image to ${series.length} selected series${series.length === 1 ? '' : 'es'}? This may rewrite archive files.`)) {
                 return;
             }
-            const progress = showMessage(`Updating covers for ${series.length} selected series${series.length === 1 ? '' : 'es'}…`, 'info', { autoDismiss: false });
+            showProgressModal('Starting cover update...');
             try {
                 const response = await fetch(apiUrl('/api/series-images/apply-current/selected'), {
                     method: 'POST',
@@ -7897,33 +7914,22 @@
                     credentials: 'same-origin',
                     body: JSON.stringify({ series })
                 });
-                if (handleAuthError(response)) return;
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
                 if (!response.ok) {
                     const error = await response.text();
+                    closeProgressModal();
                     showMessage('Failed to update selected series covers: ' + error, 'error');
                     return;
                 }
                 const data = await response.json();
-                const updated = data.updatedSeries || 0;
-                const total = data.totalSeries || 0;
-                const skipped = data.skippedSeries || (total - updated);
-                if (updated > 0) {
-                    showMessage(
-                        `Updated covers for ${updated} of ${total} selected series.${skipped > 0 ? ` ${skipped} skipped (no cached image).` : ''}`,
-                        'success');
-                } else {
-                    showMessage(
-                        `No covers updated: none of the ${total} selected series have a cached provider image to apply.`,
-                        'info');
-                }
-                if (typeof loadSeriesLibrary === 'function') {
-                    loadSeriesLibrary(1, true);
-                }
+                await trackSeriesCoverJob(data, 'Embedding Covers (Selected Series)...');
             } catch (err) {
                 console.error('updateSelectedSeriesCovers failed', err);
+                closeProgressModal();
                 showMessage('Failed to update selected series covers', 'error');
-            } finally {
-                if (progress) progress.remove();
             }
         }
 
@@ -7935,7 +7941,7 @@
             if (!confirm(`Re-apply the current cached series image to "${seriesTitle}"? This may rewrite the first-issue archive file.`)) {
                 return;
             }
-            const progress = showMessage(`Updating covers for "${seriesTitle}"…`, 'info', { autoDismiss: false });
+            showProgressModal('Starting cover update...');
             try {
                 const response = await fetch(apiUrl('/api/series-images/apply-current/selected'), {
                     method: 'POST',
@@ -7946,26 +7952,22 @@
                     credentials: 'same-origin',
                     body: JSON.stringify({ series: [seriesTitle] })
                 });
-                if (handleAuthError(response)) return;
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
                 if (!response.ok) {
                     const error = await response.text();
+                    closeProgressModal();
                     showMessage('Failed to update series covers: ' + error, 'error');
                     return;
                 }
                 const data = await response.json();
-                if ((data.updatedSeries || 0) > 0) {
-                    showMessage(`Updated covers for "${seriesTitle}".`, 'success');
-                } else {
-                    showMessage(`No cached image to apply for "${seriesTitle}".`, 'info');
-                }
-                if (typeof loadSeriesLibrary === 'function') {
-                    loadSeriesLibrary(1, true);
-                }
+                await trackSeriesCoverJob(data, `Embedding Cover ("${seriesTitle}")...`);
             } catch (err) {
                 console.error('updateSeriesCoversDirect failed', err);
+                closeProgressModal();
                 showMessage('Failed to update series covers', 'error');
-            } finally {
-                if (progress) progress.remove();
             }
         }
 

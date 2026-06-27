@@ -25,6 +25,7 @@ public class SeriesImagesController : ControllerBase
     private readonly ISeriesLibraryService _library;
     private readonly ISeriesImageStore _imageStore;
     private readonly IExternalSeriesMetadataService _externalMetadata;
+    private readonly IComicProcessorService _processor;
     private readonly ILogger<SeriesImagesController> _logger;
 
     public SeriesImagesController(
@@ -32,12 +33,14 @@ public class SeriesImagesController : ControllerBase
         ISeriesLibraryService library,
         ISeriesImageStore imageStore,
         IExternalSeriesMetadataService externalMetadata,
+        IComicProcessorService processor,
         ILogger<SeriesImagesController> logger)
     {
         _cache = cache;
         _library = library;
         _imageStore = imageStore;
         _externalMetadata = externalMetadata;
+        _processor = processor;
         _logger = logger;
     }
 
@@ -240,6 +243,11 @@ public class SeriesImagesController : ControllerBase
     /// Re-apply the current cached cover image to every series in the library,
     /// forcing the folder/first-archive cover writers even when their
     /// automatic-write feature flags are disabled.
+    ///
+    /// Runs as a background batch job (the same job/SSE pipeline used by
+    /// process / rename / normalize) so the UI can show live per-series
+    /// embedding progress instead of blocking on a single request. Returns the
+    /// job id immediately; progress arrives via <c>job_updated</c> SSE events.
     /// </summary>
     [HttpPost("apply-current/all")]
     public async Task<ActionResult<object>> ApplyCurrentToAll(CancellationToken cancellationToken)
@@ -247,27 +255,27 @@ public class SeriesImagesController : ControllerBase
         try
         {
             var library = await _library.GetSeriesAsync(perPage: -1, cancellationToken: cancellationToken);
-            var titles = library.Series
+            var consideredTitles = library.Series
                 .Select(s => string.IsNullOrWhiteSpace(s.CanonicalTitle) ? s.Title : s.CanonicalTitle)
                 .Where(t => !string.IsNullOrWhiteSpace(t))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            var updated = 0;
-            foreach (var title in titles)
-            {
-                if (await _cache.ReapplyImageArtifactsAsync(title, cancellationToken))
-                {
-                    updated++;
-                }
-            }
+            // Only series that actually have a cached image to apply become job
+            // items, so the progress bar reflects real embedding work and is
+            // not dominated by no-op "skips" for series without a cover.
+            var embeddableTitles = library.Series
+                .Where(s => s.HasExternalImage)
+                .Select(s => string.IsNullOrWhiteSpace(s.CanonicalTitle) ? s.Title : s.CanonicalTitle)
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
-            return Ok(new
-            {
-                totalSeries = titles.Count,
-                updatedSeries = updated,
-                skippedSeries = titles.Count - updated
-            });
+            return await QueueCoverReapplyJobAsync(
+                "ApplySeriesCoversAllJob",
+                embeddableTitles,
+                consideredTitles.Count,
+                cancellationToken);
         }
         catch (Exception ex)
         {
@@ -279,7 +287,8 @@ public class SeriesImagesController : ControllerBase
     /// <summary>
     /// Re-apply the current cached cover image to a specific set of series,
     /// forcing the folder/first-archive cover writers even when their
-    /// automatic-write feature flags are disabled.
+    /// automatic-write feature flags are disabled. Runs as a background batch
+    /// job so the UI can show live per-series embedding progress.
     /// </summary>
     [HttpPost("apply-current/selected")]
     public async Task<ActionResult<object>> ApplyCurrentToSelected(
@@ -297,27 +306,84 @@ public class SeriesImagesController : ControllerBase
 
         try
         {
-            var updated = 0;
-            foreach (var title in titles)
-            {
-                if (await _cache.ReapplyImageArtifactsAsync(title, cancellationToken))
-                {
-                    updated++;
-                }
-            }
+            // Restrict the job to the requested series that actually have a
+            // cached image, using the library's image flag as a cheap filter so
+            // the progress bar tracks real embedding work.
+            var library = await _library.GetSeriesAsync(perPage: -1, cancellationToken: cancellationToken);
+            var embeddableTitles = titles
+                .Where(title => SeriesHasCachedImage(library.Series, title))
+                .ToList();
 
-            return Ok(new
-            {
-                totalSeries = titles.Count,
-                updatedSeries = updated,
-                skippedSeries = titles.Count - updated
-            });
+            return await QueueCoverReapplyJobAsync(
+                "ApplySeriesCoversSelectedJob",
+                embeddableTitles,
+                titles.Count,
+                cancellationToken);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error re-applying cached series images for selected series"));
             return StatusCode(500, "Error updating series covers");
         }
+    }
+
+    /// <summary>
+    /// True when a series matching <paramref name="title"/> (by canonical
+    /// title, display title, or alias) has a cached external/user image to
+    /// embed.
+    /// </summary>
+    private static bool SeriesHasCachedImage(
+        IEnumerable<ComicMaintainer.Core.Models.SeriesLibraryDto> series,
+        string title)
+    {
+        return series.Any(s =>
+            s.HasExternalImage &&
+            (string.Equals(s.CanonicalTitle, title, StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(s.Title, title, StringComparison.OrdinalIgnoreCase) ||
+             s.Aliases.Any(a => string.Equals(a, title, StringComparison.OrdinalIgnoreCase))));
+    }
+
+    /// <summary>
+    /// Queue a batch job that re-applies the cached cover image to each title
+    /// in <paramref name="embeddableTitles"/>, embedding the first-archive
+    /// cover synchronously so the job's progress reflects real embedding work.
+    /// </summary>
+    private async Task<ActionResult<object>> QueueCoverReapplyJobAsync(
+        string operationName,
+        IReadOnlyList<string> embeddableTitles,
+        int totalConsidered,
+        CancellationToken cancellationToken)
+    {
+        var skipped = totalConsidered - embeddableTitles.Count;
+
+        // Nothing to embed — return a completed-looking response with an empty
+        // job id so the UI doesn't have to track an empty job.
+        if (embeddableTitles.Count == 0)
+        {
+            return Ok(new
+            {
+                job_id = Guid.Empty.ToString(),
+                total_items = 0,
+                totalSeries = totalConsidered,
+                skippedSeries = skipped
+            });
+        }
+
+        var jobId = await _processor.RunCustomBatchJobAsync(
+            operationName: operationName,
+            trackedItems: embeddableTitles,
+            itemOperation: (title, token) =>
+                _cache.ReapplyImageArtifactsAsync(title, embedArchiveInline: true, token),
+            failureMessage: "Cover embed failed",
+            cancellationToken: cancellationToken);
+
+        return Ok(new
+        {
+            job_id = jobId.ToString(),
+            total_items = embeddableTitles.Count,
+            totalSeries = totalConsidered,
+            skippedSeries = skipped
+        });
     }
 
     /// <summary>

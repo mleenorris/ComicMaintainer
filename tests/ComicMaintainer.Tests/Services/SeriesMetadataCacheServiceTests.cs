@@ -19,6 +19,7 @@ public class SeriesMetadataCacheServiceTests
     private readonly Mock<ISeriesImageStore> _imageStore = new();
     private readonly Mock<ISeriesFolderCoverWriter> _folderCoverWriter = new();
     private readonly Mock<ISeriesArchiveCoverWriteQueue> _archiveCoverQueue = new();
+    private readonly Mock<ISeriesArchiveCoverWriter> _archiveCoverWriter = new();
 
     public SeriesMetadataCacheServiceTests()
     {
@@ -39,6 +40,7 @@ public class SeriesMetadataCacheServiceTests
             _imageStore.Object,
             _folderCoverWriter.Object,
             _archiveCoverQueue.Object,
+            _archiveCoverWriter.Object,
             settingsMonitor.Object,
             new Mock<ILogger<SeriesMetadataCacheService>>().Object);
     }
@@ -399,6 +401,35 @@ public class SeriesMetadataCacheServiceTests
         Assert.True(updated);
         _folderCoverWriter.Verify(w => w.WriteAsync("batman", "/library/cache/batman-xyz.png", "image/png", true, It.IsAny<CancellationToken>()), Times.Once);
         _archiveCoverQueue.Verify(w => w.EnqueueWrite("batman", "/library/cache/batman-xyz.png", "image/png", true), Times.Once);
+    }
+
+    [Fact]
+    public async Task ReapplyImageArtifactsAsync_EmbedArchiveInline_WritesArchiveSynchronously()
+    {
+        _imageStore.Setup(s => s.DownloadAsync(
+                It.IsAny<string>(),
+                "https://example.com/cover.png",
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesImageStoreResult("batman-xyz.png", "image/png", 4096));
+        _imageStore.Setup(s => s.ResolveAbsolutePath("batman-xyz.png"))
+            .Returns("/library/cache/batman-xyz.png");
+
+        await _service.ApplyExternalImageAsync(
+            "Batman",
+            "https://example.com/cover.png",
+            source: "ComicVine");
+
+        var updated = await _service.ReapplyImageArtifactsAsync("Batman", embedArchiveInline: true);
+
+        Assert.True(updated);
+        _folderCoverWriter.Verify(w => w.WriteAsync("batman", "/library/cache/batman-xyz.png", "image/png", true, It.IsAny<CancellationToken>()), Times.Once);
+        // Inline mode embeds the first-archive cover synchronously via the writer
+        // instead of deferring it to the background queue.
+        _archiveCoverWriter.Verify(w => w.WriteAsync("batman", "/library/cache/batman-xyz.png", "image/png", true, It.IsAny<CancellationToken>()), Times.Once);
+        // The forced re-apply must not also enqueue a background archive write
+        // (the force=false enqueue here comes from the initial ApplyExternalImageAsync).
+        _archiveCoverQueue.Verify(w => w.EnqueueWrite(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), true), Times.Never);
     }
 
     [Fact]

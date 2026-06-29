@@ -1441,6 +1441,16 @@
                 return;
             }
             
+            // Guard against a stale/duplicate next-comic info that still points
+            // at the comic we already have loaded. Without this, a transition
+            // like "48 → 48" would briefly appear before being corrected to
+            // "48 → 49" once a fresh prefetch resolves the real next issue.
+            if (nextComicInfo.filePath === comicFilePath) {
+                await prefetchNextComic();
+                isLoadingNext = false;
+                return;
+            }
+
             try {
                 const container = document.getElementById('webcomicContainer');
                 

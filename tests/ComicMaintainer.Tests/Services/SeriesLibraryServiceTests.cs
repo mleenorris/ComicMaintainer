@@ -308,6 +308,81 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
+    public async Task GetSeriesAsync_PinnedName_UsesPinnedNameSlugForSeriesId()
+    {
+        // The series folder/canonical title is an alternative (non-pinned)
+        // title, but the user has pinned a different display name. The series
+        // id (used in #/series/{id} deep links) must follow the pinned name so
+        // the URL matches the displayed title, not the alias.
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = "/library/Alt Title/Alt Title 001.cbz", FileName = "Alt Title 001.cbz", Directory = "/library/Alt Title", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Alt Title", Issue = "1" } }
+        };
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "alt-title",
+                    CanonicalTitle = "Alt Title",
+                    SeriesName = "Revenge of the Iron-Blooded Sword Hound",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>()
+                }
+            });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetSeriesAsync();
+
+        var series = Assert.Single(result.Series);
+        Assert.Equal("Revenge of the Iron-Blooded Sword Hound", series.Title);
+        Assert.Equal("revenge-of-the-iron-blooded-sword-hound", series.Id);
+    }
+
+    [Fact]
+    public async Task GetSeriesIssuesAsync_ResolvesByPinnedIdAndLegacyAliasId()
+    {
+        // Back-compat: the pinned-name id resolves the series, and so does the
+        // legacy alias/representative id (the normalized folder title) that
+        // older links and bookmarks were generated with.
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = "/library/Alt Title/Alt Title 001.cbz", FileName = "Alt Title 001.cbz", Directory = "/library/Alt Title", FileSize = 100, LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc), Metadata = new ComicMetadata { Series = "Alt Title", Issue = "1" } }
+        };
+        _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "alt-title",
+                    CanonicalTitle = "Alt Title",
+                    SeriesName = "Revenge of the Iron-Blooded Sword Hound",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string>()
+                }
+            });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        // New pinned-name id.
+        var byPinnedId = await service.GetSeriesIssuesAsync("revenge-of-the-iron-blooded-sword-hound");
+        Assert.NotNull(byPinnedId);
+        Assert.Equal("Revenge of the Iron-Blooded Sword Hound", byPinnedId!.Title);
+        Assert.Equal(1, byPinnedId.IssueCount);
+
+        // Legacy alias/representative id still resolves.
+        var byLegacyId = await service.GetSeriesIssuesAsync("alt-title");
+        Assert.NotNull(byLegacyId);
+        Assert.Equal("Revenge of the Iron-Blooded Sword Hound", byLegacyId!.Title);
+        Assert.Equal(1, byLegacyId.IssueCount);
+    }
+
+    [Fact]
     public async Task GetSeriesIssuesAsync_ReturnsNullForUnknownId()
     {
         _fileStore.Setup(s => s.GetFilteredFilesAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))

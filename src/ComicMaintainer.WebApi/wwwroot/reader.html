@@ -833,6 +833,13 @@
         const mangaPageCache = new Map();
         const MANGA_PRELOAD_AHEAD = 2;
         const MANGA_PRELOAD_BEHIND = 1;
+        // Monotonic token for manga-mode page loads. Each loadPage() call claims
+        // the latest token; when its (possibly out-of-order) fetch resolves it
+        // only touches the DOM if it is still the most recent request. This
+        // prevents a slow fetch for an earlier page from overwriting a newer
+        // page that the user already advanced to (which made the same page
+        // appear twice in a row and skipped the page in between).
+        let mangaLoadToken = 0;
 
         // Get parameters from URL
         function getQueryParam(param) {
@@ -1100,6 +1107,9 @@
         async function loadWebcomicPage(pageNum, container) {
             const loadKey = pageLoadedKey(comicFilePath, pageNum);
             if (loadedPages.has(loadKey)) return;
+            // Mark as in-flight before awaiting so a concurrent call for the
+            // same page can't pass the guard above and append a duplicate image.
+            loadedPages.add(loadKey);
             
             try {
                 const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
@@ -1136,10 +1146,10 @@
                 if (pageObserver) {
                     pageObserver.observe(img);
                 }
-                
-                loadedPages.add(loadKey);
             } catch (error) {
                 console.error(`Error loading page ${pageNum}:`, error);
+                // Allow a retry since this page was never actually inserted.
+                loadedPages.delete(loadKey);
             }
         }
         
@@ -1701,6 +1711,10 @@
                 return;
             }
 
+            // Claim the latest load token so out-of-order fetch completions for
+            // an earlier page don't clobber a newer page the user moved on to.
+            const loadToken = ++mangaLoadToken;
+
             currentPage = pageNum;
             updateUI();
 
@@ -1715,6 +1729,11 @@
 
             try {
                 const imageUrl = await fetchMangaPageUrl(pageNum);
+                // A newer loadPage() superseded us while awaiting the fetch;
+                // abort so we don't render a stale page over the current one.
+                if (loadToken !== mangaLoadToken) {
+                    return;
+                }
                 if (!imageUrl) {
                     throw new Error('Failed to load page');
                 }

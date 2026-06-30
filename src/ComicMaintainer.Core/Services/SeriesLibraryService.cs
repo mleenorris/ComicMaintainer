@@ -339,7 +339,7 @@ public class SeriesLibraryService : ISeriesLibraryService
         // in per-issue details that may be missing from the DB cache.
         var (fileFilter, _) = SplitFilter(filter);
         var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
-        if (!groups.TryGetValue(seriesId, out var accumulator))
+        if (!TryResolveGroup(groups, seriesId, out var accumulator))
         {
             // The requested series id is not present in the filtered groups.
             // This happens for two reasons when an active file filter is in
@@ -362,7 +362,7 @@ public class SeriesLibraryService : ISeriesLibraryService
             }
 
             var unfilteredGroups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
-            if (!unfilteredGroups.TryGetValue(seriesId, out var unfilteredAccumulator))
+            if (!TryResolveGroup(unfilteredGroups, seriesId, out var unfilteredAccumulator))
             {
                 return null;
             }
@@ -521,7 +521,7 @@ public class SeriesLibraryService : ISeriesLibraryService
 
         var (fileFilter, _) = SplitFilter(filter);
         var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
-        if (!groups.TryGetValue(seriesId, out var accumulator))
+        if (!TryResolveGroup(groups, seriesId, out var accumulator))
         {
             return Array.Empty<string>();
         }
@@ -554,7 +554,7 @@ public class SeriesLibraryService : ISeriesLibraryService
 
         var (fileFilter, _) = SplitFilter(filter);
         var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
-        if (!groups.TryGetValue(seriesId, out var accumulator))
+        if (!TryResolveGroup(groups, seriesId, out var accumulator))
         {
             return null;
         }
@@ -899,7 +899,16 @@ public class SeriesLibraryService : ISeriesLibraryService
 
                 accumulator = new SeriesAccumulator
                 {
-                    Id = representative,
+                    // The public series id (used in #/series/{id} deep links and
+                    // every id-based API lookup) is derived from the pinned
+                    // user-selected name when one exists, so the URL matches the
+                    // displayed title instead of an arbitrary alias / localized
+                    // (e.g. CJK/Bengali) folder title. Falls back to the
+                    // union-find representative when the series is unpinned or
+                    // the pinned name produces an ambiguous slug. Lookups still
+                    // resolve the old representative-based ids (see
+                    // TryResolveGroup) so existing links/bookmarks keep working.
+                    Id = ComputePublicSeriesId(record?.SeriesName, representative),
                     DisplayTitle = displayTitle,
                     CanonicalTitle = canonicalTitle,
                     MetadataSource = record?.Source,
@@ -1019,7 +1028,7 @@ public class SeriesLibraryService : ISeriesLibraryService
             bucket.Add(accumulator);
         }
 
-        var dropped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var dropped = new HashSet<SeriesAccumulator>();
         foreach (var bucket in byCanonical.Values)
         {
             if (bucket.Count < 2)
@@ -1087,7 +1096,7 @@ public class SeriesLibraryService : ISeriesLibraryService
                     survivor.MetadataSource = other.MetadataSource;
                 }
 
-                dropped.Add(other.Id);
+                dropped.Add(other);
 
                 _logger.LogDebug(
                     "Collapsed duplicate series card '{DroppedTitle}' (id={DroppedId}, {DroppedCount} issues) into '{SurvivorTitle}' (id={SurvivorId}) — same canonical title",
@@ -1107,7 +1116,7 @@ public class SeriesLibraryService : ISeriesLibraryService
         var collapsed = new Dictionary<string, SeriesAccumulator>(StringComparer.OrdinalIgnoreCase);
         foreach (var kvp in groups)
         {
-            if (!dropped.Contains(kvp.Key))
+            if (!dropped.Contains(kvp.Value))
             {
                 collapsed[kvp.Key] = kvp.Value;
             }
@@ -1237,6 +1246,58 @@ public class SeriesLibraryService : ISeriesLibraryService
 
         var normalized = SeriesKeySanitizer.Replace(value.ToLowerInvariant(), "-").Trim('-');
         return string.IsNullOrWhiteSpace(normalized) ? "unknown-series" : normalized;
+    }
+
+    /// <summary>
+    /// Computes the public series id used in <c>#/series/{id}</c> deep links and
+    /// id-based API lookups. When the series carries an explicit pinned
+    /// (user-selected) name, the id is the slug of that name so the URL matches
+    /// the displayed title; otherwise it falls back to the union-find
+    /// <paramref name="representative"/> key. The pinned slug is rejected (and
+    /// the representative used instead) when it would be ambiguous — e.g. empty,
+    /// "unknown-series", or digit-only — to avoid degenerate ids.
+    /// </summary>
+    private static string ComputePublicSeriesId(string? pinnedName, string representative)
+    {
+        if (string.IsNullOrWhiteSpace(pinnedName))
+        {
+            return representative;
+        }
+
+        var slug = NormalizeKey(pinnedName);
+        return IsAmbiguousNormalizedKey(slug) ? representative : slug;
+    }
+
+    /// <summary>
+    /// Resolves a series group by its public id. Tries the dictionary key first
+    /// (the union-find representative, which preserves back-compat for existing
+    /// alias/representative-derived links and bookmarks), then falls back to a
+    /// scan matching the accumulator's <see cref="SeriesAccumulator.Id"/> (the
+    /// pinned-name slug). The dictionary remains keyed by representative for
+    /// internal grouping, so the pinned id is only discoverable via the scan.
+    /// </summary>
+    private static bool TryResolveGroup(
+        Dictionary<string, SeriesAccumulator> groups,
+        string seriesId,
+        out SeriesAccumulator accumulator)
+    {
+        if (groups.TryGetValue(seriesId, out var direct))
+        {
+            accumulator = direct;
+            return true;
+        }
+
+        foreach (var candidate in groups.Values)
+        {
+            if (string.Equals(candidate.Id, seriesId, StringComparison.OrdinalIgnoreCase))
+            {
+                accumulator = candidate;
+                return true;
+            }
+        }
+
+        accumulator = null!;
+        return false;
     }
 
     /// <summary>

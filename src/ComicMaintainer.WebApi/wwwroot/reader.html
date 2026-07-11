@@ -1412,7 +1412,14 @@
             const content = document.getElementById('readerContent');
             const scrollPosition = content.scrollTop + content.clientHeight;
             const scrollHeight = content.scrollHeight;
-            
+
+            // Warm the next issue's first pages into the browser HTTP cache well
+            // before the user reaches the bottom, so the eventual transition can
+            // render page 1 instantly instead of waiting on a cold network fetch.
+            if (scrollHeight - scrollPosition < 2000 && nextComicInfo && nextComicInfo.hasAdjacent) {
+                preloadNextComicPages();
+            }
+
             // Check if scrolled near bottom (within 200px)
             if (scrollHeight - scrollPosition < 200 && !isLoadingNext && nextComicInfo && nextComicInfo.hasAdjacent) {
                 isLoadingNext = true;
@@ -1550,17 +1557,25 @@
                     const [startIdx, endIdx] = calculatePrefetchIndices(1, totalPages);
                     console.log('Loading next comic, prefetching pages', startIdx, 'to', endIdx);
                     
-                    // Load buffered pages of next comic
+                    // Load buffered pages of next comic in parallel so a slow
+                    // page doesn't serially block the ones after it. The first
+                    // pages were typically already warmed into the browser cache
+                    // by preloadNextComicPages(), so these resolve quickly.
+                    const pageLoads = [];
                     for (let i = startIdx; i <= endIdx; i++) {
-                        await loadWebcomicPageForNextComic(i, container, comicFilePath);
+                        pageLoads.push(loadWebcomicPageForNextComic(i, container, comicFilePath));
                     }
-                    
-                    // Wait for new images to load
-                    await waitForImagesToLoad();
+                    // Only wait for the first page before scrolling; the rest
+                    // continue filling in below the fold without holding up the
+                    // transition.
+                    await pageLoads[0];
                     
                     // Scroll to the start marker (beginning of new comic) immediately.
                     // Use the marker reference we just created rather than a shared id
                     // lookup so we always target the correct (newest) comic start.
+                    // The marker sits above the freshly appended pages, so its
+                    // position is already stable and we don't need to wait for the
+                    // new images to finish decoding before scrolling.
                     const content = document.getElementById('readerContent');
                     if (startMarker && content) {
                         const markerPosition = startMarker.offsetTop;

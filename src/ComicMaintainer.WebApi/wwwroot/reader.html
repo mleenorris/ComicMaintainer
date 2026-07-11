@@ -833,6 +833,14 @@
         const mangaPageCache = new Map();
         const MANGA_PRELOAD_AHEAD = 2;
         const MANGA_PRELOAD_BEHIND = 1;
+        // Tracks the next-comic file whose leading pages we've already warmed
+        // in the browser HTTP cache so we don't refetch them every time the
+        // last page is (re)rendered. Reset whenever a fresh next-issue pointer
+        // is prefetched.
+        let preloadedNextComicPath = null;
+        // How many leading pages of the next issue to warm so that advancing
+        // to it (a full reader reload) can paint page 1 without a cold fetch.
+        const NEXT_COMIC_PRELOAD_PAGES = 2;
         // Monotonic token for manga-mode page loads. Each loadPage() call claims
         // the latest token; when its (possibly out-of-order) fetch resolves it
         // only touches the DOM if it is still the most recent request. This
@@ -942,6 +950,14 @@
 
                 // Prefetch next comic info for seamless transition
                 await prefetchNextComic();
+
+                // If we opened directly onto the final page (e.g. a single-page
+                // issue, or restored progress at the end), warm the next issue
+                // now that its pointer is available. Manga mode only; webcomic
+                // mode stitches the next issue inline instead.
+                if (readingMode !== 'webcomic' && currentPage >= totalPages) {
+                    preloadNextComicPages();
+                }
 
                 // Wire up interactive UI helpers
                 setupTapZones();
@@ -1705,6 +1721,37 @@
             }
         }
 
+        // Warm the browser HTTP cache with the first page(s) of the next issue
+        // so that advancing to it (which triggers a full reader reload) can
+        // render page 1 instantly instead of waiting on a cold network fetch.
+        // Uses fetch (not new Image()) so the JWT Authorization header is sent
+        // and the cached response is reusable by the reloaded reader, which
+        // re-requests the identical page URL. The /page endpoint responds with
+        // `Cache-Control: public, max-age=3600`, so draining the body here is
+        // enough to store it for the subsequent same-URL request.
+        async function preloadNextComicPages() {
+            if (!nextComicInfo || !nextComicInfo.hasAdjacent || !nextComicInfo.filePath) return;
+            const nextPath = nextComicInfo.filePath;
+            // Ignore a stale pointer that still references the current comic.
+            if (nextPath === comicFilePath) return;
+            if (preloadedNextComicPath === nextPath) return; // already warmed
+            preloadedNextComicPath = nextPath;
+            for (let p = 1; p <= NEXT_COMIC_PRELOAD_PAGES; p++) {
+                try {
+                    const response = await fetch(
+                        `/api/ComicReader/page?filePath=${encodeURIComponent(nextPath)}&page=${p}`,
+                        buildFetchOptions()
+                    );
+                    if (!response.ok) break; // out of pages or an error; stop early
+                    // Drain the body so the response is fully received and stored.
+                    await response.blob();
+                } catch (e) {
+                    console.error('Error preloading next comic page', p, e);
+                    break;
+                }
+            }
+        }
+
         // Load a specific page (manga mode)
         async function loadPage(pageNum) {
             if (pageNum < 1 || pageNum > totalPages) {
@@ -1758,6 +1805,13 @@
                 // Prefetch neighbours so the next page change is instant.
                 preloadAdjacentMangaPages(pageNum);
                 trimMangaPageCache(pageNum);
+
+                // On the final page, warm the next issue so advancing to it is
+                // as seamless as possible. Fire-and-forget; a no-op until the
+                // next-issue pointer has been prefetched.
+                if (pageNum >= totalPages) {
+                    preloadNextComicPages();
+                }
             } catch (error) {
                 console.error('Error loading page:', error);
                 showError('Failed to load page: ' + error.message);
@@ -1823,12 +1877,20 @@
         // still returns to the page the user came from originally.
         async function navigateToNextComic() {
             try {
-                const response = await fetch(
-                    `/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=next`,
-                    buildFetchOptions()
-                );
-                if (!response.ok) throw new Error('Failed to fetch next comic info');
-                const nextInfo = await response.json();
+                // Reuse the already-prefetched next-issue pointer when we have
+                // one so pressing Next at the last page doesn't pay for an
+                // extra round-trip before the reload. Fall back to a fresh
+                // lookup if prefetch failed or hasn't completed yet.
+                let nextInfo = nextComicInfo;
+                if (!nextInfo || !nextInfo.hasAdjacent || !nextInfo.filePath
+                    || nextInfo.filePath === comicFilePath) {
+                    const response = await fetch(
+                        `/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=next`,
+                        buildFetchOptions()
+                    );
+                    if (!response.ok) throw new Error('Failed to fetch next comic info');
+                    nextInfo = await response.json();
+                }
                 if (nextInfo.hasAdjacent && nextInfo.filePath) {
                     window.location.replace(`/reader.html?file=${encodeURIComponent(nextInfo.filePath)}`);
                 } else {

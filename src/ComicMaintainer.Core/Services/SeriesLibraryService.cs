@@ -1142,7 +1142,7 @@ public class SeriesLibraryService : ISeriesLibraryService
     {
         return issues
             .OrderBy(issue => ExtractIssueSortKey(ResolveIssueNumber(issue)), new NaturalStringComparer())
-            .ThenBy(issue => issue.FileName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(issue => issue.FileName, new NaturalStringComparer())
             .ToList();
     }
 

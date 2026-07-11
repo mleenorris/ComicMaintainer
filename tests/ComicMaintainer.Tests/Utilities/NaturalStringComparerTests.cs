@@ -245,4 +245,48 @@ public class NaturalStringComparerTests
         else
             Assert.Equal(0, result);
     }
+
+    [Fact]
+    public void Compare_WithVeryLargeNumbers_SortsNumericallyNotLexicographically()
+    {
+        // Digit runs far beyond Int32.MaxValue (2,147,483,647) and Int64.MaxValue
+        // must still sort by numeric value. The previous int.TryParse based
+        // implementation overflowed and silently fell back to lexicographic
+        // ordering, which corrupted page/issue order for such names.
+        var names = new List<string>
+        {
+            "20000000000.jpg",   // 2e10
+            "3000000000.jpg",    // 3e9
+            "160.jpg",
+            "5.jpg",
+            "99999999999999999999.jpg" // 1e20, overflows Int64
+        };
+
+        names.Sort(_comparer);
+
+        Assert.Equal(new[]
+        {
+            "5.jpg",
+            "160.jpg",
+            "3000000000.jpg",
+            "20000000000.jpg",
+            "99999999999999999999.jpg"
+        }, names);
+    }
+
+    [Theory]
+    [InlineData("3000000000.jpg", "20000000000.jpg", -1)]  // 3e9 < 2e10
+    [InlineData("20000000000.jpg", "3000000000.jpg", 1)]   // 2e10 > 3e9
+    [InlineData("00000000009.jpg", "9.jpg", 0)]            // equal magnitude, zero-padded
+    public void Compare_WithVeryLargeNumericPairs_ReturnsExpectedResult(string x, string y, int expected)
+    {
+        var result = _comparer.Compare(x, y);
+
+        if (expected < 0)
+            Assert.True(result < 0, $"Expected {x} < {y}, got {result}");
+        else if (expected > 0)
+            Assert.True(result > 0, $"Expected {x} > {y}, got {result}");
+        else
+            Assert.Equal(0, result);
+    }
 }

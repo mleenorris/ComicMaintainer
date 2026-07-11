@@ -1500,6 +1500,68 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
+    public async Task GetAdjacentIssueAsync_MultiDigitIssues_DoNotSkipAcrossHundredsBoundary()
+    {
+        // A long-running series around the 160th issue. Adjacency must walk the
+        // issues in strict numeric order (…159 → 160 → 161…) without skipping,
+        // regardless of the natural-sort tie-break.
+        var files = new List<ComicFile>();
+        for (var i = 158; i <= 163; i++)
+        {
+            files.Add(new ComicFile
+            {
+                FilePath = $"/library/Series A/Series A {i}.cbz",
+                FileName = $"Series A {i}.cbz",
+                Directory = "/library/Series A",
+                FileSize = 100,
+                Metadata = new ComicMetadata { Series = "Series A", Issue = i.ToString() }
+            });
+        }
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var next = await service.GetAdjacentIssueAsync("/library/Series A/Series A 159.cbz", "next");
+        Assert.True(next.HasAdjacent);
+        Assert.Equal("/library/Series A/Series A 160.cbz", next.FilePath);
+
+        var afterOneSixty = await service.GetAdjacentIssueAsync("/library/Series A/Series A 160.cbz", "next");
+        Assert.True(afterOneSixty.HasAdjacent);
+        Assert.Equal("/library/Series A/Series A 161.cbz", afterOneSixty.FilePath);
+    }
+
+    [Fact]
+    public async Task GetAdjacentIssueAsync_DuplicateIssueNumbers_TieBreakIsNaturalNotOrdinal()
+    {
+        // Two files share issue number 160 (e.g. a re-scan). Their relative order
+        // must follow a natural filename comparison so "part 2" follows "part 10"
+        // correctly instead of the old ordinal "10 before 2" ordering.
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = "/library/S/S 160 part 2.cbz", FileName = "S 160 part 2.cbz", Directory = "/library/S", FileSize = 100, Metadata = new ComicMetadata { Series = "S", Issue = "160" } },
+            new() { FilePath = "/library/S/S 160 part 10.cbz", FileName = "S 160 part 10.cbz", Directory = "/library/S", FileSize = 100, Metadata = new ComicMetadata { Series = "S", Issue = "160" } },
+            new() { FilePath = "/library/S/S 161.cbz", FileName = "S 161.cbz", Directory = "/library/S", FileSize = 100, Metadata = new ComicMetadata { Series = "S", Issue = "161" } }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        // part 2 comes before part 10 (natural order).
+        var next = await service.GetAdjacentIssueAsync("/library/S/S 160 part 2.cbz", "next");
+        Assert.True(next.HasAdjacent);
+        Assert.Equal("/library/S/S 160 part 10.cbz", next.FilePath);
+
+        // part 10 is followed by issue 161 (no issue is skipped).
+        var afterPart10 = await service.GetAdjacentIssueAsync("/library/S/S 160 part 10.cbz", "next");
+        Assert.True(afterPart10.HasAdjacent);
+        Assert.Equal("/library/S/S 161.cbz", afterPart10.FilePath);
+    }
+
+    [Fact]
     public async Task GetAdjacentIssueAsync_FileNotInLibrary_ReportsNotFound()
     {
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))

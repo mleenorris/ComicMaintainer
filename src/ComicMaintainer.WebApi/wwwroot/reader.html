@@ -1600,6 +1600,11 @@
         async function loadWebcomicPageForNextComic(pageNum, container, filePath) {
             const loadKey = pageLoadedKey(filePath, pageNum);
             if (loadedPages.has(loadKey)) return;
+            // Reserve the key before awaiting so a concurrent loader (e.g. the
+            // IntersectionObserver-triggered prefetch that fires as soon as the
+            // first page appears) can't slip past the guard above and append a
+            // duplicate image for the same page while this fetch is in flight.
+            loadedPages.add(loadKey);
             
             try {
                 const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
@@ -1630,17 +1635,21 @@
                 img.alt = `Page ${pageNum}`;
                 img.dataset.page = pageNum; // Local page number within the new comic
                 img.dataset.comic = filePath; // Track which comic this page belongs to
-                container.appendChild(img);
+                // Insert in the correct position within this comic's pages so
+                // parallel (out-of-order) arrivals land in ascending page order
+                // rather than in fetch-completion order.
+                insertWebcomicImage(container, img, filePath, pageNum);
                 
                 // Observe the image for visibility tracking
                 if (pageObserver) {
                     pageObserver.observe(img);
                 }
                 
-                loadedPages.add(loadKey);
                 return img;
             } catch (error) {
                 console.error(`Error loading page ${pageNum}:`, error);
+                // Release the reservation so the page can be retried later.
+                loadedPages.delete(loadKey);
                 return null;
             }
         }

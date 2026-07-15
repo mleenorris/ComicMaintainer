@@ -839,8 +839,19 @@
         // is prefetched.
         let preloadedNextComicPath = null;
         // How many leading pages of the next issue to warm so that advancing
-        // to it (a full reader reload) can paint page 1 without a cold fetch.
-        const NEXT_COMIC_PRELOAD_PAGES = 2;
+        // to it (a full reader reload in manga mode, or an inline stitch in
+        // webcomic mode) can paint the opening pages without a cold fetch.
+        // Sized to cover the first page the reloaded reader shows plus the
+        // neighbours it immediately preloads (manga: page 1 + MANGA_PRELOAD_AHEAD)
+        // and the webcomic buffer window, so the reader isn't left waiting on a
+        // network round-trip right after the transition.
+        const NEXT_COMIC_PRELOAD_PAGES = 5;
+        // Start warming the next issue this many pages before the final page in
+        // manga mode, giving the fetches time to land in the HTTP cache before
+        // the reader reloads onto the next comic. Warming only populates the
+        // browser cache keyed by explicit page URL, so it can never reorder or
+        // duplicate pages.
+        const NEXT_COMIC_PRELOAD_LEAD_PAGES = 3;
         // Monotonic token for manga-mode page loads. Each loadPage() call claims
         // the latest token; when its (possibly out-of-order) fetch resolves it
         // only touches the DOM if it is still the most recent request. This
@@ -951,11 +962,11 @@
                 // Prefetch next comic info for seamless transition
                 await prefetchNextComic();
 
-                // If we opened directly onto the final page (e.g. a single-page
-                // issue, or restored progress at the end), warm the next issue
-                // now that its pointer is available. Manga mode only; webcomic
-                // mode stitches the next issue inline instead.
-                if (readingMode !== 'webcomic' && currentPage >= totalPages) {
+                // If we opened near the final page (e.g. a short issue, or
+                // restored progress close to the end), warm the next issue now
+                // that its pointer is available. Manga mode only; webcomic mode
+                // stitches the next issue inline instead.
+                if (readingMode !== 'webcomic' && currentPage >= totalPages - (NEXT_COMIC_PRELOAD_LEAD_PAGES - 1)) {
                     preloadNextComicPages();
                 }
 
@@ -1830,10 +1841,12 @@
                 preloadAdjacentMangaPages(pageNum);
                 trimMangaPageCache(pageNum);
 
-                // On the final page, warm the next issue so advancing to it is
-                // as seamless as possible. Fire-and-forget; a no-op until the
-                // next-issue pointer has been prefetched.
-                if (pageNum >= totalPages) {
+                // As the reader nears the end of the issue, warm the next one so
+                // advancing to it is as seamless as possible. Starting a few
+                // pages early gives the fetches time to land in the cache before
+                // the reload. Fire-and-forget; a no-op until the next-issue
+                // pointer has been prefetched, and guarded so it only warms once.
+                if (pageNum >= totalPages - (NEXT_COMIC_PRELOAD_LEAD_PAGES - 1)) {
                     preloadNextComicPages();
                 }
             } catch (error) {

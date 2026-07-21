@@ -54,8 +54,8 @@ public class OverviewServiceTests
 
         var entries = new List<SeriesOverviewEntry>
         {
-            // Brand-new series: earliest within window -> Newly Added (NOT Updates).
-            Entry("new-series", now.AddDays(-3), now.AddDays(-1), "/lib/new/1.cbz"),
+            // Brand-new series with only its initial issue -> Newly Added (NOT Updates).
+            Entry("new-series", now.AddDays(-3), now.AddDays(-3), "/lib/new/1.cbz"),
             // Existing series with a recent file -> Series Updates (earliest old).
             Entry("updated-series", now.AddDays(-200), now.AddDays(-2), "/lib/upd/2.cbz"),
             // Stale series: nothing recent -> neither.
@@ -75,6 +75,55 @@ public class OverviewServiceTests
 
         Assert.DoesNotContain(result.SeriesUpdates, c => c.Id == "stale-series");
         Assert.DoesNotContain(result.NewlyAddedSeries, c => c.Id == "stale-series");
+    }
+
+    [Fact]
+    public async Task GetOverviewAsync_SeriesUpdates_IncludesRecentlyAddedSeriesThatReceivedANewIssue()
+    {
+        var now = DateTime.UtcNow;
+        var factory = CreateFactory(out _);
+
+        var entries = new List<SeriesOverviewEntry>
+        {
+            // Series first appeared within the last 30 days but has since received
+            // a newer issue. It must show up in Series Updates (and be retained by
+            // its latest addition), not be locked to the Newly Added first-added
+            // clock.
+            Entry("new-then-updated", now.AddDays(-5), now.AddDays(-1),
+                "/lib/nu/1.cbz", "/lib/nu/2.cbz"),
+        };
+
+        var service = CreateService(entries, factory);
+
+        var result = await service.GetOverviewAsync("user-1");
+
+        Assert.Contains(result.SeriesUpdates, c => c.Id == "new-then-updated");
+    }
+
+    [Fact]
+    public async Task GetOverviewAsync_SeriesUpdates_StaysForThirtyDaysFromLastUpdateNotFirstAdded()
+    {
+        var now = DateTime.UtcNow;
+        var factory = CreateFactory(out _);
+
+        var entries = new List<SeriesOverviewEntry>
+        {
+            // First appeared long ago; last update 20 days ago -> still within the
+            // 30-day-from-last-update window.
+            Entry("recently-updated", now.AddDays(-300), now.AddDays(-20),
+                "/lib/ru/1.cbz", "/lib/ru/2.cbz"),
+            // First appeared long ago; last update 40 days ago -> outside the
+            // window and must fall off regardless of when it first appeared.
+            Entry("expired-update", now.AddDays(-300), now.AddDays(-40),
+                "/lib/eu/1.cbz", "/lib/eu/2.cbz"),
+        };
+
+        var service = CreateService(entries, factory);
+
+        var result = await service.GetOverviewAsync("user-1");
+
+        Assert.Contains(result.SeriesUpdates, c => c.Id == "recently-updated");
+        Assert.DoesNotContain(result.SeriesUpdates, c => c.Id == "expired-update");
     }
 
     [Fact]

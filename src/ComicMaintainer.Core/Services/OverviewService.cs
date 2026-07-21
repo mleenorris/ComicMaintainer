@@ -180,11 +180,17 @@ public class OverviewService : IOverviewService
         IReadOnlyList<SeriesOverviewEntry> entries,
         DateTime cutoff)
     {
-        // A new file was added to an already-existing series: the newest file
-        // is within the window, but the series itself first appeared before it
-        // (so brand-new series are excluded — they belong in Newly Added).
+        // A new file was added to a series that already had at least one earlier
+        // issue: the newest file is within the window (LatestCreatedAt >= cutoff)
+        // and it was added after the series' first issue (EarliestCreatedAt <
+        // LatestCreatedAt). Keying the window off LatestCreatedAt means a series
+        // stays here for 30 days from its most recent addition — not from when it
+        // first appeared — so adding a new issue always refreshes the 30-day
+        // window even for a series that first appeared within the last 30 days.
+        // A brand-new series with only its initial issue(s) (no later addition)
+        // is excluded here and belongs in Newly Added instead.
         return entries
-            .Where(e => e.LatestCreatedAt >= cutoff && e.EarliestCreatedAt < cutoff)
+            .Where(e => e.LatestCreatedAt >= cutoff && e.EarliestCreatedAt < e.LatestCreatedAt)
             .OrderByDescending(e => e.LatestCreatedAt)
             .Take(RowCap)
             .Select(e => ToCard(e.Summary))

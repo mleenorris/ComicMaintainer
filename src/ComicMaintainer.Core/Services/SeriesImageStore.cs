@@ -23,7 +23,10 @@ namespace ComicMaintainer.Core.Services;
 ///   to prevent HTML / SVG / executable payloads from being served back as
 ///   "images" (XSS via &lt;img&gt; would be unlikely but disk usage and
 ///   indirect display via direct fetch would be).
-/// - Maximum download size is capped by <see cref="AppSettings.SeriesImageMaxBytes"/>.
+/// - Maximum download size is capped by <see cref="AppSettings.SeriesImageMaxDownloadBytes"/>.
+///   A source image larger than <see cref="AppSettings.SeriesImageMaxBytes"/>
+///   (but within that ceiling) is downscaled and re-encoded as JPEG so an
+///   oversized source doesn't block the cover from being populated.
 /// - Filenames are derived solely from the normalized key + a SHA-256 of the
 ///   payload + an extension chosen from the validated content-type. Provider
 ///   data never influences the on-disk filename.
@@ -93,10 +96,10 @@ public class SeriesImageStore : ISeriesImageStore
         }
 
         var contentLength = response.Content.Headers.ContentLength;
-        if (contentLength.HasValue && contentLength.Value > settings.SeriesImageMaxBytes)
+        if (contentLength.HasValue && contentLength.Value > settings.SeriesImageMaxDownloadBytes)
         {
             throw new InvalidOperationException(
-                $"Image too large ({contentLength.Value} bytes > {settings.SeriesImageMaxBytes})");
+                $"Image too large ({contentLength.Value} bytes > {settings.SeriesImageMaxDownloadBytes})");
         }
 
         var declaredContentType = response.Content.Headers.ContentType?.MediaType
@@ -108,14 +111,37 @@ public class SeriesImageStore : ISeriesImageStore
                 $"Unsupported image content-type: '{LoggingHelper.SanitizeForLog(declaredContentType)}'");
         }
 
+        // Allow fetching a source image larger than the persisted cap so we can
+        // downscale it below. Only payloads exceeding the hard ceiling are
+        // rejected outright.
+        var downloadCeiling = Math.Max(settings.SeriesImageMaxDownloadBytes, settings.SeriesImageMaxBytes);
         await using var responseStream = await response.Content.ReadAsStreamAsync(cts.Token);
-        var (bytes, length) = await ReadCappedAsync(responseStream, settings.SeriesImageMaxBytes, cts.Token);
+        var (bytes, length) = await ReadCappedAsync(responseStream, downloadCeiling, cts.Token);
 
         var detected = DetectContentType(bytes, length);
         if (detected is null || !string.Equals(detected, normalizedContentType, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
                 "Image payload failed magic-byte validation against declared content-type");
+        }
+
+        // A large source image must not block the cover from being populated:
+        // when the payload exceeds the persisted cap, downscale and re-encode
+        // it as JPEG so it fits, rather than rejecting the download.
+        if (length > settings.SeriesImageMaxBytes)
+        {
+            var scaled = SeriesImageDownscaler.DownscaleToJpeg(
+                bytes.AsSpan(0, length),
+                settings.SeriesImageMaxBytes,
+                Math.Max(1, settings.SeriesImageMaxDimension));
+            _logger.LogInformation(
+                "Downscaled oversized series image for {SeriesKey} from {OriginalBytes} to {ScaledBytes} bytes",
+                LoggingHelper.SanitizeForLog(normalizedKey),
+                length,
+                scaled.Length);
+            bytes = scaled;
+            length = scaled.Length;
+            normalizedContentType = "image/jpeg";
         }
 
         return Persist(normalizedKey, bytes, length, normalizedContentType, previousFile);

@@ -71,7 +71,12 @@ public class SettingsController : ControllerBase
             anilist_base_url = _appSettings.CurrentValue.AniListBaseUrl,
             default_library_view = _appSettings.CurrentValue.DefaultLibraryView,
             default_preferred_language = _appSettings.CurrentValue.DefaultPreferredLanguage,
-            write_cover_to_first_archive = _appSettings.CurrentValue.WriteCoverToFirstArchive
+            write_cover_to_first_archive = _appSettings.CurrentValue.WriteCoverToFirstArchive,
+            write_cover_to_series_folder = _appSettings.CurrentValue.WriteCoverToSeriesFolder,
+            download_external_series_images = _appSettings.CurrentValue.DownloadExternalSeriesImages,
+            series_image_max_bytes = _appSettings.CurrentValue.SeriesImageMaxBytes,
+            series_image_max_download_bytes = _appSettings.CurrentValue.SeriesImageMaxDownloadBytes,
+            series_image_max_dimension = _appSettings.CurrentValue.SeriesImageMaxDimension
         };
         
         _logger.LogDebug("Returning settings: FilenameFormat={FilenameFormat}, IssueNumberPadding={IssueNumberPadding}, WatcherEnableRename={WatcherEnableRename}, WatcherEnableNormalize={WatcherEnableNormalize}, LogMaxBytes={LogMaxBytes}, DatabaseCleanupIntervalHours={DatabaseCleanupIntervalHours}",
@@ -266,6 +271,111 @@ public class SettingsController : ControllerBase
     [ApiExplorerSettings(IgnoreApi = true)]
     public Task<ActionResult> SetWriteCoverToFirstArchive([FromBody] WriteCoverToFirstArchiveRequest request, CancellationToken cancellationToken = default)
         => UpdateWriteCoverToFirstArchive(request, cancellationToken);
+
+    [HttpGet("write-cover-to-series-folder")]
+    public ActionResult<object> GetWriteCoverToSeriesFolder()
+    {
+        return Ok(new { enabled = _appSettings.CurrentValue.WriteCoverToSeriesFolder });
+    }
+
+    [HttpPut("write-cover-to-series-folder")]
+    public async Task<ActionResult> UpdateWriteCoverToSeriesFolder([FromBody] WriteCoverToSeriesFolderRequest request, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Write cover to series folder update requested: {Enabled}", request.Enabled);
+
+        try
+        {
+            await _settingsService.UpdateWriteCoverToSeriesFolderAsync(request.Enabled, cancellationToken);
+            return Ok(new { message = "Write cover to series folder updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update write cover to series folder");
+            return StatusCode(500, new { error = "Failed to update write cover to series folder" });
+        }
+    }
+
+    [HttpPost("write-cover-to-series-folder")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public Task<ActionResult> SetWriteCoverToSeriesFolder([FromBody] WriteCoverToSeriesFolderRequest request, CancellationToken cancellationToken = default)
+        => UpdateWriteCoverToSeriesFolder(request, cancellationToken);
+
+    [HttpGet("download-external-series-images")]
+    public ActionResult<object> GetDownloadExternalSeriesImages()
+    {
+        return Ok(new { enabled = _appSettings.CurrentValue.DownloadExternalSeriesImages });
+    }
+
+    [HttpPut("download-external-series-images")]
+    public async Task<ActionResult> UpdateDownloadExternalSeriesImages([FromBody] DownloadExternalSeriesImagesRequest request, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Download external series images update requested: {Enabled}", request.Enabled);
+
+        try
+        {
+            await _settingsService.UpdateDownloadExternalSeriesImagesAsync(request.Enabled, cancellationToken);
+            return Ok(new { message = "Download external series images updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update download external series images");
+            return StatusCode(500, new { error = "Failed to update download external series images" });
+        }
+    }
+
+    [HttpPost("download-external-series-images")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public Task<ActionResult> SetDownloadExternalSeriesImages([FromBody] DownloadExternalSeriesImagesRequest request, CancellationToken cancellationToken = default)
+        => UpdateDownloadExternalSeriesImages(request, cancellationToken);
+
+    [HttpGet("series-image-limits")]
+    public ActionResult<object> GetSeriesImageLimits()
+    {
+        return Ok(new
+        {
+            maxMB = _appSettings.CurrentValue.SeriesImageMaxBytes / (double)BYTES_PER_MB,
+            maxDownloadMB = _appSettings.CurrentValue.SeriesImageMaxDownloadBytes / (double)BYTES_PER_MB,
+            maxDimension = _appSettings.CurrentValue.SeriesImageMaxDimension
+        });
+    }
+
+    [HttpPut("series-image-limits")]
+    public async Task<ActionResult> UpdateSeriesImageLimits([FromBody] SeriesImageLimitsRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.MaxMB <= 0 || request.MaxDownloadMB <= 0 || request.MaxDimension <= 0)
+        {
+            return BadRequest(new { error = "Series image limits must all be greater than 0" });
+        }
+
+        if (request.MaxDownloadMB < request.MaxMB)
+        {
+            return BadRequest(new { error = "Max download size must be greater than or equal to max stored size" });
+        }
+
+        var maxBytes = (int)Math.Round(request.MaxMB * BYTES_PER_MB);
+        var maxDownloadBytes = (int)Math.Round(request.MaxDownloadMB * BYTES_PER_MB);
+
+        _logger.LogInformation("Series image limits update requested: MaxBytes={MaxBytes}, MaxDownloadBytes={MaxDownloadBytes}, MaxDimension={MaxDimension}",
+            maxBytes, maxDownloadBytes, request.MaxDimension);
+
+        try
+        {
+            await _settingsService.UpdateSeriesImageMaxBytesAsync(maxBytes, cancellationToken);
+            await _settingsService.UpdateSeriesImageMaxDownloadBytesAsync(maxDownloadBytes, cancellationToken);
+            await _settingsService.UpdateSeriesImageMaxDimensionAsync(request.MaxDimension, cancellationToken);
+            return Ok(new { message = "Series image limits updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update series image limits");
+            return StatusCode(500, new { error = "Failed to update series image limits" });
+        }
+    }
+
+    [HttpPost("series-image-limits")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public Task<ActionResult> SetSeriesImageLimits([FromBody] SeriesImageLimitsRequest request, CancellationToken cancellationToken = default)
+        => UpdateSeriesImageLimits(request, cancellationToken);
 
     [HttpGet("database-cleanup-interval-hours")]
     public ActionResult<object> GetDatabaseCleanupIntervalHours()
@@ -583,6 +693,28 @@ public class SettingsController : ControllerBase
     public class WriteCoverToFirstArchiveRequest
     {
         public bool Enabled { get; set; }
+    }
+
+    public class WriteCoverToSeriesFolderRequest
+    {
+        public bool Enabled { get; set; }
+    }
+
+    public class DownloadExternalSeriesImagesRequest
+    {
+        public bool Enabled { get; set; }
+    }
+
+    public class SeriesImageLimitsRequest
+    {
+        /// <summary>Maximum size of a stored series cover image, in megabytes.</summary>
+        public double MaxMB { get; set; }
+
+        /// <summary>Maximum raw download payload size, in megabytes.</summary>
+        public double MaxDownloadMB { get; set; }
+
+        /// <summary>Maximum width or height of a stored series cover image, in pixels.</summary>
+        public int MaxDimension { get; set; }
     }
 
     public class DatabaseCleanupIntervalRequest

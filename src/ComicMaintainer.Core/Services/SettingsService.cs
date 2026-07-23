@@ -97,6 +97,46 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("WriteCoverToFirstArchive", enabled, cancellationToken);
     }
 
+    public async Task UpdateWriteCoverToSeriesFolderAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("WriteCoverToSeriesFolder", enabled, cancellationToken);
+    }
+
+    public async Task UpdateDownloadExternalSeriesImagesAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("DownloadExternalSeriesImages", enabled, cancellationToken);
+    }
+
+    public async Task UpdateSeriesImageMaxBytesAsync(int maxBytes, CancellationToken cancellationToken = default)
+    {
+        if (maxBytes <= 0)
+        {
+            throw new ArgumentException("Series image max bytes must be greater than 0", nameof(maxBytes));
+        }
+
+        await UpdateSettingAsync("SeriesImageMaxBytes", maxBytes, cancellationToken);
+    }
+
+    public async Task UpdateSeriesImageMaxDownloadBytesAsync(int maxDownloadBytes, CancellationToken cancellationToken = default)
+    {
+        if (maxDownloadBytes <= 0)
+        {
+            throw new ArgumentException("Series image max download bytes must be greater than 0", nameof(maxDownloadBytes));
+        }
+
+        await UpdateSettingAsync("SeriesImageMaxDownloadBytes", maxDownloadBytes, cancellationToken);
+    }
+
+    public async Task UpdateSeriesImageMaxDimensionAsync(int maxDimension, CancellationToken cancellationToken = default)
+    {
+        if (maxDimension <= 0)
+        {
+            throw new ArgumentException("Series image max dimension must be greater than 0", nameof(maxDimension));
+        }
+
+        await UpdateSettingAsync("SeriesImageMaxDimension", maxDimension, cancellationToken);
+    }
+
     public async Task UpdateGitHubTokenAsync(string? token, CancellationToken cancellationToken = default)
     {
         await UpdateSettingAsync("GitHubToken", token, cancellationToken);

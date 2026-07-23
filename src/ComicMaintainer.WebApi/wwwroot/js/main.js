@@ -1250,6 +1250,66 @@
             }
         }
         
+        async function updateWriteCoverToSeriesFolder() {
+            const enabled = document.getElementById('writeCoverToSeriesFolderCheckbox').checked;
+            
+            try {
+                const response = await fetch(apiUrl('/api/settings/write-cover-to-series-folder'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ enabled: enabled })
+                });
+                
+                if (handleAuthError(response)) {
+                    document.getElementById('writeCoverToSeriesFolderCheckbox').checked = !enabled;
+                    return;
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const statusText = enabled ? 'enabled' : 'disabled';
+                showMessage(`Write cover into series folder ${statusText} successfully!`, 'success');
+            } catch (error) {
+                showMessage('Failed to update cover folder setting: ' + error.message, 'error');
+                document.getElementById('writeCoverToSeriesFolderCheckbox').checked = !enabled;
+            }
+        }
+        
+        async function updateDownloadExternalSeriesImages() {
+            const enabled = document.getElementById('downloadExternalSeriesImagesCheckbox').checked;
+            
+            try {
+                const response = await fetch(apiUrl('/api/settings/download-external-series-images'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ enabled: enabled })
+                });
+                
+                if (handleAuthError(response)) {
+                    document.getElementById('downloadExternalSeriesImagesCheckbox').checked = !enabled;
+                    return;
+                }
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const statusText = enabled ? 'enabled' : 'disabled';
+                showMessage(`Download external series images ${statusText} successfully!`, 'success');
+            } catch (error) {
+                showMessage('Failed to update series image download setting: ' + error.message, 'error');
+                document.getElementById('downloadExternalSeriesImagesCheckbox').checked = !enabled;
+            }
+        }
+        
         // Fetch and display version
         async function loadVersion() {
             try {
@@ -6477,6 +6537,33 @@
                 if (writeCoverCheckbox) {
                     writeCoverCheckbox.checked = !!settingsData.write_cover_to_first_archive;
                 }
+
+                // Load series cover folder-sidecar status
+                const writeCoverFolderCheckbox = document.getElementById('writeCoverToSeriesFolderCheckbox');
+                if (writeCoverFolderCheckbox) {
+                    writeCoverFolderCheckbox.checked = !!settingsData.write_cover_to_series_folder;
+                }
+
+                // Load external series image download status
+                const downloadSeriesImagesCheckbox = document.getElementById('downloadExternalSeriesImagesCheckbox');
+                if (downloadSeriesImagesCheckbox) {
+                    downloadSeriesImagesCheckbox.checked = !!settingsData.download_external_series_images;
+                }
+
+                // Load series image limits (convert bytes to MB for display)
+                const SERIES_IMAGE_BYTES_PER_MB = 1048576;
+                const seriesImageMaxMBInput = document.getElementById('seriesImageMaxMB');
+                if (seriesImageMaxMBInput && typeof settingsData.series_image_max_bytes === 'number') {
+                    seriesImageMaxMBInput.value = Math.round(settingsData.series_image_max_bytes / SERIES_IMAGE_BYTES_PER_MB);
+                }
+                const seriesImageMaxDownloadMBInput = document.getElementById('seriesImageMaxDownloadMB');
+                if (seriesImageMaxDownloadMBInput && typeof settingsData.series_image_max_download_bytes === 'number') {
+                    seriesImageMaxDownloadMBInput.value = Math.round(settingsData.series_image_max_download_bytes / SERIES_IMAGE_BYTES_PER_MB);
+                }
+                const seriesImageMaxDimensionInput = document.getElementById('seriesImageMaxDimension');
+                if (seriesImageMaxDimensionInput && typeof settingsData.series_image_max_dimension === 'number') {
+                    seriesImageMaxDimensionInput.value = settingsData.series_image_max_dimension;
+                }
                 
                 // Load log max size (convert bytes to MB)
                 const BYTES_PER_MB = 1048576;
@@ -7261,6 +7348,9 @@
             const mangaDexBaseUrl = document.getElementById('mangaDexBaseUrl').value.trim();
             const enableAniListMetadata = document.getElementById('enableAniListMetadata').checked;
             const aniListBaseUrl = document.getElementById('aniListBaseUrl').value.trim();
+            const seriesImageMaxMB = parseFloat(document.getElementById('seriesImageMaxMB').value);
+            const seriesImageMaxDownloadMB = parseFloat(document.getElementById('seriesImageMaxDownloadMB').value);
+            const seriesImageMaxDimension = parseInt(document.getElementById('seriesImageMaxDimension').value);
             
             if (!format) {
                 showMessage('Filename format cannot be empty', 'error');
@@ -7279,6 +7369,26 @@
             
             if (isNaN(dbCleanupInterval) || dbCleanupInterval < 0) {
                 showMessage('Database cleanup interval must be 0 or greater', 'error');
+                return;
+            }
+            
+            if (isNaN(seriesImageMaxMB) || seriesImageMaxMB <= 0) {
+                showMessage('Max stored cover size must be a positive number', 'error');
+                return;
+            }
+            
+            if (isNaN(seriesImageMaxDownloadMB) || seriesImageMaxDownloadMB <= 0) {
+                showMessage('Max download size must be a positive number', 'error');
+                return;
+            }
+            
+            if (seriesImageMaxDownloadMB < seriesImageMaxMB) {
+                showMessage('Max download size must be greater than or equal to max stored cover size', 'error');
+                return;
+            }
+            
+            if (isNaN(seriesImageMaxDimension) || seriesImageMaxDimension <= 0) {
+                showMessage('Max cover dimension must be a positive number', 'error');
                 return;
             }
             
@@ -7383,6 +7493,38 @@
                 const metadataResult = await metadataResponse.json();
                 if (metadataResult.success === false) {
                     showMessage(metadataResult.error || 'Failed to save external metadata settings', 'error');
+                    return;
+                }
+
+                // Save series image limits
+                const seriesImageResponse = await fetch(apiUrl('/api/settings/series-image-limits'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({
+                        maxMB: seriesImageMaxMB,
+                        maxDownloadMB: seriesImageMaxDownloadMB,
+                        maxDimension: seriesImageMaxDimension
+                    })
+                });
+
+                if (!seriesImageResponse.ok) {
+                    let errorMsg = `HTTP error! status: ${seriesImageResponse.status}`;
+                    try {
+                        const errBody = await seriesImageResponse.json();
+                        if (errBody && errBody.error) {
+                            errorMsg = errBody.error;
+                        }
+                    } catch (e) { /* ignore parse errors */ }
+                    showMessage('Failed to save series image limits: ' + errorMsg, 'error');
+                    return;
+                }
+
+                const seriesImageResult = await seriesImageResponse.json();
+                if (seriesImageResult.success === false) {
+                    showMessage(seriesImageResult.error || 'Failed to save series image limits', 'error');
                     return;
                 }
                 

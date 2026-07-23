@@ -900,6 +900,45 @@
                         When enabled, the cached provider/user series image is also written into the first issue's archive as a <code>cover.&lt;ext&gt;</code> entry, so external readers (Komga, Kavita, etc.) show the same cover. This rewrites the comic archive in place; the write is idempotent and only targets writable CBZ archives. The cover shown throughout ComicMaintainer always uses the downloaded provider image regardless of this setting.
                     </small>
                 </div>
+                <div class="form-group">
+                    <label for="writeCoverToSeriesFolderCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="writeCoverToSeriesFolderCheckbox" name="writeCoverToSeriesFolder" onchange="updateWriteCoverToSeriesFolder()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <span>Write series cover into each series folder</span>
+                    </label>
+                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                        When enabled, a copy of the cached series cover is written into every on-disk folder that contains files for the series as a <code>cover.&lt;ext&gt;</code> sidecar, so file managers and external readers can display it. Set to disabled to leave series folders untouched.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="downloadExternalSeriesImagesCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="downloadExternalSeriesImagesCheckbox" name="downloadExternalSeriesImages" onchange="updateDownloadExternalSeriesImages()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <span>Download series cover images from external providers</span>
+                    </label>
+                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                        When enabled, external metadata refreshes also try to download a series cover image from the chosen provider. Disable to keep metadata-only refreshes (e.g. for limited-bandwidth deployments).
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="seriesImageMaxMB">Max Stored Cover Size (MB)</label>
+                    <input type="number" id="seriesImageMaxMB" name="seriesImageMaxMB" min="1" step="1" placeholder="5" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Maximum size of a stored series cover image. Larger downloads are downscaled to fit under this limit. Default: 5 MB.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="seriesImageMaxDownloadMB">Max Download Size (MB)</label>
+                    <input type="number" id="seriesImageMaxDownloadMB" name="seriesImageMaxDownloadMB" min="1" step="1" placeholder="25" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Hard ceiling for the raw payload fetched when downloading an external cover. Payloads above this are rejected; those between the stored limit and this ceiling are downscaled. Must be greater than or equal to the stored cover size. Default: 25 MB.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="seriesImageMaxDimension">Max Cover Dimension (px)</label>
+                    <input type="number" id="seriesImageMaxDimension" name="seriesImageMaxDimension" min="1" step="1" placeholder="2048" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Maximum width or height, in pixels, of a stored series cover image. Oversized downloads are resized (preserving aspect ratio) so their largest dimension is at most this value. Default: 2048.
+                    </small>
+                </div>
 
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">External Series Metadata</h3>
                 <div class="form-group">

@@ -18,6 +18,12 @@ public static class SeriesImageDownscaler
     // little fidelity for a smaller payload.
     private static readonly int[] QualitySteps = { 85, 75, 65, 55, 45 };
 
+    // Upper bound on decoded pixel count. A small (byte-capped) but pathological
+    // source could otherwise declare enormous dimensions and exhaust memory when
+    // decoded (a "decompression bomb"). 100 megapixels is far larger than any
+    // real cover yet cheap to reject.
+    private const long MaxDecodedPixels = 100L * 1000 * 1000;
+
     /// <summary>
     /// Decode <paramref name="source"/> (jpeg/png/webp), resize so its largest
     /// dimension is at most <paramref name="maxDimension"/> while preserving
@@ -39,6 +45,27 @@ public static class SeriesImageDownscaler
         if (maxDimension <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(maxDimension));
+        }
+
+        // Cheaply inspect the header dimensions before a full decode so a
+        // decompression bomb is rejected without allocating its pixel buffer.
+        try
+        {
+            var info = Image.Identify(source);
+            if ((long)info.Width * info.Height > MaxDecodedPixels)
+            {
+                throw new InvalidOperationException(
+                    $"Source image dimensions ({info.Width}x{info.Height}) exceed the decode limit");
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                "Could not read the source image header for downscaling", ex);
         }
 
         Image image;

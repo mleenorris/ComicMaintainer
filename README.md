@@ -416,7 +416,9 @@ When external metadata refreshes succeed, ComicMaintainer also tries to download
 |---|---|---|---|
 | `DownloadExternalSeriesImages` | `DOWNLOAD_EXTERNAL_SERIES_IMAGES` | `true` | Disable to keep metadata-only refreshes (no image download). |
 | `SeriesImageCacheDirectory` | `SERIES_IMAGE_CACHE_DIR` | `{ConfigDirectory}/series-images` | Directory where cached images are stored. |
-| `SeriesImageMaxBytes` | _(settings only)_ | `5242880` (5 MiB) | Per-image size cap for downloads and uploads. |
+| `SeriesImageMaxBytes` | `SERIES_IMAGE_MAX_BYTES` | `5242880` (5 MiB) | Per-image size cap for the persisted cover. Oversized downloads are downscaled to fit; uploads over this cap are rejected. |
+| `SeriesImageMaxDownloadBytes` | `SERIES_IMAGE_MAX_DOWNLOAD_BYTES` | `26214400` (25 MiB) | Hard ceiling for the raw source image fetched before downscaling. Downloads above this are rejected. |
+| `SeriesImageMaxDimension` | `SERIES_IMAGE_MAX_DIMENSION` | `2048` | Largest width/height (px) an oversized cover is resized to before being re-encoded as JPEG. |
 
 **Endpoints:**
 

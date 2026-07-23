@@ -95,6 +95,24 @@ public class AppSettings
     public int SeriesImageMaxBytes { get; set; } = 5 * 1024 * 1024;
 
     /// <summary>
+    /// Hard ceiling in bytes for the raw payload fetched when downloading an
+    /// external series cover image. A source image larger than
+    /// <see cref="SeriesImageMaxBytes"/> (but within this ceiling) is fetched
+    /// and then downscaled to fit under <see cref="SeriesImageMaxBytes"/> so a
+    /// large source image doesn't block the cover from being populated. Only
+    /// payloads exceeding this ceiling are rejected. Defaults to 25 MiB.
+    /// </summary>
+    public int SeriesImageMaxDownloadBytes { get; set; } = 25 * 1024 * 1024;
+
+    /// <summary>
+    /// Maximum width or height, in pixels, of a stored series cover image.
+    /// When an external download exceeds <see cref="SeriesImageMaxBytes"/> it
+    /// is resized (preserving aspect ratio) so its largest dimension is at
+    /// most this value before being re-encoded. Defaults to 2048.
+    /// </summary>
+    public int SeriesImageMaxDimension { get; set; } = 2048;
+
+    /// <summary>
     /// When true (the default), every time a series cover image is set
     /// (user upload, provider apply, or background refresh download) a copy
     /// is also written into each on-disk folder that contains files for

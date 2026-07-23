@@ -1004,6 +1004,18 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         var seriesImageDir = Environment.GetEnvironmentVariable("SERIES_IMAGE_CACHE_DIR");
         if (!string.IsNullOrEmpty(seriesImageDir))
             options.SeriesImageCacheDirectory = seriesImageDir;
+
+        var seriesImageMaxBytes = Environment.GetEnvironmentVariable("SERIES_IMAGE_MAX_BYTES");
+        if (!string.IsNullOrEmpty(seriesImageMaxBytes) && int.TryParse(seriesImageMaxBytes, out var siMaxBytes) && siMaxBytes > 0)
+            options.SeriesImageMaxBytes = siMaxBytes;
+
+        var seriesImageMaxDownloadBytes = Environment.GetEnvironmentVariable("SERIES_IMAGE_MAX_DOWNLOAD_BYTES");
+        if (!string.IsNullOrEmpty(seriesImageMaxDownloadBytes) && int.TryParse(seriesImageMaxDownloadBytes, out var siMaxDownloadBytes) && siMaxDownloadBytes > 0)
+            options.SeriesImageMaxDownloadBytes = siMaxDownloadBytes;
+
+        var seriesImageMaxDimension = Environment.GetEnvironmentVariable("SERIES_IMAGE_MAX_DIMENSION");
+        if (!string.IsNullOrEmpty(seriesImageMaxDimension) && int.TryParse(seriesImageMaxDimension, out var siMaxDim) && siMaxDim > 0)
+            options.SeriesImageMaxDimension = siMaxDim;
     }
 }
 

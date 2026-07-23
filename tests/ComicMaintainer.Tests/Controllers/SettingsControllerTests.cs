@@ -200,6 +200,112 @@ public class SettingsControllerTests
         _settingsServiceMock.Verify(s => s.UpdateWriteCoverToFirstArchiveAsync(false, It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public void GetAllSettings_IncludesSeriesCoverAndImageSettings()
+    {
+        // Act
+        var result = _controller.GetAllSettings();
+
+        // Assert
+        var okResult = Assert.IsType<ActionResult<object>>(result);
+        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
+        Assert.NotNull(objectResult.Value);
+
+        var type = objectResult.Value!.GetType();
+        Assert.NotNull(type.GetProperty("write_cover_to_series_folder"));
+        Assert.NotNull(type.GetProperty("download_external_series_images"));
+        Assert.NotNull(type.GetProperty("series_image_max_bytes"));
+        Assert.NotNull(type.GetProperty("series_image_max_download_bytes"));
+        Assert.NotNull(type.GetProperty("series_image_max_dimension"));
+    }
+
+    [Fact]
+    public async Task UpdateWriteCoverToSeriesFolder_ReturnsOk()
+    {
+        // Arrange
+        var request = new SettingsController.WriteCoverToSeriesFolderRequest { Enabled = false };
+
+        // Act
+        var result = await _controller.UpdateWriteCoverToSeriesFolder(request);
+
+        // Assert
+        Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateWriteCoverToSeriesFolderAsync(false, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateDownloadExternalSeriesImages_ReturnsOk()
+    {
+        // Arrange
+        var request = new SettingsController.DownloadExternalSeriesImagesRequest { Enabled = false };
+
+        // Act
+        var result = await _controller.UpdateDownloadExternalSeriesImages(request);
+
+        // Assert
+        Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateDownloadExternalSeriesImagesAsync(false, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateSeriesImageLimits_ReturnsOk_AndConvertsMbToBytes()
+    {
+        // Arrange
+        var request = new SettingsController.SeriesImageLimitsRequest
+        {
+            MaxMB = 5,
+            MaxDownloadMB = 25,
+            MaxDimension = 2048
+        };
+
+        // Act
+        var result = await _controller.UpdateSeriesImageLimits(request);
+
+        // Assert
+        Assert.IsType<OkObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateSeriesImageMaxBytesAsync(5 * 1048576, It.IsAny<CancellationToken>()), Times.Once);
+        _settingsServiceMock.Verify(s => s.UpdateSeriesImageMaxDownloadBytesAsync(25 * 1048576, It.IsAny<CancellationToken>()), Times.Once);
+        _settingsServiceMock.Verify(s => s.UpdateSeriesImageMaxDimensionAsync(2048, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateSeriesImageLimits_RejectsNonPositiveValues()
+    {
+        // Arrange
+        var request = new SettingsController.SeriesImageLimitsRequest
+        {
+            MaxMB = 0,
+            MaxDownloadMB = 25,
+            MaxDimension = 2048
+        };
+
+        // Act
+        var result = await _controller.UpdateSeriesImageLimits(request);
+
+        // Assert
+        Assert.IsType<BadRequestObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateSeriesImageMaxBytesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateSeriesImageLimits_RejectsDownloadSmallerThanStored()
+    {
+        // Arrange
+        var request = new SettingsController.SeriesImageLimitsRequest
+        {
+            MaxMB = 25,
+            MaxDownloadMB = 5,
+            MaxDimension = 2048
+        };
+
+        // Act
+        var result = await _controller.UpdateSeriesImageLimits(request);
+
+        // Assert
+        Assert.IsType<BadRequestObjectResult>(result);
+        _settingsServiceMock.Verify(s => s.UpdateSeriesImageMaxBytesAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     // UpdateWatcherEnabled removed - use UpdateWatcherEnableRename and UpdateWatcherEnableNormalize instead
 
     [Fact]

@@ -44,6 +44,34 @@ public interface ISettingsService
     Task UpdateWriteCoverToFirstArchiveAsync(bool enabled, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Update whether the cached series cover image is also written into each
+    /// on-disk series folder as a <c>cover.&lt;ext&gt;</c> sidecar file.
+    /// </summary>
+    Task UpdateWriteCoverToSeriesFolderAsync(bool enabled, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update whether external metadata refreshes also download a series cover
+    /// image from the chosen provider.
+    /// </summary>
+    Task UpdateDownloadExternalSeriesImagesAsync(bool enabled, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the maximum size (in bytes) of a stored series cover image.
+    /// </summary>
+    Task UpdateSeriesImageMaxBytesAsync(int maxBytes, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the hard ceiling (in bytes) for the raw payload fetched when
+    /// downloading an external series cover image.
+    /// </summary>
+    Task UpdateSeriesImageMaxDownloadBytesAsync(int maxDownloadBytes, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the maximum width or height (in pixels) of a stored series cover image.
+    /// </summary>
+    Task UpdateSeriesImageMaxDimensionAsync(int maxDimension, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Update the GitHub token setting
     /// </summary>
     Task UpdateGitHubTokenAsync(string? token, CancellationToken cancellationToken = default);

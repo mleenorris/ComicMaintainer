@@ -1152,6 +1152,69 @@ public class FileStoreServiceTests
     }
 
     [Fact]
+    public async Task UpdateFilePathAsync_PreservesCreatedAt()
+    {
+        // Regression: Overview "Series Updates" buckets series by their newest file's
+        // CreatedAt within a 30-day window. A rename/normalize must not reset CreatedAt
+        // (previously it was dropped to DateTime.MinValue when rebuilding the in-memory
+        // record), otherwise the series falls out of the list almost immediately.
+        var oldPath = Path.Combine(_testDirectory, "created_old.cbz");
+        var newPath = Path.Combine(_testDirectory, "created_new.cbz");
+        File.WriteAllText(oldPath, "content");
+        await _service.AddFileAsync(oldPath);
+
+        var original = (await _service.GetAllFilesAsync())
+            .First(f => f.FilePath == oldPath);
+        var originalCreatedAt = original.CreatedAt;
+        Assert.True(originalCreatedAt > DateTime.MinValue);
+
+        File.Move(oldPath, newPath);
+
+        // Act
+        await _service.UpdateFilePathAsync(oldPath, newPath);
+
+        // Assert - CreatedAt survives the rename
+        var updated = (await _service.GetAllFilesAsync())
+            .FirstOrDefault(f => f.FilePath == newPath);
+        Assert.NotNull(updated);
+        Assert.Equal(originalCreatedAt, updated!.CreatedAt);
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_NewPathRowAlreadyExists_PreservesEarliestCreatedAt()
+    {
+        // Regression: when merging the authoritative old row into a watcher-created stub
+        // row (stamped with "now"), the earlier original CreatedAt must be preserved so the
+        // series' recency window is not reset.
+        var oldPath = Path.Combine(_testDirectory, "created_collide_old.cbz");
+        var newPath = Path.Combine(_testDirectory, "created_collide_new.cbz");
+        File.WriteAllText(oldPath, "content");
+        await _service.AddFileAsync(oldPath);
+
+        var factory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        var oldCreatedAt = DateTime.UtcNow.AddDays(-10);
+        await using (var seed = await factory.CreateDbContextAsync())
+        {
+            var entity = await seed.ComicFiles.FirstAsync(e => e.FilePath == oldPath);
+            entity.CreatedAt = oldCreatedAt;
+            await seed.SaveChangesAsync();
+        }
+
+        // Simulate the watcher pre-creating a default stub row (CreatedAt = now) for the new path.
+        File.Move(oldPath, newPath);
+        await _service.AddFileAsync(newPath);
+
+        // Act
+        await _service.UpdateFilePathAsync(oldPath, newPath);
+
+        // Assert - the earlier CreatedAt from the authoritative old row wins.
+        await using var dbContext = await factory.CreateDbContextAsync();
+        var dbEntity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == newPath);
+        Assert.NotNull(dbEntity);
+        Assert.Equal(oldCreatedAt, dbEntity!.CreatedAt);
+    }
+
+    [Fact]
     public async Task ApplyUserMetadataEditAsync_BumpsVersionAndSetsUserEditFlags()
     {
         var filePath = Path.Combine(_testDirectory, "metadata-edit.cbz");

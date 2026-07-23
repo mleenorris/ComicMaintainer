@@ -1413,6 +1413,18 @@
             currentView = route.view;
             applyViewVisibility(route.view);
             if (route.view === 'home') {
+                // The overview/home page is not a series detail. Clear any
+                // lingering detail state so it can't leak into the reader
+                // return snapshot (readComic) and cause the app to reopen a
+                // stale series — which would hide the overview and make the
+                // "Series Updates" / "Newly Added" lists look emptied out on
+                // return from the reader.
+                if (currentSeriesDetailId) {
+                    disconnectSeriesIssuesObserver();
+                    currentSeriesDetailId = null;
+                    currentSeriesDetailTitleKeys = null;
+                    currentSeriesDetailSeries = null;
+                }
                 renderOverview();
             } else if (route.view === 'series') {
                 renderSeriesDetailView(route.seriesId);
@@ -4929,7 +4941,12 @@
                     searchQuery: typeof searchQuery === 'string' ? searchQuery : '',
                     filterMode: typeof filterMode === 'string' ? filterMode : 'all',
                     libraryViewMode: typeof libraryViewMode === 'string' ? libraryViewMode : 'files',
-                    currentSeriesDetailId: typeof currentSeriesDetailId !== 'undefined' ? currentSeriesDetailId : null,
+                    // Only remember a series-detail panel to reopen when the
+                    // user is actually viewing one. Capturing it from the
+                    // overview/home or library list would make the reader
+                    // return reopen a stale series and hide the overview.
+                    currentSeriesDetailId: (typeof currentView !== 'undefined' && currentView === 'series'
+                        && typeof currentSeriesDetailId !== 'undefined') ? currentSeriesDetailId : null,
                     timestamp: Date.now()
                 };
                 sessionStorage.setItem('comicReaderReturnState', JSON.stringify(snapshot));

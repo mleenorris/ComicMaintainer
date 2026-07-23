@@ -238,7 +238,11 @@ public class FileStoreService : IFileStoreService
         bool isRenamed = false;
         bool isNormalized = false;
         bool isDuplicate = _duplicateFiles.ContainsKey(filePath);
-        
+        // Default the creation stamp to now for a brand-new file; if the file is already
+        // tracked in the database, preserve its original CreatedAt so re-adds (e.g. watcher
+        // re-scan) don't reset the series recency window used by Overview "Series Updates".
+        DateTime createdAt = DateTime.UtcNow;
+
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
@@ -252,6 +256,7 @@ public class FileStoreService : IFileStoreService
                 isRenamed = entity.IsRenamed;
                 isNormalized = entity.IsNormalized;
                 isDuplicate = entity.IsDuplicate;
+                createdAt = entity.CreatedAt;
             }
         }
         catch (Exception ex)
@@ -266,6 +271,7 @@ public class FileStoreService : IFileStoreService
             Directory = fileInfo.DirectoryName ?? string.Empty,
             FileSize = fileInfo.Length,
             LastModified = fileInfo.LastWriteTime,
+            CreatedAt = createdAt,
             IsRenamed = isRenamed,
             IsNormalized = isNormalized,
             IsProcessed = ComputeProcessedState(isRenamed, isNormalized),
@@ -824,6 +830,11 @@ public class FileStoreService : IFileStoreService
                 Directory = fileInfo?.DirectoryName ?? Path.GetDirectoryName(newPath) ?? string.Empty,
                 FileSize = fileInfo?.Length ?? existingFile.FileSize,
                 LastModified = fileInfo?.LastWriteTime ?? existingFile.LastModified,
+                // Preserve the original CreatedAt so a rename/normalize does not reset
+                // it to the default (DateTime.MinValue). Overview "Series Updates" buckets
+                // series by the newest file's CreatedAt within a 30-day window, so losing
+                // this timestamp would drop a series out of the list far earlier than 30 days.
+                CreatedAt = existingFile.CreatedAt,
                 IsRenamed = existingFile.IsRenamed,
                 IsNormalized = existingFile.IsNormalized,
                 IsProcessed = existingFile.IsProcessed,
@@ -906,6 +917,13 @@ public class FileStoreService : IFileStoreService
                         newEntity.WrittenMetadataVersion = entity.WrittenMetadataVersion;
                     if (newEntity.Metadata == null && entity.Metadata != null)
                         newEntity.Metadata = entity.Metadata;
+
+                    // The old row is the authoritative record for this physical file, so
+                    // keep the earliest CreatedAt. The stub row inserted by the watcher
+                    // stamps CreatedAt with "now"; using it would reset the series' recency
+                    // window and prematurely drop it from Overview "Series Updates".
+                    if (entity.CreatedAt < newEntity.CreatedAt)
+                        newEntity.CreatedAt = entity.CreatedAt;
 
                     newEntity.UpdatedAt = DateTime.UtcNow;
 

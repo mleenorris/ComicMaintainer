@@ -983,6 +983,107 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
+    public async Task GetSeriesSummariesAsync_FilterByMissingIssues_DetectsLeadingGap()
+    {
+        // "Late Start" has issues 51-53 (consecutive among themselves) but is
+        // missing issues 1-50. Comics are conventionally numbered from issue 1,
+        // so a series that starts above the expected floor must be reported as
+        // missing its leading run, not just gaps strictly between existing issues.
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Late Start/Late Start 051.cbz",
+                FileName = "Late Start 051.cbz",
+                Directory = "/library/Late Start",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Late Start", Issue = "51" }
+            },
+            new()
+            {
+                FilePath = "/library/Late Start/Late Start 052.cbz",
+                FileName = "Late Start 052.cbz",
+                Directory = "/library/Late Start",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Late Start", Issue = "52" }
+            },
+            new()
+            {
+                FilePath = "/library/Late Start/Late Start 053.cbz",
+                FileName = "Late Start 053.cbz",
+                Directory = "/library/Late Start",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Late Start", Issue = "53" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync(filter: "missing");
+
+        Assert.Single(result.Series);
+        Assert.Equal("Late Start", result.Series[0].Title);
+    }
+
+    [Fact]
+    public async Task GetSeriesSummariesAsync_FilterByMissingIssues_SeriesStartingAtOneWithNoGap_Excluded()
+    {
+        // "Early Bird" starts at issue 1 and has 1-3 with no gaps, so it must not
+        // be reported as missing even though gap detection now starts at issue 1.
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/Early Bird/Early Bird 001.cbz",
+                FileName = "Early Bird 001.cbz",
+                Directory = "/library/Early Bird",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Early Bird", Issue = "1" }
+            },
+            new()
+            {
+                FilePath = "/library/Early Bird/Early Bird 002.cbz",
+                FileName = "Early Bird 002.cbz",
+                Directory = "/library/Early Bird",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Early Bird", Issue = "2" }
+            },
+            new()
+            {
+                FilePath = "/library/Early Bird/Early Bird 003.cbz",
+                FileName = "Early Bird 003.cbz",
+                Directory = "/library/Early Bird",
+                FileSize = 100,
+                LastModified = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Early Bird", Issue = "3" }
+            }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var result = await service.GetSeriesSummariesAsync(filter: "missing");
+
+        Assert.Empty(result.Series);
+    }
+
+    [Fact]
     public async Task GetSeriesSummariesAsync_FilterByMissingIssues_ResolvesIssueNumberFromFileName()
     {
         // Summary mode never opens archives, so cached metadata without an Issue

@@ -247,6 +247,47 @@ public class OverviewServiceTests
     }
 
     [Fact]
+    public async Task GetOverviewAsync_ContinueReading_IncludesSeriesWhenLaterIssueCompletedButEarlierUnread()
+    {
+        var now = DateTime.UtcNow;
+        var factory = CreateFactory(out var options);
+
+        // user-1 finished issue 3 (read out of order) but issues 1 and 2 remain
+        // unread. The series must stay in Continue Reading, resuming at the
+        // earliest unread issue.
+        await using (var db = new ComicMaintainerDbContext(options))
+        {
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "user-1",
+                ContentId = "/lib/ooo/3.cbz",
+                CurrentPage = 20,
+                TotalPages = 20,
+                PercentComplete = 100,
+                LastReadAt = now.AddHours(-1),
+                CompletedAt = now.AddHours(-1)
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var entries = new List<SeriesOverviewEntry>
+        {
+            Entry("ooo", now.AddDays(-200), now.AddDays(-100),
+                "/lib/ooo/1.cbz", "/lib/ooo/2.cbz", "/lib/ooo/3.cbz"),
+        };
+
+        var service = CreateService(entries, factory);
+
+        var result = await service.GetOverviewAsync("user-1");
+
+        var card = Assert.Single(result.ContinueReading);
+        Assert.Equal("ooo", card.Id);
+        // Resume at the earliest unread issue since nothing follows the anchor.
+        Assert.Equal("/lib/ooo/1.cbz", card.ResumeFilePath);
+        Assert.Equal(0, card.ResumePage);
+    }
+
+    [Fact]
     public async Task GetOverviewAsync_ContinueReading_ExcludesFullyCompletedSeries()
     {
         var now = DateTime.UtcNow;

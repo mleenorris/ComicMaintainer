@@ -144,8 +144,12 @@ public class OverviewService : IOverviewService
     }
 
     /// <summary>
-    /// Returns the first issue (in series order) after <paramref name="completedPath"/>
-    /// that the user has not completed, or null if every later issue is finished.
+    /// Returns the next issue the user should resume, preferring the first issue
+    /// (in series order) after <paramref name="completedPath"/> that is not
+    /// completed. If every later issue is finished, falls back to the first
+    /// not-completed issue anywhere in the series so that series with earlier
+    /// unread issues (for example when issues were read out of order) still stay
+    /// in Continue Reading. Returns null only when every issue is completed.
     /// </summary>
     private static string? FindNextUnreadIssue(
         IReadOnlyList<string> orderedPaths,
@@ -166,6 +170,19 @@ public class OverviewService : IOverviewService
         {
             var path = orderedPaths[i];
             // Unread (no record) or started-but-not-completed issues qualify.
+            if (!progressByPath.TryGetValue(path, out var progress)
+                || progress.CompletedAt is null)
+            {
+                return path;
+            }
+        }
+
+        // No unread issue remains after the completed anchor. Fall back to the
+        // earliest not-completed issue in the series so the series is not dropped
+        // from Continue Reading while unread issues still exist.
+        for (var i = 0; i <= startIndex && i < orderedPaths.Count; i++)
+        {
+            var path = orderedPaths[i];
             if (!progressByPath.TryGetValue(path, out var progress)
                 || progress.CompletedAt is null)
             {

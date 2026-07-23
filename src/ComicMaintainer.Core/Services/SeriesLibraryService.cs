@@ -1764,12 +1764,15 @@ public class SeriesLibraryService : ISeriesLibraryService
     }
 
     /// <summary>
-    /// Returns true when the series has at least one gap in its consecutive
-    /// whole-number issue numbering (e.g. it has issues 1, 2 and 4 but not 3).
-    /// Decimal "specials"/half-chapters (e.g. 2.5) count as a found issue for
-    /// their whole number (2), so they can fill an otherwise-missing slot.
-    /// Non-numeric issue labels are ignored. A series needs at least two
-    /// distinct whole-number issues for a gap to be detectable.
+    /// Returns true when the series has at least one gap in its whole-number
+    /// issue numbering. Gaps are detected from the expected starting issue
+    /// (issue 1, or issue 0 when the series starts there) up to the highest
+    /// issue, so a series that starts above the expected floor (e.g. it has
+    /// issues 51-80 but not 1-50) is reported as missing its leading run, not
+    /// just gaps strictly between existing issues (e.g. it has 1, 2 and 4 but
+    /// not 3). Decimal "specials"/half-chapters (e.g. 2.5) count as a found
+    /// issue for their whole number (2), so they can fill an otherwise-missing
+    /// slot. Non-numeric issue labels are ignored.
     /// </summary>
     private static bool HasMissingIssues(SeriesAccumulator accumulator)
     {
@@ -1802,14 +1805,21 @@ public class SeriesLibraryService : ISeriesLibraryService
             wholeIssues.Add((long)Math.Floor(value));
         }
 
-        if (wholeIssues.Count < 2)
+        if (wholeIssues.Count == 0)
         {
             return false;
         }
 
         var min = wholeIssues.Min();
         var max = wholeIssues.Max();
-        for (var i = min; i <= max; i++)
+
+        // Comics are conventionally numbered from issue 1 (some start at 0), so a
+        // series whose lowest issue is above the expected floor is missing the
+        // leading run (e.g. it has 51-80 but not 1-50). Start gap detection at the
+        // expected floor rather than the series' own minimum so those leading gaps
+        // are reported, not just gaps strictly between existing issues.
+        var start = Math.Min(min, 1);
+        for (var i = start; i <= max; i++)
         {
             if (!wholeIssues.Contains(i))
             {

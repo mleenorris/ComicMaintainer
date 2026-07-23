@@ -9,7 +9,6 @@
   "display": "standalone",
   "background_color": "#2c3e50",
   "theme_color": "#2c3e50",
-  "orientation": "any",
   "prefer_related_applications": false,
   "icons": [
     {

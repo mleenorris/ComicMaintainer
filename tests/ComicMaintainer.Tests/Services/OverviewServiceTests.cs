@@ -46,6 +46,21 @@ public class OverviewServiceTests
             FilePaths = filePaths.ToList()
         };
 
+    private static SeriesOverviewEntry EntryWithReadFlags(
+        string id,
+        DateTime earliest,
+        DateTime latest,
+        IEnumerable<string> filePaths,
+        IEnumerable<string> readFilePaths)
+        => new()
+        {
+            Summary = new SeriesSummaryDto { Id = id, Title = id, CanonicalTitle = id },
+            EarliestCreatedAt = earliest,
+            LatestCreatedAt = latest,
+            FilePaths = filePaths.ToList(),
+            ReadFilePaths = readFilePaths.ToList()
+        };
+
     [Fact]
     public async Task GetOverviewAsync_BucketsUpdatesNewlyAdded_RespectingThirtyDayWindow()
     {
@@ -329,6 +344,85 @@ public class OverviewServiceTests
 
         var result = await service.GetOverviewAsync("user-1");
         Assert.Empty(result.ContinueReading);
+    }
+
+    [Fact]
+    public async Task GetOverviewAsync_ContinueReading_ExcludesSeries_WhenRemainingIssuesMarkedReadViaFlag()
+    {
+        var now = DateTime.UtcNow;
+        var factory = CreateFactory(out var options);
+
+        // The user finished issue 1 in the reader (reading progress). Issue 2 has
+        // no reading-progress record but was marked read via the file read flag
+        // (the "mark as read" action). The series is effectively fully read and
+        // must not appear on Continue Reading.
+        await using (var db = new ComicMaintainerDbContext(options))
+        {
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "user-1",
+                ContentId = "/lib/flagged/1.cbz",
+                CurrentPage = 20,
+                TotalPages = 20,
+                PercentComplete = 100,
+                LastReadAt = now.AddHours(-1),
+                CompletedAt = now.AddHours(-1)
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var entries = new List<SeriesOverviewEntry>
+        {
+            EntryWithReadFlags("flagged", now.AddDays(-200), now.AddDays(-100),
+                filePaths: new[] { "/lib/flagged/1.cbz", "/lib/flagged/2.cbz" },
+                readFilePaths: new[] { "/lib/flagged/2.cbz" }),
+        };
+
+        var service = CreateService(entries, factory);
+
+        var result = await service.GetOverviewAsync("user-1");
+        Assert.Empty(result.ContinueReading);
+    }
+
+    [Fact]
+    public async Task GetOverviewAsync_ContinueReading_ResumesAtUnreadIssue_SkippingIssuesMarkedReadViaFlag()
+    {
+        var now = DateTime.UtcNow;
+        var factory = CreateFactory(out var options);
+
+        // Issue 1 completed in the reader, issue 2 marked read via the flag, and
+        // issue 3 is still unread. Continue Reading must keep the series and
+        // resume at issue 3, skipping the flag-read issue 2.
+        await using (var db = new ComicMaintainerDbContext(options))
+        {
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "user-1",
+                ContentId = "/lib/mixed/1.cbz",
+                CurrentPage = 20,
+                TotalPages = 20,
+                PercentComplete = 100,
+                LastReadAt = now.AddHours(-1),
+                CompletedAt = now.AddHours(-1)
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var entries = new List<SeriesOverviewEntry>
+        {
+            EntryWithReadFlags("mixed", now.AddDays(-200), now.AddDays(-100),
+                filePaths: new[] { "/lib/mixed/1.cbz", "/lib/mixed/2.cbz", "/lib/mixed/3.cbz" },
+                readFilePaths: new[] { "/lib/mixed/2.cbz" }),
+        };
+
+        var service = CreateService(entries, factory);
+
+        var result = await service.GetOverviewAsync("user-1");
+
+        var card = Assert.Single(result.ContinueReading);
+        Assert.Equal("mixed", card.Id);
+        Assert.Equal("/lib/mixed/3.cbz", card.ResumeFilePath);
+        Assert.Equal(0, card.ResumePage);
     }
 
     [Fact]

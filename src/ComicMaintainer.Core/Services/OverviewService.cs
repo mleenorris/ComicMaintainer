@@ -106,7 +106,7 @@ public class OverviewService : IOverviewService
             string resumePath;
             int resumePage;
 
-            if (anchor.CompletedAt is null)
+            if (!IsIssueRead(anchor))
             {
                 // Still in the middle of an issue: resume exactly where we left off.
                 resumePath = anchor.ContentId;
@@ -169,9 +169,9 @@ public class OverviewService : IOverviewService
         for (var i = startIndex + 1; i < orderedPaths.Count; i++)
         {
             var path = orderedPaths[i];
-            // Unread (no record) or started-but-not-completed issues qualify.
+            // Unread (no record) or started-but-not-finished issues qualify.
             if (!progressByPath.TryGetValue(path, out var progress)
-                || progress.CompletedAt is null)
+                || !IsIssueRead(progress))
             {
                 return path;
             }
@@ -184,7 +184,7 @@ public class OverviewService : IOverviewService
         {
             var path = orderedPaths[i];
             if (!progressByPath.TryGetValue(path, out var progress)
-                || progress.CompletedAt is null)
+                || !IsIssueRead(progress))
             {
                 return path;
             }
@@ -192,6 +192,18 @@ public class OverviewService : IOverviewService
 
         return null;
     }
+
+    /// <summary>
+    /// An issue counts as read once the user has completed it. A record is
+    /// treated as read when it has an explicit <see cref="ReadingProgressEntity.CompletedAt"/>
+    /// timestamp or its progress has reached the end (<see cref="ReadingProgressEntity.PercentComplete"/>
+    /// at 100 or more). The percent check covers issues that reached the final
+    /// page but never received an explicit completion mark (for example the last
+    /// issue of a series read in webcomic mode), so a fully-read series is not
+    /// kept on Continue Reading.
+    /// </summary>
+    private static bool IsIssueRead(ReadingProgressEntity progress)
+        => progress.CompletedAt is not null || progress.PercentComplete >= 100.0;
 
     private static List<OverviewSeriesCard> BuildSeriesUpdates(
         IReadOnlyList<SeriesOverviewEntry> entries,

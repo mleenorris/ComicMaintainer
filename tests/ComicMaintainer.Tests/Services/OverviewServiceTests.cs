@@ -332,6 +332,54 @@ public class OverviewServiceTests
     }
 
     [Fact]
+    public async Task GetOverviewAsync_ContinueReading_ExcludesFullyReadSeries_WhenLastIssueReached100PercentWithoutCompletionMark()
+    {
+        var now = DateTime.UtcNow;
+        var factory = CreateFactory(out var options);
+
+        // Issue 1 was explicitly completed. Issue 2 (the final issue) was read
+        // to the last page -> 100% -> but never received an explicit completion
+        // mark (CompletedAt is null), which can happen for the last issue of a
+        // series read in webcomic mode. The whole series is effectively read and
+        // must not appear on Continue Reading.
+        await using (var db = new ComicMaintainerDbContext(options))
+        {
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "user-1",
+                ContentId = "/lib/done/1.cbz",
+                CurrentPage = 20,
+                TotalPages = 20,
+                PercentComplete = 100,
+                LastReadAt = now.AddHours(-2),
+                CompletedAt = now.AddHours(-2)
+            });
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "user-1",
+                ContentId = "/lib/done/2.cbz",
+                CurrentPage = 18,
+                TotalPages = 18,
+                PercentComplete = 100,
+                LastReadAt = now.AddHours(-1),
+                CompletedAt = null
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var entries = new List<SeriesOverviewEntry>
+        {
+            Entry("done", now.AddDays(-200), now.AddDays(-100),
+                "/lib/done/1.cbz", "/lib/done/2.cbz"),
+        };
+
+        var service = CreateService(entries, factory);
+
+        var result = await service.GetOverviewAsync("user-1");
+        Assert.Empty(result.ContinueReading);
+    }
+
+    [Fact]
     public async Task GetOverviewAsync_ContinueReading_PrefersInProgressIssueOverCompleted()
     {
         var now = DateTime.UtcNow;

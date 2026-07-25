@@ -1432,16 +1432,22 @@
             }
 
             // Check if scrolled near bottom (within 200px)
-            if (scrollHeight - scrollPosition < 200 && !isLoadingNext && nextComicInfo && nextComicInfo.hasAdjacent) {
-                isLoadingNext = true;
-                hasScrolledToBottom = true;
-                
-                // Mark current comic as read before loading next
+            if (scrollHeight - scrollPosition < 200) {
+                // Reaching the bottom means the current issue has been read
+                // through. Mark it read even when there is NO adjacent next
+                // issue (i.e. the last issue of a series). Otherwise the final
+                // issue never gets its read flag set, so the whole series stays
+                // pinned to the Continue Reading row and reappears on refresh.
                 if (!hasMarkedAsRead) {
+                    hasScrolledToBottom = true;
                     await markFileAsRead();
                 }
-                
-                await loadNextComic();
+
+                // Continuously stitch in the next issue when one exists.
+                if (!isLoadingNext && nextComicInfo && nextComicInfo.hasAdjacent) {
+                    isLoadingNext = true;
+                    await loadNextComic();
+                }
             }
         }
 

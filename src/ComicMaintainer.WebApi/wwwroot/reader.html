@@ -816,6 +816,7 @@
         let nextComicInfo = null;
         let hasScrolledToBottom = false;
         let hasMarkedAsRead = false;
+        let markAsReadInFlight = false;
         let pageObserver = null; // Intersection Observer for tracking visible pages
         let currentVisiblePage = 1; // Track the currently visible page in webcomic mode
         let bufferPages = 5; // Number of pages to prefetch ahead/behind
@@ -1368,6 +1369,9 @@
                             // Save progress as the user scrolls
                             saveReadingProgress(pageNum);
                         }
+                        if (pageNum === totalPages && !hasMarkedAsRead) {
+                            markFileAsRead();
+                        }
                         if (pageNum !== currentVisiblePage) {
                             currentVisiblePage = pageNum;
                             updatePageInfoInWebcomicMode();
@@ -1554,6 +1558,7 @@
                     
                     // Reset hasMarkedAsRead for the new comic
                     hasMarkedAsRead = false;
+                    markAsReadInFlight = false;
                     
                     // Reset page tracking to 1 for the new comic
                     currentPage = 1;
@@ -2294,9 +2299,10 @@
 
         // Mark the current file as read
         async function markFileAsRead() {
-            if (hasMarkedAsRead) return;
+            if (hasMarkedAsRead || markAsReadInFlight) return;
             
             try {
+                markAsReadInFlight = true;
                 const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
                 const fetchOptions = {
                     method: 'POST',
@@ -2322,6 +2328,8 @@
                 }
             } catch (error) {
                 console.error('Error marking file as read:', error);
+            } finally {
+                markAsReadInFlight = false;
             }
         }
 

@@ -86,10 +86,6 @@ public class OverviewService : IOverviewService
         var cards = new List<(OverviewSeriesCard Card, DateTime LastReadAt)>();
         foreach (var entry in entries)
         {
-            // Issues marked read via the file read flag (outside the reader) count
-            // as read even though they have no reading-progress record.
-            var readFilePaths = new HashSet<string>(entry.ReadFilePaths, StringComparer.OrdinalIgnoreCase);
-
             // The most recently read issue (in-progress or completed) anchors the
             // user's place in the series.
             ReadingProgressEntity? anchor = null;
@@ -110,7 +106,7 @@ public class OverviewService : IOverviewService
             string resumePath;
             int resumePage;
 
-            if (!IsIssueRead(anchor) && !readFilePaths.Contains(anchor.ContentId))
+            if (!IsIssueRead(anchor))
             {
                 // Still in the middle of an issue: resume exactly where we left off.
                 resumePath = anchor.ContentId;
@@ -121,7 +117,7 @@ public class OverviewService : IOverviewService
                 // The most recent issue is finished. Resume at the next issue that
                 // has not been completed yet. If none remain, the series is fully
                 // caught up and should drop off Continue Reading.
-                var next = FindNextUnreadIssue(entry.FilePaths, anchor.ContentId, progressByPath, readFilePaths);
+                var next = FindNextUnreadIssue(entry.FilePaths, anchor.ContentId, progressByPath);
                 if (next is null)
                 {
                     continue;
@@ -158,8 +154,7 @@ public class OverviewService : IOverviewService
     private static string? FindNextUnreadIssue(
         IReadOnlyList<string> orderedPaths,
         string completedPath,
-        IReadOnlyDictionary<string, ReadingProgressEntity> progressByPath,
-        IReadOnlySet<string> readFilePaths)
+        IReadOnlyDictionary<string, ReadingProgressEntity> progressByPath)
     {
         var startIndex = -1;
         for (var i = 0; i < orderedPaths.Count; i++)
@@ -174,9 +169,8 @@ public class OverviewService : IOverviewService
         for (var i = startIndex + 1; i < orderedPaths.Count; i++)
         {
             var path = orderedPaths[i];
-            // Unread (no progress and not marked read) or started-but-not-finished
-            // issues qualify.
-            if (!IsPathRead(path, progressByPath, readFilePaths))
+            // Unread (no progress) or started-but-not-finished issues qualify.
+            if (!IsPathRead(path, progressByPath))
             {
                 return path;
             }
@@ -188,7 +182,7 @@ public class OverviewService : IOverviewService
         for (var i = 0; i <= startIndex && i < orderedPaths.Count; i++)
         {
             var path = orderedPaths[i];
-            if (!IsPathRead(path, progressByPath, readFilePaths))
+            if (!IsPathRead(path, progressByPath))
             {
                 return path;
             }
@@ -199,19 +193,13 @@ public class OverviewService : IOverviewService
 
     /// <summary>
     /// Determines whether the issue at <paramref name="path"/> should be treated
-    /// as read. An issue counts as read when it is marked read via the file read
-    /// flag or when its per-user reading progress reports completion.
+    /// as read. Continue Reading is scoped to the authenticated user's durable
+    /// progress, so only that user's completion record is considered.
     /// </summary>
     private static bool IsPathRead(
         string path,
-        IReadOnlyDictionary<string, ReadingProgressEntity> progressByPath,
-        IReadOnlySet<string> readFilePaths)
+        IReadOnlyDictionary<string, ReadingProgressEntity> progressByPath)
     {
-        if (readFilePaths.Contains(path))
-        {
-            return true;
-        }
-
         return progressByPath.TryGetValue(path, out var progress) && IsIssueRead(progress);
     }
 

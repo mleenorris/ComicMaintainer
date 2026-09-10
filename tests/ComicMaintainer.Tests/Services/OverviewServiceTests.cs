@@ -347,15 +347,13 @@ public class OverviewServiceTests
     }
 
     [Fact]
-    public async Task GetOverviewAsync_ContinueReading_ExcludesSeries_WhenRemainingIssuesMarkedReadViaFlag()
+    public async Task GetOverviewAsync_ContinueReading_DoesNotUseGlobalReadFlags()
     {
         var now = DateTime.UtcNow;
         var factory = CreateFactory(out var options);
 
-        // The user finished issue 1 in the reader (reading progress). Issue 2 has
-        // no reading-progress record but was marked read via the file read flag
-        // (the "mark as read" action). The series is effectively fully read and
-        // must not appear on Continue Reading.
+        // The user finished issue 1 in the reader. A global file read flag for
+        // issue 2 must not affect this user's Continue Reading state.
         await using (var db = new ComicMaintainerDbContext(options))
         {
             db.ReadingProgresses.Add(new ReadingProgressEntity
@@ -381,18 +379,18 @@ public class OverviewServiceTests
         var service = CreateService(entries, factory);
 
         var result = await service.GetOverviewAsync("user-1");
-        Assert.Empty(result.ContinueReading);
+        var card = Assert.Single(result.ContinueReading);
+        Assert.Equal("/lib/flagged/2.cbz", card.ResumeFilePath);
     }
 
     [Fact]
-    public async Task GetOverviewAsync_ContinueReading_ResumesAtUnreadIssue_SkippingIssuesMarkedReadViaFlag()
+    public async Task GetOverviewAsync_ContinueReading_DoesNotSkipIssuesMarkedReadGlobally()
     {
         var now = DateTime.UtcNow;
         var factory = CreateFactory(out var options);
 
-        // Issue 1 completed in the reader, issue 2 marked read via the flag, and
-        // issue 3 is still unread. Continue Reading must keep the series and
-        // resume at issue 3, skipping the flag-read issue 2.
+        // Issue 1 was completed by this user. A global read flag on issue 2
+        // must not advance this user's resume position to issue 3.
         await using (var db = new ComicMaintainerDbContext(options))
         {
             db.ReadingProgresses.Add(new ReadingProgressEntity
@@ -421,7 +419,7 @@ public class OverviewServiceTests
 
         var card = Assert.Single(result.ContinueReading);
         Assert.Equal("mixed", card.Id);
-        Assert.Equal("/lib/mixed/3.cbz", card.ResumeFilePath);
+        Assert.Equal("/lib/mixed/2.cbz", card.ResumeFilePath);
         Assert.Equal(0, card.ResumePage);
     }
 

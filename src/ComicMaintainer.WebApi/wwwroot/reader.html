@@ -815,7 +815,15 @@
         let isLoadingNext = false;
         let nextComicInfo = null;
         let hasScrolledToBottom = false;
-        let hasMarkedAsRead = false;
+        // File paths already marked read in this reader session, tracked per
+        // comic rather than as a single flag. In webcomic mode several issues
+        // are stitched into one continuous scroll, so a single flag either
+        // suppressed the mark for later issues or attributed it to the wrong
+        // file after a transition.
+        const markedReadPaths = new Set();
+        // Marks currently in flight (per file path) so repeated scroll events
+        // don't fire duplicate requests before the first one resolves.
+        const markReadInFlight = new Set();
         let pageObserver = null; // Intersection Observer for tracking visible pages
         let currentVisiblePage = 1; // Track the currently visible page in webcomic mode
         let bufferPages = 5; // Number of pages to prefetch ahead/behind
@@ -1107,6 +1115,12 @@
             
             // Set up scroll listener for loading next comic
             setupWebcomicScrollListener();
+
+            // A short issue can fit entirely on screen (or reading can resume on
+            // the final page), in which case no scroll event ever fires and the
+            // issue would never be marked read. Run the completion check once
+            // after the initial render.
+            await maybeMarkFinishedComic();
         }
         
         // Calculate prefetch indices based on current page and buffer
@@ -1433,15 +1447,13 @@
 
             // Check if scrolled near bottom (within 200px)
             if (scrollHeight - scrollPosition < 200) {
-                // Reaching the bottom means the current issue has been read
-                // through. Mark it read even when there is NO adjacent next
-                // issue (i.e. the last issue of a series). Otherwise the final
-                // issue never gets its read flag set, so the whole series stays
-                // pinned to the Continue Reading row and reappears on refresh.
-                if (!hasMarkedAsRead) {
-                    hasScrolledToBottom = true;
-                    await markFileAsRead();
-                }
+                // Reaching the bottom means the issue whose pages sit at the end
+                // of the stitched stream has been read through. Mark that issue
+                // read — even when there is NO adjacent next issue (i.e. the last
+                // issue of a series), otherwise the final issue never gets its
+                // read flag set, so the whole series stays pinned to the Continue
+                // Reading row and reappears on refresh.
+                await maybeMarkFinishedComic();
 
                 // Continuously stitch in the next issue when one exists.
                 if (!isLoadingNext && nextComicInfo && nextComicInfo.hasAdjacent) {
@@ -1449,6 +1461,50 @@
                     await loadNextComic();
                 }
             }
+        }
+
+        // Marks the issue at the end of the stitched stream as read when the
+        // reader has reached its final page.
+        async function maybeMarkFinishedComic() {
+            const finishedPath = getFinishedComicAtBottom();
+            if (!finishedPath) return;
+            hasScrolledToBottom = true;
+            await markFileAsRead(finishedPath);
+        }
+
+        // Returns the file path of the comic that the reader has just finished,
+        // based on the last page image in the continuous container. Returns null
+        // while the tail of that comic is still loading (or while the next issue
+        // is being stitched in) so a partially rendered issue is never marked
+        // read before the reader has actually reached its final page.
+        function getFinishedComicAtBottom() {
+            if (isLoadingNext) return null;
+
+            const content = document.getElementById('readerContent');
+            const container = document.getElementById('webcomicContainer');
+            if (!content || !container) return null;
+
+            // The reader must actually be at the end of the rendered stream; a
+            // short issue whose pages are all loaded is not "finished" until the
+            // reader has scrolled to the bottom of it.
+            if (content.scrollHeight - (content.scrollTop + content.clientHeight) >= 200) {
+                return null;
+            }
+
+            const images = container.querySelectorAll('img[data-page]');
+            const last = images[images.length - 1];
+            if (!last) return null;
+
+            const filePath = last.dataset.comic || comicFilePath;
+            if (!filePath) return null;
+
+            const meta = comicMeta.get(filePath);
+            const pageNum = parseInt(last.dataset.page);
+            if (meta && meta.totalPages > 0 && !isNaN(pageNum) && pageNum < meta.totalPages) {
+                return null; // Final page of this issue is not rendered yet.
+            }
+
+            return filePath;
         }
 
         // Prefetch next comic information
@@ -1504,8 +1560,9 @@
             try {
                 const container = document.getElementById('webcomicContainer');
                 
-                // Store the name of the comic we're leaving
+                // Store the name/path of the comic we're leaving
                 const leavingComicName = currentComicName;
+                const leavingComicPath = comicFilePath;
                 const enteringComicName = nextComicInfo.fileName;
                 
                 // Add comic transition separator
@@ -1542,6 +1599,14 @@
                 if (response.ok) {
                     const data = await response.json();
                     
+                    // The reader is moving past the issue it was on, so that issue
+                    // has been read through even if its final page never rendered
+                    // (e.g. a page request failed). Fire-and-forget so the
+                    // transition isn't delayed by the request; the path is
+                    // captured up-front and markFileAsRead handles its own
+                    // errors, so it can never mis-attribute or reject.
+                    void markFileAsRead(leavingComicPath);
+                    
                     // Update current comic info
                     comicFilePath = nextComicInfo.filePath;
                     currentComicName = data.fileName;
@@ -1551,9 +1616,6 @@
                     // Register the new comic so prefetching can resolve its page
                     // bounds / title when its images come into view.
                     comicMeta.set(comicFilePath, { totalPages: totalPages, name: currentComicName });
-                    
-                    // Reset hasMarkedAsRead for the new comic
-                    hasMarkedAsRead = false;
                     
                     // Reset page tracking to 1 for the new comic
                     currentPage = 1;
@@ -1839,8 +1901,8 @@
                 saveReadingProgress(pageNum);
 
                 // Mark as read when reaching last page in manga mode
-                if (pageNum === totalPages && !hasMarkedAsRead) {
-                    await markFileAsRead();
+                if (totalPages > 0 && pageNum >= totalPages) {
+                    await markFileAsRead(comicFilePath);
                 }
 
                 // Prefetch neighbours so the next page change is instant.
@@ -2292,10 +2354,14 @@
             }
         });
 
-        // Mark the current file as read
-        async function markFileAsRead() {
-            if (hasMarkedAsRead) return;
-            
+        // Mark a specific comic file as read. The caller captures the path so a
+        // mark can never be attributed to a different comic that became active
+        // while the request was in flight.
+        async function markFileAsRead(filePath = comicFilePath) {
+            if (!filePath) return;
+            if (markedReadPaths.has(filePath) || markReadInFlight.has(filePath)) return;
+
+            markReadInFlight.add(filePath);
             try {
                 const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
                 const fetchOptions = {
@@ -2310,18 +2376,21 @@
                 }
                 
                 const response = await fetch(
-                    `/api/ComicReader/mark-read?filePath=${encodeURIComponent(comicFilePath)}`,
+                    `/api/ComicReader/mark-read?filePath=${encodeURIComponent(filePath)}`,
                     fetchOptions
                 );
                 
                 if (response.ok) {
-                    hasMarkedAsRead = true;
-                    console.log('Marked file as read:', comicFilePath);
+                    markedReadPaths.add(filePath);
+                    console.log('Marked file as read:', filePath);
                 } else {
+                    // Leave the path unmarked so a later end-of-comic event retries.
                     console.error('Failed to mark file as read:', response.status);
                 }
             } catch (error) {
                 console.error('Error marking file as read:', error);
+            } finally {
+                markReadInFlight.delete(filePath);
             }
         }
 

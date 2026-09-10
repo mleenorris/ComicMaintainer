@@ -242,6 +242,10 @@ public class FileStoreService : IFileStoreService
         // tracked in the database, preserve its original CreatedAt so re-adds (e.g. watcher
         // re-scan) don't reset the series recency window used by Overview "Series Updates".
         DateTime createdAt = DateTime.UtcNow;
+        // Durable per-file state that must survive a re-add. Losing it would make an
+        // already-read issue look unread again (until the next restart reloads the
+        // database), which pins finished series back onto "Continue Reading".
+        ComicFile? tracked = null;
 
         try
         {
@@ -257,13 +261,22 @@ public class FileStoreService : IFileStoreService
                 isNormalized = entity.IsNormalized;
                 isDuplicate = entity.IsDuplicate;
                 createdAt = entity.CreatedAt;
+                tracked = ToComicFile(entity);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error reading file status from database: {FilePath}", SanitizeForLogging(filePath));
         }
-        
+
+        // Fall back to the in-memory snapshot when the database row could not be read
+        // (or does not exist yet) so a transient database error can't silently drop
+        // read/metadata state either.
+        if (tracked is null && _files.TryGetValue(filePath, out var cachedFile))
+        {
+            tracked = cachedFile;
+        }
+
         var comicFile = new ComicFile
         {
             FilePath = filePath,
@@ -275,7 +288,15 @@ public class FileStoreService : IFileStoreService
             IsRenamed = isRenamed,
             IsNormalized = isNormalized,
             IsProcessed = ComputeProcessedState(isRenamed, isNormalized),
-            IsDuplicate = isDuplicate
+            IsDuplicate = isDuplicate,
+            IsRead = tracked?.IsRead ?? false,
+            Metadata = tracked?.Metadata?.Clone(),
+            SeriesMetadataVersion = tracked?.SeriesMetadataVersion ?? 0,
+            MetadataVersion = tracked?.MetadataVersion ?? 0,
+            WrittenMetadataVersion = tracked?.WrittenMetadataVersion ?? 0,
+            LastDbEditAt = tracked?.LastDbEditAt,
+            LastWriteAt = tracked?.LastWriteAt,
+            MetadataSource = tracked?.MetadataSource ?? FileMetadataSource.Scanned
         };
 
         _files.AddOrUpdate(filePath, comicFile, (_, _) => comicFile);

@@ -261,11 +261,7 @@ public class SeriesLibraryService : ISeriesLibraryService
                 LatestCreatedAt = accumulator.LatestCreatedAt,
                 // Emit file paths in series (issue) order so the overview can
                 // resolve the "next unread issue" when resuming a series.
-                FilePaths = sortedIssues.Select(i => i.FilePath).ToList(),
-                // Issues marked read via the file read flag (independent of the
-                // per-user reading progress) so Continue Reading can recognise a
-                // fully-read series and drop it from the row.
-                ReadFilePaths = sortedIssues.Where(i => i.Read).Select(i => i.FilePath).ToList()
+                FilePaths = sortedIssues.Select(i => i.FilePath).ToList()
             });
         }
 
@@ -1916,6 +1912,4 @@ public class SeriesLibraryService : ISeriesLibraryService
         return $"/api/series-images/{Uri.EscapeDataString(accumulator.ImageNormalizedKey)}";
     }
 }
-
-
 

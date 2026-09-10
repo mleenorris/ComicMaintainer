@@ -46,21 +46,6 @@ public class OverviewServiceTests
             FilePaths = filePaths.ToList()
         };
 
-    private static SeriesOverviewEntry EntryWithReadFlags(
-        string id,
-        DateTime earliest,
-        DateTime latest,
-        IEnumerable<string> filePaths,
-        IEnumerable<string> readFilePaths)
-        => new()
-        {
-            Summary = new SeriesSummaryDto { Id = id, Title = id, CanonicalTitle = id },
-            EarliestCreatedAt = earliest,
-            LatestCreatedAt = latest,
-            FilePaths = filePaths.ToList(),
-            ReadFilePaths = readFilePaths.ToList()
-        };
-
     [Fact]
     public async Task GetOverviewAsync_BucketsUpdatesNewlyAdded_RespectingThirtyDayWindow()
     {
@@ -371,9 +356,8 @@ public class OverviewServiceTests
 
         var entries = new List<SeriesOverviewEntry>
         {
-            EntryWithReadFlags("flagged", now.AddDays(-200), now.AddDays(-100),
-                filePaths: new[] { "/lib/flagged/1.cbz", "/lib/flagged/2.cbz" },
-                readFilePaths: new[] { "/lib/flagged/2.cbz" }),
+            Entry("flagged", now.AddDays(-200), now.AddDays(-100),
+                "/lib/flagged/1.cbz", "/lib/flagged/2.cbz"),
         };
 
         var service = CreateService(entries, factory);
@@ -408,9 +392,8 @@ public class OverviewServiceTests
 
         var entries = new List<SeriesOverviewEntry>
         {
-            EntryWithReadFlags("mixed", now.AddDays(-200), now.AddDays(-100),
-                filePaths: new[] { "/lib/mixed/1.cbz", "/lib/mixed/2.cbz", "/lib/mixed/3.cbz" },
-                readFilePaths: new[] { "/lib/mixed/2.cbz" }),
+            Entry("mixed", now.AddDays(-200), now.AddDays(-100),
+                "/lib/mixed/1.cbz", "/lib/mixed/2.cbz", "/lib/mixed/3.cbz"),
         };
 
         var service = CreateService(entries, factory);

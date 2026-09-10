@@ -20,13 +20,6 @@ public class SeriesOverviewEntry
     /// <summary>Every tracked file path belonging to the series.</summary>
     public List<string> FilePaths { get; set; } = new();
 
-    /// <summary>
-    /// File paths within the series that are marked read via the file read flag
-    /// (<see cref="ComicFile.IsRead"/>). This is independent of per-user reading
-    /// progress and lets Continue Reading treat issues marked read outside the
-    /// reader as read so a fully-read series is not kept on the row.
-    /// </summary>
-    public List<string> ReadFilePaths { get; set; } = new();
 }
 
 /// <summary>

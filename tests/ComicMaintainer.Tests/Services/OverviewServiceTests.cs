@@ -332,13 +332,12 @@ public class OverviewServiceTests
     }
 
     [Fact]
-    public async Task GetOverviewAsync_ContinueReading_DoesNotUseGlobalReadFlags()
+    public async Task GetOverviewAsync_ContinueReading_ResumesAtNextIssueAfterCompletion()
     {
         var now = DateTime.UtcNow;
         var factory = CreateFactory(out var options);
 
-        // The user finished issue 1 in the reader. A global file read flag for
-        // issue 2 must not affect this user's Continue Reading state.
+        // The user finished issue 1 in the reader and can resume at issue 2.
         await using (var db = new ComicMaintainerDbContext(options))
         {
             db.ReadingProgresses.Add(new ReadingProgressEntity
@@ -368,13 +367,12 @@ public class OverviewServiceTests
     }
 
     [Fact]
-    public async Task GetOverviewAsync_ContinueReading_DoesNotSkipIssuesMarkedReadGlobally()
+    public async Task GetOverviewAsync_ContinueReading_ResumesAtFirstRemainingIssue()
     {
         var now = DateTime.UtcNow;
         var factory = CreateFactory(out var options);
 
-        // Issue 1 was completed by this user. A global read flag on issue 2
-        // must not advance this user's resume position to issue 3.
+        // Issue 1 was completed by this user, while issues 2 and 3 remain.
         await using (var db = new ComicMaintainerDbContext(options))
         {
             db.ReadingProgresses.Add(new ReadingProgressEntity

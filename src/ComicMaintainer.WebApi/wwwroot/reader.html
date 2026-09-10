@@ -1369,7 +1369,7 @@
                             // Save progress as the user scrolls
                             saveReadingProgress(pageNum);
                             if (pageNum === totalPages && scrollDirection === 'forward' && !hasMarkedAsRead) {
-                                markFileAsRead();
+                                void markFileAsRead();
                             }
                         }
                         if (pageNum !== currentVisiblePage) {

@@ -1601,9 +1601,11 @@
                     
                     // The reader is moving past the issue it was on, so that issue
                     // has been read through even if its final page never rendered
-                    // (e.g. a page request failed). Mark it before switching the
-                    // active comic so the mark is attributed to the right file.
-                    markFileAsRead(leavingComicPath);
+                    // (e.g. a page request failed). Fire-and-forget so the
+                    // transition isn't delayed by the request; the path is
+                    // captured up-front and markFileAsRead handles its own
+                    // errors, so it can never mis-attribute or reject.
+                    void markFileAsRead(leavingComicPath);
                     
                     // Update current comic info
                     comicFilePath = nextComicInfo.filePath;

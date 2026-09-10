@@ -9,12 +9,14 @@ using ComicMaintainer.Core.Reader.Services;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
+using ComicMaintainer.WebApi.HealthChecks;
 using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Middleware;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -491,8 +493,12 @@ builder.Services.AddOutputCache(options =>
 builder.Services.AddSignalR();
 builder.Services.AddMemoryCache();
 
-// Add health checks
-builder.Services.AddHealthChecks();
+// Add health checks.
+// "/health" is a pure liveness probe (the process is up and serving requests);
+// "/health/ready" additionally verifies the database is reachable, which is what
+// container orchestrators should gate traffic on.
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("database", tags: new[] { "ready" });
 
 // Add CORS with security-conscious configuration
 builder.Services.AddCors(options =>
@@ -811,8 +817,17 @@ app.UseRateLimiter();
 app.MapControllers();
 app.MapHub<ProgressHub>("/hubs/progress");
 
-// Map health check endpoints
-app.MapHealthChecks("/health");
+// Map health check endpoints. Both are anonymous so probes do not need credentials.
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    // Liveness: run no checks, just confirm the app responds.
+    Predicate = _ => false
+}).AllowAnonymous();
+
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready")
+}).AllowAnonymous();
 
 // Map default route to serve index.html for non-API routes only
 // This prevents the fallback from catching API requests, ensuring they always return JSON.

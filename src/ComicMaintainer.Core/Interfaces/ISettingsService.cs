@@ -95,6 +95,11 @@ public interface ISettingsService
     /// Update the default library view shown on initial page load ("files" or "series").
     /// </summary>
     Task UpdateDefaultLibraryViewAsync(string view, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Enables or disables anonymous self-service account registration.
+    /// </summary>
+    Task UpdateAllowRegistrationAsync(bool allowed, CancellationToken cancellationToken = default);
     Task UpdateExternalSeriesMetadataEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     Task UpdateComicVineApiKeyAsync(string? apiKey, CancellationToken cancellationToken = default);
     Task UpdateComicVineBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);

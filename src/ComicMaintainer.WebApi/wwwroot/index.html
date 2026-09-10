@@ -78,6 +78,7 @@
     </script>
 </head>
 <body>
+    <a class="skip-to-content" href="#mainContent">Skip to main content</a>
     <div class="header">
         <div class="container">
             <div class="header-content">
@@ -273,7 +274,7 @@
         </div>
     </div>
     
-     <div class="container">
+     <main class="container" id="mainContent" tabindex="-1">
          <div id="messageContainer"></div>
  
          <div class="visually-hidden" id="mobileLibraryViewStatus" aria-live="polite"></div>
@@ -471,10 +472,10 @@
                 </div>
             </div>
         </section>
-    </div>
+    </main>
     
     <!-- Tag Editor Modal -->
-    <div class="modal" id="tagModal">
+    <div class="modal" id="tagModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-hidden="true">
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="modalTitle">Edit Tags</h2>
@@ -532,10 +533,10 @@
     </div>
     
     <!-- Batch Update Modal -->
-    <div class="modal" id="batchModal">
+    <div class="modal" id="batchModal" role="dialog" aria-modal="true" aria-labelledby="batchModalTitle" aria-hidden="true">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Batch Update Tags</h2>
+                <h2 id="batchModalTitle">Batch Update Tags</h2>
                 <button class="close-btn" onclick="closeBatchModal()">&times;</button>
             </div>
             <div class="modal-body">
@@ -570,10 +571,10 @@
     </div>
     
     <!-- File Info Modal -->
-    <div class="modal" id="fileInfoModal">
+    <div class="modal" id="fileInfoModal" role="dialog" aria-modal="true" aria-labelledby="fileInfoModalTitle" aria-hidden="true">
         <div class="modal-content" style="max-width: 600px;">
             <div class="modal-header">
-                <h2>File Information</h2>
+                <h2 id="fileInfoModalTitle">File Information</h2>
                 <button class="close-btn" onclick="closeFileInfoModal()">&times;</button>
             </div>
             <div class="modal-body">
@@ -619,10 +620,10 @@
     </div>
     
     <!-- About Modal -->
-    <div class="modal" id="aboutModal">
+    <div class="modal" id="aboutModal" role="dialog" aria-modal="true" aria-labelledby="aboutModalTitle" aria-hidden="true">
         <div class="modal-content" style="max-width: 600px;">
             <div class="modal-header">
-                <h2>About Comic Maintainer</h2>
+                <h2 id="aboutModalTitle">About Comic Maintainer</h2>
                 <button class="close-btn" onclick="closeAboutModal()">&times;</button>
             </div>
             <div class="modal-body">
@@ -701,7 +702,7 @@
     </div>
     
     <!-- Progress Modal -->
-    <div class="modal" id="progressModal">
+    <div class="modal" id="progressModal" role="dialog" aria-modal="true" aria-labelledby="progressTitle" aria-hidden="true">
         <div class="modal-content" style="max-width: 600px;">
             <div class="modal-header">
                 <h2 id="progressTitle">Processing Files...</h2>
@@ -748,10 +749,10 @@
     </div>
     
     <!-- Settings Modal -->
-    <div class="modal" id="settingsModal">
+    <div class="modal" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle" aria-hidden="true">
         <div class="modal-content">
             <div class="modal-header">
-                <h2>Settings</h2>
+                <h2 id="settingsModalTitle">Settings</h2>
                 <button class="close-btn" onclick="closeSettings()">&times;</button>
             </div>
             <div class="modal-body">
@@ -774,6 +775,17 @@
                     </select>
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
                         Controls which view the library loads into when you first open the site.
+                    </small>
+                </div>
+
+                <h3 style="margin: 20px 0 10px; color: var(--text-secondary);">Access</h3>
+                <div class="form-group">
+                    <label for="allowRegistrationCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="allowRegistrationCheckbox" name="allowRegistration" onchange="updateAllowRegistration()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <span>Allow visitors to register their own account</span>
+                    </label>
+                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                        Disabled by default. When disabled, only an administrator can create accounts, so anyone who can reach this server cannot sign themselves up. Leave this off unless you intentionally want open sign-ups.
                     </small>
                 </div>
 
@@ -820,10 +832,13 @@
                 
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Log Rotation</h3>
                 <div class="form-group">
-                    <label for="logMaxSize">Maximum Log File Size (MB)</label>
+                    <label for="logMaxSize">
+                        Maximum Log File Size (MB)
+                        <span class="setting-restart-badge" title="This setting is only applied when the service starts.">Restart required</span>
+                    </label>
                     <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="100" step="1" placeholder="5" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. Changes take effect on restart.
+                        When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. The new size only takes effect after the service restarts — use <strong>Restart Service</strong> below to apply it immediately.
                     </small>
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
                         <strong>Note:</strong> Can also be configured via the <code>LOG_MAX_BYTES</code> environment variable (in bytes).
@@ -1025,10 +1040,10 @@
     </div>
     
     <!-- Reset Confirmation Modal -->
-    <div class="modal" id="resetConfirmationModal">
+    <div class="modal" id="resetConfirmationModal" role="dialog" aria-modal="true" aria-labelledby="resetConfirmationModalTitle" aria-hidden="true">
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
-                <h2 style="color: #e74c3c;">⚠️ Confirm Database Reset</h2>
+                <h2 id="resetConfirmationModalTitle" style="color: #e74c3c;">⚠️ Confirm Database Reset</h2>
                 <button class="close-btn" onclick="closeResetConfirmation()">&times;</button>
             </div>
             <div class="modal-body">
@@ -1060,10 +1075,10 @@
         </div>
     </div>
     
-    <div class="modal" id="logsModal">
+    <div class="modal" id="logsModal" role="dialog" aria-modal="true" aria-labelledby="logsModalTitle" aria-hidden="true">
         <div class="modal-content" style="max-width: 900px; height: 80vh; display: flex; flex-direction: column;">
             <div class="modal-header">
-                <h2>Application Logs</h2>
+                <h2 id="logsModalTitle">Application Logs</h2>
                 <button class="close-btn" onclick="closeLogsModal()">&times;</button>
             </div>
             <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
@@ -1104,10 +1119,10 @@
     </div>
 
     <!-- External Providers Status Modal -->
-    <div class="modal" id="externalProvidersModal">
+    <div class="modal" id="externalProvidersModal" role="dialog" aria-modal="true" aria-labelledby="externalProvidersModalTitle" aria-hidden="true">
         <div class="modal-content" style="max-width: 600px;">
             <div class="modal-header">
-                <h2>External Providers Status</h2>
+                <h2 id="externalProvidersModalTitle">External Providers Status</h2>
                 <button class="close-btn" onclick="closeExternalProvidersModal()">&times;</button>
             </div>
             <div class="modal-body">
@@ -1127,10 +1142,10 @@
         </div>
     </div>
     
-     <div class="modal" id="processingHistoryModal">
+     <div class="modal" id="processingHistoryModal" role="dialog" aria-modal="true" aria-labelledby="processingHistoryModalTitle" aria-hidden="true">
         <div class="modal-content" style="max-width: 1200px; height: 85vh; display: flex; flex-direction: column;">
             <div class="modal-header">
-                <h2>Processing History</h2>
+                <h2 id="processingHistoryModalTitle">Processing History</h2>
                 <button class="close-btn" onclick="closeProcessingHistoryModal()">&times;</button>
             </div>
             <div class="modal-body" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
@@ -1155,10 +1170,10 @@
         </div>
      </div>
  
-     <div class="modal" id="duplicateReviewModal">
+     <div class="modal" id="duplicateReviewModal" role="dialog" aria-modal="true" aria-labelledby="duplicateReviewModalTitle" aria-hidden="true">
          <div class="modal-content" style="max-width: 760px;">
              <div class="modal-header">
-                 <h2>Duplicate Review</h2>
+                 <h2 id="duplicateReviewModalTitle">Duplicate Review</h2>
                  <button class="close-btn" onclick="closeDuplicateReviewModal()">&times;</button>
              </div>
              <div class="modal-body">
@@ -1208,10 +1223,10 @@
          </div>
      </div>
 
-     <div class="modal" id="combineFoldersModal">
+     <div class="modal" id="combineFoldersModal" role="dialog" aria-modal="true" aria-labelledby="combineFoldersModalTitle" aria-hidden="true">
          <div class="modal-content" style="max-width: 1024px;">
              <div class="modal-header">
-                 <h2>Combine Folders</h2>
+                 <h2 id="combineFoldersModalTitle">Combine Folders</h2>
                  <button class="close-btn" onclick="closeCombineFoldersModal()">&times;</button>
              </div>
              <div class="modal-body">
@@ -1245,7 +1260,7 @@
      </div>
 
      <!-- Per-series folder list / merge modal -->
-     <div class="modal" id="seriesFoldersModal">
+     <div class="modal" id="seriesFoldersModal" role="dialog" aria-modal="true" aria-labelledby="seriesFoldersModalTitle" aria-hidden="true">
          <div class="modal-content" style="max-width: 720px;">
              <div class="modal-header">
                  <h2 id="seriesFoldersModalTitle">Series Folders</h2>
@@ -1269,10 +1284,10 @@
      </div>
 
      <!-- Manage Series Names Modal -->
-     <div class="modal" id="manageSeriesNamesModal">
+     <div class="modal" id="manageSeriesNamesModal" role="dialog" aria-modal="true" aria-labelledby="manageSeriesNamesModalTitle" aria-hidden="true">
          <div class="modal-content" style="max-width: 720px;">
              <div class="modal-header">
-                 <h2>Manage Series Names</h2>
+                 <h2 id="manageSeriesNamesModalTitle">Manage Series Names</h2>
                  <button class="close-btn" onclick="closeManageSeriesNamesModal()">&times;</button>
              </div>
              <div class="modal-body">
@@ -1359,10 +1374,10 @@
      </div>
      
      <!-- Change Password Modal -->
-     <div class="modal" id="changePasswordModal">
+     <div class="modal" id="changePasswordModal" role="dialog" aria-modal="true" aria-labelledby="changePasswordModalTitle" aria-hidden="true">
         <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
-                <h2>Change Password</h2>
+                <h2 id="changePasswordModalTitle">Change Password</h2>
                 <button class="close-btn" onclick="closeChangePasswordModal()">&times;</button>
             </div>
             <div class="modal-body">

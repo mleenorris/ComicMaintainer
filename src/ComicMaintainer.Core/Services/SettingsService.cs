@@ -178,6 +178,11 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("DefaultLibraryView", normalized, cancellationToken);
     }
 
+    public async Task UpdateAllowRegistrationAsync(bool allowed, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("AllowRegistration", allowed, cancellationToken);
+    }
+
     public async Task UpdateExternalSeriesMetadataEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
     {
         await UpdateSettingAsync("EnableExternalSeriesMetadata", enabled, cancellationToken);

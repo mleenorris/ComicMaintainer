@@ -15,6 +15,7 @@ public class AuthControllerTests
     private readonly Mock<ILogger<AuthController>> _mockLogger;
     private readonly Mock<IOptions<AutheliaSettings>> _mockAutheliaSettings;
     private readonly Mock<IAuthorizationService> _mockAuthorizationService;
+    private readonly Mock<IOptionsMonitor<AppSettings>> _mockAppSettings;
     private readonly AuthController _controller;
 
     public AuthControllerTests()
@@ -33,11 +34,17 @@ public class AuthControllerTests
             .Setup(x => x.AuthorizeAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<object?>(), It.IsAny<string>()))
             .ReturnsAsync(AuthorizationResult.Success());
 
+        // Registration gating reads AllowRegistration; enable it by default so
+        // the existing Register tests keep exercising the happy path.
+        _mockAppSettings = new Mock<IOptionsMonitor<AppSettings>>();
+        _mockAppSettings.Setup(x => x.CurrentValue).Returns(new AppSettings { AllowRegistration = true });
+
         _controller = new AuthController(
             _mockAuthService.Object, 
             _mockLogger.Object,
             _mockAutheliaSettings.Object,
-            _mockAuthorizationService.Object);
+            _mockAuthorizationService.Object,
+            _mockAppSettings.Object);
     }
 
     [Fact]
@@ -318,7 +325,8 @@ public class AuthControllerTests
             _mockAuthService.Object, 
             _mockLogger.Object,
             _mockAutheliaSettings.Object,
-            _mockAuthorizationService.Object);
+            _mockAuthorizationService.Object,
+            _mockAppSettings.Object);
         SetupAuthenticatedUserOnController(controller, "user-id-123", "testuser");
 
         // Act
@@ -439,7 +447,8 @@ public class AuthControllerTests
             _mockAuthService.Object, 
             _mockLogger.Object,
             _mockAutheliaSettings.Object,
-            _mockAuthorizationService.Object);
+            _mockAuthorizationService.Object,
+            _mockAppSettings.Object);
         
         SetupAuthenticatedUserOnController(controller, "user-id-789", autheliaUsername);
 

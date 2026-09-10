@@ -15,17 +15,20 @@ public class AuthController : ControllerBase
     private readonly ILogger<AuthController> _logger;
     private readonly AutheliaSettings _autheliaSettings;
     private readonly IAuthorizationService _authorizationService;
+    private readonly IOptionsMonitor<AppSettings> _appSettings;
 
     public AuthController(
         IAuthService authService, 
         ILogger<AuthController> logger,
         IOptions<AutheliaSettings> autheliaSettings,
-        IAuthorizationService authorizationService)
+        IAuthorizationService authorizationService,
+        IOptionsMonitor<AppSettings> appSettings)
     {
         _authService = authService;
         _logger = logger;
         _autheliaSettings = autheliaSettings.Value;
         _authorizationService = authorizationService;
+        _appSettings = appSettings;
     }
 
     [HttpPost("login")]
@@ -41,9 +44,31 @@ public class AuthController : ControllerBase
         return Ok(new { token });
     }
 
+    /// <summary>
+    /// Creates a new account.
+    /// </summary>
+    /// <remarks>
+    /// Self-service registration is disabled unless <c>AllowRegistration</c> is
+    /// enabled in settings, so a self-hosted instance is not open to anyone who
+    /// can reach the port. Administrators can always create accounts here.
+    /// </remarks>
+    [AllowAnonymous]
     [HttpPost("register")]
     public async Task<ActionResult> Register([FromBody] RegisterRequest request)
     {
+        var isAdmin = (await _authorizationService.AuthorizeAsync(User, AuthorizationPolicies.CanAdminister)).Succeeded;
+
+        if (!isAdmin && !_appSettings.CurrentValue.AllowRegistration)
+        {
+            _logger.LogWarning("Rejected registration attempt: self-service registration is disabled.");
+
+            // 401 when unauthenticated so clients know to sign in first; 403
+            // when a signed-in non-admin tries to create another account.
+            return User.Identity?.IsAuthenticated == true
+                ? StatusCode(StatusCodes.Status403Forbidden, new { error = "Registration is disabled. Ask an administrator to create your account." })
+                : Unauthorized(new { error = "Registration is disabled. Ask an administrator to create your account." });
+        }
+
         var (success, error) = await _authService.RegisterAsync(
             request.Username, 
             request.Password, 

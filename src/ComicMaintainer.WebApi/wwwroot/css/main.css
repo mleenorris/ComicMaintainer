@@ -4105,3 +4105,42 @@ body.user-read-only [data-requires-write] {
     font-size: 0.9rem;
     line-height: 1.4;
 }
+
+/* Badge marking settings that are only read at service startup. */
+.setting-restart-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    border: 1px solid var(--border-input);
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    vertical-align: middle;
+}
+
+/* Skip link: visually hidden until focused via keyboard. */
+.skip-to-content {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    z-index: 2000;
+    padding: 10px 16px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 2px solid var(--accent-primary, var(--border-input));
+    border-radius: 0 0 6px 0;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.skip-to-content:focus {
+    left: 0;
+}
+
+#mainContent:focus {
+    outline: none;
+}

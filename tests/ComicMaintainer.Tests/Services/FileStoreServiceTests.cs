@@ -672,6 +672,24 @@ public class FileStoreServiceTests
     }
 
     [Fact]
+    public async Task AddFileAsync_AlreadyReadFile_PreservesReadStatus()
+    {
+        // Arrange - a tracked file that the user has already finished
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+        await _service.MarkFileReadAsync(filePath, true);
+
+        // Act - a watcher/library re-scan re-adds the same file
+        await _service.AddFileAsync(filePath);
+
+        // Assert - the read flag survives the re-add
+        var files = await _service.GetAllFilesAsync();
+        var file = files.Single();
+        Assert.True(file.IsRead);
+    }
+
+    [Fact]
     public async Task SaveReadingProgressAsync_NewProgress_SavesPage()
     {
         // Arrange

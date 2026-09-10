@@ -565,6 +565,9 @@ builder.Services.AddSingleton<IReadingProgressService, ReadingProgressService>()
 builder.Services.AddSingleton<IReaderPreferenceService, ReaderPreferenceService>();
 builder.Services.AddSingleton<IReadingSessionService, ReadingSessionService>();
 
+// Per-user web UI preferences (theme, pagination, library view/filter/sort)
+builder.Services.AddSingleton<IUserPreferencesService, UserPreferencesService>();
+
 builder.Services.AddScoped<IAuthService, AuthService>();
 
 // Add hosted service for file watcher

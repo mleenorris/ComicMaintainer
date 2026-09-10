@@ -759,12 +759,14 @@
         async function setPreferences(prefs) {
             try {
                 const response = await fetch(apiUrl('/api/preferences'), {
-                    method: 'POST',
+                    method: 'PUT',
                     headers: {
+                        ...getAuthHeaders(),
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify(prefs)
                 });
+                if (handleAuthError(response)) return;
                 if (!response.ok) {
                     console.error('Failed to set preferences:', response.status);
                 }
@@ -1716,6 +1718,13 @@
                     });
                 }
 
+                // Restore sort mode from preferences
+                const oldSortMode = sortMode;
+                if (prefs.sortMode) {
+                    sortMode = prefs.sortMode;
+                    applySortUi();
+                }
+
                 // The Files library view has been removed; always force series
                 // mode regardless of what the server has cached for this user.
                 libraryViewMode = 'series';
@@ -1724,7 +1733,7 @@
                 updateLibraryViewLayout();
                 
                 // Reload files if perPage changed from default
-                if (libraryViewMode !== oldLibraryViewMode || (perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE)) {
+                if (libraryViewMode !== oldLibraryViewMode || sortMode !== oldSortMode || (perPage !== oldPerPage && perPage !== DEFAULT_PER_PAGE)) {
                     loadActiveLibraryView(1);
                 }
             });
@@ -2261,6 +2270,31 @@
         
         let sortMode = 'name'; // 'name', 'date', 'size'
         let sortDirection = 'asc'; // 'asc', 'desc'
+
+        // Syncs the sort dropdown label and active item with the current
+        // sortMode/sortDirection. Shared by setSort() and the preference
+        // restore path so both stay in sync.
+        function applySortUi() {
+            const sortLabels = {
+                'name': '🔤 Name',
+                'date': '📅 Date',
+                'size': '💾 Size'
+            };
+
+            const arrow = sortDirection === 'asc' ? '↑' : '↓';
+            const label = document.getElementById('headerSortLabel');
+            if (label) {
+                label.textContent = (sortLabels[sortMode] || sortLabels['name']) + ' ' + arrow;
+            }
+
+            document.querySelectorAll('#headerSortMenu .header-dropdown-item').forEach(item => {
+                if (item.dataset.sort === sortMode) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+        }
         
         async function setHeaderFilter(mode) {
             filterMode = mode;
@@ -2323,27 +2357,13 @@
                 sortDirection = 'asc';
             }
             
-            // Update dropdown label and active state
-            const sortLabels = {
-                'name': '🔤 Name',
-                'date': '📅 Date',
-                'size': '💾 Size'
-            };
-            
-            const arrow = sortDirection === 'asc' ? '↑' : '↓';
-            document.getElementById('headerSortLabel').textContent = sortLabels[mode] + ' ' + arrow;
-            
-            // Update active class on dropdown items
-            document.querySelectorAll('#headerSortMenu .header-dropdown-item').forEach(item => {
-                if (item.dataset.sort === mode) {
-                    item.classList.add('active');
-                } else {
-                    item.classList.remove('active');
-                }
-            });
-            
+            applySortUi();
+
             // Close the dropdown
             document.getElementById('headerSortMenu').classList.remove('show');
+
+            // Persist the chosen sort so it survives a refresh / other devices
+            setPreferences({ sortMode: sortMode });
 
             // If a series detail is open, keep the user inside it. Sorting
             // does not apply to issues within a series (issues are ordered by

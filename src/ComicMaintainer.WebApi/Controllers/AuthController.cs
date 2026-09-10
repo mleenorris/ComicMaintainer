@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.WebApi.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -13,15 +14,18 @@ public class AuthController : ControllerBase
     private readonly IAuthService _authService;
     private readonly ILogger<AuthController> _logger;
     private readonly AutheliaSettings _autheliaSettings;
+    private readonly IAuthorizationService _authorizationService;
 
     public AuthController(
         IAuthService authService, 
         ILogger<AuthController> logger,
-        IOptions<AutheliaSettings> autheliaSettings)
+        IOptions<AutheliaSettings> autheliaSettings,
+        IAuthorizationService authorizationService)
     {
         _authService = authService;
         _logger = logger;
         _autheliaSettings = autheliaSettings.Value;
+        _authorizationService = authorizationService;
     }
 
     [HttpPost("login")]
@@ -177,7 +181,7 @@ public class AuthController : ControllerBase
 
     [Authorize]
     [HttpGet("user")]
-    public ActionResult GetCurrentUser()
+    public async Task<ActionResult> GetCurrentUser()
     {
         // Return current user information
         var username = User.Identity?.Name;
@@ -188,13 +192,20 @@ public class AuthController : ControllerBase
             .ToList();
         var authMethod = User.FindFirst("auth_method")?.Value ?? "jwt";
 
+        // Evaluate the authorization policies rather than re-deriving the role
+        // rules here, so the UI can never disagree with what the API enforces.
+        var canModifyLibrary = await _authorizationService.AuthorizeAsync(User, AuthorizationPolicies.CanModifyLibrary);
+        var canAdminister = await _authorizationService.AuthorizeAsync(User, AuthorizationPolicies.CanAdminister);
+
         return Ok(new 
         { 
             username = username,
             userId = userId,
             email = email,
             roles = roles,
-            authMethod = authMethod
+            authMethod = authMethod,
+            canModifyLibrary = canModifyLibrary.Succeeded,
+            canAdminister = canAdminister.Succeeded
         });
     }
 }

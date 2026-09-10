@@ -316,7 +316,7 @@
                      <strong id="libraryHealthDuplicates">—</strong>
                      <small>Ready for review</small>
                  </button>
-                 <button class="library-health-card neutral" type="button" onclick="openCombineFoldersModal()">
+                 <button class="library-health-card neutral" type="button" onclick="openCombineFoldersModal()" data-requires-write>
                      <span class="library-health-label">Combine Folders</span>
                      <strong id="libraryHealthCombinableFolders">—</strong>
                      <small>Review &amp; merge duplicate folders</small>
@@ -326,13 +326,13 @@
                  <div class="library-health-empty-icon">📚</div>
                  <h3>No files indexed yet</h3>
                  <p>Add comics to your watched folder, or use <strong>Scan Unmarked</strong> from the ⋮ menu to bring them in. Once files appear here, you'll see processing status, duplicates, and folders ready to combine.</p>
-                 <button class="btn btn-primary btn-small" onclick="scanUnmarkedFiles()">🔍 Scan Unmarked</button>
+                 <button class="btn btn-primary btn-small" onclick="scanUnmarkedFiles()" data-requires-write>🔍 Scan Unmarked</button>
              </div>
              <div class="controls-wrapper">
                  <div class="actions-bar">
                     <div class="button-group">
                         <!-- Process Dropdown -->
-                        <div class="action-dropdown">
+                        <div class="action-dropdown" data-requires-write>
                             <button class="action-dropdown-toggle process" onclick="toggleActionDropdown(event, 'processDropdown')">
                                 🚀<span> Process</span>
                             </button>
@@ -353,7 +353,7 @@
                         </div>
                     
                     <!-- Rename Dropdown -->
-                    <div class="action-dropdown">
+                    <div class="action-dropdown" data-requires-write>
                         <button class="action-dropdown-toggle rename" onclick="toggleActionDropdown(event, 'renameDropdown')">
                             📝<span> Rename</span>
                         </button>
@@ -371,7 +371,7 @@
                     </div>
                     
                     <!-- Normalize Dropdown -->
-                    <div class="action-dropdown">
+                    <div class="action-dropdown" data-requires-write>
                         <button class="action-dropdown-toggle normalize" onclick="toggleActionDropdown(event, 'normalizeDropdown')">
                             🔧<span> Normalize</span>
                         </button>
@@ -389,7 +389,7 @@
                     </div>
                     
                     <!-- Mark Read Dropdown -->
-                    <div class="action-dropdown">
+                    <div class="action-dropdown" data-requires-write>
                         <button class="action-dropdown-toggle mark" onclick="toggleActionDropdown(event, 'markDropdown')">
                             👁️<span> Mark</span>
                         </button>
@@ -410,7 +410,7 @@
                     </div>
 
                     <!-- Metadata Dropdown -->
-                    <div class="action-dropdown">
+                    <div class="action-dropdown" data-requires-write>
                         <button class="action-dropdown-toggle" onclick="toggleActionDropdown(event, 'metadataDropdown')">
                             🌐<span> Metadata</span>
                         </button>
@@ -437,12 +437,12 @@
                         </div>
                     </div>
                     
-                    <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" disabled>✏️<span> Update</span></button>
-                    <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteSelectedBtn" disabled>🗑️<span> Delete</span></button>
+                    <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" data-requires-write disabled>✏️<span> Update</span></button>
+                    <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteSelectedBtn" data-requires-write disabled>🗑️<span> Delete</span></button>
                     <button class="btn" onclick="refreshLibraryHealth()" aria-label="Refresh library health" title="Refresh">🔄<span class="btn-label"> Refresh</span></button>
                     <button class="btn" onclick="refreshFiles()" aria-label="Refresh library" title="Refresh library">🔄<span class="btn-label"> Refresh Library</span></button>
-                    <button class="btn btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" hidden>🔁<span class="btn-label"> Review Duplicates</span></button>
-                    <button class="btn" id="combineFoldersBtn" onclick="openCombineFoldersModal()" hidden>📁<span class="btn-label"> Combine Folders</span></button>
+                    <button class="btn btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" data-requires-write hidden>🔁<span class="btn-label"> Review Duplicates</span></button>
+                    <button class="btn" id="combineFoldersBtn" onclick="openCombineFoldersModal()" data-requires-write hidden>📁<span class="btn-label"> Combine Folders</span></button>
                 </div>
                 <span class="select-info" id="selectInfo">No files selected</span>
             </div>
@@ -755,8 +755,11 @@
                 <button class="close-btn" onclick="closeSettings()">&times;</button>
             </div>
             <div class="modal-body">
+                <div class="settings-readonly-notice" id="settingsReadOnlyNotice" hidden>
+                    🔒 These are server-wide settings and can only be changed by an administrator. Your personal appearance preference below is still editable.
+                </div>
                 <h3 style="margin-bottom: 10px; color: var(--text-secondary);">Appearance</h3>
-                <div class="form-group">
+                <div class="form-group" data-user-setting>
                     <label for="themeSelect">Theme</label>
                     <select id="themeSelect" name="theme" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);" onchange="updateThemeFromSettings()">
                         <option value="light">Light Mode</option>

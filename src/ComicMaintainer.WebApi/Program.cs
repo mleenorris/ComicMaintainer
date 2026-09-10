@@ -8,6 +8,7 @@ using ComicMaintainer.Core.Reader.Interfaces;
 using ComicMaintainer.Core.Reader.Services;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Authentication;
+using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Middleware;
 using ComicMaintainer.WebApi.Services;
@@ -389,10 +390,47 @@ builder.Services.AddAuthorization(options =>
             .RequireAuthenticatedUser()
             .Build();
     }
+
+    // Schemes accepted by every named policy, mirroring the default policy so
+    // SSE/EventSource JWT connections keep working under Authelia.
+    var schemes = autheliaSettings.Enabled
+        ? new[] { "Authelia", JwtBearerDefaults.AuthenticationScheme }
+        : new[] { JwtBearerDefaults.AuthenticationScheme };
+
+    // Library mutations: allowed for any authenticated user except members of
+    // the ReadOnly role. Denying by role (rather than requiring User/Admin)
+    // keeps existing deployments working even if a user has no role assigned.
+    options.AddPolicy(AuthorizationPolicies.CanModifyLibrary, policy => policy
+        .AddAuthenticationSchemes(schemes)
+        .RequireAuthenticatedUser()
+        .RequireAssertion(context => !context.User.IsInRole("ReadOnly")));
+
+    // Administration: requires the Admin role.
+    //
+    // Compatibility note: when Authelia is the identity provider but no admin
+    // groups are configured, no user can ever be mapped to the Admin role. In
+    // that configuration ComicMaintainer cannot distinguish administrators, so
+    // any non-ReadOnly user is treated as one rather than locking everybody out
+    // of the settings screen.
+    var autheliaHasAdminGroups = autheliaSettings.Enabled
+        && !string.IsNullOrWhiteSpace(autheliaSettings.AdminGroups);
+    var autheliaAdminFallback = autheliaSettings.Enabled && !autheliaHasAdminGroups;
+
+    options.AddPolicy(AuthorizationPolicies.CanAdminister, policy => policy
+        .AddAuthenticationSchemes(schemes)
+        .RequireAuthenticatedUser()
+        .RequireAssertion(context =>
+            context.User.IsInRole("Admin")
+            || (autheliaAdminFallback && !context.User.IsInRole("ReadOnly"))));
 });
 
 // Add services to the container
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    // Require the appropriate policy for every state-changing endpoint on the
+    // library/settings controllers (see WriteOperationAuthorizationConvention).
+    options.Conventions.Add(new WriteOperationAuthorizationConvention());
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 

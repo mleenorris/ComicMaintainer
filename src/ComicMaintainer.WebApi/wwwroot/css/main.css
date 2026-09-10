@@ -4086,3 +4086,22 @@
                 max-height: 95vh;
             }
         }
+
+/* ─── Read-only user gating ───────────────────────────────────────────────
+   Controls that mutate the library are hidden for users in the ReadOnly role.
+   This is a UX affordance only; the API enforces the same rules through the
+   CanModifyLibrary / CanAdminister authorization policies. */
+body.user-read-only [data-requires-write] {
+    display: none !important;
+}
+
+.settings-readonly-notice {
+    margin-bottom: 15px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border-input);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.4;
+}

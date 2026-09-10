@@ -1312,6 +1312,55 @@
             }
         }
         
+        // Current user's capabilities, resolved from GET /api/auth/user. Both
+        // default to true so the UI stays fully functional if the capability
+        // lookup fails — the API is the real enforcement point.
+        let userCapabilities = { canModifyLibrary: true, canAdminister: true };
+
+        // Fetch the signed-in user and hide controls they are not allowed to use.
+        // The server still enforces the same rules via authorization policies;
+        // this only avoids showing actions that would fail with a 403.
+        async function loadCurrentUser() {
+            try {
+                const response = await fetch(apiUrl('/api/auth/user'), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    console.error('Failed to load current user:', response.status);
+                    return;
+                }
+                const user = await response.json();
+                userCapabilities = {
+                    canModifyLibrary: user.canModifyLibrary !== false,
+                    canAdminister: user.canAdminister !== false
+                };
+                applyCapabilities();
+            } catch (error) {
+                console.error('Error loading current user:', error);
+            }
+        }
+
+        function applyCapabilities() {
+            // Write-only controls are hidden via CSS (body.user-read-only) so
+            // they stay hidden even if other code later toggles their `hidden`
+            // attribute (e.g. the duplicate-review / combine-folders buttons).
+            document.body.classList.toggle('user-read-only', !userCapabilities.canModifyLibrary);
+
+            // Server-wide settings are administrator-only; the personal
+            // appearance preference stays editable for everyone.
+            const notice = document.getElementById('settingsReadOnlyNotice');
+            if (notice) notice.hidden = userCapabilities.canAdminister;
+
+            const settingsBody = document.querySelector('#settingsModal .modal-body');
+            if (settingsBody) {
+                settingsBody.querySelectorAll('input, select, textarea, button').forEach(el => {
+                    if (el.closest('[data-user-setting]')) return;
+                    el.disabled = !userCapabilities.canAdminister;
+                });
+            }
+        }
+
         // Fetch and display version
         async function loadVersion() {
             try {
@@ -1672,6 +1721,7 @@
             }
             
             loadVersion();
+            loadCurrentUser();
             
             // Initialize SSE connection for real-time updates
             initEventSource();
@@ -6517,6 +6567,9 @@
         }
         
         async function openSettings() {
+            // Re-assert capability gating in case the modal contents were
+            // re-rendered since the last check.
+            applyCapabilities();
             try {
                 // Load all settings
                 const settingsUrl = apiUrl('/api/settings');

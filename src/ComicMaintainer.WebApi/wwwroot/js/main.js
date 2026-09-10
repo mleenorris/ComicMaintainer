@@ -9282,7 +9282,10 @@
             modal.setAttribute('aria-hidden', 'false');
             // Defer so content rendered during the same tick is focusable.
             window.setTimeout(() => {
-                if (isModalVisible(modal)) focusFirstElementInModal(modal);
+                if (!isModalVisible(modal)) return;
+                // Respect any explicit focus the opening code already applied.
+                if (modal.contains(document.activeElement)) return;
+                focusFirstElementInModal(modal);
             }, 0);
         }
 
@@ -9336,10 +9339,11 @@
             }
             const first = focusable[0];
             const last = focusable[focusable.length - 1];
-            if (event.shiftKey && (document.activeElement === first || !modal.contains(document.activeElement))) {
+            const focusOutside = !modal.contains(document.activeElement);
+            if (event.shiftKey && (focusOutside || document.activeElement === first)) {
                 event.preventDefault();
                 last.focus();
-            } else if (!event.shiftKey && document.activeElement === last) {
+            } else if (!event.shiftKey && (focusOutside || document.activeElement === last)) {
                 event.preventDefault();
                 first.focus();
             }

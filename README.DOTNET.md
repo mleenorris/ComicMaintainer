@@ -331,6 +331,76 @@ ComicMaintainer/
 4. **Authentication**: ✅ ASP.NET Core Identity with JWT and API key support
 5. **Authorization**: ✅ Role-based access control with Admin, User, and ReadOnly roles
 6. **Security**: ✅ Path validation middleware, log sanitization, Docker hardening
+7. **User Preferences**: ✅ Per-user preferences (theme, page size, reading mode, library view, filter, sort) persisted in the database
+
+### Roles and Authorization
+
+Three roles are seeded automatically: `Admin`, `User` and `ReadOnly`. They are
+enforced through two authorization policies:
+
+| Policy | Grants | Applied to |
+| --- | --- | --- |
+| `CanModifyLibrary` | Any authenticated user **except** `ReadOnly` | All non-`GET` endpoints on the files, jobs, process, metadata, status, series-image, scheduled-jobs and watcher controllers |
+| `CanAdminister` | `Admin` (or any non-`ReadOnly` user when Authelia is enabled without `AdminGroups` configured) | All non-`GET` endpoints on the settings controller, plus service restart |
+
+The policies are applied centrally by a controller convention, so newly added
+write endpoints are protected by default. The web UI reads
+`GET /api/auth/user`, which returns `canModifyLibrary` and `canAdminister`
+flags, and hides or disables destructive controls accordingly — a `ReadOnly`
+account gets a genuine browse-and-read-only experience.
+
+Reading endpoints remain available to `ReadOnly` users, including recording
+reading progress, so the comic reader continues to work for them.
+
+### Self-Registration
+
+`POST /api/auth/register` is closed by default. An administrator can create
+accounts at any time; to allow anyone who can reach the service to sign up,
+enable **Settings → Access → Allow self-registration** (or set
+`AppSettings__AllowRegistration=true`). Leaving it off is recommended for
+self-hosted deployments exposed through a reverse proxy.
+
+### Health Endpoints
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /health` | Liveness — returns `200` as soon as the process is serving requests |
+| `GET /health/ready` | Readiness — additionally verifies the SQLite database is reachable |
+
+Both are anonymous, so container orchestrators and Docker `HEALTHCHECK`
+directives can probe them without credentials.
+
+### Deprecated Endpoints
+
+The following routes are marked `[Obsolete]` and are scheduled for removal in
+**v3.0**. They are hidden from the OpenAPI document where a canonical
+replacement exists:
+
+| Deprecated | Replacement |
+| --- | --- |
+| `POST /api/scan-unmarked` | `POST /api/files/scan-unmarked` |
+| `POST /api/process-file` | `POST /api/files/process` |
+| `POST /api/rename-file` | `POST /api/files/rename` |
+| `POST /api/delete-file` | `DELETE /api/files/{encodedFilePath}` |
+| `PUT /api/watcher`, `POST /api/watcher/enable` | `WatcherEnableRename` / `WatcherEnableNormalize` settings |
+
+### Settings That Require a Restart
+
+A few settings are only read at startup and are flagged with a **Restart
+required** badge in the Settings modal. After changing them, use **Restart
+Service** to apply them immediately:
+
+- Maximum log file size (`LOG_MAX_BYTES`)
+- `MaxWorkers`
+
+### Accessibility
+
+All library modals are exposed as `role="dialog"` with `aria-modal`, an
+`aria-labelledby` title, focus trapping, `Escape` to close, and focus
+restoration to the element that opened them. This is implemented by a single
+shared helper that observes modal visibility, so it applies to every modal and
+to any added later. The page also provides a skip-to-content link and a `<main>`
+landmark.
 
 ### Security Features
 

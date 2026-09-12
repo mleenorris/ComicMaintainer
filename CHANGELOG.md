@@ -38,6 +38,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retagged. Reverting such a series to automatic remains a no-op.
 
 ### Added
+- Multi-architecture Docker images. `linux/arm64` is now published alongside `linux/amd64`,
+  so the image runs natively on Apple Silicon and common ARM NAS/SBC hosts. The .NET build
+  runs natively on the build host and cross-compiles, so adding the second architecture does
+  not require emulating the whole SDK.
+- Container `HEALTHCHECK` in `Dockerfile.dotnet`, wired to the existing `/health` liveness
+  endpoint, so `docker ps` and orchestrators can see container health without extra
+  configuration. It deliberately uses `/health` rather than `/health/ready`: readiness also
+  checks the database, and a transient database problem should not cause a restart loop.
+- Dependabot configuration for NuGet, GitHub Actions and Docker base images, with Microsoft
+  runtime packages grouped so their coordinated releases arrive as a single pull request.
 - Batch processing jobs now survive a restart. Job state is persisted, and any job still
   queued or running when the process stops is reported as `Interrupted` on the next startup,
   along with how many files it had already processed.

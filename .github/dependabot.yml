@@ -1,0 +1,58 @@
+# Dependabot keeps dependencies patched without anyone having to watch advisory feeds.
+# See https://docs.github.com/code-security/dependabot/dependabot-version-updates
+version: 2
+
+updates:
+  # NuGet packages. A single entry covers every project in the repository: Dependabot
+  # discovers all .csproj files under the given directory.
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # Only "dependencies" is used: Dependabot creates that label itself, whereas a custom
+    # label that does not already exist in the repository is silently not applied.
+    labels:
+      - dependencies
+    groups:
+      # Test-only dependencies carry no production risk, so batching them keeps the review
+      # queue focused on packages that ship. Listed before the Microsoft group would match
+      # them, since Dependabot assigns each package to the first group it matches.
+      test:
+        patterns:
+          - "xunit*"
+          - "Moq"
+          - "coverlet*"
+          - "Microsoft.NET.Test.Sdk"
+      # Microsoft's runtime packages are versioned and released together, so updating them
+      # individually produces PRs that conflict with each other and can leave the projects on
+      # a mismatched set of versions.
+      microsoft:
+        patterns:
+          - "Microsoft.*"
+          - "System.*"
+
+  # GitHub Actions used by the workflows in .github/workflows.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Base images in the Dockerfiles.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies

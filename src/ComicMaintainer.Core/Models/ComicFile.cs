@@ -47,6 +47,18 @@ public class ComicFile
     /// files that need re-normalization without re-reading every archive.
     /// </summary>
     public int SeriesMetadataVersion { get; set; }
+
+    /// <summary>
+    /// Creates a field-for-field copy sharing the same <see cref="Metadata"/> instance.
+    /// </summary>
+    /// <remarks>
+    /// The file store keeps a single <see cref="ComicFile"/> per path and hands it to every
+    /// caller. Per-user state such as <see cref="IsRead"/> must therefore be stamped onto a
+    /// copy, or one user's read status would be visible to the next request. Metadata is
+    /// intentionally shared rather than deep-copied: callers already treat it as read-only,
+    /// and cloning it for every file would make listing a large library appreciably slower.
+    /// </remarks>
+    public ComicFile ShallowCopy() => (ComicFile)MemberwiseClone();
 }
 
 /// <summary>

@@ -57,6 +57,13 @@ public class WriteOperationAuthorizationConvention : IActionModelConvention
             return;
         }
 
+        // Writes that only affect the caller's own state (e.g. read/unread status, which
+        // is per-user) are not library mutations and must stay open to ReadOnly users.
+        if (action.Attributes.OfType<PerUserWriteOperationAttribute>().Any())
+        {
+            return;
+        }
+
         if (action.Attributes.OfType<IAuthorizeData>().Any(a => !string.IsNullOrEmpty(a.Policy) || !string.IsNullOrEmpty(a.Roles)))
         {
             return;

@@ -17,6 +17,13 @@ public class FileStoreService : IFileStoreService
 {
     private const string UnmarkedCountCacheKey = "FileStore.UnmarkedCount";
     private static readonly TimeSpan UnmarkedCountCacheTtl = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan ReadPathsCacheTtl = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Batch size for IN-list queries. SQLite defaults to a 999-parameter limit per
+    /// statement; 500 leaves headroom for the other predicates in the same query.
+    /// </summary>
+    private const int SqliteParameterChunkSize = 500;
 
     private readonly ConcurrentDictionary<string, ComicFile> _files = new();
     private readonly ConcurrentDictionary<string, bool> _duplicateFiles = new();
@@ -25,19 +32,97 @@ public class FileStoreService : IFileStoreService
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IEventBroadcaster? _eventBroadcaster;
     private readonly IMemoryCache? _memoryCache;
+    private readonly IUserContextAccessor? _userContext;
 
     public FileStoreService(
         IOptionsMonitor<AppSettings> settings,
         ILogger<FileStoreService> logger,
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         IEventBroadcaster? eventBroadcaster = null,
-        IMemoryCache? memoryCache = null)
+        IMemoryCache? memoryCache = null,
+        IUserContextAccessor? userContext = null)
     {
         _settings = settings;
         _logger = logger;
         _dbContextFactory = dbContextFactory;
         _eventBroadcaster = eventBroadcaster;
         _memoryCache = memoryCache;
+        _userContext = userContext;
+    }
+
+    /// <summary>
+    /// Identifier of the user whose read state should be reflected, or <c>null</c> when
+    /// running outside a request. Read state is per-user, so background work (scans,
+    /// audits, the watcher) has no meaningful answer and reports everything as unread.
+    /// </summary>
+    private string? CurrentUserId
+    {
+        get
+        {
+            var userId = _userContext?.UserId;
+            return string.IsNullOrEmpty(userId) ? null : userId;
+        }
+    }
+
+    private static string ReadPathsCacheKey(string userId) => $"FileStore.ReadPaths.{userId}";
+
+    /// <summary>
+    /// Paths the given user has marked read. Cached because the in-memory file list
+    /// (<see cref="GetFilteredFilesAsync"/>) has no way to join against the database, so
+    /// without a cache every library render would re-read the whole set.
+    /// </summary>
+    private async Task<HashSet<string>> GetUserReadPathsAsync(string userId, CancellationToken cancellationToken)
+    {
+        if (_memoryCache != null &&
+            _memoryCache.TryGetValue(ReadPathsCacheKey(userId), out HashSet<string>? cached) &&
+            cached != null)
+        {
+            return cached;
+        }
+
+        await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var paths = await dbContext.UserFileReadStatuses
+            .AsNoTracking()
+            .Where(e => e.UserId == userId && e.IsRead)
+            .Select(e => e.FilePath)
+            .ToListAsync(cancellationToken);
+
+        var set = new HashSet<string>(paths, StringComparer.Ordinal);
+        _memoryCache?.Set(ReadPathsCacheKey(userId), set, ReadPathsCacheTtl);
+        return set;
+    }
+
+    /// <summary>
+    /// Drops the cached read-path set for a user after their read state changes, so the
+    /// next library render reflects the change immediately rather than after the TTL.
+    /// </summary>
+    private void InvalidateUserReadPaths(string userId)
+    {
+        _memoryCache?.Remove(ReadPathsCacheKey(userId));
+    }
+
+    /// <summary>
+    /// Stamps <see cref="ComicFile.IsRead"/> on a set of files for the current user.
+    /// The in-memory file store is shared across users, so read state must never be
+    /// cached on it; it is applied to the returned copies instead.
+    /// </summary>
+    private async Task ApplyUserReadStateAsync(IReadOnlyCollection<ComicFile> files, CancellationToken cancellationToken)
+    {
+        var userId = CurrentUserId;
+        if (userId == null || files.Count == 0)
+        {
+            foreach (var file in files)
+            {
+                file.IsRead = false;
+            }
+            return;
+        }
+
+        var readPaths = await GetUserReadPathsAsync(userId, cancellationToken);
+        foreach (var file in files)
+        {
+            file.IsRead = readPaths.Contains(file.FilePath);
+        }
     }
 
     private static string SanitizeForLogging(string? input)
@@ -106,7 +191,10 @@ public class FileStoreService : IFileStoreService
             IsRenamed = entity.IsRenamed,
             IsNormalized = entity.IsNormalized,
             IsDuplicate = entity.IsDuplicate,
-            IsRead = entity.IsRead,
+            // Read state is per-user and lives in UserFileReadStatuses; it is stamped onto
+            // the returned ComicFile by ApplyUserReadStateAsync. The legacy global
+            // ComicFiles.IsRead column is deliberately not read here.
+            IsRead = false,
             Metadata = entity.Metadata?.Clone(),
             SeriesMetadataVersion = entity.SeriesMetadataVersion,
             MetadataVersion = entity.MetadataVersion,
@@ -167,18 +255,26 @@ public class FileStoreService : IFileStoreService
         };
     }
 
-    public Task<IEnumerable<ComicFile>> GetAllFilesAsync(CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<ComicFile>> GetAllFilesAsync(CancellationToken cancellationToken = default)
     {
-        var files = _files.Values.ToList();
-        return Task.FromResult<IEnumerable<ComicFile>>(files);
+        var files = _files.Values.Select(f => f.ShallowCopy()).ToList();
+        await ApplyUserReadStateAsync(files, cancellationToken);
+        return files;
     }
 
-    public Task<IEnumerable<ComicFile>> GetFilteredFilesAsync(string? filter = null, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<ComicFile>> GetFilteredFilesAsync(string? filter = null, CancellationToken cancellationToken = default)
     {
         var totalFileCount = _files.Count;
         _logger.LogDebug("GetFilteredFilesAsync: Starting with {TotalFiles} files in store, filter: '{Filter}'", totalFileCount, filter ?? "none");
-        
-        var files = _files.Values.AsEnumerable();
+
+        // Copies, not the stored instances: read state is per-user and must never be written
+        // onto the entries shared by every request.
+        var allFiles = _files.Values.Select(f => f.ShallowCopy()).ToList();
+        // Stamp per-user read state before filtering so the "read"/"unread" filters and the
+        // IsRead flag the caller ultimately projects agree with each other.
+        await ApplyUserReadStateAsync(allFiles, cancellationToken);
+
+        var files = allFiles.AsEnumerable();
 
         if (!string.IsNullOrEmpty(filter))
         {
@@ -204,20 +300,19 @@ public class FileStoreService : IFileStoreService
             // Log breakdown of file states for unprocessed filter
             if (filterLower == "unprocessed")
             {
-                var allFilesList = _files.Values.ToList();
-                var processedCount = allFilesList.Count(f => f.IsProcessed);
-                var duplicateCount = allFilesList.Count(f => f.IsDuplicate);
-                var unprocessedNonDuplicateCount = allFilesList.Count(f => !f.IsProcessed && !f.IsDuplicate);
+                var processedCount = allFiles.Count(f => f.IsProcessed);
+                var duplicateCount = allFiles.Count(f => f.IsDuplicate);
+                var unprocessedNonDuplicateCount = allFiles.Count(f => !f.IsProcessed && !f.IsDuplicate);
                 
                 _logger.LogDebug("GetFilteredFilesAsync: File state breakdown - Total: {Total}, Processed: {Processed}, Duplicates: {Duplicates}, Unprocessed (non-duplicate): {Unprocessed}",
                     totalFileCount, processedCount, duplicateCount, unprocessedNonDuplicateCount);
             }
             
-            return Task.FromResult(filteredList.AsEnumerable());
+            return filteredList;
         }
 
         _logger.LogDebug("GetFilteredFilesAsync: No filter applied, returning all {TotalFiles} files", totalFileCount);
-        return Task.FromResult(files.ToList().AsEnumerable());
+        return allFiles;
     }
 
     public async Task AddFileAsync(string filePath, CancellationToken cancellationToken = default)
@@ -242,9 +337,10 @@ public class FileStoreService : IFileStoreService
         // tracked in the database, preserve its original CreatedAt so re-adds (e.g. watcher
         // re-scan) don't reset the series recency window used by Overview "Series Updates".
         DateTime createdAt = DateTime.UtcNow;
-        // Durable per-file state that must survive a re-add. Losing it would make an
-        // already-read issue look unread again (until the next restart reloads the
-        // database), which pins finished series back onto "Continue Reading".
+        // Durable per-file metadata and version stamps that must survive a re-add, so a
+        // watcher re-scan doesn't discard authored metadata and force a needless reprocess.
+        // (Read state is no longer carried here: it is per-user, keyed by path in
+        // UserFileReadStatuses, and therefore unaffected by re-adding the file.)
         ComicFile? tracked = null;
 
         try
@@ -289,7 +385,10 @@ public class FileStoreService : IFileStoreService
             IsNormalized = isNormalized,
             IsProcessed = ComputeProcessedState(isRenamed, isNormalized),
             IsDuplicate = isDuplicate,
-            IsRead = tracked?.IsRead ?? false,
+            // Per-user read state lives in UserFileReadStatuses and is keyed by path, so a
+            // re-add cannot lose it and there is nothing to carry over onto the shared
+            // in-memory entry (which is visible to every user).
+            IsRead = false,
             Metadata = tracked?.Metadata?.Clone(),
             SeriesMetadataVersion = tracked?.SeriesMetadataVersion ?? 0,
             MetadataVersion = tracked?.MetadataVersion ?? 0,
@@ -860,7 +959,9 @@ public class FileStoreService : IFileStoreService
                 IsNormalized = existingFile.IsNormalized,
                 IsProcessed = existingFile.IsProcessed,
                 IsDuplicate = existingFile.IsDuplicate,
-                IsRead = existingFile.IsRead,
+                // Read state is per-user; the UserFileReadStatuses rows are repointed at
+                // the new path below rather than carried on the shared in-memory entry.
+                IsRead = false,
                 Metadata = existingFile.Metadata,
                 SeriesMetadataVersion = existingFile.SeriesMetadataVersion,
                 MetadataVersion = existingFile.MetadataVersion,
@@ -925,7 +1026,6 @@ public class FileStoreService : IFileStoreService
                     newEntity.IsRenamed = newEntity.IsRenamed || entity.IsRenamed;
                     newEntity.IsNormalized = newEntity.IsNormalized || entity.IsNormalized;
                     newEntity.IsDuplicate = newEntity.IsDuplicate || entity.IsDuplicate;
-                    newEntity.IsRead = newEntity.IsRead || entity.IsRead;
                     newEntity.IsProcessed = ComputeProcessedState(newEntity.IsRenamed, newEntity.IsNormalized);
 
                     // Carry over metadata/version stamps when the stub row lacks them so a
@@ -952,6 +1052,12 @@ public class FileStoreService : IFileStoreService
                     await dbContext.SaveChangesAsync(cancellationToken);
                     _logger.LogDebug("Merged processing state from stale old-path entry into existing new-path row: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
                 }
+
+                // Every user's read state is keyed by path, so a rename has to repoint it or
+                // the file comes back as unread for everyone. Rows already present at the new
+                // path (from a watcher-inserted stub the user has since touched) win, so the
+                // stale old-path rows are simply dropped after the move.
+                await MoveUserReadStatusAsync(dbContext, oldPath, newPath, cancellationToken);
             }
             else
             {
@@ -1240,61 +1346,119 @@ public class FileStoreService : IFileStoreService
         }
     }
 
-    public async Task MarkFileReadAsync(string filePath, bool read, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Repoint every user's read status from <paramref name="oldPath"/> to
+    /// <paramref name="newPath"/> after a rename or move. Rows that already exist at the
+    /// destination for a user take precedence, so the stale source row is discarded.
+    /// </summary>
+    private async Task MoveUserReadStatusAsync(
+        ComicMaintainerDbContext dbContext,
+        string oldPath,
+        string newPath,
+        CancellationToken cancellationToken)
     {
-        if (_files.TryGetValue(filePath, out var file))
+        if (string.Equals(oldPath, newPath, StringComparison.Ordinal))
         {
-            file.IsRead = read;
+            return;
         }
 
-        // Persist to database
+        var sourceRows = await dbContext.UserFileReadStatuses
+            .Where(e => e.FilePath == oldPath)
+            .ToListAsync(cancellationToken);
+
+        if (sourceRows.Count == 0)
+        {
+            return;
+        }
+
+        var destinationUserIds = await dbContext.UserFileReadStatuses
+            .Where(e => e.FilePath == newPath)
+            .Select(e => e.UserId)
+            .ToListAsync(cancellationToken);
+
+        var occupied = new HashSet<string>(destinationUserIds, StringComparer.Ordinal);
+        var now = DateTime.UtcNow;
+
+        foreach (var row in sourceRows)
+        {
+            if (occupied.Contains(row.UserId))
+            {
+                dbContext.UserFileReadStatuses.Remove(row);
+            }
+            else
+            {
+                row.FilePath = newPath;
+                row.UpdatedAt = now;
+            }
+
+            InvalidateUserReadPaths(row.UserId);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        _logger.LogDebug(
+            "Moved read status for {Count} user(s): {OldPath} -> {NewPath}",
+            sourceRows.Count, SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
+    }
+
+    /// <summary>
+    /// Fetch the current user's read-status row for a file, creating it if requested.
+    /// Returns <c>null</c> when there is no user in scope (background work).
+    /// </summary>
+    private async Task<UserFileReadStatusEntity?> GetOrCreateUserReadStatusAsync(
+        ComicMaintainerDbContext dbContext,
+        string userId,
+        string filePath,
+        bool create,
+        CancellationToken cancellationToken)
+    {
+        var entity = await dbContext.UserFileReadStatuses
+            .FirstOrDefaultAsync(e => e.UserId == userId && e.FilePath == filePath, cancellationToken);
+
+        if (entity != null || !create)
+        {
+            return entity;
+        }
+
+        entity = new UserFileReadStatusEntity
+        {
+            UserId = userId,
+            FilePath = filePath,
+            CurrentPage = 1,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        dbContext.UserFileReadStatuses.Add(entity);
+        return entity;
+    }
+
+    public async Task MarkFileReadAsync(string filePath, bool read, CancellationToken cancellationToken = default)
+    {
+        var userId = CurrentUserId;
+        if (userId == null)
+        {
+            _logger.LogDebug(
+                "Ignoring read-status update for {FilePath}: no user in scope",
+                SanitizeForLogging(filePath));
+            return;
+        }
+
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-            var entity = await dbContext.ComicFiles
-                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
+            var status = await GetOrCreateUserReadStatusAsync(dbContext, userId, filePath, create: true, cancellationToken);
+            status!.IsRead = read;
+            status.LastReadDate = read ? DateTime.UtcNow : status.LastReadDate;
+            status.UpdatedAt = DateTime.UtcNow;
 
-            if (entity != null)
-            {
-                entity.IsRead = read;
-                entity.UpdatedAt = DateTime.UtcNow;
-                await dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogDebug("Updated read status for {FilePath} to {Status}", SanitizeForLogging(filePath), read);
-            }
-            else
-            {
-                // Create entity if it doesn't exist
-                if (IsPathWithinAllowedDirectories(filePath) && File.Exists(filePath))
-                {
-                    try
-                    {
-                        entity = CreateFileEntity(filePath);
-                        entity.IsRead = read;
-                        dbContext.ComicFiles.Add(entity);
-                        await dbContext.SaveChangesAsync(cancellationToken);
-                        _logger.LogDebug("Created file entity and set read status for {FilePath} to {Status}", SanitizeForLogging(filePath), read);
-                    }
-                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
-                                                        sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
-                    {
-                        // Race condition: entity was created by another thread between our check and insert
-                        _logger.LogDebug("File entity already exists (race condition), retrying update for {FilePath}", SanitizeForLogging(filePath));
-                        entity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
-                        if (entity != null)
-                        {
-                            entity.IsRead = read;
-                            entity.UpdatedAt = DateTime.UtcNow;
-                            await dbContext.SaveChangesAsync(cancellationToken);
-                            _logger.LogDebug("Updated read status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), read);
-                        }
-                    }
-                }
-                else
-                {
-                    _logger.LogDebug("File {FilePath} not found on filesystem or outside allowed directories, skipping database creation", SanitizeForLogging(filePath));
-                }
-            }
+            await SaveUserReadStatusAsync(dbContext, status, cancellationToken);
+            await SyncReadingProgressAsync(dbContext, userId, new[] { filePath }, read, DateTime.UtcNow, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            InvalidateUserReadPaths(userId);
+            _logger.LogDebug(
+                "Updated read status for {FilePath} to {Status} for user {UserId}",
+                SanitizeForLogging(filePath), read, SanitizeForLogging(userId));
         }
         catch (Exception ex)
         {
@@ -1304,55 +1468,68 @@ public class FileStoreService : IFileStoreService
 
     public async Task MarkFilesReadAsync(IEnumerable<string> filePaths, bool read, CancellationToken cancellationToken = default)
     {
-        // Materialize once so we can iterate twice (in-memory update + bulk DB update).
         var paths = filePaths as IList<string> ?? filePaths.ToList();
         if (paths.Count == 0)
         {
             return;
         }
 
-        // Update in-memory state up-front
-        foreach (var filePath in paths)
+        var userId = CurrentUserId;
+        if (userId == null)
         {
-            if (_files.TryGetValue(filePath, out var file))
-            {
-                file.IsRead = read;
-            }
+            _logger.LogDebug("Ignoring bulk read-status update for {Count} file(s): no user in scope", paths.Count);
+            return;
         }
 
-        // Single connection + single bulk UPDATE for all existing rows.
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-
             var now = DateTime.UtcNow;
-            var updated = await dbContext.ComicFiles
-                .Where(e => paths.Contains(e.FilePath))
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(e => e.IsRead, read)
-                    .SetProperty(e => e.UpdatedAt, now),
-                    cancellationToken);
 
-            _logger.LogDebug("Bulk-updated read status for {Updated}/{Total} files", updated, paths.Count);
-
-            // If some files didn't exist in DB yet, fall back to per-file insert path
-            // only for the missing ones to avoid re-updating rows we just touched.
-            if (updated < paths.Count)
+            // SQLite caps a statement at 999 parameters, so both the lookup and the update
+            // are chunked. Chunking the lookup as well keeps a bulk "mark series read" over
+            // a few thousand issues to a bounded number of round-trips.
+            var existing = new Dictionary<string, UserFileReadStatusEntity>(StringComparer.Ordinal);
+            foreach (var chunk in Chunk(paths, SqliteParameterChunkSize))
             {
-                var existingPaths = await dbContext.ComicFiles
-                    .AsNoTracking()
-                    .Where(e => paths.Contains(e.FilePath))
-                    .Select(e => e.FilePath)
+                var rows = await dbContext.UserFileReadStatuses
+                    .Where(e => e.UserId == userId && chunk.Contains(e.FilePath))
                     .ToListAsync(cancellationToken);
 
-                var missing = new HashSet<string>(paths, StringComparer.Ordinal);
-                missing.ExceptWith(existingPaths);
-
-                foreach (var filePath in missing)
+                foreach (var row in rows)
                 {
-                    await MarkFileReadAsync(filePath, read, cancellationToken);
+                    existing[row.FilePath] = row;
                 }
             }
+
+            foreach (var path in paths)
+            {
+                if (existing.TryGetValue(path, out var row))
+                {
+                    row.IsRead = read;
+                    if (read) row.LastReadDate = now;
+                    row.UpdatedAt = now;
+                }
+                else
+                {
+                    dbContext.UserFileReadStatuses.Add(new UserFileReadStatusEntity
+                    {
+                        UserId = userId,
+                        FilePath = path,
+                        IsRead = read,
+                        CurrentPage = 1,
+                        LastReadDate = read ? now : null,
+                        CreatedAt = now,
+                        UpdatedAt = now
+                    });
+                }
+            }
+
+            await SyncReadingProgressAsync(dbContext, userId, (IReadOnlyCollection<string>)paths.ToList(), read, now, cancellationToken);
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            InvalidateUserReadPaths(userId);
+            _logger.LogDebug("Bulk-updated read status for {Total} files for user {UserId}", paths.Count, SanitizeForLogging(userId));
         }
         catch (Exception ex)
         {
@@ -1372,37 +1549,26 @@ public class FileStoreService : IFileStoreService
             return;
         }
 
+        var userId = CurrentUserId;
+        if (userId == null)
+        {
+            _logger.LogDebug(
+                "Ignoring reading-progress update for {FilePath}: no user in scope",
+                SanitizeForLogging(filePath));
+            return;
+        }
+
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            
-            var readStatus = await dbContext.FileReadStatuses
-                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
 
-            if (readStatus != null)
-            {
-                readStatus.CurrentPage = currentPage;
-                readStatus.LastReadDate = DateTime.UtcNow;
-                readStatus.UpdatedAt = DateTime.UtcNow;
-                await dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogDebug("Updated reading progress for {FilePath} to page {Page}", SanitizeForLogging(filePath), currentPage);
-            }
-            else
-            {
-                // Create new read status entry
-                readStatus = new FileReadStatusEntity
-                {
-                    FilePath = filePath,
-                    CurrentPage = currentPage,
-                    IsRead = false,
-                    LastReadDate = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                };
-                dbContext.FileReadStatuses.Add(readStatus);
-                await dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogDebug("Created read status and set page {Page} for {FilePath}", currentPage, SanitizeForLogging(filePath));
-            }
+            var status = await GetOrCreateUserReadStatusAsync(dbContext, userId, filePath, create: true, cancellationToken);
+            status!.CurrentPage = currentPage;
+            status.LastReadDate = DateTime.UtcNow;
+            status.UpdatedAt = DateTime.UtcNow;
+
+            await SaveUserReadStatusAsync(dbContext, status, cancellationToken);
+            _logger.LogDebug("Updated reading progress for {FilePath} to page {Page}", SanitizeForLogging(filePath), currentPage);
         }
         catch (Exception ex)
         {
@@ -1412,23 +1578,23 @@ public class FileStoreService : IFileStoreService
 
     public async Task<int> GetReadingProgressAsync(string filePath, CancellationToken cancellationToken = default)
     {
+        var userId = CurrentUserId;
+        if (userId == null)
+        {
+            return 1;
+        }
+
         try
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
-            
-            var readStatus = await dbContext.FileReadStatuses
-                .FirstOrDefaultAsync(e => e.FilePath == filePath, cancellationToken);
 
-            if (readStatus != null)
-            {
-                _logger.LogDebug("Retrieved reading progress for {FilePath}: page {Page}", SanitizeForLogging(filePath), readStatus.CurrentPage);
-                return readStatus.CurrentPage;
-            }
-            else
-            {
-                _logger.LogDebug("No reading progress found for {FilePath}, returning page 1", SanitizeForLogging(filePath));
-                return 1; // Default to page 1 if no progress saved
-            }
+            var currentPage = await dbContext.UserFileReadStatuses
+                .AsNoTracking()
+                .Where(e => e.UserId == userId && e.FilePath == filePath)
+                .Select(e => (int?)e.CurrentPage)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            return currentPage is > 0 ? currentPage.Value : 1;
         }
         catch (Exception ex)
         {
@@ -1436,6 +1602,115 @@ public class FileStoreService : IFileStoreService
             return 1; // Default to page 1 on error
         }
     }
+
+    /// <summary>
+    /// Persist a read-status row, tolerating the race where a concurrent request inserted
+    /// the same (user, path) pair between our lookup and this save.
+    /// </summary>
+    private async Task SaveUserReadStatusAsync(
+        ComicMaintainerDbContext dbContext,
+        UserFileReadStatusEntity status,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
+                                           sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
+        {
+            dbContext.Entry(status).State = EntityState.Detached;
+
+            var winner = await dbContext.UserFileReadStatuses
+                .FirstOrDefaultAsync(e => e.UserId == status.UserId && e.FilePath == status.FilePath, cancellationToken);
+
+            if (winner == null)
+            {
+                throw;
+            }
+
+            winner.IsRead = status.IsRead;
+            winner.CurrentPage = status.CurrentPage;
+            winner.LastReadDate = status.LastReadDate ?? winner.LastReadDate;
+            winner.UpdatedAt = DateTime.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Keep the reader's per-user <see cref="ReadingProgressEntity"/> in step with a
+    /// read/unread change made from the library.
+    /// </summary>
+    /// <remarks>
+    /// "Continue Reading" is derived from ReadingProgress alone, so without this a user who
+    /// marked a series read from the library would still see it offered as in-progress.
+    /// Only existing rows are updated: a file the user has never opened has no progress
+    /// record, is therefore not in Continue Reading, and creating one would require reading
+    /// the archive for a page count — prohibitive for a bulk mark over a whole series.
+    /// </remarks>
+    private static async Task SyncReadingProgressAsync(
+        ComicMaintainerDbContext dbContext,
+        string userId,
+        IReadOnlyCollection<string> filePaths,
+        bool read,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        foreach (var chunk in Chunk(filePaths, SqliteParameterChunkSize))
+        {
+            var rows = await dbContext.ReadingProgresses
+                .Where(p => p.UserId == userId && chunk.Contains(p.ContentId))
+                .ToListAsync(cancellationToken);
+
+            foreach (var row in rows)
+            {
+                if (read)
+                {
+                    if (row.TotalPages > 0)
+                    {
+                        row.CurrentPage = row.TotalPages;
+                    }
+                    row.PercentComplete = 100;
+                    row.CompletedAt ??= now;
+                }
+                else
+                {
+                    // Reopening a finished issue starts it over; leaving CurrentPage at the
+                    // last page would put the reader straight back at the end.
+                    row.CurrentPage = 1;
+                    row.PercentComplete = 0;
+                    row.CompletedAt = null;
+                }
+
+                row.LastReadAt = now;
+                row.UpdatedAt = now;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Split a sequence into fixed-size batches. Used to keep generated SQL inside
+    /// SQLite's 999-parameter limit.
+    /// </summary>
+    private static IEnumerable<List<T>> Chunk<T>(IEnumerable<T> source, int size)
+    {
+        var batch = new List<T>(size);
+        foreach (var item in source)
+        {
+            batch.Add(item);
+            if (batch.Count == size)
+            {
+                yield return batch;
+                batch = new List<T>(size);
+            }
+        }
+
+        if (batch.Count > 0)
+        {
+            yield return batch;
+        }
+    }
+
 
     /// <summary>
     /// Compute the directory key for a file path, relative to the watched
@@ -1526,12 +1801,28 @@ public class FileStoreService : IFileStoreService
     }
 
     /// <summary>
+    /// Identifier used to scope read-status subqueries. Returns an empty string when there
+    /// is no user in scope, which matches no row (UserId is always non-empty) and so makes
+    /// every file read as unread — the correct answer for background work.
+    /// </summary>
+    private string ReadScopeUserId => CurrentUserId ?? string.Empty;
+
+    /// <summary>
     /// Apply the named status filter to a <see cref="ComicFileEntity"/> query.
     /// Matches the semantics of <see cref="GetFilteredFilesAsync"/>.
     /// </summary>
-    private static IQueryable<ComicFileEntity> ApplyEntityFilter(IQueryable<ComicFileEntity> q, string? filter)
+    /// <remarks>
+    /// The read/unread filters are evaluated as a correlated EXISTS against
+    /// <c>UserFileReadStatuses</c> so they stay scoped to the calling user and are applied
+    /// in SQL, before paging.
+    /// </remarks>
+    private IQueryable<ComicFileEntity> ApplyEntityFilter(
+        ComicMaintainerDbContext dbContext,
+        IQueryable<ComicFileEntity> q,
+        string? filter)
     {
         if (string.IsNullOrEmpty(filter)) return q;
+        var userId = ReadScopeUserId;
         return filter.ToLowerInvariant() switch
         {
             "processed" => q.Where(f => f.IsRenamed && f.IsNormalized),
@@ -1539,8 +1830,10 @@ public class FileStoreService : IFileStoreService
             "duplicates" => q.Where(f => f.IsDuplicate),
             "renamed" => q.Where(f => f.IsRenamed),
             "normalized" => q.Where(f => f.IsNormalized),
-            "read" => q.Where(f => f.IsRead),
-            "unread" => q.Where(f => !f.IsRead),
+            "read" => q.Where(f => dbContext.UserFileReadStatuses
+                .Any(r => r.UserId == userId && r.FilePath == f.FilePath && r.IsRead)),
+            "unread" => q.Where(f => !dbContext.UserFileReadStatuses
+                .Any(r => r.UserId == userId && r.FilePath == f.FilePath && r.IsRead)),
             _ => q
         };
     }
@@ -1613,9 +1906,10 @@ public class FileStoreService : IFileStoreService
         CancellationToken cancellationToken = default)
     {
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+        var readUserId = ReadScopeUserId;
 
         var query = dbContext.ComicFiles.AsNoTracking().AsQueryable();
-        query = ApplyEntityFilter(query, filter);
+        query = ApplyEntityFilter(dbContext, query, filter);
         query = ApplyEntitySearch(query, search);
 
         var totalFiles = await query.CountAsync(cancellationToken);
@@ -1637,7 +1931,8 @@ public class FileStoreService : IFileStoreService
                 IsRenamed = f.IsRenamed,
                 IsNormalized = f.IsNormalized,
                 IsDuplicate = f.IsDuplicate,
-                IsRead = f.IsRead,
+                IsRead = dbContext.UserFileReadStatuses
+                    .Any(r => r.UserId == readUserId && r.FilePath == f.FilePath && r.IsRead),
             }).ToListAsync(cancellationToken);
             currentPage = 1;
             totalPages = 1;
@@ -1660,7 +1955,8 @@ public class FileStoreService : IFileStoreService
                     IsRenamed = f.IsRenamed,
                     IsNormalized = f.IsNormalized,
                     IsDuplicate = f.IsDuplicate,
-                    IsRead = f.IsRead,
+                    IsRead = dbContext.UserFileReadStatuses
+                        .Any(r => r.UserId == readUserId && r.FilePath == f.FilePath && r.IsRead),
                 })
                 .ToListAsync(cancellationToken);
         }
@@ -1707,11 +2003,12 @@ public class FileStoreService : IFileStoreService
             return Array.Empty<FileDto>();
         }
 
+        var readUserId = ReadScopeUserId;
         var query = dbContext.ComicFiles
             .AsNoTracking()
             .Where(f => matchedDirs.Contains(f.Directory));
 
-        query = ApplyEntityFilter(query, filter);
+        query = ApplyEntityFilter(dbContext, query, filter);
         query = ApplyEntitySearch(query, search);
         var ordered = ApplyEntityOrder(query, sort, direction);
 
@@ -1724,7 +2021,8 @@ public class FileStoreService : IFileStoreService
             IsRenamed = f.IsRenamed,
             IsNormalized = f.IsNormalized,
             IsDuplicate = f.IsDuplicate,
-            IsRead = f.IsRead,
+            IsRead = dbContext.UserFileReadStatuses
+                .Any(r => r.UserId == readUserId && r.FilePath == f.FilePath && r.IsRead),
         }).ToListAsync(cancellationToken);
 
         return rows.Select(ToFileDto).ToList();
@@ -1760,7 +2058,7 @@ public class FileStoreService : IFileStoreService
         await using var dbContext = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
         var query = dbContext.ComicFiles.AsNoTracking().AsQueryable();
-        query = ApplyEntityFilter(query, filter);
+        query = ApplyEntityFilter(dbContext, query, filter);
         query = ApplyEntitySearch(query, search);
 
         // Aggregate per raw Directory in the database. The number of distinct

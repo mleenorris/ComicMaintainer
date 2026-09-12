@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Read/unread status is now per-user.** It previously lived in two global places
+  (`ComicFiles.IsRead` and the `FileReadStatuses` table), so in a multi-user deployment one
+  user marking an issue read flipped it for everyone, and that global state could disagree
+  with the per-user progress the reader itself showed. Read status and the resume page are
+  now stored per user in `UserFileReadStatuses`, and marking a file read/unread from the
+  library also updates that user's reader progress so "Continue Reading" stays consistent.
+  - Existing read state is migrated automatically. Because the old data does not record
+    *who* read a file, it is attributed to a single account: an `Admin` if one exists,
+    otherwise any user. Where per-user reader progress already existed it takes precedence,
+    so issues finished in the reader stay attributed to the user who actually read them.
+    **In a multi-user deployment, non-admin users may need to re-mark issues read.**
+  - Marking a file read or unread no longer requires the `CanModifyLibrary` policy, since it
+    only affects the calling user. `ReadOnly` users can now track their own progress. This
+    resolves the asymmetry noted in the previous release, where the reader's mark-read was
+    open but the library's bulk mark-read was treated as a library mutation.
+  - `FileReadStatusEntity` and `ComicFiles.IsRead` are retained but unused so the migration
+    can be rolled back; both are scheduled for removal in v3.0.
+
 ### Fixed
 - Per-file metadata is no longer zero padded. The ComicInfo `<Number>` (issue)
   field now stores the bare issue number (e.g. `12`, not `0012`) and the

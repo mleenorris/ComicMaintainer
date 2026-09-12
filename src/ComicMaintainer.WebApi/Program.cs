@@ -536,6 +536,10 @@ builder.Services.AddCors(options =>
 });
 
 // Register application services
+builder.Services.AddHttpContextAccessor();
+// Singleton (rather than scoped) so singleton services can depend on it; IHttpContextAccessor
+// is AsyncLocal-backed, so the resolved user is still per-request.
+builder.Services.AddSingleton<IUserContextAccessor, HttpUserContextAccessor>();
 builder.Services.AddSingleton<EventBroadcasterService>();
 builder.Services.AddSingleton<IEventBroadcaster>(sp => sp.GetRequiredService<EventBroadcasterService>());
 builder.Services.AddSingleton<IFileStoreService, FileStoreService>();

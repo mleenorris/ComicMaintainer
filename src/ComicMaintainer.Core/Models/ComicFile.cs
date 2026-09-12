@@ -138,7 +138,15 @@ public enum JobStatus
     Running,
     Completed,
     Failed,
-    Cancelled
+    Cancelled,
+
+    /// <summary>
+    /// The job was still queued or running when the process stopped, so its real outcome is
+    /// unknown. Assigned during startup reconciliation, never by the job itself. Terminal:
+    /// an interrupted job is not resumed, because the batch operations are not transactional
+    /// and re-running them blindly could repeat side effects.
+    /// </summary>
+    Interrupted
 }
 
 /// <summary>
@@ -148,6 +156,14 @@ public class ProcessingJob
 {
     public Guid JobId { get; set; }
     public JobStatus Status { get; set; }
+
+    /// <summary>
+    /// The batch operation that created this job (for example "ProcessAll"). Used to describe
+    /// the job in the UI, which matters most after a restart when an interrupted job is shown
+    /// without any of the client-side context that originally launched it.
+    /// </summary>
+    public string OperationName { get; set; } = string.Empty;
+
     public List<string> Files { get; set; } = new();
     public int TotalFiles { get; set; }
     public int ProcessedFiles { get; set; }
@@ -156,4 +172,12 @@ public class ProcessingJob
     public DateTime? EndTime { get; set; }
     public string? CurrentFile { get; set; }
     public Dictionary<string, string> Errors { get; set; } = new();
+
+    /// <summary>
+    /// True once the job has reached a state it can never leave.
+    /// </summary>
+    public bool IsTerminal => Status is JobStatus.Completed
+        or JobStatus.Failed
+        or JobStatus.Cancelled
+        or JobStatus.Interrupted;
 }

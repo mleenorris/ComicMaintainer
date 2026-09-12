@@ -29,6 +29,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<SeriesMetadataCacheEntity> SeriesMetadataCache { get; set; } = null!;
     public DbSet<ScheduledJobEntity> ScheduledJobs { get; set; } = null!;
     public DbSet<MetadataAuditFindingEntity> MetadataAuditFindings { get; set; } = null!;
+    public DbSet<ProcessingJobEntity> ProcessingJobs { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -146,6 +147,20 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.HasIndex(e => new { e.UserId, e.IsRead });
             // Lets a file deletion/rename clean up every user's row in one statement.
             entity.HasIndex(e => e.FilePath);
+        });
+
+        // Configure ProcessingJobEntity
+        modelBuilder.Entity<ProcessingJobEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.JobId).IsRequired();
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.OperationName).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.CurrentFile).HasMaxLength(2048);
+            entity.HasIndex(e => e.JobId).IsUnique();
+            // Startup reconciliation scans for non-terminal jobs; job listing orders by start time.
+            entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => e.StartTime);
         });
 
         // Configure ReadingProgressEntity
@@ -357,6 +372,41 @@ public class UserFileReadStatusEntity
     public int CurrentPage { get; set; } = 1;
     public DateTime? LastReadDate { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Database entity for batch processing jobs.
+/// </summary>
+/// <remarks>
+/// Jobs are held in memory while they run, but that state used to be lost on restart: the UI
+/// would keep polling a job id the server no longer knew about and simply hang on a stale
+/// progress bar. Persisting jobs lets startup reconciliation mark anything left non-terminal
+/// as <see cref="JobStatus.Interrupted"/>, so the UI gets a definite answer.
+///
+/// Progress is written on state transitions and otherwise throttled, so this table is not a
+/// per-file write log; the durable per-file record remains
+/// <see cref="ProcessingHistoryEntity"/>.
+/// </remarks>
+public class ProcessingJobEntity
+{
+    public int Id { get; set; }
+    public Guid JobId { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string OperationName { get; set; } = string.Empty;
+
+    /// <summary>JSON array of the file paths in the batch.</summary>
+    public string FilesJson { get; set; } = "[]";
+
+    /// <summary>JSON object mapping file path to error message.</summary>
+    public string ErrorsJson { get; set; } = "{}";
+
+    public int TotalFiles { get; set; }
+    public int ProcessedFiles { get; set; }
+    public int FailedFiles { get; set; }
+    public DateTime StartTime { get; set; }
+    public DateTime? EndTime { get; set; }
+    public string? CurrentFile { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 

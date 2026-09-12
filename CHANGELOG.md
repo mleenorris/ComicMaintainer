@@ -38,6 +38,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retagged. Reverting such a series to automatic remains a no-op.
 
 ### Added
+- Batch processing jobs now survive a restart. Job state is persisted, and any job still
+  queued or running when the process stops is reported as `Interrupted` on the next startup,
+  along with how many files it had already processed.
+  - Previously a restart (including the app's own `POST /api/settings/restart`) discarded
+    in-flight jobs entirely, leaving the UI polling a job id the server no longer recognised
+    and showing a progress bar that never moved.
+  - Interrupted jobs are **not** resumed automatically: the batch operations are not
+    transactional, so re-running one could repeat side effects on files already handled. The
+    UI reports the interruption and the progress made so you can decide whether to re-run it.
+  - Jobs now record which operation created them, so an interrupted job can be described
+    meaningfully after a restart.
+  - Completed job records are pruned after 7 days, keeping the 50 most recent regardless of age.
 - Health check endpoint at `/health` and `/api/health` for Docker and Kubernetes orchestration
   - Returns 200 OK when healthy, 503 when unhealthy
   - Checks watched directory, database connectivity, and watcher process status

@@ -104,7 +104,10 @@ public class JobsController : ControllerBase
 
     private string DetermineJobTitle(ProcessingJob job)
     {
-        // Determine a user-friendly title based on job characteristics
+        // Prefer the recorded operation, which survives a restart; fall back to the older
+        // status-only wording for jobs persisted before OperationName was tracked.
+        var operation = string.IsNullOrWhiteSpace(job.OperationName) ? null : job.OperationName;
+
         return job.Status switch
         {
             JobStatus.Queued when job.ProcessedFiles == 0 => "Processing Files...",
@@ -112,6 +115,9 @@ public class JobsController : ControllerBase
             JobStatus.Completed => $"Completed {job.TotalFiles} files",
             JobStatus.Failed => "Processing Failed",
             JobStatus.Cancelled => "Processing Cancelled",
+            JobStatus.Interrupted => operation == null
+                ? "Interrupted by restart"
+                : $"{operation} interrupted by restart",
             _ => "Processing..."
         };
     }

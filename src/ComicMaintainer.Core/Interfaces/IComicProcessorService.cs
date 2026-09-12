@@ -153,4 +153,11 @@ public interface IComicProcessorService
     /// Cancel a running job
     /// </summary>
     bool CancelJob(Guid jobId);
+
+    /// <summary>
+    /// Add jobs recovered from durable storage to the in-memory job list, so the API can still
+    /// answer for jobs that were created before the process restarted. Jobs already present in
+    /// memory are left untouched.
+    /// </summary>
+    void RestoreJobs(IEnumerable<ProcessingJob> jobs);
 }

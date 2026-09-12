@@ -544,6 +544,7 @@ builder.Services.AddSingleton<EventBroadcasterService>();
 builder.Services.AddSingleton<IEventBroadcaster>(sp => sp.GetRequiredService<EventBroadcasterService>());
 builder.Services.AddSingleton<IFileStoreService, FileStoreService>();
 builder.Services.AddSingleton<ISeriesNameResolver, SeriesNameResolver>();
+builder.Services.AddSingleton<IJobStateStore, JobStateStore>();
 builder.Services.AddSingleton<IComicProcessorService, ComicProcessorService>();
 builder.Services.AddSingleton<IFileWatcherService, FileWatcherService>();
 builder.Services.AddSingleton<IProcessingHistoryService, ProcessingHistoryService>();
@@ -626,6 +627,10 @@ builder.Services.AddHostedService<SeriesArchiveCoverWriteQueueHostedService>();
 
 // Add hosted service for database cleanup
 builder.Services.AddHostedService<DatabaseCleanupHostedService>();
+
+// Reconcile persisted batch job state, marking anything left in flight by a restart as
+// interrupted so clients polling an old job id get a definite answer.
+builder.Services.AddHostedService<JobStateReconciliationHostedService>();
 
 // Scheduled-jobs framework: handlers + service + hosted runner.
 builder.Services.AddSingleton<IScheduledJobHandler, MetadataAuditJobHandler>();

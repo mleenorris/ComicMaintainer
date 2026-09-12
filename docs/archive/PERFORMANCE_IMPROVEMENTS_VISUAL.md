@@ -309,10 +309,10 @@ services:
 
 ## 📖 Documentation
 
-- **[Performance Tuning Guide](docs/PERFORMANCE_TUNING.md)**  
+- **[Performance Tuning Guide](../PERFORMANCE_TUNING.md)**  
   Detailed recommendations for optimizing ComicMaintainer for your specific use case
 
-- **[Performance Improvements Summary](docs/PERFORMANCE_IMPROVEMENTS_SUMMARY.md)**  
+- **[Performance Improvements Summary](../PERFORMANCE_IMPROVEMENTS_SUMMARY.md)**  
   Technical deep-dive into all optimizations and benchmarks
 
 - **[README.md](README.md)**  

@@ -410,7 +410,7 @@ landmark.
 - **Secrets Management**: Environment-based configuration for sensitive data
 - **JWT Security**: HMAC SHA256 signing with configurable expiration
 
-See [SECURITY_FIXES_DOTNET.md](SECURITY_FIXES_DOTNET.md) for complete security documentation.
+See [SECURITY_FIXES_DOTNET.md](archive/SECURITY_FIXES_DOTNET.md) for complete security documentation.
 
 ## Future Enhancements
 

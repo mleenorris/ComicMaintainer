@@ -437,7 +437,7 @@ Potential future optimizations:
 - [Performance Tuning Guide](PERFORMANCE_TUNING.md) - Detailed tuning recommendations
 - [README.md](../README.md) - General usage documentation
 - [API Documentation](API.md) - Complete REST API reference
-- [Debug Logging Guide](../DEBUG_LOGGING_GUIDE.md) - Debugging guide
+- [Debug Logging Guide](DEBUG_LOGGING_GUIDE.md) - Debugging guide
 
 ## Conclusion
 

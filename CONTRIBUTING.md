@@ -88,7 +88,7 @@ Add health check endpoint for container orchestration
 
 ## Testing
 
-⚠️ **IMPORTANT**: All bug fixes and new features **MUST** include tests. See [TESTING_POLICY.md](TESTING_POLICY.md) for detailed requirements.
+⚠️ **IMPORTANT**: All bug fixes and new features **MUST** include tests. See [TESTING_POLICY.md](docs/TESTING_POLICY.md) for detailed requirements.
 
 ### Testing Requirements
 
@@ -213,7 +213,7 @@ tests/
     └── Utilities/          # Utility tests
 ```
 
-For detailed testing guidelines, see [TESTING_POLICY.md](TESTING_POLICY.md).
+For detailed testing guidelines, see [TESTING_POLICY.md](docs/TESTING_POLICY.md).
 
 ## Code Quality
 
@@ -241,7 +241,7 @@ pip-audit -r requirements.txt
 
 Before committing, ensure:
 - [ ] **All tests pass** (`dotnet test`)
-- [ ] **New tests added** for all code changes (see [TESTING_POLICY.md](TESTING_POLICY.md))
+- [ ] **New tests added** for all code changes (see [TESTING_POLICY.md](docs/TESTING_POLICY.md))
 - [ ] **Code coverage hasn't decreased**
 - [ ] No linter errors
 - [ ] Security scans pass

@@ -158,5 +158,5 @@ If you continue to experience issues after following this guide, please report t
 ## See Also
 
 - [DEBUG_LOGGING_GUIDE.md](DEBUG_LOGGING_GUIDE.md) - General debug logging guide
-- [REVERSE_PROXY_FIX_SUMMARY.md](REVERSE_PROXY_FIX_SUMMARY.md) - Reverse proxy configuration
-- [QUICKSTART.md](QUICKSTART.md) - Getting started guide
+- [REVERSE_PROXY_FIX_SUMMARY.md](archive/REVERSE_PROXY_FIX_SUMMARY.md) - Reverse proxy configuration
+- [QUICKSTART.md](../QUICKSTART.md) - Getting started guide

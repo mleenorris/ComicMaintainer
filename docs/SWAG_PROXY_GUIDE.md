@@ -55,8 +55,8 @@ Access at: `https://yourdomain.com/comics`
 ## Complete Documentation
 
 For detailed instructions, troubleshooting, and authentication options:
-- **[SWAG Configuration Guide](docs/swag-configs/README.md)** - Complete setup guide
-- **[Reverse Proxy Guide](docs/REVERSE_PROXY.md)** - General reverse proxy documentation
+- **[SWAG Configuration Guide](swag-configs/README.md)** - Complete setup guide
+- **[Reverse Proxy Guide](REVERSE_PROXY.md)** - General reverse proxy documentation
 
 ## Configuration Files
 
@@ -72,6 +72,6 @@ Both configurations include:
 
 ## Need Help?
 
-- Check the [SWAG Configuration README](docs/swag-configs/README.md) for troubleshooting
+- Check the [SWAG Configuration README](swag-configs/README.md) for troubleshooting
 - Review [SWAG Documentation](https://docs.linuxserver.io/general/swag)
 - Open an issue on [GitHub](https://github.com/mleenorris/ComicMaintainer/issues)

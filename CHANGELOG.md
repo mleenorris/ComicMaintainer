@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Documentation reorganised.** The repository root had accumulated 69 markdown files, most of
+  them point-in-time fix write-ups and PR summaries, which buried the handful of documents
+  people actually look for. The root now keeps only `README.md`, `QUICKSTART.md`,
+  `CONTRIBUTING.md`, `SECURITY.md` and `CHANGELOG.md`; current reference material moved to
+  `docs/`, and superseded write-ups to `docs/archive/`. Nothing was deleted, all files were
+  moved with history preserved, and every internal link was updated.
+  - `docs/README.md` is now an accurate index of current documentation, and
+    `docs/archive/README.md` states plainly that its contents are unmaintained snapshots
+    rather than a description of current behaviour.
+
 - **Read/unread status is now per-user.** It previously lived in two global places
   (`ComicFiles.IsRead` and the `FileReadStatuses` table), so in a multi-user deployment one
   user marking an issue read flipped it for everyone, and that global state could disagree

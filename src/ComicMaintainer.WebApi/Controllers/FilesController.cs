@@ -2350,6 +2350,7 @@ public class FilesController : ControllerBase
     // Legacy endpoint for backward compatibility
     [HttpPost("~/api/scan-unmarked")]
     [ApiExplorerSettings(IgnoreApi = true)]
+    [Obsolete("Use POST /api/files/scan-unmarked instead. This alias is scheduled for removal in v3.0.")]
     public async Task<ActionResult> ScanUnmarkedLegacy() => await ScanUnmarked();
 
     // RESTful endpoint: POST /api/files/{encodedFilePath}/process
@@ -2376,6 +2377,7 @@ public class FilesController : ControllerBase
     // Legacy endpoint for backward compatibility
     [HttpPost("~/api/process-file")]
     [ApiExplorerSettings(IgnoreApi = true)]
+    [Obsolete("Use POST /api/files/{encodedFilePath}/process instead. This alias is scheduled for removal in v3.0.")]
     public async Task<ActionResult> ProcessSingleFile([FromQuery] string filePath, [FromQuery] bool forceReprocess = false)
     {
         try
@@ -2430,6 +2432,7 @@ public class FilesController : ControllerBase
     // Legacy endpoint for backward compatibility
     [HttpPost("~/api/rename-file")]
     [ApiExplorerSettings(IgnoreApi = true)]
+    [Obsolete("Use POST /api/files/{encodedFilePath}/rename instead. This alias is scheduled for removal in v3.0.")]
     public async Task<ActionResult> RenameSingleFile([FromQuery] string filePath, [FromQuery] bool forceReprocess = false, CancellationToken cancellationToken = default)
     {
         try
@@ -2500,6 +2503,8 @@ public class FilesController : ControllerBase
 
     // Legacy endpoint for backward compatibility: DELETE /api/delete-file?filePath=...
     [HttpDelete("~/api/delete-file")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    [Obsolete("Use DELETE /api/files/{encodedFilePath} instead. This alias is scheduled for removal in v3.0.")]
     public async Task<ActionResult> DeleteFile([FromQuery] string filePath)
     {
         try

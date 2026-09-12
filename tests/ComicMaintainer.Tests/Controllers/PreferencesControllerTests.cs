@@ -1,5 +1,9 @@
+using System.Security.Claims;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.WebApi.Controllers;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -9,199 +13,263 @@ namespace ComicMaintainer.Tests.Controllers;
 
 public class PreferencesControllerTests
 {
-    private readonly Mock<ILogger<PreferencesController>> _loggerMock;
-    private readonly Mock<IOptionsMonitor<AppSettings>> _appSettingsMock;
+    private const string UserId = "user-1";
+
     private readonly AppSettings _appSettings;
+    private readonly Mock<IUserPreferencesService> _preferencesServiceMock;
     private readonly PreferencesController _controller;
+
+    /// <summary>In-memory stand-in for the persisted preference row.</summary>
+    private UserPreferences _stored = new() { UserId = UserId };
 
     public PreferencesControllerTests()
     {
-        _loggerMock = new Mock<ILogger<PreferencesController>>();
+        var loggerMock = new Mock<ILogger<PreferencesController>>();
         _appSettings = new AppSettings();
-        _appSettingsMock = new Mock<IOptionsMonitor<AppSettings>>();
-        _appSettingsMock.Setup(x => x.CurrentValue).Returns(_appSettings);
-        _controller = new PreferencesController(_loggerMock.Object, _appSettingsMock.Object);
+        var appSettingsMock = new Mock<IOptionsMonitor<AppSettings>>();
+        appSettingsMock.Setup(x => x.CurrentValue).Returns(_appSettings);
+
+        _preferencesServiceMock = new Mock<IUserPreferencesService>();
+        _preferencesServiceMock
+            .Setup(x => x.GetPreferencesAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => _stored);
+        _preferencesServiceMock
+            .Setup(x => x.SavePreferencesAsync(It.IsAny<UserPreferences>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((UserPreferences update, CancellationToken _) =>
+            {
+                // Mirror the service's partial-merge semantics.
+                _stored = new UserPreferences
+                {
+                    UserId = update.UserId,
+                    Theme = update.Theme ?? _stored.Theme,
+                    PerPage = update.PerPage ?? _stored.PerPage,
+                    ReadingMode = update.ReadingMode ?? _stored.ReadingMode,
+                    LibraryViewMode = update.LibraryViewMode ?? _stored.LibraryViewMode,
+                    FilterMode = update.FilterMode ?? _stored.FilterMode,
+                    SortMode = update.SortMode ?? _stored.SortMode
+                };
+                return _stored;
+            });
+
+        _controller = new PreferencesController(
+            loggerMock.Object,
+            appSettingsMock.Object,
+            _preferencesServiceMock.Object);
+
+        SetUser(UserId);
+    }
+
+    private void SetUser(string? userId)
+    {
+        var claims = userId is null
+            ? Array.Empty<Claim>()
+            : new[] { new Claim(ClaimTypes.NameIdentifier, userId) };
+
+        _controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"))
+            }
+        };
+    }
+
+    private static object GetValue(ActionResult<object> result, string property)
+    {
+        var objectResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(objectResult.Value);
+        var prop = objectResult.Value!.GetType().GetProperty(property);
+        Assert.NotNull(prop);
+        return prop!.GetValue(objectResult.Value)!;
+    }
+
+    private static object? GetValueOrNull(ActionResult<object> result, string property)
+    {
+        var objectResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(objectResult.Value);
+        var prop = objectResult.Value!.GetType().GetProperty(property);
+        Assert.NotNull(prop);
+        return prop!.GetValue(objectResult.Value);
     }
 
     [Fact]
-    public void GetPreferences_ReturnsOkResultWithDefaultPreferences()
+    public async Task GetPreferences_WithoutStoredValues_ReturnsDefaults()
     {
-        // Act
-        var result = _controller.GetPreferences();
+        var result = await _controller.GetPreferences();
 
-        // Assert
-        var okResult = Assert.IsType<ActionResult<object>>(result);
-        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
-        Assert.NotNull(objectResult.Value);
-        
-        var preferences = objectResult.Value;
-        var themeProperty = preferences.GetType().GetProperty("theme");
-        Assert.NotNull(themeProperty);
-        Assert.Equal("dark", themeProperty.GetValue(preferences));
+        // Theme is null when unset so the client can use the OS colour scheme.
+        Assert.Null(GetValueOrNull(result, "theme"));
+        Assert.Equal(100, GetValue(result, "perPage"));
+        Assert.Equal("manga", GetValue(result, "readingMode"));
+        Assert.Equal("all", GetValue(result, "filterMode"));
+        Assert.Equal("name", GetValue(result, "sortMode"));
     }
 
     [Fact]
-    public void GetPreferences_IncludesReadingMode()
+    public async Task GetPreferences_ReturnsStoredValues()
     {
-        // Act
-        var result = _controller.GetPreferences();
+        _stored = new UserPreferences
+        {
+            UserId = UserId,
+            Theme = "light",
+            PerPage = 25,
+            ReadingMode = "webcomic",
+            LibraryViewMode = "series",
+            FilterMode = "unmarked",
+            SortMode = "date"
+        };
 
-        // Assert
-        var okResult = Assert.IsType<ActionResult<object>>(result);
-        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
-        Assert.NotNull(objectResult.Value);
-        
-        var preferences = objectResult.Value;
-        var readingModeProperty = preferences.GetType().GetProperty("readingMode");
-        Assert.NotNull(readingModeProperty);
-        Assert.Equal("manga", readingModeProperty.GetValue(preferences));
+        var result = await _controller.GetPreferences();
+
+        Assert.Equal("light", GetValue(result, "theme"));
+        Assert.Equal(25, GetValue(result, "perPage"));
+        Assert.Equal("webcomic", GetValue(result, "readingMode"));
+        Assert.Equal("series", GetValue(result, "libraryViewMode"));
+        Assert.Equal("unmarked", GetValue(result, "filterMode"));
+        Assert.Equal("date", GetValue(result, "sortMode"));
     }
 
     [Fact]
-    public void GetPreferences_IncludesLibraryViewMode_DefaultsToFiles()
+    public async Task GetPreferences_LibraryViewMode_DefaultsToFiles()
     {
-        // Act
-        var result = _controller.GetPreferences();
+        var result = await _controller.GetPreferences();
 
-        // Assert
-        var okResult = Assert.IsType<ActionResult<object>>(result);
-        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
-        Assert.NotNull(objectResult.Value);
-
-        var preferences = objectResult.Value;
-        var libraryViewModeProperty = preferences.GetType().GetProperty("libraryViewMode");
-        Assert.NotNull(libraryViewModeProperty);
-        Assert.Equal("files", libraryViewModeProperty.GetValue(preferences));
+        Assert.Equal("files", GetValue(result, "libraryViewMode"));
     }
 
     [Theory]
     [InlineData("series")]
     [InlineData("files")]
-    public void GetPreferences_ReflectsConfiguredDefaultLibraryView(string view)
+    public async Task GetPreferences_ReflectsConfiguredDefaultLibraryView(string view)
     {
-        // Arrange
         _appSettings.DefaultLibraryView = view;
 
-        // Act
-        var result = _controller.GetPreferences();
+        var result = await _controller.GetPreferences();
 
-        // Assert
-        var okResult = Assert.IsType<ActionResult<object>>(result);
-        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
-        Assert.NotNull(objectResult.Value);
-
-        var preferences = objectResult.Value;
-        var libraryViewModeProperty = preferences.GetType().GetProperty("libraryViewMode");
-        Assert.NotNull(libraryViewModeProperty);
-        Assert.Equal(view, libraryViewModeProperty.GetValue(preferences));
+        Assert.Equal(view, GetValue(result, "libraryViewMode"));
     }
 
     [Fact]
-    public void GetPreferences_FallsBackToFiles_WhenDefaultLibraryViewIsInvalid()
+    public async Task GetPreferences_FallsBackToFiles_WhenDefaultLibraryViewIsInvalid()
     {
-        // Arrange
         _appSettings.DefaultLibraryView = "not-a-real-view";
 
-        // Act
-        var result = _controller.GetPreferences();
+        var result = await _controller.GetPreferences();
 
-        // Assert
-        var okResult = Assert.IsType<ActionResult<object>>(result);
-        var objectResult = Assert.IsType<OkObjectResult>(okResult.Result);
-        Assert.NotNull(objectResult.Value);
-
-        var preferences = objectResult.Value;
-        var libraryViewModeProperty = preferences.GetType().GetProperty("libraryViewMode");
-        Assert.NotNull(libraryViewModeProperty);
-        Assert.Equal("files", libraryViewModeProperty.GetValue(preferences));
+        Assert.Equal("files", GetValue(result, "libraryViewMode"));
     }
 
     [Fact]
-    public void SavePreferences_ReturnsOkResult()
+    public async Task GetPreferences_WithoutUserId_ReturnsUnauthorized()
     {
-        // Arrange
-        var preferences = new { theme = "light", perPage = 50 };
+        SetUser(null);
 
-        // Act
-        var result = _controller.SavePreferences(preferences);
+        var result = await _controller.GetPreferences();
 
-        // Assert
-        Assert.IsType<OkResult>(result);
+        Assert.IsType<UnauthorizedResult>(result.Result);
     }
 
-    // New RESTful endpoint tests
-
     [Fact]
-    public void UpdatePreferences_WithValidPreferences_ReturnsOkWithMessage()
+    public async Task UpdatePreferences_PersistsValues()
     {
-        // Arrange
-        var request = new PreferencesController.PreferencesRequest
+        var result = await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest
         {
             Theme = "light",
             PerPage = 50,
-            FilenameFormat = "{series} #{issue}",
-            IssueNumberPadding = 3,
-            WatcherEnabled = false,
             ReadingMode = "webcomic"
-        };
+        });
 
-        // Act
-        var result = _controller.UpdatePreferences(request);
+        Assert.Equal("light", GetValue(result, "theme"));
+        Assert.Equal(50, GetValue(result, "perPage"));
+        Assert.Equal("webcomic", GetValue(result, "readingMode"));
 
-        // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        Assert.NotNull(okResult.Value);
-        var message = okResult.Value.GetType().GetProperty("message");
-        Assert.NotNull(message);
-        Assert.Equal("Preferences updated successfully", message.GetValue(okResult.Value));
+        _preferencesServiceMock.Verify(
+            x => x.SavePreferencesAsync(It.Is<UserPreferences>(p => p.UserId == UserId), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
-    public void UpdatePreferences_WithReadingModeOnly_ReturnsOk()
+    public async Task UpdatePreferences_PartialUpdate_DoesNotClobberOtherValues()
     {
-        // Arrange - Only update reading mode
-        var request = new PreferencesController.PreferencesRequest
-        {
-            ReadingMode = "manga"
-        };
+        await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest { PerPage = 25 });
 
-        // Act
-        var result = _controller.UpdatePreferences(request);
+        var result = await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest { Theme = "dark" });
 
-        // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        Assert.NotNull(okResult.Value);
+        Assert.Equal("dark", GetValue(result, "theme"));
+        Assert.Equal(25, GetValue(result, "perPage"));
     }
 
     [Fact]
-    public void UpdatePreferences_WithPartialPreferences_ReturnsOk()
+    public async Task UpdatePreferences_NormalizesCasing()
     {
-        // Arrange - Only update theme and perPage
-        var request = new PreferencesController.PreferencesRequest
-        {
-            Theme = "light",
-            PerPage = 75
-        };
+        var result = await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest { Theme = "LIGHT" });
 
-        // Act
-        var result = _controller.UpdatePreferences(request);
-
-        // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        Assert.NotNull(okResult.Value);
+        Assert.Equal("light", GetValue(result, "theme"));
     }
 
     [Fact]
-    public void UpdatePreferences_WithEmptyPreferences_ReturnsOk()
+    public async Task UpdatePreferences_WithEmptyRequest_IsANoOpAndReturnsOk()
     {
-        // Arrange - No preferences set (all null/default)
-        var request = new PreferencesController.PreferencesRequest();
+        var result = await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest());
 
-        // Act
-        var result = _controller.UpdatePreferences(request);
+        Assert.IsType<OkObjectResult>(result.Result);
+    }
 
-        // Assert
-        var okResult = Assert.IsType<OkObjectResult>(result);
-        Assert.NotNull(okResult.Value);
+    [Theory]
+    [InlineData("neon")]
+    [InlineData("purple")]
+    public async Task UpdatePreferences_WithInvalidTheme_ReturnsBadRequest(string theme)
+    {
+        var result = await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest { Theme = theme });
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdatePreferences_WithInvalidReadingMode_ReturnsBadRequest()
+    {
+        var result = await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest { ReadingMode = "vertical" });
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdatePreferences_WithInvalidFilterMode_ReturnsBadRequest()
+    {
+        var result = await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest { FilterMode = "everything" });
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-5)]
+    [InlineData(5000)]
+    public async Task UpdatePreferences_WithOutOfRangePerPage_ReturnsBadRequest(int perPage)
+    {
+        var result = await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest { PerPage = perPage });
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdatePreferences_WithoutUserId_ReturnsUnauthorized()
+    {
+        SetUser(null);
+
+        var result = await _controller.UpdatePreferences(new PreferencesController.PreferencesRequest { Theme = "dark" });
+
+        Assert.IsType<UnauthorizedResult>(result.Result);
+        _preferencesServiceMock.Verify(
+            x => x.SavePreferencesAsync(It.IsAny<UserPreferences>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task SavePreferences_LegacyPostEndpoint_PersistsValues()
+    {
+        var result = await _controller.SavePreferences(new PreferencesController.PreferencesRequest { Theme = "light" });
+
+        Assert.Equal("light", GetValue(result, "theme"));
     }
 }

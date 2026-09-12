@@ -47,7 +47,8 @@ public class WatcherController : ControllerBase
     // DEPRECATED: Watcher is now automatically controlled by WatcherEnableRename and WatcherEnableNormalize settings
     // This endpoint is kept for backward compatibility but does nothing
     [HttpPut]
-    [Obsolete("Direct watcher enable/disable is deprecated. Use WatcherEnableRename and WatcherEnableNormalize settings instead.")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    [Obsolete("Direct watcher enable/disable is deprecated. Use the WatcherEnableRename and WatcherEnableNormalize settings instead. This no-op endpoint is scheduled for removal in v3.0.")]
     public ActionResult UpdateWatcher([FromBody] WatcherUpdateRequest request)
     {
         try
@@ -68,7 +69,7 @@ public class WatcherController : ControllerBase
     // DEPRECATED: Watcher is now automatically controlled by WatcherEnableRename and WatcherEnableNormalize settings
     [HttpPost("enable")]
     [ApiExplorerSettings(IgnoreApi = true)]
-    [Obsolete("Direct watcher enable/disable is deprecated. Use WatcherEnableRename and WatcherEnableNormalize settings instead.")]
+    [Obsolete("Direct watcher enable/disable is deprecated. Use the WatcherEnableRename and WatcherEnableNormalize settings instead. This no-op endpoint is scheduled for removal in v3.0.")]
     public ActionResult EnableWatcher([FromBody] bool enabled)
     {
         try

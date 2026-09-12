@@ -70,6 +70,7 @@ public class SettingsController : ControllerBase
             enable_anilist_metadata = _appSettings.CurrentValue.EnableAniListMetadata,
             anilist_base_url = _appSettings.CurrentValue.AniListBaseUrl,
             default_library_view = _appSettings.CurrentValue.DefaultLibraryView,
+            allow_registration = _appSettings.CurrentValue.AllowRegistration,
             default_preferred_language = _appSettings.CurrentValue.DefaultPreferredLanguage,
             write_cover_to_first_archive = _appSettings.CurrentValue.WriteCoverToFirstArchive,
             write_cover_to_series_folder = _appSettings.CurrentValue.WriteCoverToSeriesFolder,
@@ -444,6 +445,39 @@ public class SettingsController : ControllerBase
     public Task<ActionResult> SetDefaultLibraryView([FromBody] DefaultLibraryViewRequest request, CancellationToken cancellationToken = default)
         => UpdateDefaultLibraryView(request, cancellationToken);
 
+    [HttpGet("allow-registration")]
+    public ActionResult<object> GetAllowRegistration()
+    {
+        return Ok(new { enabled = _appSettings.CurrentValue.AllowRegistration });
+    }
+
+    [HttpPut("allow-registration")]
+    public async Task<ActionResult> UpdateAllowRegistration([FromBody] AllowRegistrationRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request == null)
+        {
+            return BadRequest(new { error = "Enabled is required" });
+        }
+
+        _logger.LogInformation("Self-service registration update requested: {Enabled}", request.Enabled);
+
+        try
+        {
+            await _settingsService.UpdateAllowRegistrationAsync(request.Enabled, cancellationToken);
+            return Ok(new { message = "Self-service registration updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update self-service registration setting");
+            return StatusCode(500, new { error = "Failed to update self-service registration setting" });
+        }
+    }
+
+    [HttpPost("allow-registration")]
+    [ApiExplorerSettings(IgnoreApi = true)]
+    public Task<ActionResult> SetAllowRegistration([FromBody] AllowRegistrationRequest request, CancellationToken cancellationToken = default)
+        => UpdateAllowRegistration(request, cancellationToken);
+
     [HttpGet("default-preferred-language")]
     public ActionResult<object> GetDefaultPreferredLanguage()
     {
@@ -725,6 +759,11 @@ public class SettingsController : ControllerBase
     public class DefaultLibraryViewRequest
     {
         public string? View { get; set; }
+    }
+
+    public class AllowRegistrationRequest
+    {
+        public bool Enabled { get; set; }
     }
 
     public class DefaultPreferredLanguageRequest

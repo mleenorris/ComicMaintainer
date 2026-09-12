@@ -8,12 +8,15 @@ using ComicMaintainer.Core.Reader.Interfaces;
 using ComicMaintainer.Core.Reader.Services;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Authentication;
+using ComicMaintainer.WebApi.Authorization;
+using ComicMaintainer.WebApi.HealthChecks;
 using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Middleware;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -389,10 +392,47 @@ builder.Services.AddAuthorization(options =>
             .RequireAuthenticatedUser()
             .Build();
     }
+
+    // Schemes accepted by every named policy, mirroring the default policy so
+    // SSE/EventSource JWT connections keep working under Authelia.
+    var schemes = autheliaSettings.Enabled
+        ? new[] { "Authelia", JwtBearerDefaults.AuthenticationScheme }
+        : new[] { JwtBearerDefaults.AuthenticationScheme };
+
+    // Library mutations: allowed for any authenticated user except members of
+    // the ReadOnly role. Denying by role (rather than requiring User/Admin)
+    // keeps existing deployments working even if a user has no role assigned.
+    options.AddPolicy(AuthorizationPolicies.CanModifyLibrary, policy => policy
+        .AddAuthenticationSchemes(schemes)
+        .RequireAuthenticatedUser()
+        .RequireAssertion(context => !context.User.IsInRole("ReadOnly")));
+
+    // Administration: requires the Admin role.
+    //
+    // Compatibility note: when Authelia is the identity provider but no admin
+    // groups are configured, no user can ever be mapped to the Admin role. In
+    // that configuration ComicMaintainer cannot distinguish administrators, so
+    // any non-ReadOnly user is treated as one rather than locking everybody out
+    // of the settings screen.
+    var autheliaHasAdminGroups = autheliaSettings.Enabled
+        && !string.IsNullOrWhiteSpace(autheliaSettings.AdminGroups);
+    var autheliaAdminFallback = autheliaSettings.Enabled && !autheliaHasAdminGroups;
+
+    options.AddPolicy(AuthorizationPolicies.CanAdminister, policy => policy
+        .AddAuthenticationSchemes(schemes)
+        .RequireAuthenticatedUser()
+        .RequireAssertion(context =>
+            context.User.IsInRole("Admin")
+            || (autheliaAdminFallback && !context.User.IsInRole("ReadOnly"))));
 });
 
 // Add services to the container
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    // Require the appropriate policy for every state-changing endpoint on the
+    // library/settings controllers (see WriteOperationAuthorizationConvention).
+    options.Conventions.Add(new WriteOperationAuthorizationConvention());
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -453,8 +493,12 @@ builder.Services.AddOutputCache(options =>
 builder.Services.AddSignalR();
 builder.Services.AddMemoryCache();
 
-// Add health checks
-builder.Services.AddHealthChecks();
+// Add health checks.
+// "/health" is a pure liveness probe (the process is up and serving requests);
+// "/health/ready" additionally verifies the database is reachable, which is what
+// container orchestrators should gate traffic on.
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("database", tags: new[] { "ready" });
 
 // Add CORS with security-conscious configuration
 builder.Services.AddCors(options =>
@@ -564,6 +608,9 @@ builder.Services.AddSingleton<IExternalSeriesMetadataService>(sp =>
 builder.Services.AddSingleton<IReadingProgressService, ReadingProgressService>();
 builder.Services.AddSingleton<IReaderPreferenceService, ReaderPreferenceService>();
 builder.Services.AddSingleton<IReadingSessionService, ReadingSessionService>();
+
+// Per-user web UI preferences (theme, pagination, library view/filter/sort)
+builder.Services.AddSingleton<IUserPreferencesService, UserPreferencesService>();
 
 builder.Services.AddScoped<IAuthService, AuthService>();
 
@@ -770,8 +817,17 @@ app.UseRateLimiter();
 app.MapControllers();
 app.MapHub<ProgressHub>("/hubs/progress");
 
-// Map health check endpoints
-app.MapHealthChecks("/health");
+// Map health check endpoints. Both are anonymous so probes do not need credentials.
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    // Liveness: run no checks, just confirm the app responds.
+    Predicate = _ => false
+}).AllowAnonymous();
+
+app.MapHealthChecks("/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready")
+}).AllowAnonymous();
 
 // Map default route to serve index.html for non-API routes only
 // This prevents the fallback from catching API requests, ensuring they always return JSON.

@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.WebApi.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -13,15 +14,21 @@ public class AuthController : ControllerBase
     private readonly IAuthService _authService;
     private readonly ILogger<AuthController> _logger;
     private readonly AutheliaSettings _autheliaSettings;
+    private readonly IAuthorizationService _authorizationService;
+    private readonly IOptionsMonitor<AppSettings> _appSettings;
 
     public AuthController(
         IAuthService authService, 
         ILogger<AuthController> logger,
-        IOptions<AutheliaSettings> autheliaSettings)
+        IOptions<AutheliaSettings> autheliaSettings,
+        IAuthorizationService authorizationService,
+        IOptionsMonitor<AppSettings> appSettings)
     {
         _authService = authService;
         _logger = logger;
         _autheliaSettings = autheliaSettings.Value;
+        _authorizationService = authorizationService;
+        _appSettings = appSettings;
     }
 
     [HttpPost("login")]
@@ -37,9 +44,31 @@ public class AuthController : ControllerBase
         return Ok(new { token });
     }
 
+    /// <summary>
+    /// Creates a new account.
+    /// </summary>
+    /// <remarks>
+    /// Self-service registration is disabled unless <c>AllowRegistration</c> is
+    /// enabled in settings, so a self-hosted instance is not open to anyone who
+    /// can reach the port. Administrators can always create accounts here.
+    /// </remarks>
+    [AllowAnonymous]
     [HttpPost("register")]
     public async Task<ActionResult> Register([FromBody] RegisterRequest request)
     {
+        var isAdmin = (await _authorizationService.AuthorizeAsync(User, AuthorizationPolicies.CanAdminister)).Succeeded;
+
+        if (!isAdmin && !_appSettings.CurrentValue.AllowRegistration)
+        {
+            _logger.LogWarning("Rejected registration attempt: self-service registration is disabled.");
+
+            // 401 when unauthenticated so clients know to sign in first; 403
+            // when a signed-in non-admin tries to create another account.
+            return User.Identity?.IsAuthenticated == true
+                ? StatusCode(StatusCodes.Status403Forbidden, new { error = "Registration is disabled. Ask an administrator to create your account." })
+                : Unauthorized(new { error = "Registration is disabled. Ask an administrator to create your account." });
+        }
+
         var (success, error) = await _authService.RegisterAsync(
             request.Username, 
             request.Password, 
@@ -177,7 +206,7 @@ public class AuthController : ControllerBase
 
     [Authorize]
     [HttpGet("user")]
-    public ActionResult GetCurrentUser()
+    public async Task<ActionResult> GetCurrentUser()
     {
         // Return current user information
         var username = User.Identity?.Name;
@@ -188,13 +217,20 @@ public class AuthController : ControllerBase
             .ToList();
         var authMethod = User.FindFirst("auth_method")?.Value ?? "jwt";
 
+        // Evaluate the authorization policies rather than re-deriving the role
+        // rules here, so the UI can never disagree with what the API enforces.
+        var canModifyLibrary = await _authorizationService.AuthorizeAsync(User, AuthorizationPolicies.CanModifyLibrary);
+        var canAdminister = await _authorizationService.AuthorizeAsync(User, AuthorizationPolicies.CanAdminister);
+
         return Ok(new 
         { 
             username = username,
             userId = userId,
             email = email,
             roles = roles,
-            authMethod = authMethod
+            authMethod = authMethod,
+            canModifyLibrary = canModifyLibrary.Succeeded,
+            canAdminister = canAdminister.Succeeded
         });
     }
 }

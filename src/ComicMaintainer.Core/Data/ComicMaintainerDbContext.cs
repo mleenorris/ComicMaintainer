@@ -21,6 +21,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<FileReadStatusEntity> FileReadStatuses { get; set; } = null!;
     public DbSet<ReadingProgressEntity> ReadingProgresses { get; set; } = null!;
     public DbSet<ReaderPreferencesEntity> ReaderPreferences { get; set; } = null!;
+    public DbSet<UserPreferencesEntity> UserPreferences { get; set; } = null!;
     public DbSet<ReadingSessionEntity> ReadingSessions { get; set; } = null!;
     public DbSet<SeriesMetadataCacheEntity> SeriesMetadataCache { get; set; } = null!;
     public DbSet<ScheduledJobEntity> ScheduledJobs { get; set; } = null!;
@@ -143,6 +144,19 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.HasKey(e => e.Id);
             entity.Property(e => e.UserId).IsRequired().HasMaxLength(450);
             entity.Property(e => e.FitPreference).HasMaxLength(50);
+            entity.HasIndex(e => e.UserId).IsUnique();
+        });
+
+        // Configure UserPreferencesEntity
+        modelBuilder.Entity<UserPreferencesEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.UserId).IsRequired().HasMaxLength(450);
+            entity.Property(e => e.Theme).HasMaxLength(32);
+            entity.Property(e => e.ReadingMode).HasMaxLength(32);
+            entity.Property(e => e.LibraryViewMode).HasMaxLength(32);
+            entity.Property(e => e.FilterMode).HasMaxLength(64);
+            entity.Property(e => e.SortMode).HasMaxLength(64);
             entity.HasIndex(e => e.UserId).IsUnique();
         });
 
@@ -327,6 +341,25 @@ public class ReaderPreferencesEntity
     public bool TapZonesEnabled { get; set; } = true;
     public bool AutoHideChrome { get; set; } = true;
     public string FitPreference { get; set; } = "width";
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Database entity for per-user web UI preferences (theme, pagination, library view).
+/// All preference columns are nullable so an unset preference falls back to the
+/// application-level default rather than being pinned to a stored default value.
+/// </summary>
+public class UserPreferencesEntity
+{
+    public int Id { get; set; }
+    public string UserId { get; set; } = string.Empty;
+    public string? Theme { get; set; }
+    public int? PerPage { get; set; }
+    public string? ReadingMode { get; set; }
+    public string? LibraryViewMode { get; set; }
+    public string? FilterMode { get; set; }
+    public string? SortMode { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

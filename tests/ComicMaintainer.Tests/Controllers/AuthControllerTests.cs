@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.WebApi.Controllers;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -13,6 +14,8 @@ public class AuthControllerTests
     private readonly Mock<IAuthService> _mockAuthService;
     private readonly Mock<ILogger<AuthController>> _mockLogger;
     private readonly Mock<IOptions<AutheliaSettings>> _mockAutheliaSettings;
+    private readonly Mock<IAuthorizationService> _mockAuthorizationService;
+    private readonly Mock<IOptionsMonitor<AppSettings>> _mockAppSettings;
     private readonly AuthController _controller;
 
     public AuthControllerTests()
@@ -23,11 +26,25 @@ public class AuthControllerTests
         
         // Setup default Authelia settings (disabled by default)
         _mockAutheliaSettings.Setup(x => x.Value).Returns(new AutheliaSettings { Enabled = false });
-        
+
+        // Capability lookups on GET /api/auth/user delegate to the authorization
+        // service; succeed by default so existing assertions are unaffected.
+        _mockAuthorizationService = new Mock<IAuthorizationService>();
+        _mockAuthorizationService
+            .Setup(x => x.AuthorizeAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<object?>(), It.IsAny<string>()))
+            .ReturnsAsync(AuthorizationResult.Success());
+
+        // Registration gating reads AllowRegistration; enable it by default so
+        // the existing Register tests keep exercising the happy path.
+        _mockAppSettings = new Mock<IOptionsMonitor<AppSettings>>();
+        _mockAppSettings.Setup(x => x.CurrentValue).Returns(new AppSettings { AllowRegistration = true });
+
         _controller = new AuthController(
             _mockAuthService.Object, 
             _mockLogger.Object,
-            _mockAutheliaSettings.Object);
+            _mockAutheliaSettings.Object,
+            _mockAuthorizationService.Object,
+            _mockAppSettings.Object);
     }
 
     [Fact]
@@ -307,7 +324,9 @@ public class AuthControllerTests
         var controller = new AuthController(
             _mockAuthService.Object, 
             _mockLogger.Object,
-            _mockAutheliaSettings.Object);
+            _mockAutheliaSettings.Object,
+            _mockAuthorizationService.Object,
+            _mockAppSettings.Object);
         SetupAuthenticatedUserOnController(controller, "user-id-123", "testuser");
 
         // Act
@@ -332,13 +351,13 @@ public class AuthControllerTests
     }
 
     [Fact]
-    public void GetCurrentUser_WithAuthenticatedUser_ReturnsUserInfo()
+    public async Task GetCurrentUser_WithAuthenticatedUser_ReturnsUserInfo()
     {
         // Arrange
         SetupAuthenticatedUser("user-id-123", "testuser", "test@example.com", new[] { "Admin", "User" });
 
         // Act
-        var result = _controller.GetCurrentUser();
+        var result = await _controller.GetCurrentUser();
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
@@ -355,13 +374,13 @@ public class AuthControllerTests
     }
 
     [Fact]
-    public void GetCurrentUser_WithoutAuthentication_ReturnsEmptyUserInfo()
+    public async Task GetCurrentUser_WithoutAuthentication_ReturnsEmptyUserInfo()
     {
         // Arrange
         SetupEmptyUserContext();
 
         // Act
-        var result = _controller.GetCurrentUser();
+        var result = await _controller.GetCurrentUser();
 
         // Assert - endpoint returns OK with null/empty values when not authenticated
         // The [Authorize] attribute should prevent access, but in tests we're testing the controller directly
@@ -370,7 +389,7 @@ public class AuthControllerTests
     }
 
     [Fact]
-    public void GetCurrentUser_WithAutheliaAuthentication_ReturnsAutheliaUsername()
+    public async Task GetCurrentUser_WithAutheliaAuthentication_ReturnsAutheliaUsername()
     {
         // Arrange - Simulate Authelia authentication with username from header
         // This tests the fix for the issue where "admin" was shown instead of the Authelia username
@@ -399,7 +418,7 @@ public class AuthControllerTests
         };
 
         // Act
-        var result = _controller.GetCurrentUser();
+        var result = await _controller.GetCurrentUser();
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result);
@@ -427,7 +446,9 @@ public class AuthControllerTests
         var controller = new AuthController(
             _mockAuthService.Object, 
             _mockLogger.Object,
-            _mockAutheliaSettings.Object);
+            _mockAutheliaSettings.Object,
+            _mockAuthorizationService.Object,
+            _mockAppSettings.Object);
         
         SetupAuthenticatedUserOnController(controller, "user-id-789", autheliaUsername);
 

@@ -5797,7 +5797,7 @@
                     // The server restarted mid-job. Report how far it got so the user can
                     // decide whether to run it again; it is not resumed automatically.
                     console.warn(`[JOB RESUME] Job ${activeJobId} was interrupted by a restart`);
-                    const processed = status.processed_items || 0;
+                    const processed = (status.processed_items || 0) + (status.failed_items || 0);
                     const total = status.total_items || 0;
                     showMessage(
                         `Batch processing was interrupted by a server restart after ${processed} of ${total} files. Re-run it to process the rest.`,

@@ -15,10 +15,10 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '9.0.x'
       
@@ -171,20 +171,20 @@ jobs:
           Compress-Archive -Path "publish/win-x86/*" -DestinationPath "ComicMaintainer-v${{ steps.get_version.outputs.version }}-win-x86.zip"
       
       - name: Upload Windows x64 artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ComicMaintainer-win-x64
           path: ComicMaintainer-v${{ steps.get_version.outputs.version }}-win-x64.zip
       
       - name: Upload Windows x86 artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ComicMaintainer-win-x86
           path: ComicMaintainer-v${{ steps.get_version.outputs.version }}-win-x86.zip
       
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             ComicMaintainer-v${{ steps.get_version.outputs.version }}-win-x64.zip

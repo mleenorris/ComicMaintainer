@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y \
 # Without this, building the arm64 image on an amd64 runner would run the whole SDK under
 # QEMU emulation, which is dramatically slower. The compiler runs natively and is told which
 # runtime to emit via TARGETARCH instead.
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG TARGETARCH
 WORKDIR /src
 

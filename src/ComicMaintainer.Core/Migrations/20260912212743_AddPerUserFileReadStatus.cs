@@ -114,7 +114,10 @@ namespace ComicMaintainer.Core.Migrations
                 SELECT
                     rp.UserId,
                     rp.ContentId,
-                    CASE WHEN rp.CompletedAt IS NOT NULL THEN 1 ELSE 0 END,
+                    CASE
+                        WHEN rp.CompletedAt IS NOT NULL OR rp.PercentComplete >= 100 THEN 1
+                        ELSE 0
+                    END,
                     MAX(rp.CurrentPage, 1),
                     rp.LastReadAt,
                     CURRENT_TIMESTAMP,
@@ -122,7 +125,7 @@ namespace ComicMaintainer.Core.Migrations
                 FROM ReadingProgresses rp
                 WHERE rp.UserId <> '' AND rp.ContentId <> ''
                 ON CONFLICT(UserId, FilePath) DO UPDATE SET
-                    IsRead = MAX(UserFileReadStatuses.IsRead, excluded.IsRead),
+                    IsRead = excluded.IsRead,
                     CurrentPage = excluded.CurrentPage,
                     LastReadDate = COALESCE(excluded.LastReadDate, UserFileReadStatuses.LastReadDate),
                     UpdatedAt = CURRENT_TIMESTAMP;

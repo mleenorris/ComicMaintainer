@@ -222,7 +222,7 @@ public class JobStatePersistenceTests : IDisposable
     }
 
     [Fact]
-    public void DeleteJob_RemovesInterruptedJobFromMemoryAndStorage()
+    public async Task DeleteJob_RemovesInterruptedJobFromMemoryAndStorage()
     {
         var processor = CreateProcessor();
         var jobId = Guid.NewGuid();
@@ -236,7 +236,7 @@ public class JobStatePersistenceTests : IDisposable
         });
 
         // An interrupted job is terminal, so the user must be able to dismiss it.
-        Assert.True(processor.DeleteJob(jobId));
+        Assert.True(await processor.DeleteJobAsync(jobId));
         Assert.Null(processor.GetJob(jobId));
     }
 
@@ -281,15 +281,16 @@ public class JobStatePersistenceTests : IDisposable
     [Fact]
     public async Task ReconciliationService_PrunesOldJobRecords()
     {
-        _jobStateStore
+        var sequence = new MockSequence();
+        _jobStateStore.InSequence(sequence)
             .Setup(s => s.MarkInterruptedAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<ProcessingJob>());
-        _jobStateStore
-            .Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<ProcessingJob>());
-        _jobStateStore
+        _jobStateStore.InSequence(sequence)
             .Setup(s => s.PruneAsync(It.IsAny<DateTime>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(2);
+        _jobStateStore.InSequence(sequence)
+            .Setup(s => s.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<ProcessingJob>());
 
         var service = new JobStateReconciliationHostedService(
             _jobStateStore.Object,

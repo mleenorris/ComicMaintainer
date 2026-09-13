@@ -1009,6 +1009,71 @@ public class FileStoreServiceTests
     }
 
     [Fact]
+    public async Task UpdateFilePathAsync_Rename_MovesReadingProgressContentId()
+    {
+        var oldPath = Path.Combine(_testDirectory, "old-progress.cbz");
+        var newPath = Path.Combine(_testDirectory, "new-progress.cbz");
+        File.WriteAllText(oldPath, "test content");
+        await _service.AddFileAsync(oldPath);
+
+        var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        await using (var db = await dbContextFactory.CreateDbContextAsync())
+        {
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "test-user",
+                ContentId = oldPath,
+                CurrentPage = 4,
+                TotalPages = 10,
+                PercentComplete = 40,
+                LastReadAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        File.Move(oldPath, newPath);
+        await _service.UpdateFilePathAsync(oldPath, newPath);
+
+        await using (var db = await dbContextFactory.CreateDbContextAsync())
+        {
+            Assert.DoesNotContain(db.ReadingProgresses, p => p.UserId == "test-user" && p.ContentId == oldPath);
+            Assert.Contains(db.ReadingProgresses, p => p.UserId == "test-user" && p.ContentId == newPath);
+        }
+    }
+
+    [Fact]
+    public async Task MarkFileReadAsync_SynchronizesStatusCurrentPageWithReadingProgress()
+    {
+        var filePath = Path.Combine(_testDirectory, "sync-progress.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+        await _service.SaveReadingProgressAsync(filePath, 5);
+
+        var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        await using (var db = await dbContextFactory.CreateDbContextAsync())
+        {
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "test-user",
+                ContentId = filePath,
+                CurrentPage = 5,
+                TotalPages = 12,
+                PercentComplete = (5d / 12d) * 100d,
+                LastReadAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await _service.MarkFileReadAsync(filePath, true);
+        Assert.Equal(12, await _service.GetReadingProgressAsync(filePath));
+
+        await _service.MarkFileReadAsync(filePath, false);
+        Assert.Equal(1, await _service.GetReadingProgressAsync(filePath));
+    }
+
+    [Fact]
     public async Task MarkFileRenamedAsync_SetFalse_UnmarksRenamed()
     {
         // Arrange
@@ -1391,4 +1456,3 @@ public class FileStoreServiceTests
         Assert.True(((ComicMetadataFieldFlags)row.Metadata.UserLockedFieldsMask).HasFlag(ComicMetadataFieldFlags.Issue));
     }
 }
-

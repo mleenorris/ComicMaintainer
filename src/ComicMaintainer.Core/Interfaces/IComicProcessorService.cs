@@ -147,7 +147,7 @@ public interface IComicProcessorService
     /// <summary>
     /// Delete a job from the job history
     /// </summary>
-    bool DeleteJob(Guid jobId);
+    Task<bool> DeleteJobAsync(Guid jobId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Cancel a running job

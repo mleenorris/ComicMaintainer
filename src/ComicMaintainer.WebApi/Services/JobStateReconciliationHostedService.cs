@@ -50,16 +50,16 @@ public class JobStateReconciliationHostedService : IHostedService
                     job.JobId, job.OperationName, job.ProcessedFiles + job.FailedFiles, job.TotalFiles);
             }
 
+            await _jobStateStore.PruneAsync(
+                DateTime.UtcNow - JobRetention,
+                JobRetentionCount,
+                cancellationToken);
+
             var jobs = await _jobStateStore.GetAllAsync(cancellationToken);
 
             _processor.RestoreJobs(jobs);
 
             _logger.LogInformation("Restored {Count} persisted job record(s)", jobs.Count);
-
-            await _jobStateStore.PruneAsync(
-                DateTime.UtcNow - JobRetention,
-                JobRetentionCount,
-                cancellationToken);
         }
         catch (Exception ex)
         {

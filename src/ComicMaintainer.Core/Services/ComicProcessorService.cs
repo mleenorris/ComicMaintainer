@@ -35,6 +35,8 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     private readonly ConcurrentDictionary<Guid, JobStatus> _lastPersistedStatus = new();
     private readonly ConcurrentDictionary<Guid, DateTime> _lastPersistedAt = new();
     private readonly ConcurrentDictionary<Guid, bool> _persistedTerminalJobs = new();
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _jobPersistenceLocks = new();
+    private readonly ConcurrentDictionary<Guid, bool> _deletedPersistedJobs = new();
 
     /// <summary>
     /// Minimum spacing between durable progress writes for a job that has not changed status.
@@ -1036,57 +1038,63 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             return;
         }
 
-        // Status broadcasts are fire-and-forget, so an early write can still be in flight when
-        // a short job finishes. Without this guard a late "queued" write could land after the
-        // terminal write and leave the job looking in-flight, so the next restart would report
-        // a job that actually completed as interrupted.
-        if (_persistedTerminalJobs.ContainsKey(snapshot.JobId))
+        await WithJobPersistenceLockAsync(snapshot.JobId, async () =>
         {
-            return;
-        }
-
-        var isTransition = !_lastPersistedStatus.TryGetValue(snapshot.JobId, out var lastStatus)
-            || lastStatus != snapshot.Status;
-
-        if (!isTransition)
-        {
-            var lastWrite = _lastPersistedAt.TryGetValue(snapshot.JobId, out var at) ? at : DateTime.MinValue;
-            if (DateTime.UtcNow - lastWrite < JobPersistenceInterval)
+            if (_deletedPersistedJobs.ContainsKey(snapshot.JobId))
             {
                 return;
             }
-        }
 
-        if (snapshot.IsTerminal && !_persistedTerminalJobs.TryAdd(snapshot.JobId, true))
-        {
-            // Another thread is already writing the terminal state for this job.
-            return;
-        }
-
-        try
-        {
-            await _jobStateStore.SaveAsync(snapshot);
-            _lastPersistedStatus[snapshot.JobId] = snapshot.Status;
-            _lastPersistedAt[snapshot.JobId] = DateTime.UtcNow;
-
-            if (snapshot.IsTerminal)
+            // Status broadcasts are fire-and-forget. Serialize per-job writes so a late queued/
+            // running save cannot land after a terminal one.
+            if (_persistedTerminalJobs.ContainsKey(snapshot.JobId))
             {
-                // The job will never change again, so stop tracking its throttle state.
-                _lastPersistedStatus.TryRemove(snapshot.JobId, out _);
-                _lastPersistedAt.TryRemove(snapshot.JobId, out _);
-            }
-        }
-        catch (Exception ex)
-        {
-            if (snapshot.IsTerminal)
-            {
-                // Let a retry write the final state rather than leaving it permanently blocked.
-                _persistedTerminalJobs.TryRemove(snapshot.JobId, out _);
+                return;
             }
 
-            // Never let a persistence problem abort the batch the user asked for.
-            _logger.LogWarning(ex, "Failed to persist state for job {JobId}", snapshot.JobId);
-        }
+            var isTransition = !_lastPersistedStatus.TryGetValue(snapshot.JobId, out var lastStatus)
+                || lastStatus != snapshot.Status;
+
+            if (!isTransition)
+            {
+                var lastWrite = _lastPersistedAt.TryGetValue(snapshot.JobId, out var at) ? at : DateTime.MinValue;
+                if (DateTime.UtcNow - lastWrite < JobPersistenceInterval)
+                {
+                    return;
+                }
+            }
+
+            if (snapshot.IsTerminal && !_persistedTerminalJobs.TryAdd(snapshot.JobId, true))
+            {
+                // Another thread is already writing the terminal state for this job.
+                return;
+            }
+
+            try
+            {
+                await _jobStateStore.SaveAsync(snapshot);
+                _lastPersistedStatus[snapshot.JobId] = snapshot.Status;
+                _lastPersistedAt[snapshot.JobId] = DateTime.UtcNow;
+
+                if (snapshot.IsTerminal)
+                {
+                    // The job will never change again, so stop tracking its throttle state.
+                    _lastPersistedStatus.TryRemove(snapshot.JobId, out _);
+                    _lastPersistedAt.TryRemove(snapshot.JobId, out _);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (snapshot.IsTerminal)
+                {
+                    // Let a retry write the final state rather than leaving it permanently blocked.
+                    _persistedTerminalJobs.TryRemove(snapshot.JobId, out _);
+                }
+
+                // Never let a persistence problem abort the batch the user asked for.
+                _logger.LogWarning(ex, "Failed to persist state for job {JobId}", snapshot.JobId);
+            }
+        });
     }
 
     /// <summary>
@@ -1125,7 +1133,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             .OrderByDescending(j => j.StartTime);
     }
 
-    public bool DeleteJob(Guid jobId)
+    public async Task<bool> DeleteJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
         if (!_jobs.TryGetValue(jobId, out var job))
         {
@@ -1139,23 +1147,31 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             return false;
         }
 
-        var removed = _jobs.TryRemove(jobId, out _);
-
-        if (removed && _jobStateStore != null)
+        if (_jobStateStore != null)
         {
             // Deleting only from memory would resurrect the job on the next restart.
-            _ = Task.Run(async () =>
+            await WithJobPersistenceLockAsync(jobId, async () =>
             {
+                _deletedPersistedJobs[jobId] = true;
                 try
                 {
-                    await _jobStateStore.DeleteAsync(jobId);
+                    await _jobStateStore.DeleteAsync(jobId, cancellationToken);
                 }
-                catch (Exception ex)
+                catch
                 {
-                    _logger.LogWarning(ex, "Failed to delete persisted state for job {JobId}", jobId);
+                    _deletedPersistedJobs.TryRemove(jobId, out _);
+                    throw;
                 }
+
+                _persistedTerminalJobs.TryRemove(jobId, out _);
+                _lastPersistedStatus.TryRemove(jobId, out _);
+                _lastPersistedAt.TryRemove(jobId, out _);
             });
         }
+
+        var removed = _jobs.TryRemove(jobId, out _);
+        _jobCancellationTokens.TryRemove(jobId, out _);
+        _jobSyncLocks.TryRemove(jobId, out _);
 
         return removed;
     }
@@ -1198,6 +1214,20 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     private object GetJobSyncLock(Guid jobId)
     {
         return _jobSyncLocks.GetOrAdd(jobId, static _ => new object());
+    }
+
+    private async Task WithJobPersistenceLockAsync(Guid jobId, Func<Task> action)
+    {
+        var gate = _jobPersistenceLocks.GetOrAdd(jobId, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync();
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default)

@@ -42,17 +42,7 @@ public class JobStateStore : IJobStateStore
 
         Apply(job, entity);
 
-        try
-        {
-            await db.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException ex)
-        {
-            // Job persistence is best-effort observability, never a reason to fail the batch
-            // the user actually asked for. Losing a progress write only means the job is
-            // reported as interrupted if the process dies before the next successful write.
-            _logger.LogWarning(ex, "Failed to persist state for job {JobId}", job.JobId);
-        }
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<ProcessingJob>> GetAllAsync(CancellationToken cancellationToken = default)

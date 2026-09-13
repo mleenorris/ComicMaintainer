@@ -1347,9 +1347,9 @@ public class FileStoreService : IFileStoreService
     }
 
     /// <summary>
-    /// Repoint every user's read status from <paramref name="oldPath"/> to
-    /// <paramref name="newPath"/> after a rename or move. Rows that already exist at the
-    /// destination for a user take precedence, so the stale source row is discarded.
+    /// Repoint every user's read status and reader progress from <paramref name="oldPath"/>
+    /// to <paramref name="newPath"/> after a rename or move. Rows that already exist at the
+    /// destination for a user take precedence, so stale source rows are merged or discarded.
     /// </summary>
     private async Task MoveUserReadStatusAsync(
         ComicMaintainerDbContext dbContext,
@@ -1365,11 +1365,6 @@ public class FileStoreService : IFileStoreService
         var sourceRows = await dbContext.UserFileReadStatuses
             .Where(e => e.FilePath == oldPath)
             .ToListAsync(cancellationToken);
-
-        if (sourceRows.Count == 0)
-        {
-            return;
-        }
 
         var destinationUserIds = await dbContext.UserFileReadStatuses
             .Where(e => e.FilePath == newPath)
@@ -1394,9 +1389,41 @@ public class FileStoreService : IFileStoreService
             InvalidateUserReadPaths(row.UserId);
         }
 
+        var sourceProgress = await dbContext.ReadingProgresses
+            .Where(e => e.ContentId == oldPath)
+            .ToListAsync(cancellationToken);
+
+        if (sourceProgress.Count > 0)
+        {
+            var destinationProgress = await dbContext.ReadingProgresses
+                .Where(e => e.ContentId == newPath)
+                .ToDictionaryAsync(e => e.UserId, e => e, StringComparer.Ordinal, cancellationToken);
+
+            foreach (var progress in sourceProgress)
+            {
+                if (destinationProgress.TryGetValue(progress.UserId, out var existing))
+                {
+                    existing.TotalPages = Math.Max(existing.TotalPages, progress.TotalPages);
+                    existing.CurrentPage = Math.Max(existing.CurrentPage, progress.CurrentPage);
+                    existing.PercentComplete = Math.Max(existing.PercentComplete, progress.PercentComplete);
+                    existing.CompletedAt = existing.CompletedAt.HasValue && progress.CompletedAt.HasValue
+                        ? (existing.CompletedAt > progress.CompletedAt ? existing.CompletedAt : progress.CompletedAt)
+                        : existing.CompletedAt ?? progress.CompletedAt;
+                    existing.LastReadAt = existing.LastReadAt > progress.LastReadAt ? existing.LastReadAt : progress.LastReadAt;
+                    existing.UpdatedAt = now;
+                    dbContext.ReadingProgresses.Remove(progress);
+                }
+                else
+                {
+                    progress.ContentId = newPath;
+                    progress.UpdatedAt = now;
+                }
+            }
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
         _logger.LogDebug(
-            "Moved read status for {Count} user(s): {OldPath} -> {NewPath}",
+            "Moved read status/progress for {Count} user(s): {OldPath} -> {NewPath}",
             sourceRows.Count, SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
     }
 
@@ -1661,6 +1688,9 @@ public class FileStoreService : IFileStoreService
             var rows = await dbContext.ReadingProgresses
                 .Where(p => p.UserId == userId && chunk.Contains(p.ContentId))
                 .ToListAsync(cancellationToken);
+            var statuses = await dbContext.UserFileReadStatuses
+                .Where(p => p.UserId == userId && chunk.Contains(p.FilePath))
+                .ToDictionaryAsync(p => p.FilePath, p => p, StringComparer.Ordinal, cancellationToken);
 
             foreach (var row in rows)
             {
@@ -1684,6 +1714,12 @@ public class FileStoreService : IFileStoreService
 
                 row.LastReadAt = now;
                 row.UpdatedAt = now;
+
+                if (statuses.TryGetValue(row.ContentId, out var status))
+                {
+                    status.CurrentPage = row.CurrentPage;
+                    status.UpdatedAt = now;
+                }
             }
         }
     }

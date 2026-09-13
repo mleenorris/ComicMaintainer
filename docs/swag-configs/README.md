@@ -203,7 +203,7 @@ environment:
 - Synchronize user information (email, display name) from Authelia
 - Map Authelia groups to application roles
 
-For detailed setup instructions, see the [Authelia Integration Guide](../../AUTHELIA.md).
+For detailed setup instructions, see the [Authelia Integration Guide](../AUTHELIA.md).
 
 ### Authentik
 ```nginx

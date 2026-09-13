@@ -3,14 +3,21 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
 WORKDIR /app
 EXPOSE 5000
 
-# Install system dependencies for file handling, unrar, and gosu for user switching
+# Install system dependencies for file handling, unrar, gosu for user switching, and curl
+# for the container health check.
 RUN apt-get update && apt-get install -y \
     unrar-free \
     p7zip-full \
     gosu \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+# Pin the build stage to the machine doing the building rather than the image being produced.
+# Without this, building the arm64 image on an amd64 runner would run the whole SDK under
+# QEMU emulation, which is dramatically slower. The compiler runs natively and is told which
+# runtime to emit via TARGETARCH instead.
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+ARG TARGETARCH
 WORKDIR /src
 
 # Copy solution and project files
@@ -19,9 +26,9 @@ COPY ["src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj", "src/ComicMain
 
 # Restore dependencies for each project
 WORKDIR "/src/src/ComicMaintainer.Core"
-RUN dotnet restore "ComicMaintainer.Core.csproj"
+RUN dotnet restore "ComicMaintainer.Core.csproj" -a "${TARGETARCH}"
 WORKDIR "/src/src/ComicMaintainer.WebApi"
-RUN dotnet restore "ComicMaintainer.WebApi.csproj"
+RUN dotnet restore "ComicMaintainer.WebApi.csproj" -a "${TARGETARCH}"
 
 # Copy source files
 WORKDIR "/src"
@@ -29,10 +36,11 @@ COPY ["src/", "src/"]
 
 # Build the application
 WORKDIR "/src/src/ComicMaintainer.WebApi"
-RUN dotnet build "ComicMaintainer.WebApi.csproj" -c Release -o /app/build
+RUN dotnet build "ComicMaintainer.WebApi.csproj" -c Release -a "${TARGETARCH}" -o /app/build
 
 FROM build AS publish
-RUN dotnet publish "ComicMaintainer.WebApi.csproj" -c Release -o /app/publish /p:UseAppHost=false
+ARG TARGETARCH
+RUN dotnet publish "ComicMaintainer.WebApi.csproj" -c Release -a "${TARGETARCH}" -o /app/publish /p:UseAppHost=false
 
 FROM base AS final
 WORKDIR /app
@@ -67,6 +75,13 @@ RUN mkdir -p /watched_dir /duplicates /Config && \
 
 # Expose web interface port
 EXPOSE 5000
+
+# Report container health from the application's own liveness probe. "/health" is used rather
+# than "/health/ready" deliberately: readiness also checks the database, and a transient
+# database problem should not make Docker restart an otherwise healthy process.
+# start-period covers first-run startup, which applies migrations.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl --fail --silent --show-error http://localhost:5000/health || exit 1
 
 # Use entrypoint script to handle dynamic user creation and permission management
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

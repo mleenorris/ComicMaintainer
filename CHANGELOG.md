@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Documentation reorganised.** The repository root had accumulated 69 markdown files, most of
+  them point-in-time fix write-ups and PR summaries, which buried the handful of documents
+  people actually look for. The root now keeps only `README.md`, `QUICKSTART.md`,
+  `CONTRIBUTING.md`, `SECURITY.md` and `CHANGELOG.md`; current reference material moved to
+  `docs/`, and superseded write-ups to `docs/archive/`. Nothing was deleted, all files were
+  moved with history preserved, and every internal link was updated.
+  - `docs/README.md` is now an accurate index of current documentation, and
+    `docs/archive/README.md` states plainly that its contents are unmaintained snapshots
+    rather than a description of current behaviour.
+
+- **Read/unread status is now per-user.** It previously lived in two global places
+  (`ComicFiles.IsRead` and the `FileReadStatuses` table), so in a multi-user deployment one
+  user marking an issue read flipped it for everyone, and that global state could disagree
+  with the per-user progress the reader itself showed. Read status and the resume page are
+  now stored per user in `UserFileReadStatuses`, and marking a file read/unread from the
+  library also updates that user's reader progress so "Continue Reading" stays consistent.
+  - Existing read state is migrated automatically. Because the old data does not record
+    *who* read a file, it is attributed to a single account: an `Admin` if one exists,
+    otherwise any user. Where per-user reader progress already existed it takes precedence,
+    so issues finished in the reader stay attributed to the user who actually read them.
+    **In a multi-user deployment, non-admin users may need to re-mark issues read.**
+  - Marking a file read or unread no longer requires the `CanModifyLibrary` policy, since it
+    only affects the calling user. `ReadOnly` users can now track their own progress. This
+    resolves the asymmetry noted in the previous release, where the reader's mark-read was
+    open but the library's bulk mark-read was treated as a library mutation.
+  - `FileReadStatusEntity` and `ComicFiles.IsRead` are retained but unused so the migration
+    can be rolled back; both are scheduled for removal in v3.0.
+
 ### Fixed
 - Per-file metadata is no longer zero padded. The ComicInfo `<Number>` (issue)
   field now stores the bare issue number (e.g. `12`, not `0012`) and the
@@ -19,6 +48,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retagged. Reverting such a series to automatic remains a no-op.
 
 ### Added
+- Multi-architecture Docker images. `linux/arm64` is now published alongside `linux/amd64`,
+  so the image runs natively on Apple Silicon and common ARM NAS/SBC hosts. The .NET build
+  runs natively on the build host and cross-compiles, so adding the second architecture does
+  not require emulating the whole SDK.
+- Container `HEALTHCHECK` in `Dockerfile.dotnet`, wired to the existing `/health` liveness
+  endpoint, so `docker ps` and orchestrators can see container health without extra
+  configuration. It deliberately uses `/health` rather than `/health/ready`: readiness also
+  checks the database, and a transient database problem should not cause a restart loop.
+- Dependabot configuration for NuGet, GitHub Actions and Docker base images, with Microsoft
+  runtime packages grouped so their coordinated releases arrive as a single pull request.
+- Batch processing jobs now survive a restart. Job state is persisted, and any job still
+  queued or running when the process stops is reported as `Interrupted` on the next startup,
+  along with how many files it had already processed.
+  - Previously a restart (including the app's own `POST /api/settings/restart`) discarded
+    in-flight jobs entirely, leaving the UI polling a job id the server no longer recognised
+    and showing a progress bar that never moved.
+  - Interrupted jobs are **not** resumed automatically: the batch operations are not
+    transactional, so re-running one could repeat side effects on files already handled. The
+    UI reports the interruption and the progress made so you can decide whether to re-run it.
+  - Jobs now record which operation created them, so an interrupted job can be described
+    meaningfully after a restart.
+  - Completed job records are pruned after 7 days, keeping the 50 most recent regardless of age.
 - Health check endpoint at `/health` and `/api/health` for Docker and Kubernetes orchestration
   - Returns 200 OK when healthy, 503 when unhealthy
   - Checks watched directory, database connectivity, and watcher process status

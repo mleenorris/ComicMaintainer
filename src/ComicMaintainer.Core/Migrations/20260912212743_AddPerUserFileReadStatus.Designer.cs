@@ -3,6 +3,7 @@ using System;
 using ComicMaintainer.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ComicMaintainer.Core.Migrations
 {
     [DbContext(typeof(ComicMaintainerDbContext))]
-    partial class ComicMaintainerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260912212743_AddPerUserFileReadStatus")]
+    partial class AddPerUserFileReadStatus
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "9.0.10");
@@ -253,67 +256,6 @@ namespace ComicMaintainer.Core.Migrations
                     b.HasIndex("Timestamp");
 
                     b.ToTable("ProcessingHistory");
-                });
-
-            modelBuilder.Entity("ComicMaintainer.Core.Data.ProcessingJobEntity", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("CurrentFile")
-                        .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime?>("EndTime")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ErrorsJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("FailedFiles")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("FilesJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("JobId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OperationName")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("ProcessedFiles")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("StartTime")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("TotalFiles")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("JobId")
-                        .IsUnique();
-
-                    b.HasIndex("StartTime");
-
-                    b.HasIndex("Status");
-
-                    b.ToTable("ProcessingJobs");
                 });
 
             modelBuilder.Entity("ComicMaintainer.Core.Data.ReaderPreferencesEntity", b =>

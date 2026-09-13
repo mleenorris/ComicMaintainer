@@ -17,6 +17,7 @@ public class FileStoreServiceTests
     private readonly string _testDirectory;
     private readonly IServiceProvider _serviceProvider;
     private readonly string _dbName;
+    private readonly TestUserContextAccessor _userContext = new("test-user");
 
     public FileStoreServiceTests()
     {
@@ -40,7 +41,8 @@ public class FileStoreServiceTests
         
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
-        _service = new FileStoreService(options, logger, dbContextFactory);
+        // Read state is per-user, so the service under test needs a user in scope.
+        _service = new FileStoreService(options, logger, dbContextFactory, userContext: _userContext);
     }
 
     [Fact]
@@ -875,6 +877,203 @@ public class FileStoreServiceTests
     }
 
     [Fact]
+    public async Task MarkFileReadAsync_ReadStatus_IsNotVisibleToOtherUsers()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+
+        // Act - the first user finishes the issue
+        await _service.MarkFileReadAsync(filePath, true);
+        var asFirstUser = (await _service.GetAllFilesAsync()).Single();
+
+        // ...and a second user looks at the same library
+        _userContext.UserId = "other-user";
+        var asSecondUser = (await _service.GetAllFilesAsync()).Single();
+
+        // Assert
+        Assert.True(asFirstUser.IsRead);
+        Assert.False(asSecondUser.IsRead);
+    }
+
+    [Fact]
+    public async Task MarkFilesReadAsync_BulkMark_IsNotVisibleToOtherUsers()
+    {
+        // Arrange
+        var file1 = Path.Combine(_testDirectory, "test1.cbz");
+        var file2 = Path.Combine(_testDirectory, "test2.cbz");
+        File.WriteAllText(file1, "content 1");
+        File.WriteAllText(file2, "content 2");
+        await _service.AddFileAsync(file1);
+        await _service.AddFileAsync(file2);
+
+        // Act
+        await _service.MarkFilesReadAsync(new[] { file1, file2 }, true);
+        _userContext.UserId = "other-user";
+
+        // Assert
+        var files = await _service.GetAllFilesAsync();
+        Assert.All(files, f => Assert.False(f.IsRead));
+    }
+
+    [Fact]
+    public async Task GetFilteredFilesAsync_ReadFilter_IsScopedToCurrentUser()
+    {
+        // Arrange
+        var readFile = Path.Combine(_testDirectory, "read.cbz");
+        var unreadFile = Path.Combine(_testDirectory, "unread.cbz");
+        File.WriteAllText(readFile, "content");
+        File.WriteAllText(unreadFile, "content");
+        await _service.AddFileAsync(readFile);
+        await _service.AddFileAsync(unreadFile);
+        await _service.MarkFileReadAsync(readFile, true);
+
+        // Act
+        var readForOwner = await _service.GetFilteredFilesAsync("read");
+        var unreadForOwner = await _service.GetFilteredFilesAsync("unread");
+
+        _userContext.UserId = "other-user";
+        var readForOther = await _service.GetFilteredFilesAsync("read");
+        var unreadForOther = await _service.GetFilteredFilesAsync("unread");
+
+        // Assert
+        Assert.Equal(readFile, Assert.Single(readForOwner).FilePath);
+        Assert.Equal(unreadFile, Assert.Single(unreadForOwner).FilePath);
+        Assert.Empty(readForOther);
+        Assert.Equal(2, unreadForOther.Count());
+    }
+
+    [Fact]
+    public async Task MarkFileReadAsync_NoUserInScope_IsIgnored()
+    {
+        // Arrange - background work (a scan, an audit) has no user
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+        _userContext.UserId = null;
+
+        // Act
+        await _service.MarkFileReadAsync(filePath, true);
+
+        // Assert - nothing was recorded, and nothing reads as read
+        var withoutUser = (await _service.GetAllFilesAsync()).Single();
+        Assert.False(withoutUser.IsRead);
+
+        _userContext.UserId = "test-user";
+        var withUser = (await _service.GetAllFilesAsync()).Single();
+        Assert.False(withUser.IsRead);
+    }
+
+    [Fact]
+    public async Task SaveReadingProgressAsync_ResumePosition_IsPerUser()
+    {
+        // Arrange
+        var filePath = Path.Combine(_testDirectory, "test.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+
+        // Act
+        await _service.SaveReadingProgressAsync(filePath, 12);
+        _userContext.UserId = "other-user";
+        var otherUserProgress = await _service.GetReadingProgressAsync(filePath);
+
+        _userContext.UserId = "test-user";
+        var ownerProgress = await _service.GetReadingProgressAsync(filePath);
+
+        // Assert - the second user starts at page 1, not where the first left off
+        Assert.Equal(1, otherUserProgress);
+        Assert.Equal(12, ownerProgress);
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_Rename_CarriesReadStatusToNewPath()
+    {
+        // Arrange
+        var oldPath = Path.Combine(_testDirectory, "old.cbz");
+        var newPath = Path.Combine(_testDirectory, "new.cbz");
+        File.WriteAllText(oldPath, "test content");
+        await _service.AddFileAsync(oldPath);
+        await _service.MarkFileReadAsync(oldPath, true);
+        await _service.SaveReadingProgressAsync(oldPath, 7);
+
+        // Act - the processor renames the file
+        File.Move(oldPath, newPath);
+        await _service.UpdateFilePathAsync(oldPath, newPath);
+
+        // Assert - read state and resume position follow the file
+        var file = (await _service.GetAllFilesAsync()).Single();
+        Assert.Equal(newPath, file.FilePath);
+        Assert.True(file.IsRead);
+        Assert.Equal(7, await _service.GetReadingProgressAsync(newPath));
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_Rename_MovesReadingProgressContentId()
+    {
+        var oldPath = Path.Combine(_testDirectory, "old-progress.cbz");
+        var newPath = Path.Combine(_testDirectory, "new-progress.cbz");
+        File.WriteAllText(oldPath, "test content");
+        await _service.AddFileAsync(oldPath);
+
+        var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        await using (var db = await dbContextFactory.CreateDbContextAsync())
+        {
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "test-user",
+                ContentId = oldPath,
+                CurrentPage = 4,
+                TotalPages = 10,
+                PercentComplete = 40,
+                LastReadAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        File.Move(oldPath, newPath);
+        await _service.UpdateFilePathAsync(oldPath, newPath);
+
+        await using (var db = await dbContextFactory.CreateDbContextAsync())
+        {
+            Assert.DoesNotContain(db.ReadingProgresses, p => p.UserId == "test-user" && p.ContentId == oldPath);
+            Assert.Contains(db.ReadingProgresses, p => p.UserId == "test-user" && p.ContentId == newPath);
+        }
+    }
+
+    [Fact]
+    public async Task MarkFileReadAsync_SynchronizesStatusCurrentPageWithReadingProgress()
+    {
+        var filePath = Path.Combine(_testDirectory, "sync-progress.cbz");
+        File.WriteAllText(filePath, "test content");
+        await _service.AddFileAsync(filePath);
+        await _service.SaveReadingProgressAsync(filePath, 5);
+
+        var dbContextFactory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        await using (var db = await dbContextFactory.CreateDbContextAsync())
+        {
+            db.ReadingProgresses.Add(new ReadingProgressEntity
+            {
+                UserId = "test-user",
+                ContentId = filePath,
+                CurrentPage = 5,
+                TotalPages = 12,
+                PercentComplete = (5d / 12d) * 100d,
+                LastReadAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        await _service.MarkFileReadAsync(filePath, true);
+        Assert.Equal(12, await _service.GetReadingProgressAsync(filePath));
+
+        await _service.MarkFileReadAsync(filePath, false);
+        Assert.Equal(1, await _service.GetReadingProgressAsync(filePath));
+    }
+
+    [Fact]
     public async Task MarkFileRenamedAsync_SetFalse_UnmarksRenamed()
     {
         // Arrange
@@ -1257,4 +1456,3 @@ public class FileStoreServiceTests
         Assert.True(((ComicMetadataFieldFlags)row.Metadata.UserLockedFieldsMask).HasFlag(ComicMetadataFieldFlags.Issue));
     }
 }
-

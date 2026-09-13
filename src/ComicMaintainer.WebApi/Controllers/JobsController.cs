@@ -79,6 +79,14 @@ public class JobsController : ControllerBase
         {
             var job = _processor.GetActiveJob();
             if (job == null)
+            {
+                // After restart, in-flight jobs are reconciled to Interrupted and are no longer
+                // "active", but the UI still needs one last status to explain why work stopped.
+                job = (_processor.GetAllJobs() ?? Enumerable.Empty<ProcessingJob>())
+                    .FirstOrDefault(j => j.Status == JobStatus.Interrupted);
+            }
+
+            if (job == null)
                 return Ok(new { active = false });
             
             // Return in snake_case format expected by frontend
@@ -104,7 +112,10 @@ public class JobsController : ControllerBase
 
     private string DetermineJobTitle(ProcessingJob job)
     {
-        // Determine a user-friendly title based on job characteristics
+        // Prefer the recorded operation, which survives a restart; fall back to the older
+        // status-only wording for jobs persisted before OperationName was tracked.
+        var operation = string.IsNullOrWhiteSpace(job.OperationName) ? null : job.OperationName;
+
         return job.Status switch
         {
             JobStatus.Queued when job.ProcessedFiles == 0 => "Processing Files...",
@@ -112,6 +123,9 @@ public class JobsController : ControllerBase
             JobStatus.Completed => $"Completed {job.TotalFiles} files",
             JobStatus.Failed => "Processing Failed",
             JobStatus.Cancelled => "Processing Cancelled",
+            JobStatus.Interrupted => operation == null
+                ? "Interrupted by restart"
+                : $"{operation} interrupted by restart",
             _ => "Processing..."
         };
     }
@@ -503,12 +517,12 @@ public class JobsController : ControllerBase
 
     // RESTful endpoint: DELETE /api/jobs/{jobId} - Delete a job
     [HttpDelete("{jobId}")]
-    public ActionResult DeleteJob(Guid jobId)
+    public async Task<ActionResult> DeleteJob(Guid jobId, CancellationToken cancellationToken)
     {
         try
         {
             _logger.LogInformation("Delete requested for job {JobId}", jobId);
-            var deleted = _processor.DeleteJob(jobId);
+            var deleted = await _processor.DeleteJobAsync(jobId, cancellationToken);
             if (!deleted)
                 return NotFound();
             

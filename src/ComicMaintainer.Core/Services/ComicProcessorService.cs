@@ -28,9 +28,20 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     private readonly ISeriesMetadataCacheService? _seriesMetadataCache;
     private readonly IProcessingHistoryService _historyService;
     private readonly ISeriesNameResolver? _seriesNameResolver;
+    private readonly IJobStateStore? _jobStateStore;
     private readonly ConcurrentDictionary<Guid, ProcessingJob> _jobs = new();
     private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _jobCancellationTokens = new();
     private readonly ConcurrentDictionary<Guid, object> _jobSyncLocks = new();
+    private readonly ConcurrentDictionary<Guid, JobStatus> _lastPersistedStatus = new();
+    private readonly ConcurrentDictionary<Guid, DateTime> _lastPersistedAt = new();
+    private readonly ConcurrentDictionary<Guid, bool> _persistedTerminalJobs = new();
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _jobPersistenceLocks = new();
+    private readonly ConcurrentDictionary<Guid, bool> _deletedPersistedJobs = new();
+
+    /// <summary>
+    /// Minimum spacing between durable progress writes for a job that has not changed status.
+    /// </summary>
+    private static readonly TimeSpan JobPersistenceInterval = TimeSpan.FromSeconds(5);
     private readonly SemaphoreSlim _processingSemaphore;
     private readonly int _maxWorkers;
     private bool _disposed;
@@ -52,7 +63,8 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         IEventBroadcaster? eventBroadcaster = null,
         IExternalSeriesMetadataService? externalSeriesMetadata = null,
         ISeriesMetadataCacheService? seriesMetadataCache = null,
-        ISeriesNameResolver? seriesNameResolver = null)
+        ISeriesNameResolver? seriesNameResolver = null,
+        IJobStateStore? jobStateStore = null)
     {
         _settingsMonitor = settings;
         _logger = logger;
@@ -62,6 +74,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         _externalSeriesMetadata = externalSeriesMetadata;
         _seriesMetadataCache = seriesMetadataCache;
         _seriesNameResolver = seriesNameResolver;
+        _jobStateStore = jobStateStore;
         _maxWorkers = Math.Max(1, _settingsMonitor.CurrentValue.MaxWorkers);
         _processingSemaphore = new SemaphoreSlim(_maxWorkers, _maxWorkers);
     }
@@ -552,6 +565,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         {
             JobId = jobId,
             Status = JobStatus.Queued,
+            OperationName = operationName,
             Files = fileList,
             TotalFiles = fileList.Count,
             StartTime = DateTime.UtcNow
@@ -991,9 +1005,10 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
 
     private async Task BroadcastJobStatusAsync(ProcessingJob job)
     {
+        var snapshot = CloneJob(job);
+
         if (_eventBroadcaster != null)
         {
-            var snapshot = CloneJob(job);
             await _eventBroadcaster.BroadcastJobUpdateAsync(
                 snapshot.JobId,
                 snapshot.Status.ToString().ToLower(),
@@ -1001,6 +1016,101 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                 snapshot.TotalFiles,
                 snapshot.ProcessedFiles,
                 snapshot.FailedFiles);
+        }
+
+        await PersistJobStateAsync(snapshot);
+    }
+
+    /// <summary>
+    /// Writes a job snapshot to durable storage, throttling mid-run progress writes.
+    /// </summary>
+    /// <remarks>
+    /// This runs after every file in a batch, so persisting unconditionally would add a
+    /// database write per file on top of the real work. Status changes and terminal states are
+    /// always written because they are what a restart needs to see; progress between them is
+    /// written at most once per <see cref="JobPersistenceInterval"/> and is only an optimisation
+    /// for how much progress an interrupted job appears to have made.
+    /// </remarks>
+    private async Task PersistJobStateAsync(ProcessingJob snapshot)
+    {
+        if (_jobStateStore == null)
+        {
+            return;
+        }
+
+        await WithJobPersistenceLockAsync(snapshot.JobId, async () =>
+        {
+            if (_deletedPersistedJobs.ContainsKey(snapshot.JobId))
+            {
+                return;
+            }
+
+            // Status broadcasts are fire-and-forget. Serialize per-job writes so a late queued/
+            // running save cannot land after a terminal one.
+            if (_persistedTerminalJobs.ContainsKey(snapshot.JobId))
+            {
+                return;
+            }
+
+            var isTransition = !_lastPersistedStatus.TryGetValue(snapshot.JobId, out var lastStatus)
+                || lastStatus != snapshot.Status;
+
+            if (!isTransition)
+            {
+                var lastWrite = _lastPersistedAt.TryGetValue(snapshot.JobId, out var at) ? at : DateTime.MinValue;
+                if (DateTime.UtcNow - lastWrite < JobPersistenceInterval)
+                {
+                    return;
+                }
+            }
+
+            if (snapshot.IsTerminal && !_persistedTerminalJobs.TryAdd(snapshot.JobId, true))
+            {
+                // Another thread is already writing the terminal state for this job.
+                return;
+            }
+
+            try
+            {
+                await _jobStateStore.SaveAsync(snapshot);
+                _lastPersistedStatus[snapshot.JobId] = snapshot.Status;
+                _lastPersistedAt[snapshot.JobId] = DateTime.UtcNow;
+
+                if (snapshot.IsTerminal)
+                {
+                    // The job will never change again, so stop tracking its throttle state.
+                    _lastPersistedStatus.TryRemove(snapshot.JobId, out _);
+                    _lastPersistedAt.TryRemove(snapshot.JobId, out _);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (snapshot.IsTerminal)
+                {
+                    // Let a retry write the final state rather than leaving it permanently blocked.
+                    _persistedTerminalJobs.TryRemove(snapshot.JobId, out _);
+                }
+
+                // Never let a persistence problem abort the batch the user asked for.
+                _logger.LogWarning(ex, "Failed to persist state for job {JobId}", snapshot.JobId);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Adds jobs recovered from durable storage so the API can still answer for them.
+    /// </summary>
+    /// <remarks>
+    /// Existing in-memory jobs win: a job created since startup is authoritative over whatever
+    /// the database recorded for it.
+    /// </remarks>
+    public void RestoreJobs(IEnumerable<ProcessingJob> jobs)
+    {
+        ArgumentNullException.ThrowIfNull(jobs);
+
+        foreach (var job in jobs)
+        {
+            _jobs.TryAdd(job.JobId, job);
         }
     }
 
@@ -1023,7 +1133,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             .OrderByDescending(j => j.StartTime);
     }
 
-    public bool DeleteJob(Guid jobId)
+    public async Task<bool> DeleteJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
         if (!_jobs.TryGetValue(jobId, out var job))
         {
@@ -1031,13 +1141,39 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
 
         var snapshot = CloneJob(job);
-        if (snapshot.Status == JobStatus.Running || snapshot.Status == JobStatus.Queued)
+        if (!snapshot.IsTerminal)
         {
             _logger.LogWarning("Cannot delete active job: {JobId}", jobId);
             return false;
         }
 
-        return _jobs.TryRemove(jobId, out _);
+        if (_jobStateStore != null)
+        {
+            // Deleting only from memory would resurrect the job on the next restart.
+            await WithJobPersistenceLockAsync(jobId, async () =>
+            {
+                _deletedPersistedJobs[jobId] = true;
+                try
+                {
+                    await _jobStateStore.DeleteAsync(jobId, cancellationToken);
+                }
+                catch
+                {
+                    _deletedPersistedJobs.TryRemove(jobId, out _);
+                    throw;
+                }
+
+                _persistedTerminalJobs.TryRemove(jobId, out _);
+                _lastPersistedStatus.TryRemove(jobId, out _);
+                _lastPersistedAt.TryRemove(jobId, out _);
+            });
+        }
+
+        var removed = _jobs.TryRemove(jobId, out _);
+        _jobCancellationTokens.TryRemove(jobId, out _);
+        _jobSyncLocks.TryRemove(jobId, out _);
+
+        return removed;
     }
 
     public bool CancelJob(Guid jobId)
@@ -1062,6 +1198,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             {
                 JobId = job.JobId,
                 Status = job.Status,
+                OperationName = job.OperationName,
                 Files = new List<string>(job.Files),
                 TotalFiles = job.TotalFiles,
                 ProcessedFiles = job.ProcessedFiles,
@@ -1077,6 +1214,20 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     private object GetJobSyncLock(Guid jobId)
     {
         return _jobSyncLocks.GetOrAdd(jobId, static _ => new object());
+    }
+
+    private async Task WithJobPersistenceLockAsync(Guid jobId, Func<Task> action)
+    {
+        var gate = _jobPersistenceLocks.GetOrAdd(jobId, static _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync();
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default)

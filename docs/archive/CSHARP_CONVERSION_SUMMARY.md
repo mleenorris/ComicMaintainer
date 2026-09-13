@@ -371,7 +371,7 @@ For existing users of the Python version:
 5. **Monitor**: Watch for any issues
 6. **Decommission**: Remove Python version after stabilization
 
-See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for detailed instructions.
+See [MIGRATION_GUIDE.md](../MIGRATION_GUIDE.md) for detailed instructions.
 
 ## Contribution Guidelines
 
@@ -413,8 +413,8 @@ The .NET version offers significant advantages in performance, type safety, and 
 ## References
 
 - [Original Python README](README.md)
-- [.NET Version README](README.DOTNET.md)
-- [Migration Guide](MIGRATION_GUIDE.md)
-- [MAUI Android Setup](MAUI_ANDROID_SETUP.md)
+- [.NET Version README](../README.DOTNET.md)
+- [Migration Guide](../MIGRATION_GUIDE.md)
+- [MAUI Android Setup](../MAUI_ANDROID_SETUP.md)
 - [.NET Documentation](https://docs.microsoft.com/dotnet/)
 - [ASP.NET Core Documentation](https://docs.microsoft.com/aspnet/core/)

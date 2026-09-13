@@ -237,7 +237,7 @@ Related documentation files:
 - [PWA_INSTALL_FIX_SUMMARY.md](PWA_INSTALL_FIX_SUMMARY.md) - Previous PWA scope fix
 - [PWA_FIX_COMPLETE_SUMMARY.md](PWA_FIX_COMPLETE_SUMMARY.md) - PWA icon configuration
 - [PWA_ICON_FIX.md](PWA_ICON_FIX.md) - Icon creation details
-- [docs/REVERSE_PROXY.md](docs/REVERSE_PROXY.md) - BASE_PATH deployment guide
+- [docs/REVERSE_PROXY.md](../REVERSE_PROXY.md) - BASE_PATH deployment guide
 - [README.md](README.md) - Full application documentation
 
 ## References

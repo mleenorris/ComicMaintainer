@@ -147,10 +147,17 @@ public interface IComicProcessorService
     /// <summary>
     /// Delete a job from the job history
     /// </summary>
-    bool DeleteJob(Guid jobId);
+    Task<bool> DeleteJobAsync(Guid jobId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Cancel a running job
     /// </summary>
     bool CancelJob(Guid jobId);
+
+    /// <summary>
+    /// Add jobs recovered from durable storage to the in-memory job list, so the API can still
+    /// answer for jobs that were created before the process restarted. Jobs already present in
+    /// memory are left untouched.
+    /// </summary>
+    void RestoreJobs(IEnumerable<ProcessingJob> jobs);
 }

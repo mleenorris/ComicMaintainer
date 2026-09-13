@@ -1,7 +1,7 @@
 
 # ComicTagger Watcher Service
 
-> **Note:** This is the Python-based version of ComicMaintainer. For the **primary .NET version (v2.0)** with improved performance, extensive testing, and modern architecture, see [README.DOTNET.md](README.DOTNET.md).
+> **Note:** This is the Python-based version of ComicMaintainer. For the **primary .NET version (v2.0)** with improved performance, extensive testing, and modern architecture, see [README.DOTNET.md](docs/README.DOTNET.md).
 
 This service automatically watches a directory for new or changed comic archive files (`.cbz`/`.cbr`), tags them using ComicTagger, and manages duplicates. It is designed to run in a Docker container and is fully automated. **The container supports custom user and group IDs (PUID/PGID) to ensure proper file permissions when working with host-mounted directories.**
 
@@ -264,7 +264,7 @@ The web interface can be installed as a standalone application on your device, p
 - Feels like a native app
 
 ### Performance
-- **Fast initial page load**: HTML reduced from 217KB to 43KB by extracting CSS/JS to external cached files (see [PERFORMANCE_IMPROVEMENT_INITIAL_LOAD.md](PERFORMANCE_IMPROVEMENT_INITIAL_LOAD.md))
+- **Fast initial page load**: HTML reduced from 217KB to 43KB by extracting CSS/JS to external cached files (see [PERFORMANCE_IMPROVEMENT_INITIAL_LOAD.md](docs/archive/PERFORMANCE_IMPROVEMENT_INITIAL_LOAD.md))
 - **Aggressive browser caching**: Static assets cached for 1 year, reducing repeat visit load time by 80%
 - **Optimized search and filtering**: Server-side processing with efficient database queries
 - **Search debouncing**: 300ms delay reduces API calls by 87% while typing
@@ -273,7 +273,7 @@ The web interface can be installed as a standalone application on your device, p
 - Pagination controls allow easy navigation through large libraries
 - Search and filters are applied server-side before pagination for efficient handling of large libraries
 - **SQLite-based file store**: File list is managed in a SQLite database for atomic operations, better concurrency, and excellent performance (160k+ lookups/sec, <3ms reads for 5000 files)
-- See [FILE_LIST_IMPROVEMENTS.md](FILE_LIST_IMPROVEMENTS.md), [docs/EVENT_BROADCASTING_SYSTEM.md](docs/EVENT_BROADCASTING_SYSTEM.md), and [docs/PROGRESS_CALLBACKS.md](docs/PROGRESS_CALLBACKS.md) for detailed performance metrics and architecture
+- See [FILE_LIST_IMPROVEMENTS.md](docs/archive/FILE_LIST_IMPROVEMENTS.md), [docs/EVENT_BROADCASTING_SYSTEM.md](docs/EVENT_BROADCASTING_SYSTEM.md), and [docs/PROGRESS_CALLBACKS.md](docs/PROGRESS_CALLBACKS.md) for detailed performance metrics and architecture
 
 ### Filename Format Configuration
 The filename format can be customized through the web interface Settings modal. The format uses placeholders that are replaced with actual metadata values:
@@ -746,12 +746,12 @@ The application is 100% event-driven with zero polling:
 - **`master`** - Main development branch with the latest features and updates
 - **`stable`** - Stable branch based on PR #344 (mobile action bar fix), providing a tested baseline for production deployments
 
-See [STABLE_BRANCH_CREATION.md](STABLE_BRANCH_CREATION.md) for details about the stable branch.
+See [STABLE_BRANCH_CREATION.md](docs/STABLE_BRANCH_CREATION.md) for details about the stable branch.
 
 ## Documentation
 
 - **[API Documentation](docs/API.md)** - Complete REST API reference
-- **[Postman API Collection](POSTMAN_API_COLLECTION.md)** - Import into Postman for easy API testing (.NET version)
+- **[Postman API Collection](docs/POSTMAN_API_COLLECTION.md)** - Import into Postman for easy API testing (.NET version)
 - **[HTTPS Setup Guide](docs/HTTPS_SETUP.md)** - Configure HTTPS with native support or reverse proxy
 - **[Reverse Proxy Setup Guide](docs/REVERSE_PROXY.md)** - Deploy behind SWAG, Nginx, Traefik, Apache, or Caddy
 - **[Authelia Integration Guide](docs/AUTHELIA.md)** - Configure Authelia for 2FA and SSO authentication
@@ -759,8 +759,8 @@ See [STABLE_BRANCH_CREATION.md](STABLE_BRANCH_CREATION.md) for details about the
 - **[Performance Tuning Guide](docs/PERFORMANCE_TUNING.md)** - Optimize performance for your system
 - **[Automated Versioning](docs/AUTOMATED_VERSIONING.md)** - How automatic version bumping works
 - **[Contributing Guide](CONTRIBUTING.md)** - How to contribute to the project
-- **[Testing Policy](TESTING_POLICY.md)** - Testing requirements and best practices
-- **[Debug Logging Guide](DEBUG_LOGGING_GUIDE.md)** - Debug logging and error reporting
+- **[Testing Policy](docs/TESTING_POLICY.md)** - Testing requirements and best practices
+- **[Debug Logging Guide](docs/DEBUG_LOGGING_GUIDE.md)** - Debug logging and error reporting
 - **[Security Policy](SECURITY.md)** - Security guidelines and vulnerability reporting
 - **[Changelog](CHANGELOG.md)** - Version history and changes
 

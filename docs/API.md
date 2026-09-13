@@ -545,5 +545,5 @@ fetch('http://localhost:5000/api/jobs/process-all', {
 
 For questions or issues, please:
 - Check the [README](../README.md)
-- Review the [DEBUG_LOGGING_GUIDE](../DEBUG_LOGGING_GUIDE.md)
+- Review the [DEBUG_LOGGING_GUIDE](DEBUG_LOGGING_GUIDE.md)
 - Open an issue on GitHub

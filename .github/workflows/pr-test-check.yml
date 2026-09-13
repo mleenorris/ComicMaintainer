@@ -93,7 +93,7 @@ jobs:
             - If tests aren't applicable, explain why in the PR description
             - Reviewers may approve PRs without tests in exceptional cases
             
-            📚 See [TESTING_POLICY.md](https://github.com/${{ github.repository }}/blob/${{ github.head_ref }}/TESTING_POLICY.md) for detailed requirements.
+            📚 See [TESTING_POLICY.md](https://github.com/${{ github.repository }}/blob/${{ github.head_ref }}/docs/TESTING_POLICY.md) for detailed requirements.
             
             ---
             *This is an automated reminder. If you've added tests but they weren't detected, please verify that test files are in the \`tests/\` directory.*`;

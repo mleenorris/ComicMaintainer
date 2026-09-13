@@ -47,6 +47,18 @@ public class ComicFile
     /// files that need re-normalization without re-reading every archive.
     /// </summary>
     public int SeriesMetadataVersion { get; set; }
+
+    /// <summary>
+    /// Creates a field-for-field copy sharing the same <see cref="Metadata"/> instance.
+    /// </summary>
+    /// <remarks>
+    /// The file store keeps a single <see cref="ComicFile"/> per path and hands it to every
+    /// caller. Per-user state such as <see cref="IsRead"/> must therefore be stamped onto a
+    /// copy, or one user's read status would be visible to the next request. Metadata is
+    /// intentionally shared rather than deep-copied: callers already treat it as read-only,
+    /// and cloning it for every file would make listing a large library appreciably slower.
+    /// </remarks>
+    public ComicFile ShallowCopy() => (ComicFile)MemberwiseClone();
 }
 
 /// <summary>
@@ -126,7 +138,15 @@ public enum JobStatus
     Running,
     Completed,
     Failed,
-    Cancelled
+    Cancelled,
+
+    /// <summary>
+    /// The job was still queued or running when the process stopped, so its real outcome is
+    /// unknown. Assigned during startup reconciliation, never by the job itself. Terminal:
+    /// an interrupted job is not resumed, because the batch operations are not transactional
+    /// and re-running them blindly could repeat side effects.
+    /// </summary>
+    Interrupted
 }
 
 /// <summary>
@@ -136,6 +156,14 @@ public class ProcessingJob
 {
     public Guid JobId { get; set; }
     public JobStatus Status { get; set; }
+
+    /// <summary>
+    /// The batch operation that created this job (for example "ProcessAll"). Used to describe
+    /// the job in the UI, which matters most after a restart when an interrupted job is shown
+    /// without any of the client-side context that originally launched it.
+    /// </summary>
+    public string OperationName { get; set; } = string.Empty;
+
     public List<string> Files { get; set; } = new();
     public int TotalFiles { get; set; }
     public int ProcessedFiles { get; set; }
@@ -144,4 +172,12 @@ public class ProcessingJob
     public DateTime? EndTime { get; set; }
     public string? CurrentFile { get; set; }
     public Dictionary<string, string> Errors { get; set; } = new();
+
+    /// <summary>
+    /// True once the job has reached a state it can never leave.
+    /// </summary>
+    public bool IsTerminal => Status is JobStatus.Completed
+        or JobStatus.Failed
+        or JobStatus.Cancelled
+        or JobStatus.Interrupted;
 }

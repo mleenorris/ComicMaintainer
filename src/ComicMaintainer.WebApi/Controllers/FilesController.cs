@@ -5,6 +5,7 @@ using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.WebApi.Services;
+using ComicMaintainer.WebApi.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -2845,6 +2846,7 @@ public class FilesController : ControllerBase
     /// Mark a single file as read or unread
     /// </summary>
     [HttpPost("~/api/files/{encodedFilePath}/read")]
+    [PerUserWriteOperation]
     public async Task<ActionResult> MarkFileRead(string encodedFilePath, [FromBody] ReadStatusRequest request, CancellationToken cancellationToken = default)
     {
         try
@@ -2871,6 +2873,7 @@ public class FilesController : ControllerBase
     /// Mark multiple files as read or unread
     /// </summary>
     [HttpPost("~/api/files/read-batch")]
+    [PerUserWriteOperation]
     public async Task<ActionResult> MarkFilesReadBatch([FromBody] ReadBatchRequest request, CancellationToken cancellationToken = default)
     {
         try

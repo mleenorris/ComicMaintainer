@@ -219,7 +219,7 @@ If you still see "Not Secure" warnings:
    - Restart browser
 
 4. **Review documentation**
-   - See [docs/REVERSE_PROXY.md](docs/REVERSE_PROXY.md) for detailed examples
+   - See [docs/REVERSE_PROXY.md](../REVERSE_PROXY.md) for detailed examples
    - Check the troubleshooting section for your specific reverse proxy
 
 ## Related Issues

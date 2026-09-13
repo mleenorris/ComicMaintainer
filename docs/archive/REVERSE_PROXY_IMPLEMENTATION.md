@@ -247,7 +247,7 @@ Total Changes: +815 lines, -1 line
 ## Next Steps
 
 ### For Users
-1. Review the [Reverse Proxy Guide](docs/REVERSE_PROXY.md)
+1. Review the [Reverse Proxy Guide](../REVERSE_PROXY.md)
 2. Choose your reverse proxy solution (Nginx, Traefik, Apache, or Caddy)
 3. Follow the configuration example for your chosen proxy
 4. Set BASE_PATH if deploying to a subdirectory

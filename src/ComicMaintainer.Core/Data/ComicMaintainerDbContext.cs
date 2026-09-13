@@ -18,7 +18,10 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
 
     public DbSet<ComicFileEntity> ComicFiles { get; set; } = null!;
     public DbSet<ProcessingHistoryEntity> ProcessingHistory { get; set; } = null!;
+#pragma warning disable CS0618 // FileReadStatuses is retained for migration rollback only.
     public DbSet<FileReadStatusEntity> FileReadStatuses { get; set; } = null!;
+#pragma warning restore CS0618
+    public DbSet<UserFileReadStatusEntity> UserFileReadStatuses { get; set; } = null!;
     public DbSet<ReadingProgressEntity> ReadingProgresses { get; set; } = null!;
     public DbSet<ReaderPreferencesEntity> ReaderPreferences { get; set; } = null!;
     public DbSet<UserPreferencesEntity> UserPreferences { get; set; } = null!;
@@ -26,6 +29,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<SeriesMetadataCacheEntity> SeriesMetadataCache { get; set; } = null!;
     public DbSet<ScheduledJobEntity> ScheduledJobs { get; set; } = null!;
     public DbSet<MetadataAuditFindingEntity> MetadataAuditFindings { get; set; } = null!;
+    public DbSet<ProcessingJobEntity> ProcessingJobs { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -118,7 +122,8 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.AfterVolume).HasMaxLength(50);
         });
 
-        // Configure FileReadStatusEntity
+        // Configure FileReadStatusEntity (legacy; see UserFileReadStatusEntity)
+#pragma warning disable CS0618
         modelBuilder.Entity<FileReadStatusEntity>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -127,6 +132,35 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.HasIndex(e => e.FilePath).IsUnique();
             entity.HasIndex(e => e.IsRead);
             entity.HasIndex(e => e.LastReadDate);
+        });
+#pragma warning restore CS0618
+
+        // Configure UserFileReadStatusEntity
+        modelBuilder.Entity<UserFileReadStatusEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.UserId).IsRequired().HasMaxLength(450);
+            entity.Property(e => e.FilePath).IsRequired().HasMaxLength(2048);
+            entity.Property(e => e.CurrentPage).HasDefaultValue(1);
+            entity.HasIndex(e => new { e.UserId, e.FilePath }).IsUnique();
+            // Covers the "read"/"unread" library filter, which is always scoped to one user.
+            entity.HasIndex(e => new { e.UserId, e.IsRead });
+            // Lets a file deletion/rename clean up every user's row in one statement.
+            entity.HasIndex(e => e.FilePath);
+        });
+
+        // Configure ProcessingJobEntity
+        modelBuilder.Entity<ProcessingJobEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.JobId).IsRequired();
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.OperationName).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.CurrentFile).HasMaxLength(2048);
+            entity.HasIndex(e => e.JobId).IsUnique();
+            // Startup reconciliation scans for non-terminal jobs; job listing orders by start time.
+            entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => e.StartTime);
         });
 
         // Configure ReadingProgressEntity
@@ -297,8 +331,15 @@ public class ProcessingHistoryEntity
 }
 
 /// <summary>
-/// Database entity for file read status tracking
+/// Database entity for file read status tracking.
 /// </summary>
+/// <remarks>
+/// Superseded by <see cref="UserFileReadStatusEntity"/>, which scopes the same state to a
+/// user. Retained so the AddPerUserFileReadStatus migration is reversible and so an
+/// operator can roll back to a previous release without losing read state; it is no longer
+/// read or written by the application and can be dropped in a future major version.
+/// </remarks>
+[Obsolete("Use UserFileReadStatusEntity. Retained only for migration rollback; scheduled for removal in v3.0.")]
 public class FileReadStatusEntity
 {
     public int Id { get; set; }
@@ -307,6 +348,65 @@ public class FileReadStatusEntity
     public int CurrentPage { get; set; } = 1; // Track current page for resuming reading
     public DateTime? LastReadDate { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Database entity for per-user file read status and resume position.
+/// </summary>
+/// <remarks>
+/// Read state used to live on <c>ComicFileEntity.IsRead</c> and in
+/// <see cref="FileReadStatusEntity"/>, both of which were global: in a multi-user
+/// deployment one user marking an issue read flipped it for everyone, and the global state
+/// could disagree with the per-user <see cref="ReadingProgressEntity"/> shown by the reader.
+/// This entity is now the single source of truth for "has this user read this file", and is
+/// kept consistent with <see cref="ReadingProgressEntity"/> by
+/// <c>IFileStoreService.MarkFileReadAsync</c>.
+/// </remarks>
+public class UserFileReadStatusEntity
+{
+    public int Id { get; set; }
+    public string UserId { get; set; } = string.Empty;
+    public string FilePath { get; set; } = string.Empty;
+    public bool IsRead { get; set; }
+    public int CurrentPage { get; set; } = 1;
+    public DateTime? LastReadDate { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Database entity for batch processing jobs.
+/// </summary>
+/// <remarks>
+/// Jobs are held in memory while they run, but that state used to be lost on restart: the UI
+/// would keep polling a job id the server no longer knew about and simply hang on a stale
+/// progress bar. Persisting jobs lets startup reconciliation mark anything left non-terminal
+/// as <see cref="JobStatus.Interrupted"/>, so the UI gets a definite answer.
+///
+/// Progress is written on state transitions and otherwise throttled, so this table is not a
+/// per-file write log; the durable per-file record remains
+/// <see cref="ProcessingHistoryEntity"/>.
+/// </remarks>
+public class ProcessingJobEntity
+{
+    public int Id { get; set; }
+    public Guid JobId { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string OperationName { get; set; } = string.Empty;
+
+    /// <summary>JSON array of the file paths in the batch.</summary>
+    public string FilesJson { get; set; } = "[]";
+
+    /// <summary>JSON object mapping file path to error message.</summary>
+    public string ErrorsJson { get; set; } = "{}";
+
+    public int TotalFiles { get; set; }
+    public int ProcessedFiles { get; set; }
+    public int FailedFiles { get; set; }
+    public DateTime StartTime { get; set; }
+    public DateTime? EndTime { get; set; }
+    public string? CurrentFile { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
 

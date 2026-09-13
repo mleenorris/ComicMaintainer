@@ -2,6 +2,15 @@
         // (before this external JS is loaded) to support Flask template variable injection.
         // They are available globally when this script executes.
         
+        // Job statuses a job can never leave. 'interrupted' means the server restarted while
+        // the job was in flight; like the other terminal states it must stop polling, or the
+        // UI would poll forever for a job that will never progress again.
+        const TERMINAL_JOB_STATUSES = ['completed', 'failed', 'cancelled', 'interrupted'];
+
+        function isTerminalJobStatus(status) {
+            return TERMINAL_JOB_STATUSES.includes(status);
+        }
+
         // Helper function to decode JWT token and extract expiration
         function decodeJwtToken(token) {
             try {
@@ -650,7 +659,7 @@
             updateProgress(processed, total, successCount, errorCount);
             
             // Handle job completion
-            if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+            if (isTerminalJobStatus(status)) {
                 console.log(`SSE: Job ${jobId} finished with status: ${status}`);
                 scheduleLibraryHealthRefresh(250);
                 
@@ -690,6 +699,15 @@
                         hasActiveJob = false;
                         currentJobTitle = null;
                         setTimeout(closeProgressModal, 2000);
+                    } else if (status === 'interrupted') {
+                        document.getElementById('progressTitle').textContent =
+                            `Interrupted - the server restarted after ${processed} of ${total} items`;
+                        completeProgress();
+                        hasActiveJob = false;
+                        currentJobTitle = null;
+                        // Left open longer than the other outcomes: the job did not finish and
+                        // the user may need to re-run it, so the message should not flash past.
+                        setTimeout(closeProgressModal, 5000);
                     }
                 }, 500);
             }
@@ -5609,7 +5627,7 @@
                 }
                 
                 // Handle completion states
-                if (status.status === 'completed' || status.status === 'failed' || status.status === 'cancelled') {
+                if (isTerminalJobStatus(status.status)) {
                     console.log(`[JOB ${jobId}] Job is ${status.status}, triggering completion handler`);
                     
                     // Simulate an SSE event to trigger completion logic
@@ -5775,6 +5793,16 @@
                     // Job was cancelled
                     console.log(`[JOB RESUME] Job ${activeJobId} was cancelled`);
                     showMessage('Batch processing was cancelled', 'warning');
+                } else if (status.status === 'interrupted') {
+                    // The server restarted mid-job. Report how far it got so the user can
+                    // decide whether to run it again; it is not resumed automatically.
+                    console.warn(`[JOB RESUME] Job ${activeJobId} was interrupted by a restart`);
+                    const processed = (status.processed_items || 0) + (status.failed_items || 0);
+                    const total = status.total_items || 0;
+                    showMessage(
+                        `Batch processing was interrupted by a server restart after ${processed} of ${total} files. Re-run it to process the rest.`,
+                        'warning');
+                    await loadActiveLibraryView(1, true);
                 }
             } catch (error) {
                 // Network error or other exception
@@ -8370,7 +8398,7 @@
                     const job = await response.json();
                     renderMetadataRefreshToast(jobId, label, job);
                     const status = (job.status || '').toString().toLowerCase();
-                    if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+                    if (isTerminalJobStatus(status)) {
                         metadataRefreshJobs.delete(jobId);
                         // Final library refresh + provider health update.
                         if (typeof loadSeriesLibrary === 'function') {
@@ -8418,7 +8446,7 @@
                 <div class="metadata-refresh-toast-bar"><div class="metadata-refresh-toast-bar-fill" style="width:${pct}%"></div></div>
                 <div class="metadata-refresh-toast-meta">${processed}/${total} · ✓ ${successes} · ✗ ${failures}${current ? ` · now: ${escapeHtml(current)}` : ''}</div>
             `;
-            if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+            if (isTerminalJobStatus(status)) {
                 toast.classList.add('metadata-refresh-toast--done');
                 setTimeout(() => { toast.remove(); }, 6000);
             }

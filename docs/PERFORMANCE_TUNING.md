@@ -390,5 +390,5 @@ Monitor the application using logs and health checks, and adjust settings increm
 
 For additional help, see:
 - [README.md](../README.md) - General usage documentation
-- [DEBUG_LOGGING_GUIDE.md](../DEBUG_LOGGING_GUIDE.md) - Debugging guide
+- [DEBUG_LOGGING_GUIDE.md](DEBUG_LOGGING_GUIDE.md) - Debugging guide
 - [CONTRIBUTING.md](../CONTRIBUTING.md) - Development guide

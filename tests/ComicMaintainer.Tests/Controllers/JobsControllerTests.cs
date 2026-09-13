@@ -89,6 +89,7 @@ public class JobsControllerTests
     {
         // Arrange
         _mockProcessor.Setup(p => p.GetActiveJob()).Returns((ProcessingJob?)null);
+        _mockProcessor.Setup(p => p.GetAllJobs()).Returns(new List<ProcessingJob>());
 
         // Act
         var result = _controller.GetActiveJob();
@@ -96,6 +97,29 @@ public class JobsControllerTests
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.NotNull(okResult.Value);
+    }
+
+    [Fact]
+    public void GetActiveJob_WhenNoRunningJobButInterruptedExists_ReturnsInterruptedJob()
+    {
+        var interrupted = new ProcessingJob
+        {
+            JobId = Guid.NewGuid(),
+            Status = JobStatus.Interrupted,
+            TotalFiles = 10,
+            ProcessedFiles = 3,
+            FailedFiles = 1
+        };
+
+        _mockProcessor.Setup(p => p.GetActiveJob()).Returns((ProcessingJob?)null);
+        _mockProcessor.Setup(p => p.GetAllJobs()).Returns(new List<ProcessingJob> { interrupted });
+
+        var result = _controller.GetActiveJob();
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var json = JObject.FromObject(okResult.Value!);
+        Assert.Equal(interrupted.JobId.ToString(), json["job_id"]!.ToString());
+        Assert.Equal("interrupted", json["status"]!.ToString());
     }
 
     [Fact]
@@ -406,43 +430,45 @@ public class JobsControllerTests
     }
 
     [Fact]
-    public void DeleteJob_ExistingJob_ReturnsNoContent()
+    public async Task DeleteJob_ExistingJob_ReturnsNoContent()
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        _mockProcessor.Setup(p => p.DeleteJob(jobId)).Returns(true);
+        _mockProcessor.Setup(p => p.DeleteJobAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
 
         // Act
-        var result = _controller.DeleteJob(jobId);
+        var result = await _controller.DeleteJob(jobId, CancellationToken.None);
 
         // Assert
         Assert.IsType<NoContentResult>(result);
-        _mockProcessor.Verify(p => p.DeleteJob(jobId), Times.Once);
+        _mockProcessor.Verify(p => p.DeleteJobAsync(jobId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public void DeleteJob_NonExistentJob_ReturnsNotFound()
+    public async Task DeleteJob_NonExistentJob_ReturnsNotFound()
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        _mockProcessor.Setup(p => p.DeleteJob(jobId)).Returns(false);
+        _mockProcessor.Setup(p => p.DeleteJobAsync(jobId, It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
         // Act
-        var result = _controller.DeleteJob(jobId);
+        var result = await _controller.DeleteJob(jobId, CancellationToken.None);
 
         // Assert
         Assert.IsType<NotFoundResult>(result);
     }
 
     [Fact]
-    public void DeleteJob_WhenExceptionThrown_ReturnsInternalServerError()
+    public async Task DeleteJob_WhenExceptionThrown_ReturnsInternalServerError()
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        _mockProcessor.Setup(p => p.DeleteJob(jobId)).Throws(new InvalidOperationException("Test error"));
+        _mockProcessor
+            .Setup(p => p.DeleteJobAsync(jobId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Test error"));
 
         // Act
-        var result = _controller.DeleteJob(jobId);
+        var result = await _controller.DeleteJob(jobId, CancellationToken.None);
 
         // Assert
         var statusCodeResult = Assert.IsType<ObjectResult>(result);

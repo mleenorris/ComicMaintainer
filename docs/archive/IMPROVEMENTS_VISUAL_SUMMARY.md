@@ -343,6 +343,6 @@ These improvements transform ComicMaintainer from a functional project into a **
 
 **For detailed information, see:**
 - [IMPROVEMENTS_SUMMARY.md](IMPROVEMENTS_SUMMARY.md) - Complete technical details
-- [CHANGELOG.md](CHANGELOG.md) - Version history
-- [CONTRIBUTING.md](CONTRIBUTING.md) - How to contribute
-- [docs/API.md](docs/API.md) - API reference
+- [CHANGELOG.md](../../CHANGELOG.md) - Version history
+- [CONTRIBUTING.md](../../CONTRIBUTING.md) - How to contribute
+- [docs/API.md](../API.md) - API reference

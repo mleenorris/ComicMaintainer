@@ -145,5 +145,5 @@ docker run -e PUID=$(id -u) -e PGID=$(id -g) \
 ## Related Documentation
 
 - [Docker Deployment Guide](DOCKER_DEPLOYMENT_DOTNET.md)
-- [Security Fixes](SECURITY_FIXES_DOTNET.md)
-- [.NET Implementation Summary](DOTNET_IMPLEMENTATION_SUMMARY.md)
+- [Security Fixes](archive/SECURITY_FIXES_DOTNET.md)
+- [.NET Implementation Summary](archive/DOTNET_IMPLEMENTATION_SUMMARY.md)

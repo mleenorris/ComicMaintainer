@@ -53,6 +53,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-dotnet-
       
+      # Registers QEMU so the runner can execute arm64 binaries. Required because the final
+      # image stage installs system packages with apt-get, which runs under the target
+      # architecture; without this the arm64 build fails with "exec format error".
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -72,7 +78,9 @@ jobs:
           tags: ${{ steps.docker_tags.outputs.tags }}
           cache-from: type=local,src=/tmp/.buildx-cache-dotnet
           cache-to: type=local,dest=/tmp/.buildx-cache-dotnet
-          platforms: linux/amd64
+          # arm64 covers Apple Silicon and common NAS/SBC hosts. The build stage compiles
+          # natively for the runner and cross-targets, so this does not require emulation.
+          platforms: linux/amd64,linux/arm64
           
       - name: Image digest
         if: github.event_name != 'pull_request'

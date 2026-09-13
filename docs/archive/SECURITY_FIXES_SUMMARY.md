@@ -551,7 +551,7 @@ The application is now secure and ready for production deployment. Regular secur
 ## Support
 
 For security questions or to report vulnerabilities:
-- See [SECURITY.md](SECURITY.md) for vulnerability reporting
+- See [SECURITY.md](../../SECURITY.md) for vulnerability reporting
 - Create GitHub issue for general security questions
 - Use GitHub Security Advisories for sensitive reports
 

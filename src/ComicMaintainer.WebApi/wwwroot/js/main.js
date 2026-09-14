@@ -1726,7 +1726,7 @@
                 <div class="overview-card">
                     <button class="series-card overview-series-card" type="button" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
                         <div class="series-cover-wrapper">
-                            <img class="series-cover" data-protected-image="${escapeHtml(cover)}" data-protected-image-fallback="${escapeHtml(fallback)}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                            <img class="series-cover" data-protected-image="${escapeHtml(cover)}" data-protected-image-fallback="${escapeHtml(fallback)}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                             <div class="series-cover-overlay"></div>
                             <span class="series-count-badge">${series.issue_count}</span>
                             ${renderLookupStatusBadge(series)}
@@ -2513,6 +2513,37 @@
             const menu = document.getElementById('settingsDropdownMenu');
             menu.classList.remove('show');
         }
+
+        // Keep aria-expanded on the header menu triggers in sync with the
+        // menu's visual state. The menus are opened/closed from many places
+        // (toggles, item handlers, click-away, Escape), so instead of touching
+        // every call site we observe the menu's class attribute.
+        function initDropdownAriaExpandedSync() {
+            const pairs = [
+                ['settingsMenuToggle', 'settingsDropdownMenu'],
+                ['headerFilterToggle', 'headerFilterMenu'],
+                ['headerSortToggle', 'headerSortMenu']
+            ];
+
+            pairs.forEach(([toggleId, menuId]) => {
+                const toggle = document.getElementById(toggleId);
+                const menu = document.getElementById(menuId);
+                if (!toggle || !menu) return;
+
+                const sync = () => {
+                    toggle.setAttribute('aria-expanded', menu.classList.contains('show') ? 'true' : 'false');
+                };
+
+                sync();
+
+                if (typeof MutationObserver !== 'undefined') {
+                    new MutationObserver(sync).observe(menu, {
+                        attributes: true,
+                        attributeFilter: ['class']
+                    });
+                }
+            });
+        }
         
         async function scanUnmarkedFiles() {
             try {
@@ -2882,7 +2913,7 @@
                         <button class="series-card${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
                             ${renderSeriesSelectBox(series)}
                             <div class="series-cover-wrapper">
-                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                 <div class="series-cover-overlay"></div>
                                 <span class="series-count-badge">${series.issue_count}</span>
                                 ${renderLookupStatusBadge(series)}
@@ -2906,7 +2937,7 @@
                         <button class="series-card series-card--titled${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
                             ${renderSeriesSelectBox(series)}
                             <div class="series-cover-wrapper">
-                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                 <span class="series-count-badge">${series.issue_count}</span>
                                 ${renderLookupStatusBadge(series)}
                             </div>
@@ -2930,7 +2961,7 @@
                         <button class="series-list-row${selectedSeries.has(series.id) ? ' series-list-row--selected' : ''}" type="button" role="listitem" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
                             ${renderSeriesSelectBox(series)}
                             <div class="series-list-thumb-wrapper">
-                                <img class="series-list-thumb" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                                <img class="series-list-thumb" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                             </div>
                             <div class="series-list-info">
                                 <h3 class="series-list-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
@@ -3517,7 +3548,7 @@
                                     ${issue.duplicate ? `<span class="series-issue-duplicate-badge" title="Duplicate">🔁 Duplicate</span>` : ''}
                                     <span class="series-issue-read-corner series-issue-read-corner--${issue.read ? 'read' : 'unread'}" title="${issue.read ? 'Read' : 'Unread'}" aria-label="${issue.read ? 'Read' : 'Unread'}"></span>
                                     <button type="button" class="series-issue-cover-button" aria-label="Read ${escapeHtml(issue.title || issue.file_name)}" onclick="readComic('${escapeJs(issue.file_path)}')">
-                                        <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy">
+                                        <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                         <div class="series-issue-cover-overlay"></div>
                                         ${issue.issue ? `<span class="series-issue-badge">#${escapeHtml(issue.issue)}</span>` : ''}
                                     </button>
@@ -3672,7 +3703,7 @@
                     <div class="series-detail-header">
                         <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">← Back to Series</button>
                         <div class="series-detail-summary">
-                            <img class="series-detail-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                            <img class="series-detail-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                             <div class="series-detail-summary-body">
                                 <h2>${escapeHtml(series.title)} ${renderLookupStatusBadge(series)}</h2>
                                 <div class="series-detail-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
@@ -3806,11 +3837,12 @@
                            ${isSelected ? 'checked' : ''}
                            onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
                     <div class="status-badge" title="${statusTitle}">
-                        <span>${statusIcon}</span>
+                        <span aria-hidden="true">${statusIcon}</span>
+                        <span class="visually-hidden">${escapeHtml(statusTitle)}</span>
                     </div>
                     <div>
                         <div class="file-name" title="${escapeHtml(file.name)}">
-                            ${readIcon ? `<span class="read-indicator" title="${readTitle}">${readIcon}</span> ` : ''}${filenameHtml}
+                            ${readIcon ? `<span class="read-indicator" title="${readTitle}"><span aria-hidden="true">${readIcon}</span><span class="visually-hidden">${escapeHtml(readTitle)}</span></span> ` : ''}${filenameHtml}
                         </div>
                         ${!dir ? `<div class="file-path">${escapeHtml(file.relative_path)}</div>` : ''}
                     </div>
@@ -9421,4 +9453,10 @@
             document.addEventListener('DOMContentLoaded', initModalAccessibility);
         } else {
             initModalAccessibility();
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initDropdownAriaExpandedSync);
+        } else {
+            initDropdownAriaExpandedSync();
         }

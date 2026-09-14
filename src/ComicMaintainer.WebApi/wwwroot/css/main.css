@@ -4144,3 +4144,43 @@ body.user-read-only [data-requires-write] {
 #mainContent:focus {
     outline: none;
 }
+
+/* ---------------------------------------------------------------------------
+   Accessibility: global keyboard focus visibility
+   ---------------------------------------------------------------------------
+   Many controls in this app are styled with `outline: none` for mouse users.
+   Keyboard users still need a clearly visible focus indicator, so restore one
+   globally via :focus-visible (which only matches keyboard/AT focus).
+--------------------------------------------------------------------------- */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+    outline: 2px solid var(--accent-primary, #4a90d9);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* ---------------------------------------------------------------------------
+   Accessibility: respect the OS "reduce motion" preference
+   ---------------------------------------------------------------------------
+   Users who enable reduced motion (vestibular disorders, motion sensitivity)
+   should not be exposed to transitions, animations or smooth scrolling.
+--------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    html {
+        scroll-behavior: auto !important;
+    }
+}

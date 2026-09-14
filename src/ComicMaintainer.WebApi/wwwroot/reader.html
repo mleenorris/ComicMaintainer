@@ -1888,7 +1888,7 @@
                     throw new Error('Failed to load page');
                 }
 
-                content.innerHTML = `<img src="${imageUrl}" class="page-image page-fade" alt="Page ${pageNum}">`
+                content.innerHTML = `<img src="${imageUrl}" class="page-image page-fade" alt="Page ${pageNum}" decoding="async" fetchpriority="high">`
                     + tapZonesHtml();
                 setupTapZones();
                 // Fade in once the browser has painted the new src.

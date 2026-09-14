@@ -135,17 +135,21 @@
         const MAX_TEMPLATE_CACHE_ENTRIES = 200;
 
         function getParsedTemplate(markup) {
-            let template = TEMPLATE_CACHE.get(markup);
-            if (!template) {
-                template = document.createElement('template');
-                template.innerHTML = markup;
-                if (TEMPLATE_CACHE.size >= MAX_TEMPLATE_CACHE_ENTRIES) {
-                    // Map iterates in insertion order, so this drops the
-                    // least-recently-added entry.
-                    TEMPLATE_CACHE.delete(TEMPLATE_CACHE.keys().next().value);
-                }
-                TEMPLATE_CACHE.set(markup, template);
+            const cached = TEMPLATE_CACHE.get(markup);
+            if (cached) {
+                // Re-insert so the map's insertion order doubles as recency
+                // order, making the eviction below least-recently-used.
+                TEMPLATE_CACHE.delete(markup);
+                TEMPLATE_CACHE.set(markup, cached);
+                return cached;
             }
+
+            const template = document.createElement('template');
+            template.innerHTML = markup;
+            if (TEMPLATE_CACHE.size >= MAX_TEMPLATE_CACHE_ENTRIES) {
+                TEMPLATE_CACHE.delete(TEMPLATE_CACHE.keys().next().value);
+            }
+            TEMPLATE_CACHE.set(markup, template);
             return template;
         }
 
@@ -1972,7 +1976,7 @@
                 { title: '🆕 Series Updates', items: data.series_updates || [], empty: 'No new files in the last 30 days.', resume: false, seeAll: true },
                 { title: '✨ Newly Added Series', items: data.newly_added_series || [], empty: 'No new series in the last 30 days.', resume: false, seeAll: true }
             ];
-            container.innerHTML = rows.map(renderOverviewRow).join('');
+            renderHtml(container, rawHtml(rows.map(renderOverviewRow).join('')));
             hydrateProtectedImages(container);
         }
 
@@ -2411,12 +2415,12 @@
             // even if the underlying API call is slow on large libraries.
             const fileListEl = document.getElementById('fileList');
             if (!append && fileListEl && !currentSeriesDetailId) {
-                fileListEl.innerHTML = `
+                renderHtml(fileListEl, html`
                     <div class="loading">
                         <div class="spinner"></div>
                         <p>Loading series...</p>
                     </div>
-                `;
+                `);
             }
 
             seriesLoading = true;
@@ -3001,13 +3005,13 @@
             reconcileSeriesSelection();
 
             if (!seriesLibrary.length) {
-                fileList.innerHTML = `
+                renderHtml(fileList, html`
                     <div class="empty-state">
                         <div class="empty-state-icon">🖼️</div>
                         <h2>No series found</h2>
                         <p>${searchQuery || filterMode !== 'all' ? 'Try a different search term or filter' : 'Process and normalize comics to build your series library view.'}</p>
                     </div>
-                `;
+                `);
                 return;
             }
 
@@ -3018,10 +3022,10 @@
                     ? renderSeriesLibraryGrid()
                     : renderSeriesLibraryCompact();
 
-            fileList.innerHTML = `
-                ${renderSeriesSelectionToolbar()}
-                ${body}
-            `;
+            renderHtml(fileList, html`
+                ${rawHtml(renderSeriesSelectionToolbar())}
+                ${rawHtml(body)}
+            `);
 
             hydrateProtectedImages(fileList);
             updateSelectInfo();
@@ -3294,7 +3298,7 @@
             const modal = document.getElementById('externalProvidersModal');
             const host = document.getElementById('externalProvidersModalContent');
             if (!modal || !host) return;
-            host.innerHTML = renderProviderHealthWidget();
+            renderHtml(host, rawHtml(renderProviderHealthWidget()));
             modal.classList.add('show');
             modal.style.display = 'flex';
             loadProviderHealth();
@@ -3325,7 +3329,7 @@
                     renderHtml(container, html`<div style="color: var(--text-muted); font-size: 13px;">No external providers are configured.</div>`);
                     return;
                 }
-                container.innerHTML = `
+                renderHtml(container, html`
                     <div class="provider-health-row">
                         <span class="provider-health-label">External providers:</span>
                         ${providers.map(p => {
@@ -3338,12 +3342,12 @@
                                 p.last_success_utc ? `Last success: ${new Date(p.last_success_utc).toLocaleString()}` : 'No successful lookups yet',
                                 `Successes: ${p.success_count || 0}, Failures: ${p.failure_count || 0}`
                             ].filter(Boolean).join('\n');
-                            return `<span class="provider-health-pill provider-health-pill--${cls}" title="${escapeHtml(tooltipParts)}">
-                                <span class="provider-health-dot"></span>${escapeHtml(p.name)}
+                            return html`<span class="provider-health-pill provider-health-pill--${cls}" title="${tooltipParts}">
+                                <span class="provider-health-dot"></span>${p.name}
                             </span>`;
-                        }).join('')}
+                        })}
                     </div>
-                `;
+                `);
                 container.dataset.loaded = 'true';
             } catch (err) {
                 console.warn('Provider health fetch failed', err);
@@ -3593,8 +3597,10 @@
             // Close any open action menu first so a menu that was portaled to
             // <body> is restored before its host card is replaced below.
             closeAllDropdowns();
-            grid.innerHTML = gridItems.map(renderSeriesIssueGridItemHtml).join('')
-                + (!allLoaded ? `<div id="seriesIssuesSentinel" class="series-issues-sentinel" aria-hidden="true"><div class="spinner spinner-small"></div></div>` : '');
+            renderHtml(grid, html`
+                ${rawHtml(gridItems.map(renderSeriesIssueGridItemHtml).join(''))}
+                ${!allLoaded ? html`<div id="seriesIssuesSentinel" class="series-issues-sentinel" aria-hidden="true"><div class="spinner spinner-small"></div></div>` : ''}
+            `);
             // Update the "showing N of M" counter in the selection bar.
             const metaSpan = panel.querySelector('.series-detail-selection-meta');
             if (metaSpan) {
@@ -3973,43 +3979,43 @@
             const someIssuesSelected = selectableIssuePaths.some(path => selectedFiles.has(path));
             const gridItems = buildSeriesIssuesGridItems(issues);
 
-            fileList.innerHTML = `
+            renderHtml(fileList, html`
                 <div class="series-detail" id="seriesDetailPanel">
                     <div class="series-detail-header">
                         <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">← Back to Series</button>
                         <div class="series-detail-summary">
-                            <img class="series-detail-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
+                            <img class="series-detail-cover" data-protected-image="${series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path}" data-protected-image-fallback="${series.has_external_image && series.external_image_url ? series.cover_file_path : ''}" alt="${series.title} cover" loading="lazy" decoding="async" fetchpriority="low">
                             <div class="series-detail-summary-body">
-                                <h2>${escapeHtml(series.title)} ${renderLookupStatusBadge(series)}</h2>
+                                <h2>${series.title} ${rawHtml(renderLookupStatusBadge(series))}</h2>
                                 <div class="series-detail-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
-                                ${series.aliases?.length ? `<div class="series-detail-meta">Also known as: ${escapeHtml(series.aliases.join(', '))}</div>` : ''}
-                                ${series.metadata_source ? `<div class="series-detail-meta">Source: ${escapeHtml(series.metadata_source)}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
-                                ${renderSeriesSynopsis(series)}
+                                ${series.aliases?.length ? html`<div class="series-detail-meta">Also known as: ${series.aliases.join(', ')}</div>` : ''}
+                                ${series.metadata_source ? html`<div class="series-detail-meta">Source: ${series.metadata_source}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
+                                ${rawHtml(renderSeriesSynopsis(series))}
                                 <div class="series-detail-actions">
-                                    ${issues.length ? `<button type="button" class="btn btn-small" onclick="readComic('${escapeJs(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
+                                    ${issues.length ? html`<button type="button" class="btn btn-small" onclick="readComic('${jsArg(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
                                     <div class="file-actions-dropdown series-actions-dropdown">
-                                        <button type="button" class="dropdown-toggle" onclick="toggleDropdown(event, '${escapeJs(SERIES_ACTIONS_DROPDOWN_KEY)}')">
+                                        <button type="button" class="dropdown-toggle" onclick="toggleDropdown(event, '${jsArg(SERIES_ACTIONS_DROPDOWN_KEY)}')">
                                             ⚙️ Actions
                                         </button>
                                         <div class="dropdown-menu" id="${getDropdownId(SERIES_ACTIONS_DROPDOWN_KEY)}">
-                                            <button class="dropdown-item" onclick="openManageSeriesNamesModal('${escapeJs(series.title)}'); closeAllDropdowns();">
+                                            <button class="dropdown-item" onclick="openManageSeriesNamesModal('${jsArg(series.title)}'); closeAllDropdowns();">
                                                 🏷️ Manage Names
                                             </button>
-                                            <button class="dropdown-item" onclick="openSeriesFoldersModal('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="See the on-disk folders contributing to this series and merge them into one">
+                                            <button class="dropdown-item" onclick="openSeriesFoldersModal('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="See the on-disk folders contributing to this series and merge them into one">
                                                 📁 Manage Folders
                                             </button>
                                             <div class="dropdown-divider"></div>
-                                            <button class="dropdown-item" onclick="refreshSeriesMetadataDirect('${escapeJs(series.title)}'); closeAllDropdowns();">
+                                            <button class="dropdown-item" onclick="refreshSeriesMetadataDirect('${jsArg(series.title)}'); closeAllDropdowns();">
                                                 🌐 Refresh Metadata
                                             </button>
-                                            <button class="dropdown-item" onclick="refreshSeriesFolder('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="Refresh metadata for every folder/alias that groups under this series">
+                                            <button class="dropdown-item" onclick="refreshSeriesFolder('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Refresh metadata for every folder/alias that groups under this series">
                                                 📁 Refresh Folder
                                             </button>
-                                            <button class="dropdown-item" onclick="updateSeriesCoversDirect('${escapeJs(series.title)}'); closeAllDropdowns();" title="Re-apply the current cached series image to this series' cover sidecars and first-issue archive. This may rewrite the archive file.">
+                                            <button class="dropdown-item" onclick="updateSeriesCoversDirect('${jsArg(series.title)}'); closeAllDropdowns();" title="Re-apply the current cached series image to this series' cover sidecars and first-issue archive. This may rewrite the archive file.">
                                                 🖼️ Update Covers
                                             </button>
                                             <div class="dropdown-divider"></div>
-                                            <button class="dropdown-item" onclick="resetSeriesProcessedStatus('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
+                                            <button class="dropdown-item" onclick="resetSeriesProcessedStatus('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
                                                 ♻️ Reset Processed Status
                                             </button>
                                         </div>
@@ -4018,39 +4024,39 @@
                             </div>
                         </div>
                     </div>
-                    ${!issuesLoading && !issuesFailed && issues.length ? `
+                    ${!issuesLoading && !issuesFailed && issues.length ? html`
                         <div class="series-detail-selection-bar">
                             <label class="series-detail-select-all" for="selectAll">
                                 <input type="checkbox"
                                        id="selectAll"
                                        onchange="toggleSelectAll(this.checked)"
-                                       ${allIssuesSelected ? 'checked' : ''}>
+                                       ${allIssuesSelected ? rawHtml('checked') : ''}>
                                 <span>Select all issues</span>
                             </label>
                             <span class="series-detail-selection-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} in this series${!allLoaded ? ` · showing ${issues.length}` : ''}</span>
                         </div>
-                        ${renderMissingIssuesBanner(issues)}
+                        ${rawHtml(renderMissingIssuesBanner(issues))}
                     ` : ''}
-                    ${issuesLoading ? `
+                    ${issuesLoading ? html`
                         <div class="loading">
                             <div class="spinner"></div>
                             <p>Loading issues...</p>
                         </div>
-                    ` : issuesFailed ? `
-                        <div class="empty-state"><p>Failed to load issues. <button type="button" class="btn btn-small" onclick="loadSeriesIssues('${escapeJs(seriesId)}', true)">Retry</button></p></div>
-                    ` : issues.length === 0 ? `
+                    ` : issuesFailed ? html`
+                        <div class="empty-state"><p>Failed to load issues. <button type="button" class="btn btn-small" onclick="loadSeriesIssues('${jsArg(seriesId)}', true)">Retry</button></p></div>
+                    ` : issues.length === 0 ? html`
                         <div class="empty-state">
                             <p>${filterMode !== 'all' || searchQuery ? 'No issues in this series match the current filter.' : 'No issues in this series.'}</p>
-                            ${filterMode !== 'all' ? `<button type="button" class="btn btn-small" onclick="setHeaderFilter('all')">Clear filter</button>` : ''}
+                            ${filterMode !== 'all' ? html`<button type="button" class="btn btn-small" onclick="setHeaderFilter('all')">Clear filter</button>` : ''}
                         </div>
-                    ` : `
+                    ` : html`
                         <div class="series-issues-grid">
-                            ${gridItems.map(renderSeriesIssueGridItemHtml).join('')}
-                            ${!allLoaded ? `<div id="seriesIssuesSentinel" class="series-issues-sentinel" aria-hidden="true"><div class="spinner spinner-small"></div></div>` : ''}
+                            ${rawHtml(gridItems.map(renderSeriesIssueGridItemHtml).join(''))}
+                            ${!allLoaded ? html`<div id="seriesIssuesSentinel" class="series-issues-sentinel" aria-hidden="true"><div class="spinner spinner-small"></div></div>` : ''}
                         </div>
                     `}
                 </div>
-            `;
+            `);
 
             const selectAllCheckbox = document.getElementById('selectAll');
             if (selectAllCheckbox) {
@@ -4190,23 +4196,17 @@
         const folderSectionCache = new Map();
         const fileListHeaderCache = new Map();
 
-        function buildElementFromHtml(html) {
-            const template = document.createElement('template');
-            template.innerHTML = html.trim();
-            return template.content.firstElementChild;
-        }
-
-        function reuseOrBuildListNode(parent, cache, key, html) {
+        function reuseOrBuildListNode(parent, cache, key, markup) {
             const cached = cache.get(key);
             if (cached &&
-                cached.html === html &&
+                cached.markup === markup &&
                 cached.el.isConnected &&
                 cached.el.parentElement === parent) {
                 return cached.el;
             }
 
-            const el = buildElementFromHtml(html);
-            cache.set(key, { html, el });
+            const el = htmlToElement(rawHtml(markup.trim()));
+            cache.set(key, { markup, el });
             return el;
         }
 
@@ -4260,28 +4260,28 @@
 
             if (folderList.length === 0) {
                 if (folderLoading) {
-                    fileList.innerHTML = `
+                    renderHtml(fileList, html`
                         <div class="loading">
                             <div class="spinner"></div>
                             <p>Loading files...</p>
                         </div>
-                    `;
+                    `);
                 } else if (searchQuery || filterMode !== 'all') {
-                    fileList.innerHTML = `
+                    renderHtml(fileList, html`
                         <div class="empty-state">
                             <div class="empty-state-icon">🔍</div>
                             <h2>No matching files found</h2>
                             <p>Try a different search term or filter</p>
                         </div>
-                    `;
+                    `);
                 } else {
-                    fileList.innerHTML = `
+                    renderHtml(fileList, html`
                         <div class="empty-state">
                             <div class="empty-state-icon">📁</div>
                             <h2>No comic files found</h2>
                             <p>Add some .cbz or .cbr files to your watched directory</p>
                         </div>
-                    `;
+                    `);
                 }
                 updateSelectInfo();
                 updateSelectAllCheckbox();
@@ -5089,12 +5089,12 @@
                     return;
                 }
 
-                list.innerHTML = folders.map(folder => `
+                renderHtml(list, folders.map(folder => html`
                     <div class="combine-folder-row" style="padding: 8px 0; border-bottom: 1px solid var(--border, #ddd);">
-                        <div style="font-weight: 500; word-break: break-all;">${escapeHtml(folder.directory)}</div>
+                        <div style="font-weight: 500; word-break: break-all;">${folder.directory}</div>
                         <div class="combine-folders-meta">${folder.file_count} file${folder.file_count === 1 ? '' : 's'} · ${formatFileSize(folder.total_size)}</div>
                     </div>
-                `).join('');
+                `));
 
                 if (folders.length < 2) {
                     mergeBtn.disabled = true;
@@ -5284,14 +5284,14 @@
 
                 const radioId = `combineFolderRadio_${combineFolderIndex}_${idx}`;
                 const sample = (folder.sampleFileNames || []).slice(0, 5);
-                const sampleHtml = sample.length
-                    ? `<div class="combine-folder-files">Sample files:<ul>${sample.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul></div>`
+                const sampleMarkup = sample.length
+                    ? html`<div class="combine-folder-files">Sample files:<ul>${sample.map(n => html`<li>${n}</li>`)}</ul></div>`
                     : '';
 
-                card.innerHTML = `
+                renderHtml(card, html`
                     <div class="combine-folder-card-header">
-                        <input type="radio" name="combineFolderDestination" id="${radioId}" ${isSelected ? 'checked' : ''}>
-                        <label for="${radioId}" class="combine-folder-path">${escapeHtml(folder.directory)}</label>
+                        <input type="radio" name="combineFolderDestination" id="${radioId}" ${isSelected ? rawHtml('checked') : ''}>
+                        <label for="${radioId}" class="combine-folder-path">${folder.directory}</label>
                     </div>
                     <div class="combine-folder-stats">
                         <div>Files <strong>${folder.fileCount.toLocaleString()}</strong></div>
@@ -5299,8 +5299,8 @@
                         <div>Newest file <strong>${formatCombineFolderDate(folder.newestFileAddedAt)}</strong></div>
                         <div>Oldest file <strong>${formatCombineFolderDate(folder.oldestFileAddedAt)}</strong></div>
                     </div>
-                    ${sampleHtml}
-                `;
+                    ${sampleMarkup}
+                `);
 
                 const selectThis = () => {
                     combineFolderSelectedDestination = folder.directory;
@@ -5369,19 +5369,19 @@
                 } else {
                     const conflicts = moves.filter(m => m.conflict).length;
                     const skipped = moves.filter(m => m.skipped).length;
-                    const list = moves.map(m => {
+                    const items = moves.map(m => {
                         const cls = m.skipped ? 'skipped' : (m.conflict ? 'conflict' : '');
                         const note = m.skipped ? ' (skipped)' : (m.conflict ? ' (renamed to avoid conflict)' : '');
-                        return `<li class="${cls}">${escapeHtml(m.sourcePath)} → ${escapeHtml(m.destinationPath)}${note}</li>`;
-                    }).join('');
-                    previewPanel.innerHTML = `
+                        return html`<li class="${cls}">${m.sourcePath} → ${m.destinationPath}${note}</li>`;
+                    });
+                    renderHtml(previewPanel, html`
                         <h4>Move plan (${moves.length} file${moves.length === 1 ? '' : 's'}${conflicts ? `, ${conflicts} renamed` : ''}${skipped ? `, ${skipped} skipped` : ''})</h4>
-                        <ul>${list}</ul>
-                    `;
+                        <ul>${items}</ul>
+                    `);
                 }
             } catch (error) {
                 console.error('Failed to build combine preview:', error);
-                previewPanel.innerHTML = `<span class="conflict">Failed to build preview: ${escapeHtml(error.message)}</span>`;
+                renderHtml(previewPanel, html`<span class="conflict">Failed to build preview: ${error.message}</span>`);
             } finally {
                 combineFolderActionInFlight = false;
                 renderCombineFolderGroup();
@@ -7240,13 +7240,11 @@
                 }
                 
                 // Render history items
-                let html = '<div style="display: flex; flex-direction: column; gap: 15px;">';
-                data.history.forEach(item => {
-                    html += renderHistoryItem(item);
-                });
-                html += '</div>';
-                
-                contentDiv.innerHTML = html;
+                renderHtml(contentDiv, html`
+                    <div style="display: flex; flex-direction: column; gap: 15px;">
+                        ${data.history.map(item => rawHtml(renderHistoryItem(item)))}
+                    </div>
+                `);
                 
                 // Update pagination controls
                 pageInfo.textContent = `Page ${historyCurrentPage} of ${totalPages} (${historyTotal} total)`;
@@ -7255,7 +7253,7 @@
                 
             } catch (error) {
                 loadingIndicator.style.display = 'none';
-                contentDiv.innerHTML = `<div style="padding: 20px; color: red;">Error loading history: ${error.message}</div>`;
+                renderHtml(contentDiv, html`<div style="padding: 20px; color: red;">Error loading history: ${error.message}</div>`);
             }
         }
         
@@ -7615,20 +7613,26 @@
             
             clearChildren(details);
             progressResults.forEach(result => {
-                const entry = document.createElement('div');
-                entry.className = `progress-result-item ${result.success ? 'success' : 'error'}`;
-                entry.innerHTML = `
-                    <div class="progress-result-status">${result.success ? '✅' : '❌'}</div>
-                    <div class="progress-result-text">
-                        <strong>${escapeHtml(result.filename)}</strong>
-                        <span>${result.success ? 'Completed successfully' : escapeHtml(result.error || 'Failed')}</span>
-                    </div>
-                `;
+                const entry = buildProgressResultElement(result);
                 details.appendChild(entry);
                 progressResultElements.set(result.key, entry);
             });
         }
         
+        // Both the full re-render and the incremental single-row append build
+        // the same row, so the markup lives in one place.
+        function buildProgressResultElement(result) {
+            return htmlToElement(html`
+                <div class="progress-result-item ${result.success ? 'success' : 'error'}">
+                    <div class="progress-result-status" aria-hidden="true">${result.success ? '✅' : '❌'}</div>
+                    <div class="progress-result-text">
+                        <strong>${result.filename}</strong>
+                        <span>${result.success ? 'Completed successfully' : (result.error || 'Failed')}</span>
+                    </div>
+                </div>
+            `);
+        }
+
         function addProgressDetail(filename, success, error = null) {
             const resultKey = filename;
             const nextResult = {
@@ -7660,15 +7664,7 @@
             progressResults.unshift(nextResult);
             progressResultLookup.add(resultKey);
 
-            const entry = document.createElement('div');
-            entry.className = `progress-result-item ${success ? 'success' : 'error'}`;
-            entry.innerHTML = `
-                <div class="progress-result-status">${success ? '✅' : '❌'}</div>
-                <div class="progress-result-text">
-                    <strong>${escapeHtml(nextResult.filename)}</strong>
-                    <span>${success ? 'Completed successfully' : escapeHtml(error || 'Failed')}</span>
-                </div>
-            `;
+            const entry = buildProgressResultElement(nextResult);
             details.prepend(entry);
             progressResultElements.set(resultKey, entry);
 
@@ -8816,14 +8812,14 @@
             const status = (job.status || job.Status || 'queued').toString().toLowerCase();
             const current = job.currentSeries || job.CurrentSeries || '';
             const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
-            toast.innerHTML = `
+            renderHtml(toast, html`
                 <div class="metadata-refresh-toast-header">
-                    <strong>Refreshing ${escapeHtml(label)}</strong>
-                    <span class="metadata-refresh-toast-status metadata-refresh-toast-status--${status}">${escapeHtml(status)}</span>
+                    <strong>Refreshing ${label}</strong>
+                    <span class="metadata-refresh-toast-status metadata-refresh-toast-status--${status}">${status}</span>
                 </div>
                 <div class="metadata-refresh-toast-bar"><div class="metadata-refresh-toast-bar-fill" style="width:${pct}%"></div></div>
-                <div class="metadata-refresh-toast-meta">${processed}/${total} · ✓ ${successes} · ✗ ${failures}${current ? ` · now: ${escapeHtml(current)}` : ''}</div>
-            `;
+                <div class="metadata-refresh-toast-meta">${processed}/${total} · ✓ ${successes} · ✗ ${failures}${current ? html` · now: ${current}` : ''}</div>
+            `);
             if (isTerminalJobStatus(status)) {
                 toast.classList.add('metadata-refresh-toast--done');
                 setTimeout(() => { toast.remove(); }, 6000);
@@ -9123,13 +9119,13 @@
             if (!aliases.length) {
                 container.textContent = 'None';
             } else {
-                container.innerHTML = aliases.map(a => {
+                renderHtml(container, aliases.map(a => {
                     const lang = langByTitle.get(a.toLowerCase());
                     const langBadge = lang
-                        ? ` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${escapeHtml(lang)}</span>`
+                        ? html` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${lang}</span>`
                         : '';
-                    return `<span class="badge" style="display: inline-block; padding: 4px 8px; margin: 2px; background: var(--bg-secondary); border-radius: 12px; font-size: 13px;">${escapeHtml(a)}${langBadge}</span>`;
-                }).join('');
+                    return html`<span class="badge" style="display: inline-block; padding: 4px 8px; margin: 2px; background: var(--bg-secondary); border-radius: 12px; font-size: 13px;">${a}${langBadge}</span>`;
+                }));
             }
             const sourceLabel = document.getElementById('manageSeriesProviderSource');
             if (record.source) {
@@ -9209,7 +9205,7 @@
             if (record && Array.isArray(record.user_aliases)) {
                 for (const a of record.user_aliases) pushOption(a, 'your alias');
             }
-            select.innerHTML = options.join('');
+            renderHtml(select, rawHtml(options.join('')));
             // Preserve the user's current selection even if it isn't otherwise
             // listed (server validation already accepted it at write time).
             const selected = (record && record.series_name) || '';
@@ -9276,12 +9272,12 @@
                 container.textContent = 'None';
                 return;
             }
-            container.innerHTML = aliases.map(a => `
+            renderHtml(container, aliases.map(a => html`
                 <span class="badge" style="display: inline-flex; align-items: center; padding: 4px 4px 4px 8px; margin: 2px; background: var(--bg-secondary); border-radius: 12px; font-size: 13px;">
-                    ${escapeHtml(a)}
-                    <button type="button" onclick="removeManageSeriesAlias('${escapeJs(a)}')" style="margin-left: 6px; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px;" title="Remove alias">×</button>
+                    ${a}
+                    <button type="button" onclick="removeManageSeriesAlias('${jsArg(a)}')" style="margin-left: 6px; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px;" title="Remove alias">×</button>
                 </span>
-            `).join('');
+            `));
         }
 
         function addManageSeriesAlias() {
@@ -9416,7 +9412,7 @@
                     renderHtml(container, html`<p style="color: var(--text-secondary);">No matches found. Check that external metadata providers are enabled in Settings.</p>`);
                     return;
                 }
-                container.innerHTML = results.map((r, idx) => {
+                renderHtml(container, results.map((r, idx) => {
                     // Build a lookup of alias -> language from the provider's
                     // localized titles so each alias can be rendered with a
                     // small language badge ("en", "ja", "ko", ...). Without
@@ -9430,19 +9426,19 @@
                     });
                     const aliasList = r.aliases || [];
                     const aliases = aliasList.length
-                        ? aliasList.map(a => {
+                        ? rawHtml(aliasList.map(a => {
                             const lang = langByTitle.get(a.toLowerCase());
                             const langBadge = lang
-                                ? ` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${escapeHtml(lang)}</span>`
+                                ? html` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${lang}</span>`
                                 : '';
-                            return `<span style="display: inline-block; margin-right: 4px;">${escapeHtml(a)}${langBadge}</span>`;
-                        }).join(', ')
-                        : '<em>none</em>';
+                            return htmlToString(html`<span style="display: inline-block; margin-right: 4px;">${a}${langBadge}</span>`);
+                        }).join(', '))
+                        : html`<em>none</em>`;
                     // Show the canonical title's language too so the user can
                     // see that (for example) the chosen canonical is English.
                     const canonicalLang = langByTitle.get((r.canonical_title || '').toLowerCase());
                     const canonicalLangBadge = canonicalLang
-                        ? ` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${escapeHtml(canonicalLang)}</span>`
+                        ? html` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${canonicalLang}</span>`
                         : '';
                     // Server returns match_score on [0,100]. Render a colour
                     // hint so the user can see at a glance which candidate is
@@ -9453,15 +9449,15 @@
                         const tone = score >= 90 ? 'var(--accent-success, #1f9d55)'
                                    : score >= 60 ? 'var(--accent-warning, #c69026)'
                                    : 'var(--text-secondary)';
-                        scoreBadge = `<span title="Confidence that this is the right match" style="font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--bg-secondary); color: ${tone}; border: 1px solid ${tone};">${score.toFixed(1)}% match</span>`;
+                        scoreBadge = html`<span title="Confidence that this is the right match" style="font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--bg-secondary); color: ${tone}; border: 1px solid ${tone};">${score.toFixed(1)}% match</span>`;
                     }
-                    return `
+                    return html`
                         <div style="border: 1px solid var(--border-primary); border-radius: 5px; padding: 10px; margin-bottom: 8px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                <strong>${escapeHtml(r.canonical_title || '')}${canonicalLangBadge}</strong>
+                                <strong>${r.canonical_title || ''}${canonicalLangBadge}</strong>
                                 <div style="display: flex; gap: 6px; align-items: center;">
                                     ${scoreBadge}
-                                    <span style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(r.source || '')}</span>
+                                    <span style="font-size: 12px; color: var(--text-secondary);">${r.source || ''}</span>
                                 </div>
                             </div>
                             <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Aliases: ${aliases}</div>
@@ -9472,7 +9468,7 @@
                             </div>
                         </div>
                     `;
-                }).join('');
+                }));
                 window.__manageSeriesSearchResults = results;
             } catch (err) {
                 console.error('searchExternalSeries failed', err);

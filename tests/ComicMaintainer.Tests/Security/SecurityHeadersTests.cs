@@ -280,6 +280,46 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         Assert.DoesNotContain("no-store", cacheControl);
     }
 
+    [Theory]
+    [InlineData("/css/main.css")]
+    [InlineData("/js/main.js")]
+    public async Task StaticFiles_VersionMatchedCssAndJs_AreImmutable(string path)
+    {
+        // Arrange
+        var client = _factory.CreateClient();
+        var version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0";
+
+        // Act - the HTML stamps ?v=<app-version> onto these URLs, so a request
+        // carrying the current version can never be answered with different
+        // content for the lifetime of the release and may be cached immutably.
+        var response = await client.GetAsync($"{path}?v={version}");
+
+        // Assert
+        Assert.True(response.Headers.Contains("Cache-Control"));
+        var cacheControl = response.Headers.GetValues("Cache-Control").First();
+        Assert.Contains("immutable", cacheControl);
+        Assert.Contains("max-age=31536000", cacheControl);
+    }
+
+    [Fact]
+    public async Task StaticFiles_StaleVersionedCss_StillRequiresRevalidation()
+    {
+        // Arrange
+        var client = _factory.CreateClient();
+
+        // Act - a ?v= that does not match the running build must not be cached
+        // immutably; otherwise a client that requested an old version would
+        // pin that (now different) body for a year.
+        var response = await client.GetAsync("/css/main.css?v=0.0.0-not-the-current-version");
+
+        // Assert
+        Assert.True(response.Headers.Contains("Cache-Control"));
+        var cacheControl = response.Headers.GetValues("Cache-Control").First();
+        Assert.Contains("no-cache", cacheControl);
+        Assert.Contains("must-revalidate", cacheControl);
+        Assert.DoesNotContain("immutable", cacheControl);
+    }
+
     [Fact]
     public async Task StaticFiles_NonCssNonJsArePublicCached()
     {

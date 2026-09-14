@@ -38,6 +38,47 @@ async function updateCacheName() {
 // the oldest inserted entries.
 const MAX_RUNTIME_CACHE_ENTRIES = 120;
 
+// Comic covers and page images are content-addressed by file path and do not
+// change when the app is upgraded, so they live in their own cache that
+// survives version bumps (the versioned cache above is wiped on every
+// release). Decoding a cover is by far the most expensive thing the library
+// grid does over the network, so serving them cache-first makes scrolling back
+// through an already-visited library effectively instant and works offline.
+//
+// This cache holds *authenticated* responses, so it is cleared on logout via
+// the CLEAR_IMAGE_CACHE message.
+const IMAGE_CACHE_NAME = `${CACHE_PREFIX}images-v1`;
+const MAX_IMAGE_CACHE_ENTRIES = 400;
+
+// Request paths whose GET responses are safe to cache as images.
+const IMAGE_API_PATHS = ['/api/comicreader/cover', '/api/comicreader/page'];
+
+function isCacheableImageRequest(request, url) {
+  return request.method === 'GET' &&
+    IMAGE_API_PATHS.some((path) => url.pathname === path);
+}
+
+// Cache-first with a background refresh omitted on purpose: these responses are
+// immutable for a given file path, so a cache hit is always correct until the
+// underlying file changes (at which point its path/mtime-derived URL changes
+// too, or the user can clear the cache).
+async function serveImageFromCache(request) {
+  const cache = await caches.open(IMAGE_CACHE_NAME);
+  const cached = await cache.match(request);
+  if (cached) {
+    return cached;
+  }
+
+  const response = await fetch(request);
+  if (response && response.status === 200) {
+    // Only successful, non-opaque responses are worth storing.
+    cache.put(request, response.clone())
+      .then(() => trimCache(IMAGE_CACHE_NAME, MAX_IMAGE_CACHE_ENTRIES))
+      .catch(() => { /* quota errors are non-fatal */ });
+  }
+  return response;
+}
+
 async function trimCache(cacheName, maxEntries) {
   try {
     const cache = await caches.open(cacheName);
@@ -94,7 +135,11 @@ self.addEventListener('activate', (event) => {
         return Promise.all(
           cacheNames.map((cacheName) => {
             // Delete any cache that starts with our prefix but isn't the current version
-            if (cacheName.startsWith(CACHE_PREFIX) && cacheName !== CACHE_NAME) {
+            // The image cache is deliberately preserved across releases: it
+            // holds comic covers/pages, which are unrelated to the app version.
+            if (cacheName.startsWith(CACHE_PREFIX) &&
+                cacheName !== CACHE_NAME &&
+                cacheName !== IMAGE_CACHE_NAME) {
               console.log('Service Worker: Deleting old cache:', cacheName);
               return caches.delete(cacheName);
             }
@@ -131,6 +176,24 @@ self.addEventListener('fetch', (event) => {
     return;
   }
   
+  // Comic covers and page images: cache-first with a bounded cache.
+  if (isCacheableImageRequest(request, url)) {
+    event.respondWith(
+      serveImageFromCache(request).catch(
+        () => new Response('Offline', { status: 503 })
+      )
+    );
+    return;
+  }
+
+  // Writes (POST/PUT/PATCH/DELETE) must always hit the network and must never
+  // be cached or replayed. Let them fall through to the browser untouched
+  // rather than wrapping them in an offline fallback that would mask a failed
+  // mutation as a successful-looking response.
+  if (url.pathname.startsWith('/api/') && request.method !== 'GET') {
+    return;
+  }
+
   // Network-first strategy for API calls and dynamic content
   if (url.pathname.startsWith('/api/')) {
     event.respondWith(
@@ -222,7 +285,18 @@ self.addEventListener('fetch', (event) => {
 
 // Listen for messages from the client
 self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
+  if (!event.data) {
+    return;
+  }
+
+  if (event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
+    return;
+  }
+
+  // Cached covers/pages are authenticated content, so drop them when the user
+  // signs out rather than leaving them readable for whoever logs in next.
+  if (event.data.type === 'CLEAR_IMAGE_CACHE') {
+    event.waitUntil(caches.delete(IMAGE_CACHE_NAME));
   }
 });

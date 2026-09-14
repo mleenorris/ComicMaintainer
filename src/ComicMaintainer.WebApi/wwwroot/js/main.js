@@ -55,7 +55,23 @@
             localStorage.removeItem('jwt_token');
             localStorage.removeItem('username');
             localStorage.removeItem('authelia_authenticated');
+            clearCachedImages();
             window.location.href = '/login.html';
+        }
+
+        /**
+         * Ask the service worker to drop its cached comic covers and pages.
+         * Those responses are authenticated content, so they must not survive a
+         * sign-out and be served to whoever signs in next on the same device.
+         */
+        function clearCachedImages() {
+            try {
+                if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                    navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_IMAGE_CACHE' });
+                }
+            } catch (error) {
+                console.log('PWA: Failed to request image cache clear', error);
+            }
         }
         
         // Authentication check - check server auth status first (supports Authelia)
@@ -1433,6 +1449,59 @@
         // PWA Installation support
         let deferredPrompt = null;
         
+        // Tracks the worker the user has been told about, so repeated
+        // 'updatefound' events don't stack up multiple banners.
+        let pendingServiceWorkerUpdate = null;
+
+        /**
+         * Show a dismissible banner offering to activate a newly installed
+         * service worker. Activation (and the reload that follows it via
+         * 'controllerchange') only happens when the user opts in.
+         */
+        function promptForServiceWorkerUpdate(worker) {
+            if (!worker || pendingServiceWorkerUpdate === worker) {
+                return;
+            }
+            pendingServiceWorkerUpdate = worker;
+
+            const existing = document.getElementById('appUpdateBanner');
+            if (existing) {
+                existing.remove();
+            }
+
+            const banner = document.createElement('div');
+            banner.id = 'appUpdateBanner';
+            banner.className = 'app-update-banner';
+            banner.setAttribute('role', 'status');
+            banner.setAttribute('aria-live', 'polite');
+
+            const text = document.createElement('span');
+            text.className = 'app-update-banner-text';
+            text.textContent = 'A new version of Comic Maintainer is available.';
+
+            const reloadBtn = document.createElement('button');
+            reloadBtn.type = 'button';
+            reloadBtn.className = 'btn btn-primary btn-small';
+            reloadBtn.textContent = 'Reload';
+            reloadBtn.addEventListener('click', () => {
+                reloadBtn.disabled = true;
+                reloadBtn.textContent = 'Reloading…';
+                worker.postMessage({ type: 'SKIP_WAITING' });
+            });
+
+            const dismissBtn = document.createElement('button');
+            dismissBtn.type = 'button';
+            dismissBtn.className = 'app-update-banner-dismiss';
+            dismissBtn.setAttribute('aria-label', 'Dismiss update notification');
+            dismissBtn.textContent = '\u00d7';
+            dismissBtn.addEventListener('click', () => {
+                banner.remove();
+            });
+
+            banner.append(text, reloadBtn, dismissBtn);
+            document.body.appendChild(banner);
+        }
+
         // Register service worker for offline support
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
@@ -1447,13 +1516,25 @@
                             registration.update();
                         }, 60000); // Check every minute
 
-                        // When a new service worker has fully installed, tell it to
-                        // skip waiting so it activates immediately. The actual reload
-                        // is triggered by the 'controllerchange' event below, which
-                        // is the documented signal that the new SW is now in control.
-                        // Reloading earlier (e.g. on 'statechange' => 'installed') is
-                        // racy: the reload would be served by the OLD service worker
-                        // and the user would still see stale assets, forcing a hard refresh.
+                        // When a new service worker has fully installed, surface
+                        // it to the user instead of silently activating and
+                        // reloading. An unannounced reload can interrupt work in
+                        // progress (an open settings form, a running batch job's
+                        // progress view), so the swap is deferred until the user
+                        // asks for it.
+                        //
+                        // The reload itself is still driven by 'controllerchange'
+                        // below, which is the documented signal that the new
+                        // worker is in control. Reloading earlier (e.g. straight
+                        // after 'installed') is racy: the reload would be served
+                        // by the OLD worker and the user would still see stale
+                        // assets, forcing a hard refresh.
+                        if (registration.waiting && navigator.serviceWorker.controller) {
+                            // A new version finished installing during a previous
+                            // visit and has been waiting ever since.
+                            promptForServiceWorkerUpdate(registration.waiting);
+                        }
+
                         registration.addEventListener('updatefound', () => {
                             const newWorker = registration.installing;
                             console.log('PWA: New service worker installing...');
@@ -1463,10 +1544,20 @@
                             }
 
                             newWorker.addEventListener('statechange', () => {
-                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                    console.log('PWA: New version installed, asking it to skipWaiting...');
-                                    newWorker.postMessage({ type: 'SKIP_WAITING' });
+                                if (newWorker.state !== 'installed') {
+                                    return;
                                 }
+
+                                if (!navigator.serviceWorker.controller) {
+                                    // First ever install: nothing is cached yet and
+                                    // there is no stale page to replace, so there is
+                                    // nothing to prompt about.
+                                    console.log('PWA: Service worker installed for the first time');
+                                    return;
+                                }
+
+                                console.log('PWA: New version installed, prompting user to reload');
+                                promptForServiceWorkerUpdate(newWorker);
                             });
                         });
                     })
@@ -3902,6 +3993,65 @@
             `;
         }
 
+        // ---------------------------------------------------------------
+        // Incremental list rendering helpers (see renderFileList()).
+        //
+        // Each cache maps a key to `{ html, el }`, where `html` is the markup
+        // the node was built from. A node is only rebuilt when its markup
+        // changed or when it is no longer attached to the expected parent
+        // (which happens whenever some other code path replaces the whole list,
+        // e.g. to show a loading or empty state) — that check makes the caches
+        // self-healing rather than something every teardown site must reset.
+        // ---------------------------------------------------------------
+        const folderSectionCache = new Map();
+        const fileListHeaderCache = new Map();
+
+        function buildElementFromHtml(html) {
+            const template = document.createElement('template');
+            template.innerHTML = html.trim();
+            return template.content.firstElementChild;
+        }
+
+        function reuseOrBuildListNode(parent, cache, key, html) {
+            const cached = cache.get(key);
+            if (cached &&
+                cached.html === html &&
+                cached.el.isConnected &&
+                cached.el.parentElement === parent) {
+                return cached.el;
+            }
+
+            const el = buildElementFromHtml(html);
+            cache.set(key, { html, el });
+            return el;
+        }
+
+        /**
+         * Move/insert `desiredChildren` into `parent` in order, touching the
+         * DOM only where it already differs, and remove any other children.
+         * The infinite-scroll sentinel is left in place because
+         * ensureScrollObserver() re-appends it as the last child afterwards.
+         */
+        function reconcileListChildren(parent, desiredChildren) {
+            let cursor = parent.firstElementChild;
+
+            for (const node of desiredChildren) {
+                if (cursor === node) {
+                    cursor = cursor.nextElementSibling;
+                    continue;
+                }
+                parent.insertBefore(node, cursor);
+            }
+
+            while (cursor) {
+                const next = cursor.nextElementSibling;
+                if (cursor.id !== 'libraryScrollSentinel') {
+                    cursor.remove();
+                }
+                cursor = next;
+            }
+        }
+
         function renderFileList() {
             const fileList = document.getElementById('fileList');
 
@@ -3955,7 +4105,24 @@
                 return;
             }
 
-            let html = `
+            // Incremental rendering.
+            //
+            // Assigning the whole list in one `innerHTML` write forces the
+            // browser to re-parse and re-lay-out every folder and every file
+            // row. renderFileList() runs on every folder fetch completing,
+            // every selection change and every infinite-scroll page append, so
+            // with hundreds of folders loaded that full rebuild dominates the
+            // frame budget and is the main source of jank in the library view.
+            //
+            // Instead, each folder is rendered into its own `.folder-section`
+            // wrapper and the markup used to build it is remembered. On the
+            // next render a folder whose generated markup is byte-identical
+            // keeps its existing DOM node untouched, so only folders that
+            // actually changed are re-parsed. Using the generated markup itself
+            // as the cache key makes the comparison exact by construction:
+            // there is no hand-maintained list of fields that could drift out
+            // of sync with the template.
+            const headerHtml = `
                 <div class="file-list-header">
                     <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)" title="Select all loaded files">
                     <button class="toggle-all-btn" onclick="toggleAllFolders()" id="toggleAllBtn" title="Expand/Collapse All">
@@ -3968,8 +4135,15 @@
                 </div>
             `;
 
+            // Desired child order for `.file-list`, in order.
+            const desiredChildren = [];
+            desiredChildren.push(reuseOrBuildListNode(fileList, fileListHeaderCache, 'header', headerHtml));
+
+            const renderedFolderKeys = new Set();
+
             folderList.forEach(folder => {
                 const dir = folder.path || '';
+                let html = '';
                 const isCollapsed = collapsedDirectories.has(dir);
                 const entry = folderFiles.get(dir);
                 const loadedFiles = (entry && entry.status === 'loaded') ? entry.files : [];
@@ -4024,9 +4198,21 @@
                 }
 
                 html += `</div>`;
+
+                const sectionHtml = `<div class="folder-section">${html}</div>`;
+                desiredChildren.push(reuseOrBuildListNode(fileList, folderSectionCache, dir, sectionHtml));
+                renderedFolderKeys.add(dir);
             });
 
-            fileList.innerHTML = html;
+            // Drop cache entries for folders that are no longer listed (e.g.
+            // after a filter/search change) so the map cannot grow unbounded.
+            for (const key of Array.from(folderSectionCache.keys())) {
+                if (!renderedFolderKeys.has(key)) {
+                    folderSectionCache.delete(key);
+                }
+            }
+
+            reconcileListChildren(fileList, desiredChildren);
 
             updateSelectInfo();
             updateSelectAllCheckbox();

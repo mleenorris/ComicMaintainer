@@ -56,6 +56,29 @@ public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>
         Assert.Contains("frame-ancestors 'none'", response.Headers.GetValues("Content-Security-Policy").First());
     }
 
+    [Theory]
+    [InlineData("default-src 'self'")]
+    [InlineData("script-src 'self' 'unsafe-inline'")]
+    [InlineData("style-src 'self' 'unsafe-inline'")]
+    [InlineData("object-src 'none'")]
+    [InlineData("base-uri 'self'")]
+    [InlineData("form-action 'self'")]
+    [InlineData("connect-src 'self'")]
+    public async Task SecurityHeaders_Csp_ContainsRestrictiveDirective(string directive)
+    {
+        // Arrange
+        var client = _factory.CreateClient();
+
+        // Act
+        var response = await client.GetAsync("/api/version");
+
+        // Assert
+        // The CSP must restrict where scripts, styles, plugins, form posts and
+        // XHR/WebSocket connections may come from, not only who may frame us.
+        Assert.True(response.Headers.Contains("Content-Security-Policy"));
+        Assert.Contains(directive, response.Headers.GetValues("Content-Security-Policy").First());
+    }
+
     [Fact]
     public async Task SecurityHeaders_NoDeprecatedHeaders()
     {

@@ -735,6 +735,35 @@ app.Use(async (context, next) =>
     // Restrict dangerous browser features
     context.Response.Headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()";
     
+    // Content-Security-Policy.
+    //
+    // The web UI is entirely first-party: no CDN scripts, styles or fonts. It
+    // does however rely on inline <script>/<style> blocks and inline style
+    // attributes inside index.html/reader.html, so script-src and style-src
+    // must allow 'unsafe-inline' until the inline code is extracted. The
+    // remaining directives still provide meaningful protection: injected
+    // markup cannot load an attacker-hosted script, exfiltrate data to a
+    // third-party origin, embed plugins, rewrite <base>, or post forms
+    // off-origin.
+    //
+    // img-src allows https: because series covers may be fetched directly from
+    // external metadata providers, and blob:/data: because covers and comic
+    // pages are rendered from object URLs.
+    const string baseCspDirectives =
+        "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: blob: https:; " +
+        "font-src 'self' data:; " +
+        "media-src 'self' blob:; " +
+        "connect-src 'self' ws: wss:; " +
+        "worker-src 'self'; " +
+        "manifest-src 'self'; " +
+        "object-src 'none'; " +
+        "base-uri 'self'; " +
+        "form-action 'self'; " +
+        "frame-ancestors 'none'";
+
     // Add HSTS and CSP headers when behind HTTPS proxy
     // Use case-insensitive comparison as HTTP headers are case-insensitive per RFC 7230
     if (context.Request.Headers.TryGetValue("X-Forwarded-Proto", out var forwardedProto) && 
@@ -746,7 +775,8 @@ app.Use(async (context, next) =>
         // CSP: Upgrade insecure requests and prevent framing (replaces X-Frame-Options)
         if (!context.Response.Headers.ContainsKey("Content-Security-Policy"))
         {
-            context.Response.Headers["Content-Security-Policy"] = "upgrade-insecure-requests; frame-ancestors 'none'";
+            context.Response.Headers["Content-Security-Policy"] =
+                baseCspDirectives + "; upgrade-insecure-requests";
         }
     }
     else
@@ -754,7 +784,7 @@ app.Use(async (context, next) =>
         // CSP: Prevent framing even without HTTPS (replaces X-Frame-Options)
         if (!context.Response.Headers.ContainsKey("Content-Security-Policy"))
         {
-            context.Response.Headers["Content-Security-Policy"] = "frame-ancestors 'none'";
+            context.Response.Headers["Content-Security-Policy"] = baseCspDirectives;
         }
     }
     

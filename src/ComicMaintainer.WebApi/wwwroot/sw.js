@@ -7,6 +7,7 @@ let CACHE_NAME = 'comic-maintainer-v2'; // Default fallback
 const CACHE_PREFIX = 'comic-maintainer-';
 const urlsToCache = [
   '/manifest.json',
+  '/offline.html',
   '/icons/icon-192x192.png',
   '/icons/icon-512x512.png',
   '/icons/icon-192x192-maskable.png',
@@ -29,6 +30,44 @@ async function updateCacheName() {
   } catch (error) {
     console.log('Service Worker: Failed to fetch version, using default cache name', error);
   }
+}
+
+// Maximum number of entries kept in the runtime asset cache. Icons, fonts and
+// other static assets accumulate over time (especially on long-lived installs),
+// so trim the cache to a bounded size using a simple FIFO/LRU-style eviction of
+// the oldest inserted entries.
+const MAX_RUNTIME_CACHE_ENTRIES = 120;
+
+async function trimCache(cacheName, maxEntries) {
+  try {
+    const cache = await caches.open(cacheName);
+    const keys = await cache.keys();
+    if (keys.length <= maxEntries) {
+      return;
+    }
+    // cache.keys() returns entries in insertion order, so the head of the list
+    // is the least recently added entry.
+    const excess = keys.length - maxEntries;
+    for (let i = 0; i < excess; i++) {
+      await cache.delete(keys[i]);
+    }
+  } catch (error) {
+    console.log('Service Worker: Failed to trim cache', cacheName, error);
+  }
+}
+
+// Serve the precached offline page; fall back to a minimal inline document if
+// it is somehow missing from the cache.
+async function offlineFallbackResponse() {
+  const cached = await caches.match('/offline.html');
+  if (cached) {
+    return cached;
+  }
+
+  return new Response(
+    '<html><body><h1>Offline</h1><p>Comic Maintainer is unavailable while offline.</p></body></html>',
+    { headers: { 'Content-Type': 'text/html' } }
+  );
 }
 
 // Install event - cache essential resources
@@ -83,12 +122,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(request, { cache: 'no-store' }).catch(() => {
         if (request.headers.get('Accept')?.includes('text/html')) {
-          return new Response(
-            '<html><body><h1>Offline</h1><p>Comic Maintainer is unavailable while offline.</p></body></html>',
-            {
-              headers: { 'Content-Type': 'text/html' }
-            }
-          );
+          return offlineFallbackResponse();
         }
 
         return new Response('Offline', { status: 503 });
@@ -131,7 +165,8 @@ self.addEventListener('fetch', (event) => {
           const networkFetch = fetch(request)
             .then((networkResponse) => {
               if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
-                cache.put(request, networkResponse.clone());
+                cache.put(request, networkResponse.clone())
+                  .then(() => trimCache(CACHE_NAME, MAX_RUNTIME_CACHE_ENTRIES));
               }
               return networkResponse;
             })
@@ -165,9 +200,10 @@ self.addEventListener('fetch', (event) => {
           
           // Cache static assets
           if (url.pathname.startsWith('/icons/')) {
-            caches.open(CACHE_NAME).then((cache) => {
-              cache.put(request, responseToCache);
-            });
+            caches.open(CACHE_NAME).then((cache) =>
+              cache.put(request, responseToCache)
+                .then(() => trimCache(CACHE_NAME, MAX_RUNTIME_CACHE_ENTRIES))
+            );
           }
           
           return response;
@@ -175,14 +211,11 @@ self.addEventListener('fetch', (event) => {
       })
       .catch(() => {
         // Return a friendly offline page for HTML requests
-        if (request.headers.get('Accept').includes('text/html')) {
-          return new Response(
-            '<html><body><h1>Offline</h1><p>Comic Maintainer is unavailable while offline.</p></body></html>',
-            {
-              headers: { 'Content-Type': 'text/html' }
-            }
-          );
+        if (request.headers.get('Accept')?.includes('text/html')) {
+          return offlineFallbackResponse();
         }
+
+        return new Response('Offline', { status: 503 });
       })
   );
 });

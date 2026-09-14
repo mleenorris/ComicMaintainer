@@ -2,6 +2,190 @@
         // (before this external JS is loaded) to support Flask template variable injection.
         // They are available globally when this script executes.
         
+        // =================================================================
+        // HTML templating helpers
+        // =================================================================
+        //
+        // The UI is rendered by building markup strings. Doing that with bare
+        // `innerHTML` and hand-placed escapeHtml() calls is error-prone: every
+        // new interpolation is an opportunity to forget the escape, and such a
+        // mistake is invisible until someone has a quote or an angle bracket in
+        // a series title (or a hostile filename).
+        //
+        // `html` is a tagged template that escapes every interpolated value by
+        // default, so the safe thing is what you get for free and unescaped
+        // output has to be asked for explicitly via rawHtml()/jsArg(). It
+        // returns a marker object rather than a string so that nesting one
+        // template inside another does not double-escape the inner markup.
+        //
+        // Rendering goes through a <template> element, whose parsed content is
+        // cached per markup string and cloned on use. Cloning an already-parsed
+        // fragment avoids re-running the HTML parser for markup the app has
+        // rendered before (loading and empty states, repeated list rows), and
+        // it keeps the parse away from the live document: the nodes are only
+        // attached once fully built.
+
+        const HTML_ESCAPES = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        };
+
+        /**
+         * Escape a value for interpolation into markup, in either text or
+         * quoted-attribute position.
+         *
+         * Quotes must be escaped too: this is used inside attributes such as
+         * aria-label="...", and titles really do contain double quotes (see the
+         * example in escapeJs below), which would otherwise terminate the
+         * attribute and let the rest of the value be parsed as markup.
+         */
+        function escapeHtml(text) {
+            return String(text ?? '').replace(/[&<>"']/g, ch => HTML_ESCAPES[ch]);
+        }
+        
+        function escapeJs(text) {
+            // Produce a value safe for use inside a single-quoted JavaScript string
+            // that is itself embedded in a double-quoted HTML attribute (e.g.
+            // onclick="doStuff('${escapeJs(value)}')"). Backslashes, single quotes,
+            // and control characters are JS-escaped. The double-quote character must
+            // be HTML-entity-encoded — not JS-escaped — because the browser parses
+            // the attribute value before handing it to the JS parser, so a literal
+            // " would otherwise terminate the attribute and break the markup
+            // (e.g. for series titles like: Hazure Zokusei "Hikari Mahou" ga ...).
+            // After HTML decoding the JS sees a plain " inside a single-quoted
+            // string, which is valid.
+            return text.replace(/\\/g, '\\\\')
+                       .replace(/'/g, "\\'")
+                       .replace(/"/g, '&quot;')
+                       .replace(/\n/g, '\\n')
+                       .replace(/\r/g, '\\r')
+                       .replace(/\t/g, '\\t');
+        }
+
+        const TRUSTED_HTML = Symbol('trustedHtml');
+
+        /**
+         * Mark a string as already-safe markup that must be inlined verbatim.
+         * Only ever pass markup this code generated - never raw server or user
+         * data.
+         */
+        function rawHtml(value) {
+            return { [TRUSTED_HTML]: true, value: String(value ?? '') };
+        }
+
+        function isTrustedHtml(value) {
+            return !!value && typeof value === 'object' && value[TRUSTED_HTML] === true;
+        }
+
+        /**
+         * Escape a value for use as an argument of an inline event handler,
+         * e.g. html`<button onclick="doThing('${jsArg(path)}')">`.
+         *
+         * This deliberately bypasses HTML escaping: the browser HTML-decodes an
+         * attribute value *before* the JS parser sees it, so HTML-escaping a
+         * quote here would decode straight back into a string-terminating
+         * quote. escapeJs() produces the one encoding that survives both
+         * parsers - see its own comment for the details.
+         */
+        function jsArg(value) {
+            return rawHtml(escapeJs(String(value ?? '')));
+        }
+
+        /**
+         * Convert a single interpolated value to markup.
+         *  - trusted values (rawHtml/jsArg/nested html) are inlined as-is
+         *  - null/undefined/false are dropped, so `cond && html`...`` works
+         *  - arrays are flattened, so `items.map(...)` needs no .join('')
+         *  - everything else is stringified and HTML-escaped
+         */
+        function htmlValueToString(value) {
+            if (value === null || value === undefined || value === false || value === true) {
+                return '';
+            }
+            if (isTrustedHtml(value)) {
+                return value.value;
+            }
+            if (Array.isArray(value)) {
+                return value.map(htmlValueToString).join('');
+            }
+            return escapeHtml(String(value));
+        }
+
+        /** Tagged template producing auto-escaped, trusted markup. */
+        function html(strings, ...values) {
+            let out = strings[0];
+            for (let i = 0; i < values.length; i++) {
+                out += htmlValueToString(values[i]) + strings[i + 1];
+            }
+            return rawHtml(out);
+        }
+
+        /** Unwrap an html`` result (or plain value) to a markup string. */
+        function htmlToString(content) {
+            return htmlValueToString(content);
+        }
+
+        // Parsed <template> elements keyed by markup string. Bounded because
+        // interpolated markup produces a distinct key per distinct data, and an
+        // unbounded map here would retain every row the app ever rendered.
+        const TEMPLATE_CACHE = new Map();
+        const MAX_TEMPLATE_CACHE_ENTRIES = 200;
+
+        function getParsedTemplate(markup) {
+            let template = TEMPLATE_CACHE.get(markup);
+            if (!template) {
+                template = document.createElement('template');
+                template.innerHTML = markup;
+                if (TEMPLATE_CACHE.size >= MAX_TEMPLATE_CACHE_ENTRIES) {
+                    // Map iterates in insertion order, so this drops the
+                    // least-recently-added entry.
+                    TEMPLATE_CACHE.delete(TEMPLATE_CACHE.keys().next().value);
+                }
+                TEMPLATE_CACHE.set(markup, template);
+            }
+            return template;
+        }
+
+        /** Build a DocumentFragment by cloning the parsed template content. */
+        function htmlToFragment(content) {
+            return getParsedTemplate(htmlToString(content)).content.cloneNode(true);
+        }
+
+        /** Build the first element of a template, or null if there is none. */
+        function htmlToElement(content) {
+            return htmlToFragment(content).firstElementChild;
+        }
+
+        /**
+         * Replace `target`'s children with freshly cloned template content.
+         * Use instead of `target.innerHTML = ...`.
+         */
+        function renderHtml(target, content) {
+            if (!target) return target;
+            target.replaceChildren(htmlToFragment(content));
+            return target;
+        }
+
+        /**
+         * Append cloned template content to `target` without disturbing the
+         * children it already has.
+         */
+        function appendHtml(target, content) {
+            if (!target) return target;
+            target.appendChild(htmlToFragment(content));
+            return target;
+        }
+
+        /** Remove every child of `target`. Use instead of `innerHTML = ''`. */
+        function clearChildren(target) {
+            if (!target) return target;
+            target.replaceChildren();
+            return target;
+        }
+
         // Job statuses a job can never leave. 'interrupted' means the server restarted while
         // the job was in flight; like the other terminal states it must stop polling, or the
         // UI would poll forever for a job that will never progress again.
@@ -1767,7 +1951,7 @@
             const container = document.getElementById('overviewRows');
             if (!container) return;
             if (!overviewLoaded) {
-                container.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading overview...</p></div>`;
+                renderHtml(container, html`<div class="loading"><div class="spinner"></div><p>Loading overview...</p></div>`);
             }
             let data;
             try {
@@ -1779,7 +1963,7 @@
                 data = await resp.json();
             } catch (err) {
                 console.error('Failed to load overview', err);
-                container.innerHTML = `<div class="empty-state"><p>Couldn't load your overview. <button type="button" class="btn btn-small" onclick="renderOverview()">Retry</button></p></div>`;
+                renderHtml(container, html`<div class="empty-state"><p>Couldn't load your overview. <button type="button" class="btn btn-small" onclick="renderOverview()">Retry</button></p></div>`);
                 return;
             }
             overviewLoaded = true;
@@ -3132,13 +3316,13 @@
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>';
+                    renderHtml(container, html`<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>`);
                     return;
                 }
                 const data = await response.json();
                 const providers = data.providers || [];
                 if (!providers.length) {
-                    container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">No external providers are configured.</div>';
+                    renderHtml(container, html`<div style="color: var(--text-muted); font-size: 13px;">No external providers are configured.</div>`);
                     return;
                 }
                 container.innerHTML = `
@@ -3163,7 +3347,7 @@
                 container.dataset.loaded = 'true';
             } catch (err) {
                 console.warn('Provider health fetch failed', err);
-                container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>';
+                renderHtml(container, html`<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>`);
             }
         }
 
@@ -4259,30 +4443,6 @@
             return `${month}-${day}`;
         }
         
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
-        function escapeJs(text) {
-            // Produce a value safe for use inside a single-quoted JavaScript string
-            // that is itself embedded in a double-quoted HTML attribute (e.g.
-            // onclick="doStuff('${escapeJs(value)}')"). Backslashes, single quotes,
-            // and control characters are JS-escaped. The double-quote character must
-            // be HTML-entity-encoded — not JS-escaped — because the browser parses
-            // the attribute value before handing it to the JS parser, so a literal
-            // " would otherwise terminate the attribute and break the markup
-            // (e.g. for series titles like: Hazure Zokusei "Hikari Mahou" ga ...).
-            // After HTML decoding the JS sees a plain " inside a single-quoted
-            // string, which is valid.
-            return text.replace(/\\/g, '\\\\')
-                       .replace(/'/g, "\\'")
-                       .replace(/"/g, '&quot;')
-                       .replace(/\n/g, '\\n')
-                       .replace(/\r/g, '\\r')
-                       .replace(/\t/g, '\\t');
-        }
 
         // Encode a folder path for use in URLs (URL-safe base64, matching the
         // server-side DecodeBase64UrlSafe helper).
@@ -4903,7 +5063,7 @@
             const titleEl = document.getElementById('seriesFoldersModalTitle');
 
             titleEl.textContent = seriesTitle ? `Folders for "${seriesTitle}"` : 'Series Folders';
-            list.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading folders...</p></div>';
+            renderHtml(list, html`<div class="loading"><div class="spinner"></div><p>Loading folders...</p></div>`);
             emptyState.style.display = 'none';
             mergeBtn.disabled = true;
             mergeNote.style.display = 'none';
@@ -4924,7 +5084,7 @@
                 const folders = Array.isArray(data.folders) ? data.folders : [];
 
                 if (folders.length === 0) {
-                    list.innerHTML = '';
+                    clearChildren(list);
                     emptyState.style.display = 'block';
                     return;
                 }
@@ -4954,7 +5114,7 @@
                 }
             } catch (error) {
                 console.error('Failed to load series folders:', error);
-                list.innerHTML = '';
+                clearChildren(list);
                 emptyState.style.display = 'block';
                 emptyState.textContent = `Failed to load folders: ${error.message}`;
             }
@@ -4997,9 +5157,9 @@
             document.getElementById('combineFoldersGroupTitle').textContent = 'Loading combinable folders...';
             document.getElementById('combineFoldersGroupMeta').textContent = '';
             document.getElementById('combineFoldersSuggestion').textContent = '';
-            document.getElementById('combineFoldersList').innerHTML = '';
+            clearChildren(document.getElementById('combineFoldersList'));
             document.getElementById('combineFoldersPreview').style.display = 'none';
-            document.getElementById('combineFoldersPreview').innerHTML = '';
+            clearChildren(document.getElementById('combineFoldersPreview'));
             document.getElementById('combineFoldersPreviewBtn').disabled = true;
             document.getElementById('combineFoldersConfirmBtn').disabled = true;
 
@@ -5080,7 +5240,7 @@
             const previewPanel = document.getElementById('combineFoldersPreview');
 
             previewPanel.style.display = 'none';
-            previewPanel.innerHTML = '';
+            clearChildren(previewPanel);
 
             if (!group) {
                 emptyState.style.display = 'block';
@@ -5111,7 +5271,7 @@
             }
 
             const list = document.getElementById('combineFoldersList');
-            list.innerHTML = '';
+            clearChildren(list);
             group.folders.forEach((folder, idx) => {
                 const isSelected = folder.directory === combineFolderSelectedDestination;
                 const isSuggested = folder.directory === group.suggestedDestinationDirectory;
@@ -5185,7 +5345,7 @@
             if (!body) return;
             const previewPanel = document.getElementById('combineFoldersPreview');
             previewPanel.style.display = 'block';
-            previewPanel.innerHTML = '<em>Building preview...</em>';
+            renderHtml(previewPanel, html`<em>Building preview...</em>`);
             combineFolderActionInFlight = true;
             document.getElementById('combineFoldersPreviewBtn').disabled = true;
             document.getElementById('combineFoldersConfirmBtn').disabled = true;
@@ -5205,7 +5365,7 @@
                 }
                 const moves = Array.isArray(data.moves) ? data.moves : [];
                 if (moves.length === 0) {
-                    previewPanel.innerHTML = '<em>No files will be moved.</em>';
+                    renderHtml(previewPanel, html`<em>No files will be moved.</em>`);
                 } else {
                     const conflicts = moves.filter(m => m.conflict).length;
                     const skipped = moves.filter(m => m.skipped).length;
@@ -7052,7 +7212,7 @@
             
             try {
                 loadingIndicator.style.display = 'block';
-                contentDiv.innerHTML = '';
+                clearChildren(contentDiv);
                 
                 const offset = (historyCurrentPage - 1) * historyPerPage;
                 const response = await fetch(apiUrl(`/api/processing-history?limit=${historyPerPage}&offset=${offset}`), {
@@ -7072,7 +7232,7 @@
                 loadingIndicator.style.display = 'none';
                 
                 if (data.history.length === 0) {
-                    contentDiv.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">No processing history found</div>';
+                    renderHtml(contentDiv, html`<div style="padding: 40px; text-align: center; color: var(--text-muted);">No processing history found</div>`);
                     pageInfo.textContent = 'No results';
                     prevBtn.disabled = true;
                     nextBtn.disabled = true;
@@ -7449,11 +7609,11 @@
             countLabel.textContent = `${progressResults.length} result${progressResults.length === 1 ? '' : 's'}`;
 
             if (progressResults.length === 0) {
-                details.innerHTML = '<div class="progress-results-empty">Per-file processing updates will appear here as each file completes.</div>';
+                renderHtml(details, html`<div class="progress-results-empty">Per-file processing updates will appear here as each file completes.</div>`);
                 return;
             }
             
-            details.innerHTML = '';
+            clearChildren(details);
             progressResults.forEach(result => {
                 const entry = document.createElement('div');
                 entry.className = `progress-result-item ${result.success ? 'success' : 'error'}`;
@@ -7599,7 +7759,7 @@
             const logType = document.getElementById('logType').value;
             
             try {
-                logFileSelect.innerHTML = '<option value="">Loading...</option>';
+                renderHtml(logFileSelect, html`<option value="">Loading...</option>`);
                 
                 const response = await fetch(apiUrl(`/api/logs/files?type=${logType}`), {
                     headers: getAuthHeaders()
@@ -7613,7 +7773,7 @@
                 const data = await response.json();
                 
                 // Clear and populate the dropdown
-                logFileSelect.innerHTML = '';
+                clearChildren(logFileSelect);
                 
                 if (data.files && data.files.length > 0) {
                     // Add "Most Recent" option
@@ -7639,7 +7799,7 @@
                 // Load logs for the selected file (most recent by default)
                 await loadLogs();
             } catch (error) {
-                logFileSelect.innerHTML = '<option value="">Error loading files</option>';
+                renderHtml(logFileSelect, html`<option value="">Error loading files</option>`);
                 console.error('Failed to load log files:', error);
             }
         }
@@ -8678,13 +8838,13 @@
             document.getElementById('manageSeriesUserAliases').textContent = 'Loading...';
             const nameSelect = document.getElementById('manageSeriesName');
             if (nameSelect) {
-                nameSelect.innerHTML = '<option value="">Automatic (use language preference)</option>';
+                renderHtml(nameSelect, html`<option value="">Automatic (use language preference)</option>`);
                 nameSelect.value = '';
             }
             const resolved = document.getElementById('manageSeriesResolvedName');
             if (resolved) resolved.textContent = '';
             document.getElementById('manageSeriesSearchInput').value = seriesTitle;
-            document.getElementById('manageSeriesSearchResults').innerHTML = '';
+            clearChildren(document.getElementById('manageSeriesSearchResults'));
             document.getElementById('manageSeriesNamesModal').classList.add('active');
             await loadManageSeriesRecord();
         }
@@ -8843,7 +9003,7 @@
                 };
             }
             const results = document.getElementById('manageSeriesImageProviderResults');
-            if (results) results.innerHTML = '';
+            if (results) clearChildren(results);
             const status = document.getElementById('manageSeriesImageProviderStatus');
             if (status) status.textContent = 'Enter a title and click Search to find cover candidates from the configured providers.';
         }
@@ -8864,7 +9024,7 @@
                 return;
             }
             status.textContent = 'Searching providers...';
-            results.innerHTML = '';
+            clearChildren(results);
             try {
                 const response = await fetch(
                     apiUrl(`/api/series-images/candidates?query=${encodeURIComponent(query)}&limit=12`),
@@ -8881,7 +9041,7 @@
                     return;
                 }
                 status.textContent = `${candidates.length} candidate${candidates.length === 1 ? '' : 's'} — click a thumbnail to apply.`;
-                results.innerHTML = '';
+                clearChildren(results);
                 candidates.forEach((cand) => {
                     const previewUrl = cand.thumbnail_url || cand.image_url;
                     const card = document.createElement('div');
@@ -9238,22 +9398,22 @@
             const query = (document.getElementById('manageSeriesSearchInput').value || '').trim();
             const container = document.getElementById('manageSeriesSearchResults');
             if (!query) {
-                container.innerHTML = '<p style="color: var(--text-secondary);">Enter a query above to search.</p>';
+                renderHtml(container, html`<p style="color: var(--text-secondary);">Enter a query above to search.</p>`);
                 return;
             }
-            container.innerHTML = '<p style="color: var(--text-secondary);">Searching...</p>';
+            renderHtml(container, html`<p style="color: var(--text-secondary);">Searching...</p>`);
             try {
                 const response = await fetch(apiUrl(`/api/metadata/search?query=${encodeURIComponent(query)}&limit=10`), {
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    container.innerHTML = '<p style="color: var(--text-error);">Search failed.</p>';
+                    renderHtml(container, html`<p style="color: var(--text-error);">Search failed.</p>`);
                     return;
                 }
                 const data = await response.json();
                 const results = data.results || [];
                 if (!results.length) {
-                    container.innerHTML = '<p style="color: var(--text-secondary);">No matches found. Check that external metadata providers are enabled in Settings.</p>';
+                    renderHtml(container, html`<p style="color: var(--text-secondary);">No matches found. Check that external metadata providers are enabled in Settings.</p>`);
                     return;
                 }
                 container.innerHTML = results.map((r, idx) => {
@@ -9316,7 +9476,7 @@
                 window.__manageSeriesSearchResults = results;
             } catch (err) {
                 console.error('searchExternalSeries failed', err);
-                container.innerHTML = '<p style="color: var(--text-error);">Search failed.</p>';
+                renderHtml(container, html`<p style="color: var(--text-error);">Search failed.</p>`);
             }
         }
 

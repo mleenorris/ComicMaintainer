@@ -122,12 +122,12 @@
                     <rect x="66" y="68" width="8" height="12" fill="#7CB8B8"/>
                     <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
                 </svg>
-                <div class="watcher-status-indicator" id="watcherStatus" title="Watcher Status">
-                    <span class="watcher-icon">⚙️</span>
+                <div class="watcher-status-indicator" id="watcherStatus" title="Watcher Status" role="status" aria-live="polite" aria-label="Watcher status">
+                    <span class="watcher-icon" aria-hidden="true">⚙️</span>
                     <span class="watcher-text">Checking...</span>
                 </div>
                 <div class="settings-menu-wrapper">
-                    <button class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle">
+                    <button type="button" class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle" aria-label="Open menu" aria-haspopup="true" aria-expanded="false" aria-controls="settingsDropdownMenu">
                         ⋮
                     </button>
                     <div class="settings-dropdown-menu" id="settingsDropdownMenu">
@@ -195,7 +195,7 @@
                         <button type="button" class="header-nav-btn" id="navOverviewBtn" onclick="navigate('#/home')">🏠<span class="header-nav-label"> Overview</span></button>
                         <button type="button" class="header-nav-btn" id="navLibraryBtn" onclick="navigate('#/library')">📚<span class="header-nav-label"> Library</span></button>
                     </nav>
-                    <button id="progressIndicator" class="progress-indicator-btn" onclick="restoreProgressModal()" style="display: none;" title="Show progress">
+                    <button type="button" id="progressIndicator" class="progress-indicator-btn" onclick="restoreProgressModal()" style="display: none;" title="Show progress" aria-label="Show processing progress">
                         <span id="progressIndicatorText">⏳ Processing...</span>
                     </button>
                     <div class="header-search">
@@ -203,7 +203,7 @@
                         <input type="text" id="headerSearchInput" name="headerSearch" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
                     </div>
                     <div class="header-filter-dropdown">
-                        <button class="header-filter-toggle" onclick="toggleHeaderFilterDropdown(event)" id="headerFilterToggle">
+                        <button type="button" class="header-filter-toggle" onclick="toggleHeaderFilterDropdown(event)" id="headerFilterToggle" aria-label="Filter files" aria-haspopup="true" aria-expanded="false" aria-controls="headerFilterMenu">
                             <span id="headerFilterLabel">📚 All</span>
                         </button>
                         <div class="header-dropdown-menu" id="headerFilterMenu">
@@ -243,7 +243,7 @@
                         </div>
                     </div>
                     <div class="header-sort-dropdown">
-                        <button class="header-sort-toggle" onclick="toggleHeaderSortDropdown(event)" id="headerSortToggle">
+                        <button type="button" class="header-sort-toggle" onclick="toggleHeaderSortDropdown(event)" id="headerSortToggle" aria-label="Sort files" aria-haspopup="true" aria-expanded="false" aria-controls="headerSortMenu">
                             <span id="headerSortLabel">🔤 Name</span>
                         </button>
                         <div class="header-dropdown-menu" id="headerSortMenu">

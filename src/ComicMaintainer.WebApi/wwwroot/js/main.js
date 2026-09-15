@@ -2,6 +2,201 @@
         // (before this external JS is loaded) to support Flask template variable injection.
         // They are available globally when this script executes.
         
+        // =================================================================
+        // HTML templating helpers
+        // =================================================================
+        //
+        // The UI is rendered by building markup strings. Doing that with bare
+        // `innerHTML` and hand-placed escapeHtml() calls is error-prone: every
+        // new interpolation is an opportunity to forget the escape, and such a
+        // mistake is invisible until someone has a quote or an angle bracket in
+        // a series title (or a hostile filename).
+        //
+        // `html` is a tagged template that escapes every interpolated value by
+        // default, so the safe thing is what you get for free and unescaped
+        // output has to be asked for explicitly via rawHtml()/jsArg(). It
+        // returns a marker object rather than a string so that nesting one
+        // template inside another does not double-escape the inner markup.
+        //
+        // Rendering goes through a <template> element, whose parsed content is
+        // cached per markup string and cloned on use. Cloning an already-parsed
+        // fragment avoids re-running the HTML parser for markup the app has
+        // rendered before (loading and empty states, repeated list rows), and
+        // it keeps the parse away from the live document: the nodes are only
+        // attached once fully built.
+
+        const HTML_ESCAPES = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        };
+
+        /**
+         * Escape a value for interpolation into markup, in either text or
+         * quoted-attribute position.
+         *
+         * Quotes must be escaped too: this is used inside attributes such as
+         * aria-label="...", and titles really do contain double quotes (see the
+         * example in escapeJs below), which would otherwise terminate the
+         * attribute and let the rest of the value be parsed as markup.
+         */
+        function escapeHtml(text) {
+            return String(text ?? '').replace(/[&<>"']/g, ch => HTML_ESCAPES[ch]);
+        }
+        
+        function escapeJs(text) {
+            // Produce a value safe for use inside a single-quoted JavaScript string
+            // that is itself embedded in a double-quoted HTML attribute (e.g.
+            // onclick="doStuff('${escapeJs(value)}')"). Backslashes, single quotes,
+            // and control characters are JS-escaped. The double-quote character must
+            // be HTML-entity-encoded — not JS-escaped — because the browser parses
+            // the attribute value before handing it to the JS parser, so a literal
+            // " would otherwise terminate the attribute and break the markup
+            // (e.g. for series titles like: Hazure Zokusei "Hikari Mahou" ga ...).
+            // After HTML decoding the JS sees a plain " inside a single-quoted
+            // string, which is valid.
+            //
+            // & must be encoded to &amp; first (before " is turned into &quot;),
+            // otherwise a value containing a literal HTML entity such as
+            // "&#39;" would survive JS-escaping unchanged and then get
+            // HTML-decoded back into a raw ' by the browser, terminating the
+            // single-quoted JS string early and allowing injected code to run.
+            return text.replace(/&/g, '&amp;')
+                       .replace(/\\/g, '\\\\')
+                       .replace(/'/g, "\\'")
+                       .replace(/"/g, '&quot;')
+                       .replace(/\n/g, '\\n')
+                       .replace(/\r/g, '\\r')
+                       .replace(/\t/g, '\\t');
+        }
+
+        const TRUSTED_HTML = Symbol('trustedHtml');
+
+        /**
+         * Mark a string as already-safe markup that must be inlined verbatim.
+         * Only ever pass markup this code generated - never raw server or user
+         * data.
+         */
+        function rawHtml(value) {
+            return { [TRUSTED_HTML]: true, value: String(value ?? '') };
+        }
+
+        function isTrustedHtml(value) {
+            return !!value && typeof value === 'object' && value[TRUSTED_HTML] === true;
+        }
+
+        /**
+         * Escape a value for use as an argument of an inline event handler,
+         * e.g. html`<button onclick="doThing('${jsArg(path)}')">`.
+         *
+         * This deliberately bypasses HTML escaping: the browser HTML-decodes an
+         * attribute value *before* the JS parser sees it, so HTML-escaping a
+         * quote here would decode straight back into a string-terminating
+         * quote. escapeJs() produces the one encoding that survives both
+         * parsers - see its own comment for the details.
+         */
+        function jsArg(value) {
+            return rawHtml(escapeJs(String(value ?? '')));
+        }
+
+        /**
+         * Convert a single interpolated value to markup.
+         *  - trusted values (rawHtml/jsArg/nested html) are inlined as-is
+         *  - null/undefined/false are dropped, so `cond && html`...`` works
+         *  - arrays are flattened, so `items.map(...)` needs no .join('')
+         *  - everything else is stringified and HTML-escaped
+         */
+        function htmlValueToString(value) {
+            if (value === null || value === undefined || value === false || value === true) {
+                return '';
+            }
+            if (isTrustedHtml(value)) {
+                return value.value;
+            }
+            if (Array.isArray(value)) {
+                return value.map(htmlValueToString).join('');
+            }
+            return escapeHtml(String(value));
+        }
+
+        /** Tagged template producing auto-escaped, trusted markup. */
+        function html(strings, ...values) {
+            let out = strings[0];
+            for (let i = 0; i < values.length; i++) {
+                out += htmlValueToString(values[i]) + strings[i + 1];
+            }
+            return rawHtml(out);
+        }
+
+        /** Unwrap an html`` result (or plain value) to a markup string. */
+        function htmlToString(content) {
+            return htmlValueToString(content);
+        }
+
+        // Parsed <template> elements keyed by markup string. Bounded because
+        // interpolated markup produces a distinct key per distinct data, and an
+        // unbounded map here would retain every row the app ever rendered.
+        const TEMPLATE_CACHE = new Map();
+        const MAX_TEMPLATE_CACHE_ENTRIES = 200;
+
+        function getParsedTemplate(markup) {
+            const cached = TEMPLATE_CACHE.get(markup);
+            if (cached) {
+                // Re-insert so the map's insertion order doubles as recency
+                // order, making the eviction below least-recently-used.
+                TEMPLATE_CACHE.delete(markup);
+                TEMPLATE_CACHE.set(markup, cached);
+                return cached;
+            }
+
+            const template = document.createElement('template');
+            template.innerHTML = markup;
+            if (TEMPLATE_CACHE.size >= MAX_TEMPLATE_CACHE_ENTRIES) {
+                TEMPLATE_CACHE.delete(TEMPLATE_CACHE.keys().next().value);
+            }
+            TEMPLATE_CACHE.set(markup, template);
+            return template;
+        }
+
+        /** Build a DocumentFragment by cloning the parsed template content. */
+        function htmlToFragment(content) {
+            return getParsedTemplate(htmlToString(content)).content.cloneNode(true);
+        }
+
+        /** Build the first element of a template, or null if there is none. */
+        function htmlToElement(content) {
+            return htmlToFragment(content).firstElementChild;
+        }
+
+        /**
+         * Replace `target`'s children with freshly cloned template content.
+         * Use instead of `target.innerHTML = ...`.
+         */
+        function renderHtml(target, content) {
+            if (!target) return target;
+            target.replaceChildren(htmlToFragment(content));
+            return target;
+        }
+
+        /**
+         * Append cloned template content to `target` without disturbing the
+         * children it already has.
+         */
+        function appendHtml(target, content) {
+            if (!target) return target;
+            target.appendChild(htmlToFragment(content));
+            return target;
+        }
+
+        /** Remove every child of `target`. Use instead of `innerHTML = ''`. */
+        function clearChildren(target) {
+            if (!target) return target;
+            target.replaceChildren();
+            return target;
+        }
+
         // Job statuses a job can never leave. 'interrupted' means the server restarted while
         // the job was in flight; like the other terminal states it must stop polling, or the
         // UI would poll forever for a job that will never progress again.
@@ -55,7 +250,41 @@
             localStorage.removeItem('jwt_token');
             localStorage.removeItem('username');
             localStorage.removeItem('authelia_authenticated');
+            localStorage.removeItem('client_cache_session_id');
+            clearCachedImages();
             window.location.href = '/login.html';
+        }
+
+        /**
+         * Opaque, per-login identifier used to scope the service worker's
+         * image cache to the current session. It is created the first time a
+         * request is made after login and cleared on logout (redirectToLogin
+         * above), so the cache key changes whenever the signed-in identity
+         * changes - even for Authelia's cookie-based auth, where the service
+         * worker cannot read the session cookie itself to tell sessions apart.
+         */
+        function getOrCreateClientCacheSessionId() {
+            let id = localStorage.getItem('client_cache_session_id');
+            if (!id) {
+                id = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
+                localStorage.setItem('client_cache_session_id', id);
+            }
+            return id;
+        }
+
+        /**
+         * Ask the service worker to drop its cached comic covers and pages.
+         * Those responses are authenticated content, so they must not survive a
+         * sign-out and be served to whoever signs in next on the same device.
+         */
+        function clearCachedImages() {
+            try {
+                if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                    navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_IMAGE_CACHE' });
+                }
+            } catch (error) {
+                console.log('PWA: Failed to request image cache clear', error);
+            }
         }
         
         // Authentication check - check server auth status first (supports Authelia)
@@ -138,7 +367,8 @@
             if (isAutheliaAuth) {
                 console.log('[AUTH] Using Authelia authentication (cookies)');
                 return {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-Client-Session': getOrCreateClientCacheSessionId()
                 };
             }
             
@@ -152,7 +382,8 @@
             }
             
             const headers = {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'X-Client-Session': getOrCreateClientCacheSessionId()
             };
             if (token) {
                 headers['Authorization'] = `Bearer ${token}`;
@@ -1433,6 +1664,59 @@
         // PWA Installation support
         let deferredPrompt = null;
         
+        // Tracks the worker the user has been told about, so repeated
+        // 'updatefound' events don't stack up multiple banners.
+        let pendingServiceWorkerUpdate = null;
+
+        /**
+         * Show a dismissible banner offering to activate a newly installed
+         * service worker. Activation (and the reload that follows it via
+         * 'controllerchange') only happens when the user opts in.
+         */
+        function promptForServiceWorkerUpdate(worker) {
+            if (!worker || pendingServiceWorkerUpdate === worker) {
+                return;
+            }
+            pendingServiceWorkerUpdate = worker;
+
+            const existing = document.getElementById('appUpdateBanner');
+            if (existing) {
+                existing.remove();
+            }
+
+            const banner = document.createElement('div');
+            banner.id = 'appUpdateBanner';
+            banner.className = 'app-update-banner';
+            banner.setAttribute('role', 'status');
+            banner.setAttribute('aria-live', 'polite');
+
+            const text = document.createElement('span');
+            text.className = 'app-update-banner-text';
+            text.textContent = 'A new version of Comic Maintainer is available.';
+
+            const reloadBtn = document.createElement('button');
+            reloadBtn.type = 'button';
+            reloadBtn.className = 'btn btn-primary btn-small';
+            reloadBtn.textContent = 'Reload';
+            reloadBtn.addEventListener('click', () => {
+                reloadBtn.disabled = true;
+                reloadBtn.textContent = 'Reloading…';
+                worker.postMessage({ type: 'SKIP_WAITING' });
+            });
+
+            const dismissBtn = document.createElement('button');
+            dismissBtn.type = 'button';
+            dismissBtn.className = 'app-update-banner-dismiss';
+            dismissBtn.setAttribute('aria-label', 'Dismiss update notification');
+            dismissBtn.textContent = '\u00d7';
+            dismissBtn.addEventListener('click', () => {
+                banner.remove();
+            });
+
+            banner.append(text, reloadBtn, dismissBtn);
+            document.body.appendChild(banner);
+        }
+
         // Register service worker for offline support
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
@@ -1447,13 +1731,25 @@
                             registration.update();
                         }, 60000); // Check every minute
 
-                        // When a new service worker has fully installed, tell it to
-                        // skip waiting so it activates immediately. The actual reload
-                        // is triggered by the 'controllerchange' event below, which
-                        // is the documented signal that the new SW is now in control.
-                        // Reloading earlier (e.g. on 'statechange' => 'installed') is
-                        // racy: the reload would be served by the OLD service worker
-                        // and the user would still see stale assets, forcing a hard refresh.
+                        // When a new service worker has fully installed, surface
+                        // it to the user instead of silently activating and
+                        // reloading. An unannounced reload can interrupt work in
+                        // progress (an open settings form, a running batch job's
+                        // progress view), so the swap is deferred until the user
+                        // asks for it.
+                        //
+                        // The reload itself is still driven by 'controllerchange'
+                        // below, which is the documented signal that the new
+                        // worker is in control. Reloading earlier (e.g. straight
+                        // after 'installed') is racy: the reload would be served
+                        // by the OLD worker and the user would still see stale
+                        // assets, forcing a hard refresh.
+                        if (registration.waiting && navigator.serviceWorker.controller) {
+                            // A new version finished installing during a previous
+                            // visit and has been waiting ever since.
+                            promptForServiceWorkerUpdate(registration.waiting);
+                        }
+
                         registration.addEventListener('updatefound', () => {
                             const newWorker = registration.installing;
                             console.log('PWA: New service worker installing...');
@@ -1463,10 +1759,20 @@
                             }
 
                             newWorker.addEventListener('statechange', () => {
-                                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                    console.log('PWA: New version installed, asking it to skipWaiting...');
-                                    newWorker.postMessage({ type: 'SKIP_WAITING' });
+                                if (newWorker.state !== 'installed') {
+                                    return;
                                 }
+
+                                if (!navigator.serviceWorker.controller) {
+                                    // First ever install: nothing is cached yet and
+                                    // there is no stale page to replace, so there is
+                                    // nothing to prompt about.
+                                    console.log('PWA: Service worker installed for the first time');
+                                    return;
+                                }
+
+                                console.log('PWA: New version installed, prompting user to reload');
+                                promptForServiceWorkerUpdate(newWorker);
                             });
                         });
                     })
@@ -1676,7 +1982,7 @@
             const container = document.getElementById('overviewRows');
             if (!container) return;
             if (!overviewLoaded) {
-                container.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading overview...</p></div>`;
+                renderHtml(container, html`<div class="loading"><div class="spinner"></div><p>Loading overview...</p></div>`);
             }
             let data;
             try {
@@ -1688,7 +1994,7 @@
                 data = await resp.json();
             } catch (err) {
                 console.error('Failed to load overview', err);
-                container.innerHTML = `<div class="empty-state"><p>Couldn't load your overview. <button type="button" class="btn btn-small" onclick="renderOverview()">Retry</button></p></div>`;
+                renderHtml(container, html`<div class="empty-state"><p>Couldn't load your overview. <button type="button" class="btn btn-small" onclick="renderOverview()">Retry</button></p></div>`);
                 return;
             }
             overviewLoaded = true;
@@ -1697,7 +2003,7 @@
                 { title: '🆕 Series Updates', items: data.series_updates || [], empty: 'No new files in the last 30 days.', resume: false, seeAll: true },
                 { title: '✨ Newly Added Series', items: data.newly_added_series || [], empty: 'No new series in the last 30 days.', resume: false, seeAll: true }
             ];
-            container.innerHTML = rows.map(renderOverviewRow).join('');
+            renderHtml(container, rawHtml(rows.map(renderOverviewRow).join('')));
             hydrateProtectedImages(container);
         }
 
@@ -1726,7 +2032,7 @@
                 <div class="overview-card">
                     <button class="series-card overview-series-card" type="button" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
                         <div class="series-cover-wrapper">
-                            <img class="series-cover" data-protected-image="${escapeHtml(cover)}" data-protected-image-fallback="${escapeHtml(fallback)}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                            <img class="series-cover" data-protected-image="${escapeHtml(cover)}" data-protected-image-fallback="${escapeHtml(fallback)}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                             <div class="series-cover-overlay"></div>
                             <span class="series-count-badge">${series.issue_count}</span>
                             ${renderLookupStatusBadge(series)}
@@ -2136,12 +2442,12 @@
             // even if the underlying API call is slow on large libraries.
             const fileListEl = document.getElementById('fileList');
             if (!append && fileListEl && !currentSeriesDetailId) {
-                fileListEl.innerHTML = `
+                renderHtml(fileListEl, html`
                     <div class="loading">
                         <div class="spinner"></div>
                         <p>Loading series...</p>
                     </div>
-                `;
+                `);
             }
 
             seriesLoading = true;
@@ -2513,6 +2819,37 @@
             const menu = document.getElementById('settingsDropdownMenu');
             menu.classList.remove('show');
         }
+
+        // Keep aria-expanded on the header menu triggers in sync with the
+        // menu's visual state. The menus are opened/closed from many places
+        // (toggles, item handlers, click-away, Escape), so instead of touching
+        // every call site we observe the menu's class attribute.
+        function initDropdownAriaExpandedSync() {
+            const pairs = [
+                ['settingsMenuToggle', 'settingsDropdownMenu'],
+                ['headerFilterToggle', 'headerFilterMenu'],
+                ['headerSortToggle', 'headerSortMenu']
+            ];
+
+            pairs.forEach(([toggleId, menuId]) => {
+                const toggle = document.getElementById(toggleId);
+                const menu = document.getElementById(menuId);
+                if (!toggle || !menu) return;
+
+                const sync = () => {
+                    toggle.setAttribute('aria-expanded', menu.classList.contains('show') ? 'true' : 'false');
+                };
+
+                sync();
+
+                if (typeof MutationObserver !== 'undefined') {
+                    new MutationObserver(sync).observe(menu, {
+                        attributes: true,
+                        attributeFilter: ['class']
+                    });
+                }
+            });
+        }
         
         async function scanUnmarkedFiles() {
             try {
@@ -2695,13 +3032,13 @@
             reconcileSeriesSelection();
 
             if (!seriesLibrary.length) {
-                fileList.innerHTML = `
+                renderHtml(fileList, html`
                     <div class="empty-state">
                         <div class="empty-state-icon">🖼️</div>
                         <h2>No series found</h2>
                         <p>${searchQuery || filterMode !== 'all' ? 'Try a different search term or filter' : 'Process and normalize comics to build your series library view.'}</p>
                     </div>
-                `;
+                `);
                 return;
             }
 
@@ -2712,10 +3049,10 @@
                     ? renderSeriesLibraryGrid()
                     : renderSeriesLibraryCompact();
 
-            fileList.innerHTML = `
-                ${renderSeriesSelectionToolbar()}
-                ${body}
-            `;
+            renderHtml(fileList, html`
+                ${rawHtml(renderSeriesSelectionToolbar())}
+                ${rawHtml(body)}
+            `);
 
             hydrateProtectedImages(fileList);
             updateSelectInfo();
@@ -2882,7 +3219,7 @@
                         <button class="series-card${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
                             ${renderSeriesSelectBox(series)}
                             <div class="series-cover-wrapper">
-                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                 <div class="series-cover-overlay"></div>
                                 <span class="series-count-badge">${series.issue_count}</span>
                                 ${renderLookupStatusBadge(series)}
@@ -2906,7 +3243,7 @@
                         <button class="series-card series-card--titled${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
                             ${renderSeriesSelectBox(series)}
                             <div class="series-cover-wrapper">
-                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                                <img class="series-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                 <span class="series-count-badge">${series.issue_count}</span>
                                 ${renderLookupStatusBadge(series)}
                             </div>
@@ -2930,7 +3267,7 @@
                         <button class="series-list-row${selectedSeries.has(series.id) ? ' series-list-row--selected' : ''}" type="button" role="listitem" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
                             ${renderSeriesSelectBox(series)}
                             <div class="series-list-thumb-wrapper">
-                                <img class="series-list-thumb" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                                <img class="series-list-thumb" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy" decoding="async" fetchpriority="low">
                             </div>
                             <div class="series-list-info">
                                 <h3 class="series-list-title" title="${escapeHtml(series.title)}">${escapeHtml(series.title)}</h3>
@@ -2988,7 +3325,7 @@
             const modal = document.getElementById('externalProvidersModal');
             const host = document.getElementById('externalProvidersModalContent');
             if (!modal || !host) return;
-            host.innerHTML = renderProviderHealthWidget();
+            renderHtml(host, rawHtml(renderProviderHealthWidget()));
             modal.classList.add('show');
             modal.style.display = 'flex';
             loadProviderHealth();
@@ -3010,16 +3347,16 @@
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>';
+                    renderHtml(container, html`<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>`);
                     return;
                 }
                 const data = await response.json();
                 const providers = data.providers || [];
                 if (!providers.length) {
-                    container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">No external providers are configured.</div>';
+                    renderHtml(container, html`<div style="color: var(--text-muted); font-size: 13px;">No external providers are configured.</div>`);
                     return;
                 }
-                container.innerHTML = `
+                renderHtml(container, html`
                     <div class="provider-health-row">
                         <span class="provider-health-label">External providers:</span>
                         ${providers.map(p => {
@@ -3032,16 +3369,16 @@
                                 p.last_success_utc ? `Last success: ${new Date(p.last_success_utc).toLocaleString()}` : 'No successful lookups yet',
                                 `Successes: ${p.success_count || 0}, Failures: ${p.failure_count || 0}`
                             ].filter(Boolean).join('\n');
-                            return `<span class="provider-health-pill provider-health-pill--${cls}" title="${escapeHtml(tooltipParts)}">
-                                <span class="provider-health-dot"></span>${escapeHtml(p.name)}
+                            return html`<span class="provider-health-pill provider-health-pill--${cls}" title="${tooltipParts}">
+                                <span class="provider-health-dot"></span>${p.name}
                             </span>`;
-                        }).join('')}
+                        })}
                     </div>
-                `;
+                `);
                 container.dataset.loaded = 'true';
             } catch (err) {
                 console.warn('Provider health fetch failed', err);
-                container.innerHTML = '<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>';
+                renderHtml(container, html`<div style="color: var(--text-muted); font-size: 13px;">Unable to fetch provider status.</div>`);
             }
         }
 
@@ -3287,8 +3624,10 @@
             // Close any open action menu first so a menu that was portaled to
             // <body> is restored before its host card is replaced below.
             closeAllDropdowns();
-            grid.innerHTML = gridItems.map(renderSeriesIssueGridItemHtml).join('')
-                + (!allLoaded ? `<div id="seriesIssuesSentinel" class="series-issues-sentinel" aria-hidden="true"><div class="spinner spinner-small"></div></div>` : '');
+            renderHtml(grid, html`
+                ${rawHtml(gridItems.map(renderSeriesIssueGridItemHtml).join(''))}
+                ${!allLoaded ? html`<div id="seriesIssuesSentinel" class="series-issues-sentinel" aria-hidden="true"><div class="spinner spinner-small"></div></div>` : ''}
+            `);
             // Update the "showing N of M" counter in the selection bar.
             const metaSpan = panel.querySelector('.series-detail-selection-meta');
             if (metaSpan) {
@@ -3517,7 +3856,7 @@
                                     ${issue.duplicate ? `<span class="series-issue-duplicate-badge" title="Duplicate">🔁 Duplicate</span>` : ''}
                                     <span class="series-issue-read-corner series-issue-read-corner--${issue.read ? 'read' : 'unread'}" title="${issue.read ? 'Read' : 'Unread'}" aria-label="${issue.read ? 'Read' : 'Unread'}"></span>
                                     <button type="button" class="series-issue-cover-button" aria-label="Read ${escapeHtml(issue.title || issue.file_name)}" onclick="readComic('${escapeJs(issue.file_path)}')">
-                                        <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy">
+                                        <img class="series-issue-cover" data-protected-image="${escapeHtml(issue.file_path)}" alt="${escapeHtml(issue.file_name)} cover" loading="lazy" decoding="async" fetchpriority="low">
                                         <div class="series-issue-cover-overlay"></div>
                                         ${issue.issue ? `<span class="series-issue-badge">#${escapeHtml(issue.issue)}</span>` : ''}
                                     </button>
@@ -3667,43 +4006,43 @@
             const someIssuesSelected = selectableIssuePaths.some(path => selectedFiles.has(path));
             const gridItems = buildSeriesIssuesGridItems(issues);
 
-            fileList.innerHTML = `
+            renderHtml(fileList, html`
                 <div class="series-detail" id="seriesDetailPanel">
                     <div class="series-detail-header">
                         <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">← Back to Series</button>
                         <div class="series-detail-summary">
-                            <img class="series-detail-cover" data-protected-image="${escapeHtml(series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path)}" data-protected-image-fallback="${escapeHtml(series.has_external_image && series.external_image_url ? series.cover_file_path : '')}" alt="${escapeHtml(series.title)} cover" loading="lazy">
+                            <img class="series-detail-cover" data-protected-image="${series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path}" data-protected-image-fallback="${series.has_external_image && series.external_image_url ? series.cover_file_path : ''}" alt="${series.title} cover" loading="lazy" decoding="async" fetchpriority="low">
                             <div class="series-detail-summary-body">
-                                <h2>${escapeHtml(series.title)} ${renderLookupStatusBadge(series)}</h2>
+                                <h2>${series.title} ${rawHtml(renderLookupStatusBadge(series))}</h2>
                                 <div class="series-detail-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} · ${formatFileSize(series.total_size)}</div>
-                                ${series.aliases?.length ? `<div class="series-detail-meta">Also known as: ${escapeHtml(series.aliases.join(', '))}</div>` : ''}
-                                ${series.metadata_source ? `<div class="series-detail-meta">Source: ${escapeHtml(series.metadata_source)}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
-                                ${renderSeriesSynopsis(series)}
+                                ${series.aliases?.length ? html`<div class="series-detail-meta">Also known as: ${series.aliases.join(', ')}</div>` : ''}
+                                ${series.metadata_source ? html`<div class="series-detail-meta">Source: ${series.metadata_source}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
+                                ${rawHtml(renderSeriesSynopsis(series))}
                                 <div class="series-detail-actions">
-                                    ${issues.length ? `<button type="button" class="btn btn-small" onclick="readComic('${escapeJs(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
+                                    ${issues.length ? html`<button type="button" class="btn btn-small" onclick="readComic('${jsArg(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
                                     <div class="file-actions-dropdown series-actions-dropdown">
-                                        <button type="button" class="dropdown-toggle" onclick="toggleDropdown(event, '${escapeJs(SERIES_ACTIONS_DROPDOWN_KEY)}')">
+                                        <button type="button" class="dropdown-toggle" onclick="toggleDropdown(event, '${jsArg(SERIES_ACTIONS_DROPDOWN_KEY)}')">
                                             ⚙️ Actions
                                         </button>
                                         <div class="dropdown-menu" id="${getDropdownId(SERIES_ACTIONS_DROPDOWN_KEY)}">
-                                            <button class="dropdown-item" onclick="openManageSeriesNamesModal('${escapeJs(series.title)}'); closeAllDropdowns();">
+                                            <button class="dropdown-item" onclick="openManageSeriesNamesModal('${jsArg(series.title)}'); closeAllDropdowns();">
                                                 🏷️ Manage Names
                                             </button>
-                                            <button class="dropdown-item" onclick="openSeriesFoldersModal('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="See the on-disk folders contributing to this series and merge them into one">
+                                            <button class="dropdown-item" onclick="openSeriesFoldersModal('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="See the on-disk folders contributing to this series and merge them into one">
                                                 📁 Manage Folders
                                             </button>
                                             <div class="dropdown-divider"></div>
-                                            <button class="dropdown-item" onclick="refreshSeriesMetadataDirect('${escapeJs(series.title)}'); closeAllDropdowns();">
+                                            <button class="dropdown-item" onclick="refreshSeriesMetadataDirect('${jsArg(series.title)}'); closeAllDropdowns();">
                                                 🌐 Refresh Metadata
                                             </button>
-                                            <button class="dropdown-item" onclick="refreshSeriesFolder('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="Refresh metadata for every folder/alias that groups under this series">
+                                            <button class="dropdown-item" onclick="refreshSeriesFolder('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Refresh metadata for every folder/alias that groups under this series">
                                                 📁 Refresh Folder
                                             </button>
-                                            <button class="dropdown-item" onclick="updateSeriesCoversDirect('${escapeJs(series.title)}'); closeAllDropdowns();" title="Re-apply the current cached series image to this series' cover sidecars and first-issue archive. This may rewrite the archive file.">
+                                            <button class="dropdown-item" onclick="updateSeriesCoversDirect('${jsArg(series.title)}'); closeAllDropdowns();" title="Re-apply the current cached series image to this series' cover sidecars and first-issue archive. This may rewrite the archive file.">
                                                 🖼️ Update Covers
                                             </button>
                                             <div class="dropdown-divider"></div>
-                                            <button class="dropdown-item" onclick="resetSeriesProcessedStatus('${escapeJs(series.id)}','${escapeJs(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
+                                            <button class="dropdown-item" onclick="resetSeriesProcessedStatus('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
                                                 ♻️ Reset Processed Status
                                             </button>
                                         </div>
@@ -3712,39 +4051,39 @@
                             </div>
                         </div>
                     </div>
-                    ${!issuesLoading && !issuesFailed && issues.length ? `
+                    ${!issuesLoading && !issuesFailed && issues.length ? html`
                         <div class="series-detail-selection-bar">
                             <label class="series-detail-select-all" for="selectAll">
                                 <input type="checkbox"
                                        id="selectAll"
                                        onchange="toggleSelectAll(this.checked)"
-                                       ${allIssuesSelected ? 'checked' : ''}>
+                                       ${allIssuesSelected ? rawHtml('checked') : ''}>
                                 <span>Select all issues</span>
                             </label>
                             <span class="series-detail-selection-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} in this series${!allLoaded ? ` · showing ${issues.length}` : ''}</span>
                         </div>
-                        ${renderMissingIssuesBanner(issues)}
+                        ${rawHtml(renderMissingIssuesBanner(issues))}
                     ` : ''}
-                    ${issuesLoading ? `
+                    ${issuesLoading ? html`
                         <div class="loading">
                             <div class="spinner"></div>
                             <p>Loading issues...</p>
                         </div>
-                    ` : issuesFailed ? `
-                        <div class="empty-state"><p>Failed to load issues. <button type="button" class="btn btn-small" onclick="loadSeriesIssues('${escapeJs(seriesId)}', true)">Retry</button></p></div>
-                    ` : issues.length === 0 ? `
+                    ` : issuesFailed ? html`
+                        <div class="empty-state"><p>Failed to load issues. <button type="button" class="btn btn-small" onclick="loadSeriesIssues('${jsArg(seriesId)}', true)">Retry</button></p></div>
+                    ` : issues.length === 0 ? html`
                         <div class="empty-state">
                             <p>${filterMode !== 'all' || searchQuery ? 'No issues in this series match the current filter.' : 'No issues in this series.'}</p>
-                            ${filterMode !== 'all' ? `<button type="button" class="btn btn-small" onclick="setHeaderFilter('all')">Clear filter</button>` : ''}
+                            ${filterMode !== 'all' ? html`<button type="button" class="btn btn-small" onclick="setHeaderFilter('all')">Clear filter</button>` : ''}
                         </div>
-                    ` : `
+                    ` : html`
                         <div class="series-issues-grid">
-                            ${gridItems.map(renderSeriesIssueGridItemHtml).join('')}
-                            ${!allLoaded ? `<div id="seriesIssuesSentinel" class="series-issues-sentinel" aria-hidden="true"><div class="spinner spinner-small"></div></div>` : ''}
+                            ${rawHtml(gridItems.map(renderSeriesIssueGridItemHtml).join(''))}
+                            ${!allLoaded ? html`<div id="seriesIssuesSentinel" class="series-issues-sentinel" aria-hidden="true"><div class="spinner spinner-small"></div></div>` : ''}
                         </div>
                     `}
                 </div>
-            `;
+            `);
 
             const selectAllCheckbox = document.getElementById('selectAll');
             if (selectAllCheckbox) {
@@ -3806,11 +4145,12 @@
                            ${isSelected ? 'checked' : ''}
                            onchange="toggleFileSelection('${escapeJs(file.relative_path)}', this.checked)">
                     <div class="status-badge" title="${statusTitle}">
-                        <span>${statusIcon}</span>
+                        <span aria-hidden="true">${statusIcon}</span>
+                        <span class="visually-hidden">${escapeHtml(statusTitle)}</span>
                     </div>
                     <div>
                         <div class="file-name" title="${escapeHtml(file.name)}">
-                            ${readIcon ? `<span class="read-indicator" title="${readTitle}">${readIcon}</span> ` : ''}${filenameHtml}
+                            ${readIcon ? `<span class="read-indicator" title="${readTitle}"><span aria-hidden="true">${readIcon}</span><span class="visually-hidden">${escapeHtml(readTitle)}</span></span> ` : ''}${filenameHtml}
                         </div>
                         ${!dir ? `<div class="file-path">${escapeHtml(file.relative_path)}</div>` : ''}
                     </div>
@@ -3870,6 +4210,59 @@
             `;
         }
 
+        // ---------------------------------------------------------------
+        // Incremental list rendering helpers (see renderFileList()).
+        //
+        // Each cache maps a key to `{ html, el }`, where `html` is the markup
+        // the node was built from. A node is only rebuilt when its markup
+        // changed or when it is no longer attached to the expected parent
+        // (which happens whenever some other code path replaces the whole list,
+        // e.g. to show a loading or empty state) — that check makes the caches
+        // self-healing rather than something every teardown site must reset.
+        // ---------------------------------------------------------------
+        const folderSectionCache = new Map();
+        const fileListHeaderCache = new Map();
+
+        function reuseOrBuildListNode(parent, cache, key, markup) {
+            const cached = cache.get(key);
+            if (cached &&
+                cached.markup === markup &&
+                cached.el.isConnected &&
+                cached.el.parentElement === parent) {
+                return cached.el;
+            }
+
+            const el = htmlToElement(rawHtml(markup.trim()));
+            cache.set(key, { markup, el });
+            return el;
+        }
+
+        /**
+         * Move/insert `desiredChildren` into `parent` in order, touching the
+         * DOM only where it already differs, and remove any other children.
+         * The infinite-scroll sentinel is left in place because
+         * ensureScrollObserver() re-appends it as the last child afterwards.
+         */
+        function reconcileListChildren(parent, desiredChildren) {
+            let cursor = parent.firstElementChild;
+
+            for (const node of desiredChildren) {
+                if (cursor === node) {
+                    cursor = cursor.nextElementSibling;
+                    continue;
+                }
+                parent.insertBefore(node, cursor);
+            }
+
+            while (cursor) {
+                const next = cursor.nextElementSibling;
+                if (cursor.id !== 'libraryScrollSentinel') {
+                    cursor.remove();
+                }
+                cursor = next;
+            }
+        }
+
         function renderFileList() {
             const fileList = document.getElementById('fileList');
 
@@ -3894,28 +4287,28 @@
 
             if (folderList.length === 0) {
                 if (folderLoading) {
-                    fileList.innerHTML = `
+                    renderHtml(fileList, html`
                         <div class="loading">
                             <div class="spinner"></div>
                             <p>Loading files...</p>
                         </div>
-                    `;
+                    `);
                 } else if (searchQuery || filterMode !== 'all') {
-                    fileList.innerHTML = `
+                    renderHtml(fileList, html`
                         <div class="empty-state">
                             <div class="empty-state-icon">🔍</div>
                             <h2>No matching files found</h2>
                             <p>Try a different search term or filter</p>
                         </div>
-                    `;
+                    `);
                 } else {
-                    fileList.innerHTML = `
+                    renderHtml(fileList, html`
                         <div class="empty-state">
                             <div class="empty-state-icon">📁</div>
                             <h2>No comic files found</h2>
                             <p>Add some .cbz or .cbr files to your watched directory</p>
                         </div>
-                    `;
+                    `);
                 }
                 updateSelectInfo();
                 updateSelectAllCheckbox();
@@ -3923,7 +4316,24 @@
                 return;
             }
 
-            let html = `
+            // Incremental rendering.
+            //
+            // Assigning the whole list in one `innerHTML` write forces the
+            // browser to re-parse and re-lay-out every folder and every file
+            // row. renderFileList() runs on every folder fetch completing,
+            // every selection change and every infinite-scroll page append, so
+            // with hundreds of folders loaded that full rebuild dominates the
+            // frame budget and is the main source of jank in the library view.
+            //
+            // Instead, each folder is rendered into its own `.folder-section`
+            // wrapper and the markup used to build it is remembered. On the
+            // next render a folder whose generated markup is byte-identical
+            // keeps its existing DOM node untouched, so only folders that
+            // actually changed are re-parsed. Using the generated markup itself
+            // as the cache key makes the comparison exact by construction:
+            // there is no hand-maintained list of fields that could drift out
+            // of sync with the template.
+            const headerHtml = `
                 <div class="file-list-header">
                     <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this.checked)" title="Select all loaded files">
                     <button class="toggle-all-btn" onclick="toggleAllFolders()" id="toggleAllBtn" title="Expand/Collapse All">
@@ -3936,8 +4346,15 @@
                 </div>
             `;
 
+            // Desired child order for `.file-list`, in order.
+            const desiredChildren = [];
+            desiredChildren.push(reuseOrBuildListNode(fileList, fileListHeaderCache, 'header', headerHtml));
+
+            const renderedFolderKeys = new Set();
+
             folderList.forEach(folder => {
                 const dir = folder.path || '';
+                let html = '';
                 const isCollapsed = collapsedDirectories.has(dir);
                 const entry = folderFiles.get(dir);
                 const loadedFiles = (entry && entry.status === 'loaded') ? entry.files : [];
@@ -3992,9 +4409,21 @@
                 }
 
                 html += `</div>`;
+
+                const sectionHtml = `<div class="folder-section">${html}</div>`;
+                desiredChildren.push(reuseOrBuildListNode(fileList, folderSectionCache, dir, sectionHtml));
+                renderedFolderKeys.add(dir);
             });
 
-            fileList.innerHTML = html;
+            // Drop cache entries for folders that are no longer listed (e.g.
+            // after a filter/search change) so the map cannot grow unbounded.
+            for (const key of Array.from(folderSectionCache.keys())) {
+                if (!renderedFolderKeys.has(key)) {
+                    folderSectionCache.delete(key);
+                }
+            }
+
+            reconcileListChildren(fileList, desiredChildren);
 
             updateSelectInfo();
             updateSelectAllCheckbox();
@@ -4041,30 +4470,6 @@
             return `${month}-${day}`;
         }
         
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
-        function escapeJs(text) {
-            // Produce a value safe for use inside a single-quoted JavaScript string
-            // that is itself embedded in a double-quoted HTML attribute (e.g.
-            // onclick="doStuff('${escapeJs(value)}')"). Backslashes, single quotes,
-            // and control characters are JS-escaped. The double-quote character must
-            // be HTML-entity-encoded — not JS-escaped — because the browser parses
-            // the attribute value before handing it to the JS parser, so a literal
-            // " would otherwise terminate the attribute and break the markup
-            // (e.g. for series titles like: Hazure Zokusei "Hikari Mahou" ga ...).
-            // After HTML decoding the JS sees a plain " inside a single-quoted
-            // string, which is valid.
-            return text.replace(/\\/g, '\\\\')
-                       .replace(/'/g, "\\'")
-                       .replace(/"/g, '&quot;')
-                       .replace(/\n/g, '\\n')
-                       .replace(/\r/g, '\\r')
-                       .replace(/\t/g, '\\t');
-        }
 
         // Encode a folder path for use in URLs (URL-safe base64, matching the
         // server-side DecodeBase64UrlSafe helper).
@@ -4685,7 +5090,7 @@
             const titleEl = document.getElementById('seriesFoldersModalTitle');
 
             titleEl.textContent = seriesTitle ? `Folders for "${seriesTitle}"` : 'Series Folders';
-            list.innerHTML = '<div class="loading"><div class="spinner"></div><p>Loading folders...</p></div>';
+            renderHtml(list, html`<div class="loading"><div class="spinner"></div><p>Loading folders...</p></div>`);
             emptyState.style.display = 'none';
             mergeBtn.disabled = true;
             mergeNote.style.display = 'none';
@@ -4706,17 +5111,17 @@
                 const folders = Array.isArray(data.folders) ? data.folders : [];
 
                 if (folders.length === 0) {
-                    list.innerHTML = '';
+                    clearChildren(list);
                     emptyState.style.display = 'block';
                     return;
                 }
 
-                list.innerHTML = folders.map(folder => `
+                renderHtml(list, folders.map(folder => html`
                     <div class="combine-folder-row" style="padding: 8px 0; border-bottom: 1px solid var(--border, #ddd);">
-                        <div style="font-weight: 500; word-break: break-all;">${escapeHtml(folder.directory)}</div>
+                        <div style="font-weight: 500; word-break: break-all;">${folder.directory}</div>
                         <div class="combine-folders-meta">${folder.file_count} file${folder.file_count === 1 ? '' : 's'} · ${formatFileSize(folder.total_size)}</div>
                     </div>
-                `).join('');
+                `));
 
                 if (folders.length < 2) {
                     mergeBtn.disabled = true;
@@ -4736,7 +5141,7 @@
                 }
             } catch (error) {
                 console.error('Failed to load series folders:', error);
-                list.innerHTML = '';
+                clearChildren(list);
                 emptyState.style.display = 'block';
                 emptyState.textContent = `Failed to load folders: ${error.message}`;
             }
@@ -4779,9 +5184,9 @@
             document.getElementById('combineFoldersGroupTitle').textContent = 'Loading combinable folders...';
             document.getElementById('combineFoldersGroupMeta').textContent = '';
             document.getElementById('combineFoldersSuggestion').textContent = '';
-            document.getElementById('combineFoldersList').innerHTML = '';
+            clearChildren(document.getElementById('combineFoldersList'));
             document.getElementById('combineFoldersPreview').style.display = 'none';
-            document.getElementById('combineFoldersPreview').innerHTML = '';
+            clearChildren(document.getElementById('combineFoldersPreview'));
             document.getElementById('combineFoldersPreviewBtn').disabled = true;
             document.getElementById('combineFoldersConfirmBtn').disabled = true;
 
@@ -4862,7 +5267,7 @@
             const previewPanel = document.getElementById('combineFoldersPreview');
 
             previewPanel.style.display = 'none';
-            previewPanel.innerHTML = '';
+            clearChildren(previewPanel);
 
             if (!group) {
                 emptyState.style.display = 'block';
@@ -4893,7 +5298,7 @@
             }
 
             const list = document.getElementById('combineFoldersList');
-            list.innerHTML = '';
+            clearChildren(list);
             group.folders.forEach((folder, idx) => {
                 const isSelected = folder.directory === combineFolderSelectedDestination;
                 const isSuggested = folder.directory === group.suggestedDestinationDirectory;
@@ -4906,14 +5311,14 @@
 
                 const radioId = `combineFolderRadio_${combineFolderIndex}_${idx}`;
                 const sample = (folder.sampleFileNames || []).slice(0, 5);
-                const sampleHtml = sample.length
-                    ? `<div class="combine-folder-files">Sample files:<ul>${sample.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul></div>`
+                const sampleMarkup = sample.length
+                    ? html`<div class="combine-folder-files">Sample files:<ul>${sample.map(n => html`<li>${n}</li>`)}</ul></div>`
                     : '';
 
-                card.innerHTML = `
+                renderHtml(card, html`
                     <div class="combine-folder-card-header">
-                        <input type="radio" name="combineFolderDestination" id="${radioId}" ${isSelected ? 'checked' : ''}>
-                        <label for="${radioId}" class="combine-folder-path">${escapeHtml(folder.directory)}</label>
+                        <input type="radio" name="combineFolderDestination" id="${radioId}" ${isSelected ? rawHtml('checked') : ''}>
+                        <label for="${radioId}" class="combine-folder-path">${folder.directory}</label>
                     </div>
                     <div class="combine-folder-stats">
                         <div>Files <strong>${folder.fileCount.toLocaleString()}</strong></div>
@@ -4921,8 +5326,8 @@
                         <div>Newest file <strong>${formatCombineFolderDate(folder.newestFileAddedAt)}</strong></div>
                         <div>Oldest file <strong>${formatCombineFolderDate(folder.oldestFileAddedAt)}</strong></div>
                     </div>
-                    ${sampleHtml}
-                `;
+                    ${sampleMarkup}
+                `);
 
                 const selectThis = () => {
                     combineFolderSelectedDestination = folder.directory;
@@ -4967,7 +5372,7 @@
             if (!body) return;
             const previewPanel = document.getElementById('combineFoldersPreview');
             previewPanel.style.display = 'block';
-            previewPanel.innerHTML = '<em>Building preview...</em>';
+            renderHtml(previewPanel, html`<em>Building preview...</em>`);
             combineFolderActionInFlight = true;
             document.getElementById('combineFoldersPreviewBtn').disabled = true;
             document.getElementById('combineFoldersConfirmBtn').disabled = true;
@@ -4987,23 +5392,23 @@
                 }
                 const moves = Array.isArray(data.moves) ? data.moves : [];
                 if (moves.length === 0) {
-                    previewPanel.innerHTML = '<em>No files will be moved.</em>';
+                    renderHtml(previewPanel, html`<em>No files will be moved.</em>`);
                 } else {
                     const conflicts = moves.filter(m => m.conflict).length;
                     const skipped = moves.filter(m => m.skipped).length;
-                    const list = moves.map(m => {
+                    const items = moves.map(m => {
                         const cls = m.skipped ? 'skipped' : (m.conflict ? 'conflict' : '');
                         const note = m.skipped ? ' (skipped)' : (m.conflict ? ' (renamed to avoid conflict)' : '');
-                        return `<li class="${cls}">${escapeHtml(m.sourcePath)} → ${escapeHtml(m.destinationPath)}${note}</li>`;
-                    }).join('');
-                    previewPanel.innerHTML = `
+                        return html`<li class="${cls}">${m.sourcePath} → ${m.destinationPath}${note}</li>`;
+                    });
+                    renderHtml(previewPanel, html`
                         <h4>Move plan (${moves.length} file${moves.length === 1 ? '' : 's'}${conflicts ? `, ${conflicts} renamed` : ''}${skipped ? `, ${skipped} skipped` : ''})</h4>
-                        <ul>${list}</ul>
-                    `;
+                        <ul>${items}</ul>
+                    `);
                 }
             } catch (error) {
                 console.error('Failed to build combine preview:', error);
-                previewPanel.innerHTML = `<span class="conflict">Failed to build preview: ${escapeHtml(error.message)}</span>`;
+                renderHtml(previewPanel, html`<span class="conflict">Failed to build preview: ${error.message}</span>`);
             } finally {
                 combineFolderActionInFlight = false;
                 renderCombineFolderGroup();
@@ -6834,7 +7239,7 @@
             
             try {
                 loadingIndicator.style.display = 'block';
-                contentDiv.innerHTML = '';
+                clearChildren(contentDiv);
                 
                 const offset = (historyCurrentPage - 1) * historyPerPage;
                 const response = await fetch(apiUrl(`/api/processing-history?limit=${historyPerPage}&offset=${offset}`), {
@@ -6854,7 +7259,7 @@
                 loadingIndicator.style.display = 'none';
                 
                 if (data.history.length === 0) {
-                    contentDiv.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">No processing history found</div>';
+                    renderHtml(contentDiv, html`<div style="padding: 40px; text-align: center; color: var(--text-muted);">No processing history found</div>`);
                     pageInfo.textContent = 'No results';
                     prevBtn.disabled = true;
                     nextBtn.disabled = true;
@@ -6862,13 +7267,11 @@
                 }
                 
                 // Render history items
-                let html = '<div style="display: flex; flex-direction: column; gap: 15px;">';
-                data.history.forEach(item => {
-                    html += renderHistoryItem(item);
-                });
-                html += '</div>';
-                
-                contentDiv.innerHTML = html;
+                renderHtml(contentDiv, html`
+                    <div style="display: flex; flex-direction: column; gap: 15px;">
+                        ${data.history.map(item => rawHtml(renderHistoryItem(item)))}
+                    </div>
+                `);
                 
                 // Update pagination controls
                 pageInfo.textContent = `Page ${historyCurrentPage} of ${totalPages} (${historyTotal} total)`;
@@ -6877,7 +7280,7 @@
                 
             } catch (error) {
                 loadingIndicator.style.display = 'none';
-                contentDiv.innerHTML = `<div style="padding: 20px; color: red;">Error loading history: ${error.message}</div>`;
+                renderHtml(contentDiv, html`<div style="padding: 20px; color: red;">Error loading history: ${error.message}</div>`);
             }
         }
         
@@ -6901,7 +7304,7 @@
                             </div>
                             <div style="font-size: 12px; color: var(--text-muted);">${timestamp}</div>
                         </div>
-                        <span style="background: var(--bg-hover); padding: 4px 12px; border-radius: 4px; font-size: 12px; color: var(--text-secondary);">${item.operation_type}</span>
+                        <span style="background: var(--bg-hover); padding: 4px 12px; border-radius: 4px; font-size: 12px; color: var(--text-secondary);">${escapeHtml(item.operation_type)}</span>
                     </div>
             `;
             
@@ -6941,12 +7344,12 @@
                                 <div style="display: flex; gap: 10px; align-items: center;">
                                     <div style="flex: 1; padding: 6px 10px; background: var(--bg-hover); border-radius: 4px; color: var(--text-muted);">
                                         <span style="font-size: 11px; text-transform: uppercase; opacity: 0.7;">Before:</span>
-                                        <div style="margin-top: 3px; color: var(--text-primary);">${field.before || '<em style="opacity: 0.5;">(empty)</em>'}</div>
+                                        <div style="margin-top: 3px; color: var(--text-primary);">${field.before ? escapeHtml(field.before) : '<em style="opacity: 0.5;">(empty)</em>'}</div>
                                     </div>
                                     <span style="color: var(--text-muted);">→</span>
                                     <div style="flex: 1; padding: 6px 10px; background: var(--bg-hover); border-radius: 4px; color: var(--text-muted);">
                                         <span style="font-size: 11px; text-transform: uppercase; opacity: 0.7;">After:</span>
-                                        <div style="margin-top: 3px; color: var(--text-primary);">${field.after || '<em style="opacity: 0.5;">(empty)</em>'}</div>
+                                        <div style="margin-top: 3px; color: var(--text-primary);">${field.after ? escapeHtml(field.after) : '<em style="opacity: 0.5;">(empty)</em>'}</div>
                                     </div>
                                 </div>
                             </div>
@@ -7231,26 +7634,32 @@
             countLabel.textContent = `${progressResults.length} result${progressResults.length === 1 ? '' : 's'}`;
 
             if (progressResults.length === 0) {
-                details.innerHTML = '<div class="progress-results-empty">Per-file processing updates will appear here as each file completes.</div>';
+                renderHtml(details, html`<div class="progress-results-empty">Per-file processing updates will appear here as each file completes.</div>`);
                 return;
             }
             
-            details.innerHTML = '';
+            clearChildren(details);
             progressResults.forEach(result => {
-                const entry = document.createElement('div');
-                entry.className = `progress-result-item ${result.success ? 'success' : 'error'}`;
-                entry.innerHTML = `
-                    <div class="progress-result-status">${result.success ? '✅' : '❌'}</div>
-                    <div class="progress-result-text">
-                        <strong>${escapeHtml(result.filename)}</strong>
-                        <span>${result.success ? 'Completed successfully' : escapeHtml(result.error || 'Failed')}</span>
-                    </div>
-                `;
+                const entry = buildProgressResultElement(result);
                 details.appendChild(entry);
                 progressResultElements.set(result.key, entry);
             });
         }
         
+        // Both the full re-render and the incremental single-row append build
+        // the same row, so the markup lives in one place.
+        function buildProgressResultElement(result) {
+            return htmlToElement(html`
+                <div class="progress-result-item ${result.success ? 'success' : 'error'}">
+                    <div class="progress-result-status" aria-hidden="true">${result.success ? '✅' : '❌'}</div>
+                    <div class="progress-result-text">
+                        <strong>${result.filename}</strong>
+                        <span>${result.success ? 'Completed successfully' : (result.error || 'Failed')}</span>
+                    </div>
+                </div>
+            `);
+        }
+
         function addProgressDetail(filename, success, error = null) {
             const resultKey = filename;
             const nextResult = {
@@ -7282,15 +7691,7 @@
             progressResults.unshift(nextResult);
             progressResultLookup.add(resultKey);
 
-            const entry = document.createElement('div');
-            entry.className = `progress-result-item ${success ? 'success' : 'error'}`;
-            entry.innerHTML = `
-                <div class="progress-result-status">${success ? '✅' : '❌'}</div>
-                <div class="progress-result-text">
-                    <strong>${escapeHtml(nextResult.filename)}</strong>
-                    <span>${success ? 'Completed successfully' : escapeHtml(error || 'Failed')}</span>
-                </div>
-            `;
+            const entry = buildProgressResultElement(nextResult);
             details.prepend(entry);
             progressResultElements.set(resultKey, entry);
 
@@ -7381,7 +7782,7 @@
             const logType = document.getElementById('logType').value;
             
             try {
-                logFileSelect.innerHTML = '<option value="">Loading...</option>';
+                renderHtml(logFileSelect, html`<option value="">Loading...</option>`);
                 
                 const response = await fetch(apiUrl(`/api/logs/files?type=${logType}`), {
                     headers: getAuthHeaders()
@@ -7395,7 +7796,7 @@
                 const data = await response.json();
                 
                 // Clear and populate the dropdown
-                logFileSelect.innerHTML = '';
+                clearChildren(logFileSelect);
                 
                 if (data.files && data.files.length > 0) {
                     // Add "Most Recent" option
@@ -7421,7 +7822,7 @@
                 // Load logs for the selected file (most recent by default)
                 await loadLogs();
             } catch (error) {
-                logFileSelect.innerHTML = '<option value="">Error loading files</option>';
+                renderHtml(logFileSelect, html`<option value="">Error loading files</option>`);
                 console.error('Failed to load log files:', error);
             }
         }
@@ -8438,14 +8839,14 @@
             const status = (job.status || job.Status || 'queued').toString().toLowerCase();
             const current = job.currentSeries || job.CurrentSeries || '';
             const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
-            toast.innerHTML = `
+            renderHtml(toast, html`
                 <div class="metadata-refresh-toast-header">
-                    <strong>Refreshing ${escapeHtml(label)}</strong>
-                    <span class="metadata-refresh-toast-status metadata-refresh-toast-status--${status}">${escapeHtml(status)}</span>
+                    <strong>Refreshing ${label}</strong>
+                    <span class="metadata-refresh-toast-status metadata-refresh-toast-status--${status}">${status}</span>
                 </div>
                 <div class="metadata-refresh-toast-bar"><div class="metadata-refresh-toast-bar-fill" style="width:${pct}%"></div></div>
-                <div class="metadata-refresh-toast-meta">${processed}/${total} · ✓ ${successes} · ✗ ${failures}${current ? ` · now: ${escapeHtml(current)}` : ''}</div>
-            `;
+                <div class="metadata-refresh-toast-meta">${processed}/${total} · ✓ ${successes} · ✗ ${failures}${current ? html` · now: ${current}` : ''}</div>
+            `);
             if (isTerminalJobStatus(status)) {
                 toast.classList.add('metadata-refresh-toast--done');
                 setTimeout(() => { toast.remove(); }, 6000);
@@ -8460,13 +8861,13 @@
             document.getElementById('manageSeriesUserAliases').textContent = 'Loading...';
             const nameSelect = document.getElementById('manageSeriesName');
             if (nameSelect) {
-                nameSelect.innerHTML = '<option value="">Automatic (use language preference)</option>';
+                renderHtml(nameSelect, html`<option value="">Automatic (use language preference)</option>`);
                 nameSelect.value = '';
             }
             const resolved = document.getElementById('manageSeriesResolvedName');
             if (resolved) resolved.textContent = '';
             document.getElementById('manageSeriesSearchInput').value = seriesTitle;
-            document.getElementById('manageSeriesSearchResults').innerHTML = '';
+            clearChildren(document.getElementById('manageSeriesSearchResults'));
             document.getElementById('manageSeriesNamesModal').classList.add('active');
             await loadManageSeriesRecord();
         }
@@ -8625,7 +9026,7 @@
                 };
             }
             const results = document.getElementById('manageSeriesImageProviderResults');
-            if (results) results.innerHTML = '';
+            if (results) clearChildren(results);
             const status = document.getElementById('manageSeriesImageProviderStatus');
             if (status) status.textContent = 'Enter a title and click Search to find cover candidates from the configured providers.';
         }
@@ -8646,7 +9047,7 @@
                 return;
             }
             status.textContent = 'Searching providers...';
-            results.innerHTML = '';
+            clearChildren(results);
             try {
                 const response = await fetch(
                     apiUrl(`/api/series-images/candidates?query=${encodeURIComponent(query)}&limit=12`),
@@ -8663,7 +9064,7 @@
                     return;
                 }
                 status.textContent = `${candidates.length} candidate${candidates.length === 1 ? '' : 's'} — click a thumbnail to apply.`;
-                results.innerHTML = '';
+                clearChildren(results);
                 candidates.forEach((cand) => {
                     const previewUrl = cand.thumbnail_url || cand.image_url;
                     const card = document.createElement('div');
@@ -8745,13 +9146,13 @@
             if (!aliases.length) {
                 container.textContent = 'None';
             } else {
-                container.innerHTML = aliases.map(a => {
+                renderHtml(container, aliases.map(a => {
                     const lang = langByTitle.get(a.toLowerCase());
                     const langBadge = lang
-                        ? ` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${escapeHtml(lang)}</span>`
+                        ? html` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${lang}</span>`
                         : '';
-                    return `<span class="badge" style="display: inline-block; padding: 4px 8px; margin: 2px; background: var(--bg-secondary); border-radius: 12px; font-size: 13px;">${escapeHtml(a)}${langBadge}</span>`;
-                }).join('');
+                    return html`<span class="badge" style="display: inline-block; padding: 4px 8px; margin: 2px; background: var(--bg-secondary); border-radius: 12px; font-size: 13px;">${a}${langBadge}</span>`;
+                }));
             }
             const sourceLabel = document.getElementById('manageSeriesProviderSource');
             if (record.source) {
@@ -8831,7 +9232,7 @@
             if (record && Array.isArray(record.user_aliases)) {
                 for (const a of record.user_aliases) pushOption(a, 'your alias');
             }
-            select.innerHTML = options.join('');
+            renderHtml(select, rawHtml(options.join('')));
             // Preserve the user's current selection even if it isn't otherwise
             // listed (server validation already accepted it at write time).
             const selected = (record && record.series_name) || '';
@@ -8898,12 +9299,12 @@
                 container.textContent = 'None';
                 return;
             }
-            container.innerHTML = aliases.map(a => `
+            renderHtml(container, aliases.map(a => html`
                 <span class="badge" style="display: inline-flex; align-items: center; padding: 4px 4px 4px 8px; margin: 2px; background: var(--bg-secondary); border-radius: 12px; font-size: 13px;">
-                    ${escapeHtml(a)}
-                    <button type="button" onclick="removeManageSeriesAlias('${escapeJs(a)}')" style="margin-left: 6px; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px;" title="Remove alias">×</button>
+                    ${a}
+                    <button type="button" onclick="removeManageSeriesAlias('${jsArg(a)}')" style="margin-left: 6px; background: transparent; border: none; color: var(--text-secondary); cursor: pointer; font-size: 14px;" title="Remove alias">×</button>
                 </span>
-            `).join('');
+            `));
         }
 
         function addManageSeriesAlias() {
@@ -9020,25 +9421,25 @@
             const query = (document.getElementById('manageSeriesSearchInput').value || '').trim();
             const container = document.getElementById('manageSeriesSearchResults');
             if (!query) {
-                container.innerHTML = '<p style="color: var(--text-secondary);">Enter a query above to search.</p>';
+                renderHtml(container, html`<p style="color: var(--text-secondary);">Enter a query above to search.</p>`);
                 return;
             }
-            container.innerHTML = '<p style="color: var(--text-secondary);">Searching...</p>';
+            renderHtml(container, html`<p style="color: var(--text-secondary);">Searching...</p>`);
             try {
                 const response = await fetch(apiUrl(`/api/metadata/search?query=${encodeURIComponent(query)}&limit=10`), {
                     credentials: 'same-origin'
                 });
                 if (!response.ok) {
-                    container.innerHTML = '<p style="color: var(--text-error);">Search failed.</p>';
+                    renderHtml(container, html`<p style="color: var(--text-error);">Search failed.</p>`);
                     return;
                 }
                 const data = await response.json();
                 const results = data.results || [];
                 if (!results.length) {
-                    container.innerHTML = '<p style="color: var(--text-secondary);">No matches found. Check that external metadata providers are enabled in Settings.</p>';
+                    renderHtml(container, html`<p style="color: var(--text-secondary);">No matches found. Check that external metadata providers are enabled in Settings.</p>`);
                     return;
                 }
-                container.innerHTML = results.map((r, idx) => {
+                renderHtml(container, results.map((r, idx) => {
                     // Build a lookup of alias -> language from the provider's
                     // localized titles so each alias can be rendered with a
                     // small language badge ("en", "ja", "ko", ...). Without
@@ -9052,19 +9453,19 @@
                     });
                     const aliasList = r.aliases || [];
                     const aliases = aliasList.length
-                        ? aliasList.map(a => {
+                        ? rawHtml(aliasList.map(a => {
                             const lang = langByTitle.get(a.toLowerCase());
                             const langBadge = lang
-                                ? ` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${escapeHtml(lang)}</span>`
+                                ? html` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${lang}</span>`
                                 : '';
-                            return `<span style="display: inline-block; margin-right: 4px;">${escapeHtml(a)}${langBadge}</span>`;
-                        }).join(', ')
-                        : '<em>none</em>';
+                            return htmlToString(html`<span style="display: inline-block; margin-right: 4px;">${a}${langBadge}</span>`);
+                        }).join(', '))
+                        : html`<em>none</em>`;
                     // Show the canonical title's language too so the user can
                     // see that (for example) the chosen canonical is English.
                     const canonicalLang = langByTitle.get((r.canonical_title || '').toLowerCase());
                     const canonicalLangBadge = canonicalLang
-                        ? ` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${escapeHtml(canonicalLang)}</span>`
+                        ? html` <span style="font-size: 11px; padding: 1px 6px; margin-left: 4px; background: var(--bg-primary); border: 1px solid var(--border-primary); border-radius: 8px; color: var(--text-secondary);">${canonicalLang}</span>`
                         : '';
                     // Server returns match_score on [0,100]. Render a colour
                     // hint so the user can see at a glance which candidate is
@@ -9075,15 +9476,15 @@
                         const tone = score >= 90 ? 'var(--accent-success, #1f9d55)'
                                    : score >= 60 ? 'var(--accent-warning, #c69026)'
                                    : 'var(--text-secondary)';
-                        scoreBadge = `<span title="Confidence that this is the right match" style="font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--bg-secondary); color: ${tone}; border: 1px solid ${tone};">${score.toFixed(1)}% match</span>`;
+                        scoreBadge = html`<span title="Confidence that this is the right match" style="font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--bg-secondary); color: ${tone}; border: 1px solid ${tone};">${score.toFixed(1)}% match</span>`;
                     }
-                    return `
+                    return html`
                         <div style="border: 1px solid var(--border-primary); border-radius: 5px; padding: 10px; margin-bottom: 8px;">
                             <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                <strong>${escapeHtml(r.canonical_title || '')}${canonicalLangBadge}</strong>
+                                <strong>${r.canonical_title || ''}${canonicalLangBadge}</strong>
                                 <div style="display: flex; gap: 6px; align-items: center;">
                                     ${scoreBadge}
-                                    <span style="font-size: 12px; color: var(--text-secondary);">${escapeHtml(r.source || '')}</span>
+                                    <span style="font-size: 12px; color: var(--text-secondary);">${r.source || ''}</span>
                                 </div>
                             </div>
                             <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Aliases: ${aliases}</div>
@@ -9094,11 +9495,11 @@
                             </div>
                         </div>
                     `;
-                }).join('');
+                }));
                 window.__manageSeriesSearchResults = results;
             } catch (err) {
                 console.error('searchExternalSeries failed', err);
-                container.innerHTML = '<p style="color: var(--text-error);">Search failed.</p>';
+                renderHtml(container, html`<p style="color: var(--text-error);">Search failed.</p>`);
             }
         }
 
@@ -9421,4 +9822,10 @@
             document.addEventListener('DOMContentLoaded', initModalAccessibility);
         } else {
             initModalAccessibility();
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initDropdownAriaExpandedSync);
+        } else {
+            initDropdownAriaExpandedSync();
         }

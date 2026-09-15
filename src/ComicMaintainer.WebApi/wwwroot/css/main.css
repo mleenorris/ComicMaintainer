@@ -1975,6 +1975,14 @@
             align-self: center;
         }
         
+        /* Wrapper around a folder's header + contents. Purely a rendering
+           unit: renderFileList() reuses the whole section unchanged when the
+           folder's markup has not changed, so it must not introduce any layout
+           of its own. */
+        .folder-section {
+            display: block;
+        }
+
         .directory-content {
             display: block;
         }
@@ -4143,4 +4151,87 @@ body.user-read-only [data-requires-write] {
 
 #mainContent:focus {
     outline: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Accessibility: global keyboard focus visibility
+   ---------------------------------------------------------------------------
+   Many controls in this app are styled with `outline: none` for mouse users.
+   Keyboard users still need a clearly visible focus indicator, so restore one
+   globally via :focus-visible (which only matches keyboard/AT focus).
+--------------------------------------------------------------------------- */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible {
+    outline: 2px solid var(--accent-primary, #4a90d9);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* ---------------------------------------------------------------------------
+   Accessibility: respect the OS "reduce motion" preference
+   ---------------------------------------------------------------------------
+   Users who enable reduced motion (vestibular disorders, motion sensitivity)
+   should not be exposed to transitions, animations or smooth scrolling.
+--------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    html {
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ---------------------------------------------------------------------------
+   "New version available" banner
+   ---------------------------------------------------------------------------
+   Shown when a newer service worker has installed and is waiting to take over.
+   The swap is deferred until the user opts in, so this must be noticeable but
+   never block the page underneath.
+--------------------------------------------------------------------------- */
+.app-update-banner {
+    position: fixed;
+    left: 50%;
+    bottom: 20px;
+    transform: translateX(-50%);
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: calc(100vw - 32px);
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-secondary);
+    box-shadow: var(--shadow-md);
+}
+
+.app-update-banner-text {
+    font-size: 0.92rem;
+}
+
+.app-update-banner-dismiss {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.2rem;
+    line-height: 1;
+    padding: 0 4px;
+    cursor: pointer;
+}
+
+.app-update-banner-dismiss:hover {
+    color: var(--text-primary);
 }

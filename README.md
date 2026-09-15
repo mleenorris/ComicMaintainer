@@ -38,7 +38,7 @@ This service automatically watches a directory for new or changed comic archive 
   - Works on desktop (Windows, macOS, Linux) and mobile (iOS, Android)
   - App-like experience with dedicated window
   - Add to home screen on mobile devices
-  - Offline-ready with cached assets
+  - Offline-ready with cached assets, including a dedicated offline page when the server is unreachable
   - Easy access from your app drawer or desktop
 
 ## How It Works

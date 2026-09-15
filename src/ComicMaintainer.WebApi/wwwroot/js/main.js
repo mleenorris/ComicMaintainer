@@ -57,7 +57,14 @@
             // (e.g. for series titles like: Hazure Zokusei "Hikari Mahou" ga ...).
             // After HTML decoding the JS sees a plain " inside a single-quoted
             // string, which is valid.
-            return text.replace(/\\/g, '\\\\')
+            //
+            // & must be encoded to &amp; first (before " is turned into &quot;),
+            // otherwise a value containing a literal HTML entity such as
+            // "&#39;" would survive JS-escaping unchanged and then get
+            // HTML-decoded back into a raw ' by the browser, terminating the
+            // single-quoted JS string early and allowing injected code to run.
+            return text.replace(/&/g, '&amp;')
+                       .replace(/\\/g, '\\\\')
                        .replace(/'/g, "\\'")
                        .replace(/"/g, '&quot;')
                        .replace(/\n/g, '\\n')
@@ -243,8 +250,26 @@
             localStorage.removeItem('jwt_token');
             localStorage.removeItem('username');
             localStorage.removeItem('authelia_authenticated');
+            localStorage.removeItem('client_cache_session_id');
             clearCachedImages();
             window.location.href = '/login.html';
+        }
+
+        /**
+         * Opaque, per-login identifier used to scope the service worker's
+         * image cache to the current session. It is created the first time a
+         * request is made after login and cleared on logout (redirectToLogin
+         * above), so the cache key changes whenever the signed-in identity
+         * changes - even for Authelia's cookie-based auth, where the service
+         * worker cannot read the session cookie itself to tell sessions apart.
+         */
+        function getOrCreateClientCacheSessionId() {
+            let id = localStorage.getItem('client_cache_session_id');
+            if (!id) {
+                id = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
+                localStorage.setItem('client_cache_session_id', id);
+            }
+            return id;
         }
 
         /**
@@ -342,7 +367,8 @@
             if (isAutheliaAuth) {
                 console.log('[AUTH] Using Authelia authentication (cookies)');
                 return {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json',
+                    'X-Client-Session': getOrCreateClientCacheSessionId()
                 };
             }
             
@@ -356,7 +382,8 @@
             }
             
             const headers = {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'X-Client-Session': getOrCreateClientCacheSessionId()
             };
             if (token) {
                 headers['Authorization'] = `Bearer ${token}`;
@@ -7277,7 +7304,7 @@
                             </div>
                             <div style="font-size: 12px; color: var(--text-muted);">${timestamp}</div>
                         </div>
-                        <span style="background: var(--bg-hover); padding: 4px 12px; border-radius: 4px; font-size: 12px; color: var(--text-secondary);">${item.operation_type}</span>
+                        <span style="background: var(--bg-hover); padding: 4px 12px; border-radius: 4px; font-size: 12px; color: var(--text-secondary);">${escapeHtml(item.operation_type)}</span>
                     </div>
             `;
             
@@ -7317,12 +7344,12 @@
                                 <div style="display: flex; gap: 10px; align-items: center;">
                                     <div style="flex: 1; padding: 6px 10px; background: var(--bg-hover); border-radius: 4px; color: var(--text-muted);">
                                         <span style="font-size: 11px; text-transform: uppercase; opacity: 0.7;">Before:</span>
-                                        <div style="margin-top: 3px; color: var(--text-primary);">${field.before || '<em style="opacity: 0.5;">(empty)</em>'}</div>
+                                        <div style="margin-top: 3px; color: var(--text-primary);">${field.before ? escapeHtml(field.before) : '<em style="opacity: 0.5;">(empty)</em>'}</div>
                                     </div>
                                     <span style="color: var(--text-muted);">→</span>
                                     <div style="flex: 1; padding: 6px 10px; background: var(--bg-hover); border-radius: 4px; color: var(--text-muted);">
                                         <span style="font-size: 11px; text-transform: uppercase; opacity: 0.7;">After:</span>
-                                        <div style="margin-top: 3px; color: var(--text-primary);">${field.after || '<em style="opacity: 0.5;">(empty)</em>'}</div>
+                                        <div style="margin-top: 3px; color: var(--text-primary);">${field.after ? escapeHtml(field.after) : '<em style="opacity: 0.5;">(empty)</em>'}</div>
                                     </div>
                                 </div>
                             </div>

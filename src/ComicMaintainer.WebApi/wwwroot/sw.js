@@ -54,29 +54,61 @@ const MAX_IMAGE_CACHE_ENTRIES = 400;
 const IMAGE_API_PATHS = ['/api/comicreader/cover', '/api/comicreader/page'];
 
 function isCacheableImageRequest(request, url) {
+  const pathname = url.pathname.toLowerCase();
   return request.method === 'GET' &&
-    IMAGE_API_PATHS.some((path) => url.pathname === path);
+    IMAGE_API_PATHS.some((path) => pathname === path);
 }
 
-// Cache-first with a background refresh omitted on purpose: these responses are
-// immutable for a given file path, so a cache hit is always correct until the
-// underlying file changes (at which point its path/mtime-derived URL changes
-// too, or the user can clear the cache).
+// Scope an image cache entry to the requesting session: the cache is shared
+// across logins on the same device, so without this a cover/page fetched by
+// one authenticated user could be served straight out of the cache to
+// whoever signs in next. The client sends a per-login opaque id (regenerated
+// on logout) in X-Client-Session; folding it into the cache key means a
+// different session simply misses the cache instead of reusing someone
+// else's cached response.
+function cacheKeyForRequest(request) {
+  const sessionId = request.headers.get('X-Client-Session');
+  if (!sessionId) {
+    return request;
+  }
+  const keyUrl = new URL(request.url);
+  keyUrl.searchParams.set('__sid', sessionId);
+  return new Request(keyUrl.toString(), { method: request.method });
+}
+
+// Cache-first, but always revalidated in the background: covers/pages are
+// served from cache immediately for speed, while a network fetch runs
+// alongside to refresh the entry if the underlying file changed, or evict it
+// if the session backing it is no longer authorized (401/403). This keeps
+// the fast path but stops it from serving indefinitely-stale or
+// no-longer-authorized content.
 async function serveImageFromCache(request) {
   const cache = await caches.open(IMAGE_CACHE_NAME);
-  const cached = await cache.match(request);
+  const cacheKey = cacheKeyForRequest(request);
+  const cached = await cache.match(cacheKey);
+
+  const networkFetch = fetch(request).then((response) => {
+    if (response && response.status === 200) {
+      // Only successful, non-opaque responses are worth storing.
+      cache.put(cacheKey, response.clone())
+        .then(() => trimCache(IMAGE_CACHE_NAME, MAX_IMAGE_CACHE_ENTRIES))
+        .catch(() => { /* quota errors are non-fatal */ });
+    } else if (response && (response.status === 401 || response.status === 403)) {
+      // No longer authorized for this entry; stop serving it from cache.
+      cache.delete(cacheKey).catch(() => { /* best effort */ });
+    }
+    return response;
+  });
+
   if (cached) {
+    // Serve the cached copy immediately; let the revalidation above update
+    // or evict the entry in the background. A network failure here just
+    // means we keep serving the (still the best available) cached copy.
+    networkFetch.catch(() => { /* offline; keep serving the cached entry */ });
     return cached;
   }
 
-  const response = await fetch(request);
-  if (response && response.status === 200) {
-    // Only successful, non-opaque responses are worth storing.
-    cache.put(request, response.clone())
-      .then(() => trimCache(IMAGE_CACHE_NAME, MAX_IMAGE_CACHE_ENTRIES))
-      .catch(() => { /* quota errors are non-fatal */ });
-  }
-  return response;
+  return networkFetch;
 }
 
 async function trimCache(cacheName, maxEntries) {
@@ -162,6 +194,18 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Writes (POST/PUT/PATCH/DELETE) must always hit the network and must never
+  // be cached or replayed. Let them fall through to the browser untouched
+  // rather than wrapping them in an offline fallback that would mask a failed
+  // mutation as a successful-looking response. This must run before the
+  // navigation check below: a non-GET API request that sends
+  // "Accept: text/html" would otherwise satisfy isNavigationRequest and be
+  // handled by the offline-HTML fallback instead of being allowed to fail
+  // normally.
+  if (url.pathname.startsWith('/api/') && request.method !== 'GET') {
+    return;
+  }
+
   // Always fetch the app shell from the network first so users do not need a hard refresh
   if (isNavigationRequest || url.pathname.endsWith('.html')) {
     event.respondWith(
@@ -183,14 +227,6 @@ self.addEventListener('fetch', (event) => {
         () => new Response('Offline', { status: 503 })
       )
     );
-    return;
-  }
-
-  // Writes (POST/PUT/PATCH/DELETE) must always hit the network and must never
-  // be cached or replayed. Let them fall through to the browser untouched
-  // rather than wrapping them in an offline fallback that would mask a failed
-  // mutation as a successful-looking response.
-  if (url.pathname.startsWith('/api/') && request.method !== 'GET') {
     return;
   }
 

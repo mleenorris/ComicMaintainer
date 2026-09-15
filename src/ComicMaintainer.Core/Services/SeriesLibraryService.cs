@@ -285,7 +285,8 @@ public class SeriesLibraryService : ISeriesLibraryService
         // Use the unfiltered grouping so adjacency reflects the whole series
         // regardless of any active library filter, and never reads archives
         // off disk so the reader's next/previous prefetch stays fast.
-        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+        var groupingKeyByFile = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken, groupingKeyByFile);
 
         var owningSeries = groups.Values.FirstOrDefault(accumulator =>
             accumulator.Issues.Any(issue =>
@@ -297,6 +298,26 @@ public class SeriesLibraryService : ISeriesLibraryService
         }
 
         var sortedIssues = SortIssues(owningSeries.Issues);
+
+        // A library card can legitimately span several distinct source series:
+        // union-find merges groups through cache aliases / shared metadata, and
+        // those merges are occasionally wrong. Reader navigation must never hop
+        // into a different comic, so restrict the candidates to issues that were
+        // grouped under the same title as the current file.
+        if (groupingKeyByFile.TryGetValue(filePath, out var currentGroupingKey)
+            && !string.IsNullOrWhiteSpace(currentGroupingKey))
+        {
+            var scoped = sortedIssues
+                .Where(issue => groupingKeyByFile.TryGetValue(issue.FilePath, out var key)
+                    && string.Equals(key, currentGroupingKey, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (scoped.Count > 0)
+            {
+                sortedIssues = scoped;
+            }
+        }
+
         var currentIndex = sortedIssues.FindIndex(issue =>
             string.Equals(issue.FilePath, filePath, StringComparison.Ordinal));
 
@@ -772,10 +793,18 @@ public class SeriesLibraryService : ISeriesLibraryService
     /// and returns a dictionary of series accumulators keyed by their union-find
     /// representative (the series id surfaced to the API).
     /// </summary>
+    /// <param name="groupingKeyByFileOutput">
+    /// When supplied, receives the per-file grouping key (the normalized title the
+    /// file was grouped under, before any union-find / cache-record merging). The
+    /// reader uses it to keep next/previous navigation inside the file's own
+    /// source series instead of spilling into a different series that merely got
+    /// merged into the same library card.
+    /// </param>
     private async Task<Dictionary<string, SeriesAccumulator>> BuildGroupsAsync(
         string? filter,
         bool allowDiskRead,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Dictionary<string, string>? groupingKeyByFileOutput = null)
     {
         var files = (await _fileStore.GetFilteredFilesAsync(filter, cancellationToken)).ToList();
         var fileEntries = new List<(ComicFile File, SeriesMetadata Metadata, string GroupingTitle, List<string> MetadataAliases)>(files.Count);
@@ -816,6 +845,14 @@ public class SeriesLibraryService : ISeriesLibraryService
                 UnionWithCacheKey(unionFind, fileKey, alias, aliasIndex);
             }
             groupingKeyByFile[entry.File.FilePath] = fileKey;
+        }
+
+        if (groupingKeyByFileOutput is not null)
+        {
+            foreach (var kvp in groupingKeyByFile)
+            {
+                groupingKeyByFileOutput[kvp.Key] = kvp.Value;
+            }
         }
 
         foreach (var record in cacheRecords)

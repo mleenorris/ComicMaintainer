@@ -1528,9 +1528,15 @@
 
                 if (response.ok) {
                     nextComicInfo = await response.json();
+                } else {
+                    // Drop any previous pointer: keeping a stale one risks
+                    // stitching in an issue that is no longer adjacent to the
+                    // comic currently being read.
+                    nextComicInfo = null;
                 }
             } catch (error) {
                 console.error('Error prefetching next comic:', error);
+                nextComicInfo = null;
             }
         }
 

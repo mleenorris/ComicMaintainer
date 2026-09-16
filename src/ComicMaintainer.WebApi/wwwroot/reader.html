@@ -819,6 +819,7 @@
         // Distinguishing the two lets the reader retry instead of silently
         // stalling at the bottom of the stream.
         let nextComicPrefetchFailed = false;
+        const NEXT_COMIC_RETRY_MESSAGE = 'Could not load the next issue. Scroll again to retry.';
         let hasScrolledToBottom = false;
         // File paths already marked read in this reader session, tracked per
         // comic rather than as a single flag. In webcomic mode several issues
@@ -1465,11 +1466,12 @@
                     if (nextComicInfo && nextComicInfo.hasAdjacent) {
                         isLoadingNext = true;
                         await loadNextComic();
-                    } else if (nextComicPrefetchFailed) {
-                        // The pointer is missing because the lookup failed, not
-                        // because the series ended. Retry here so a transient
-                        // error doesn't strand the reader at the bottom with no
-                        // way forward and no explanation.
+                    } else if (!nextComicInfo) {
+                        // No pointer available: the lookup either failed or has
+                        // not completed yet. Resolve it here so a transient
+                        // error — or a race with the initial prefetch — doesn't
+                        // strand the reader at the bottom with no way forward
+                        // and no explanation.
                         isLoadingNext = true;
                         try {
                             await prefetchNextComic();
@@ -1482,11 +1484,11 @@
                             isLoadingNext = true;
                             await loadNextComic();
                         } else if (nextComicPrefetchFailed) {
-                            showStreamEndMessage('Could not load the next issue. Scroll again to retry.');
+                            showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
                         } else {
                             showStreamEndMessage('End of series');
                         }
-                    } else if (nextComicInfo) {
+                    } else {
                         showStreamEndMessage('End of series');
                     }
                 }
@@ -1733,12 +1735,12 @@
                     // leaving the reader stuck mid-transition; a later scroll to
                     // the bottom will try again.
                     transitionDiv.remove();
-                    showStreamEndMessage('Could not load the next issue. Scroll again to retry.');
+                    showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
                     isLoadingNext = false;
                 }
             } catch (error) {
                 console.error('Error loading next comic:', error);
-                showStreamEndMessage('Could not load the next issue. Scroll again to retry.');
+                showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
                 isLoadingNext = false;
             }
         }

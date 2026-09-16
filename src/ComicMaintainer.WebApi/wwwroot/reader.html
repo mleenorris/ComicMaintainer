@@ -1463,10 +1463,7 @@
 
                 // Continuously stitch in the next issue when one exists.
                 if (!isLoadingNext) {
-                    if (nextComicInfo && nextComicInfo.hasAdjacent) {
-                        isLoadingNext = true;
-                        await loadNextComic();
-                    } else if (!nextComicInfo) {
+                    if (!nextComicInfo) {
                         // No pointer available: the lookup either failed or has
                         // not completed yet. Resolve it here so a transient
                         // error — or a race with the initial prefetch — doesn't
@@ -1478,16 +1475,14 @@
                         } finally {
                             isLoadingNext = false;
                         }
+                    }
 
-                        if (nextComicInfo && nextComicInfo.hasAdjacent) {
-                            clearStreamEndMessage();
-                            isLoadingNext = true;
-                            await loadNextComic();
-                        } else if (nextComicPrefetchFailed) {
-                            showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
-                        } else {
-                            showStreamEndMessage('End of series');
-                        }
+                    if (nextComicInfo && nextComicInfo.hasAdjacent) {
+                        clearStreamEndMessage();
+                        isLoadingNext = true;
+                        await loadNextComic();
+                    } else if (nextComicPrefetchFailed) {
+                        showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
                     } else {
                         showStreamEndMessage('End of series');
                     }
@@ -1577,16 +1572,19 @@
 
         // Shows a single status line at the end of the stitched stream, either
         // the end-of-series notice or a retry hint after a failed lookup. Reuses
-        // one element so repeated scrolls can't stack duplicate messages.
+        // one element so repeated scrolls can't stack duplicate messages; an
+        // existing message is only re-worded in place, never re-appended.
         function showStreamEndMessage(text) {
             const container = document.getElementById('webcomicContainer');
             if (!container) return;
-            let message = document.getElementById('webcomicStreamEndMessage');
-            if (!message) {
-                message = document.createElement('div');
-                message.id = 'webcomicStreamEndMessage';
-                message.className = 'loading-indicator';
+            const existing = document.getElementById('webcomicStreamEndMessage');
+            if (existing) {
+                existing.textContent = text;
+                return;
             }
+            const message = document.createElement('div');
+            message.id = 'webcomicStreamEndMessage';
+            message.className = 'loading-indicator';
             message.textContent = text;
             container.appendChild(message);
         }

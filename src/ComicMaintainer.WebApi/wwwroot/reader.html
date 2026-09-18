@@ -814,6 +814,12 @@
         }
         let isLoadingNext = false;
         let nextComicInfo = null;
+        // True when the last adjacent-issue lookup failed (network error or a
+        // non-OK response) rather than legitimately reporting "no next issue".
+        // Distinguishing the two lets the reader retry instead of silently
+        // stalling at the bottom of the stream.
+        let nextComicPrefetchFailed = false;
+        const NEXT_COMIC_RETRY_MESSAGE = 'Could not load the next issue. Scroll again to retry.';
         let hasScrolledToBottom = false;
         // File paths already marked read in this reader session, tracked per
         // comic rather than as a single flag. In webcomic mode several issues
@@ -1456,9 +1462,30 @@
                 await maybeMarkFinishedComic();
 
                 // Continuously stitch in the next issue when one exists.
-                if (!isLoadingNext && nextComicInfo && nextComicInfo.hasAdjacent) {
-                    isLoadingNext = true;
-                    await loadNextComic();
+                if (!isLoadingNext) {
+                    if (!nextComicInfo) {
+                        // No pointer available: the lookup either failed or has
+                        // not completed yet. Resolve it here so a transient
+                        // error — or a race with the initial prefetch — doesn't
+                        // strand the reader at the bottom with no way forward
+                        // and no explanation.
+                        isLoadingNext = true;
+                        try {
+                            await prefetchNextComic();
+                        } finally {
+                            isLoadingNext = false;
+                        }
+                    }
+
+                    if (nextComicInfo && nextComicInfo.hasAdjacent) {
+                        clearStreamEndMessage();
+                        isLoadingNext = true;
+                        await loadNextComic();
+                    } else if (nextComicPrefetchFailed) {
+                        showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
+                    } else {
+                        showStreamEndMessage('End of series');
+                    }
                 }
             }
         }
@@ -1528,22 +1555,50 @@
 
                 if (response.ok) {
                     nextComicInfo = await response.json();
+                    nextComicPrefetchFailed = false;
+                } else {
+                    // Drop any previous pointer: keeping a stale one risks
+                    // stitching in an issue that is no longer adjacent to the
+                    // comic currently being read.
+                    nextComicInfo = null;
+                    nextComicPrefetchFailed = true;
                 }
             } catch (error) {
                 console.error('Error prefetching next comic:', error);
+                nextComicInfo = null;
+                nextComicPrefetchFailed = true;
             }
+        }
+
+        // Shows a single status line at the end of the stitched stream, either
+        // the end-of-series notice or a retry hint after a failed lookup. Reuses
+        // one element so repeated scrolls can't stack duplicate messages; an
+        // existing message is only re-worded in place, never re-appended.
+        function showStreamEndMessage(text) {
+            const container = document.getElementById('webcomicContainer');
+            if (!container) return;
+            const existing = document.getElementById('webcomicStreamEndMessage');
+            if (existing) {
+                existing.textContent = text;
+                return;
+            }
+            const message = document.createElement('div');
+            message.id = 'webcomicStreamEndMessage';
+            message.className = 'loading-indicator';
+            message.textContent = text;
+            container.appendChild(message);
+        }
+
+        function clearStreamEndMessage() {
+            const message = document.getElementById('webcomicStreamEndMessage');
+            if (message) message.remove();
         }
 
         // Load next comic seamlessly with buffered loading
         async function loadNextComic() {
             if (!nextComicInfo || !nextComicInfo.hasAdjacent) {
-                const container = document.getElementById('webcomicContainer');
-                if (container) {
-                    const endMessage = document.createElement('div');
-                    endMessage.className = 'loading-indicator';
-                    endMessage.textContent = 'End of series';
-                    container.appendChild(endMessage);
-                }
+                showStreamEndMessage('End of series');
+                isLoadingNext = false;
                 return;
             }
             
@@ -1559,6 +1614,10 @@
 
             try {
                 const container = document.getElementById('webcomicContainer');
+
+                // A previous end-of-series / retry notice no longer applies once
+                // another issue is being stitched in.
+                clearStreamEndMessage();
                 
                 // Store the name/path of the comic we're leaving
                 const leavingComicName = currentComicName;
@@ -1668,9 +1727,18 @@
                     // Prefetch the next one
                     await prefetchNextComic();
                     isLoadingNext = false;
+                } else {
+                    // The lookup for the next issue failed. Roll back the
+                    // transition banner and surface a retry hint instead of
+                    // leaving the reader stuck mid-transition; a later scroll to
+                    // the bottom will try again.
+                    transitionDiv.remove();
+                    showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
+                    isLoadingNext = false;
                 }
             } catch (error) {
                 console.error('Error loading next comic:', error);
+                showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
                 isLoadingNext = false;
             }
         }
@@ -1888,7 +1956,7 @@
                     throw new Error('Failed to load page');
                 }
 
-                content.innerHTML = `<img src="${imageUrl}" class="page-image page-fade" alt="Page ${pageNum}">`
+                content.innerHTML = `<img src="${imageUrl}" class="page-image page-fade" alt="Page ${pageNum}" decoding="async" fetchpriority="high">`
                     + tapZonesHtml();
                 setupTapZones();
                 // Fade in once the browser has painted the new src.

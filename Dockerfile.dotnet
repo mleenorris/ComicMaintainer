@@ -1,5 +1,5 @@
 # Dockerfile for .NET ComicMaintainer Web Application
-FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 WORKDIR /app
 EXPOSE 5000
 
@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y \
 # Without this, building the arm64 image on an amd64 runner would run the whole SDK under
 # QEMU emulation, which is dramatically slower. The compiler runs natively and is told which
 # runtime to emit via TARGETARCH instead.
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 ARG TARGETARCH
 WORKDIR /src
 

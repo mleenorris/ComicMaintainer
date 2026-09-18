@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **The web UI now announces what it is doing to assistive technology.** `showMessage()` is
+  the library page's only notification channel — roughly a hundred call sites, including
+  every error path — but `#messageContainer` was not a live region, so none of it reached
+  screen readers. The container is now a polite live region and errors are additionally
+  marked `role="alert"` so a failure interrupts rather than queueing behind routine progress
+  chatter. The sign-in and first-run setup pages had the same problem in a more damaging
+  form: a rejected sign-in wrote to `#errorMessage` and nothing else, leaving a screen reader
+  user with no indication the attempt had failed. Those elements are now `role="alert"` /
+  `role="status"`, and because they are `display: none` until shown (which keeps them out of
+  the accessibility tree) the element is revealed *before* the text is written, so the change
+  happens in a region that is already exposed.
+
+- **Reduced-motion users no longer get frozen loading spinners.** The
+  `prefers-reduced-motion` reset zeroed every animation on the page, which included the
+  spinners. Several of those replace the button label while a request is in flight, so the
+  reset turned "signing in…" into a static circle with no text and no other feedback. WCAG
+  2.2.2 exempts motion that is essential to conveying information, so spinners now keep
+  animating while decorative motion stays suppressed.
+
+- **Viewport resize work is debounced.** Two separate `resize` listeners re-evaluated media
+  queries and wrote to the DOM on every event, which fires continuously while a window is
+  dragged or a device rotated. They now share a single debounced dispatcher.
+
+- **Service worker update checks pause in hidden tabs.** The check ran every minute for the
+  lifetime of the page, so a pinned tab left open kept issuing a request a minute
+  indefinitely — to show an update banner nobody was looking at. It is now skipped while the
+  tab is hidden, and runs when the tab becomes visible again so a returning user is not left
+  waiting. Both paths share the same minimum interval: `sw.js` is served `no-store` and the
+  main script always bypasses the HTTP cache, so every check is a real request and an
+  unthrottled focus-triggered check would be noisier than the plain interval it replaced.
+
 - **Documentation reorganised.** The repository root had accumulated 69 markdown files, most of
   them point-in-time fix write-ups and PR summaries, which buried the handful of documents
   people actually look for. The root now keeps only `README.md`, `QUICKSTART.md`,
@@ -48,6 +79,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retagged. Reverting such a series to automatic remains a no-op.
 
 ### Added
+- **Offline awareness.** A `fetch()` made with no network rejects with a bare
+  "Failed to fetch", which the UI surfaced as a generic "Failed to load …" — indistinguishable
+  from a server fault, so users retried against a server they could not reach. A banner now
+  states the actual cause and disappears by itself when the connection returns.
+- **Last-resort error reporting.** An uncaught exception or rejected promise used to stop the
+  surrounding code silently, leaving spinners spinning and stale data on screen with nothing
+  to explain why. `unhandledrejection` and `error` are now handled globally and surface a
+  message, rate limited so a failure inside a render or loop path cannot bury the UI in
+  banners. Reports are suppressed while offline, where the offline banner already explains
+  the cause.
+- Keyboard focus indicators, a `<main>` landmark and an accessible name for the theme toggle
+  on the sign-in and first-run setup pages. These are standalone pages that do not load
+  `css/main.css`, so they had missed the global `:focus-visible` rule the rest of the app
+  gained: they cleared the default focus outline for mouse users and never restored one,
+  leaving keyboard users with no visible focus on the sign-in form.
 - Multi-architecture Docker images. `linux/arm64` is now published alongside `linux/amd64`,
   so the image runs natively on Apple Silicon and common ARM NAS/SBC hosts. The .NET build
   runs natively on the build host and cross-compiles, so adding the second architecture does
@@ -2105,6 +2151,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [2.0.288] - 2026-09-13
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.289] - 2026-09-15
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.290] - 2026-09-18
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.291] - 2026-09-18
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.292] - 2026-09-18
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.293] - 2026-09-18
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.294] - 2026-09-18
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.295] - 2026-09-18
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.296] - 2026-09-18
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.297] - 2026-09-18
 
 ### Changed
 - Automatic version bump on merge to master

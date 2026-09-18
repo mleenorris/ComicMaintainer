@@ -1663,6 +1663,79 @@ public class SeriesLibraryServiceTests
     }
 
     [Fact]
+    public async Task GetAdjacentIssueAsync_MergedSeriesCard_DoesNotCrossIntoOtherSourceSeries()
+    {
+        // "Series A" and "Series B" live in separate folders but a cache record
+        // alias merges them into a single library card. Reader navigation must
+        // still stop at the last issue of the folder the reader is in instead of
+        // loading an issue of the other comic.
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = "/library/Series A/Series A 001.cbz", FileName = "Series A 001.cbz", Directory = "/library/Series A", FileSize = 100, Metadata = new ComicMetadata { Series = "Series A", Issue = "1" } },
+            new() { FilePath = "/library/Series A/Series A 002.cbz", FileName = "Series A 002.cbz", Directory = "/library/Series A", FileSize = 100, Metadata = new ComicMetadata { Series = "Series A", Issue = "2" } },
+            new() { FilePath = "/library/Series B/Series B 003.cbz", FileName = "Series B 003.cbz", Directory = "/library/Series B", FileSize = 100, Metadata = new ComicMetadata { Series = "Series B", Issue = "3" } }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        _metadataCache.Setup(m => m.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>
+            {
+                new()
+                {
+                    NormalizedKey = "series-a",
+                    CanonicalTitle = "Series A",
+                    Aliases = new List<string>(),
+                    UserAliases = new List<string> { "Series B" }
+                }
+            });
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        // Sanity check: the two folders really are merged into one series card.
+        var library = await service.GetSeriesAsync();
+        Assert.Single(library.Series);
+        Assert.Equal(3, library.Series[0].IssueCount);
+
+        // Last issue of the folder the reader is in: no adjacent issue.
+        var atEnd = await service.GetAdjacentIssueAsync("/library/Series A/Series A 002.cbz", "next");
+        Assert.True(atEnd.Found);
+        Assert.False(atEnd.HasAdjacent);
+
+        // First issue of the other folder: no previous issue either.
+        var atStart = await service.GetAdjacentIssueAsync("/library/Series B/Series B 003.cbz", "prev");
+        Assert.True(atStart.Found);
+        Assert.False(atStart.HasAdjacent);
+
+        // Navigation inside a folder still works.
+        var next = await service.GetAdjacentIssueAsync("/library/Series A/Series A 001.cbz", "next");
+        Assert.True(next.HasAdjacent);
+        Assert.Equal("/library/Series A/Series A 002.cbz", next.FilePath);
+    }
+
+    [Fact]
+    public async Task GetAdjacentIssueAsync_SameSeriesSplitAcrossParents_StillNavigates()
+    {
+        // The same series stored under two different parent paths shares a
+        // grouping title, so next/previous continues to work across them.
+        var files = new List<ComicFile>
+        {
+            new() { FilePath = "/library/a/Series A/Series A 001.cbz", FileName = "Series A 001.cbz", Directory = "/library/a/Series A", FileSize = 100, Metadata = new ComicMetadata { Series = "Series A", Issue = "1" } },
+            new() { FilePath = "/library/b/Series A/Series A 002.cbz", FileName = "Series A 002.cbz", Directory = "/library/b/Series A", FileSize = 100, Metadata = new ComicMetadata { Series = "Series A", Issue = "2" } }
+        };
+
+        _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+
+        var service = new SeriesLibraryService(_fileStore.Object, _processor.Object, _metadataCache.Object, _settings, _logger.Object);
+
+        var next = await service.GetAdjacentIssueAsync("/library/a/Series A/Series A 001.cbz", "next");
+        Assert.True(next.HasAdjacent);
+        Assert.Equal("/library/b/Series A/Series A 002.cbz", next.FilePath);
+    }
+
+    [Fact]
     public async Task GetAdjacentIssueAsync_FileNotInLibrary_ReportsNotFound()
     {
         _fileStore.Setup(store => store.GetFilteredFilesAsync(null, It.IsAny<CancellationToken>()))

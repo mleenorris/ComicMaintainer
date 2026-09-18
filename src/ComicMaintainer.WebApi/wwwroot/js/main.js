@@ -7013,6 +7013,13 @@
             const container = document.getElementById('messageContainer');
             const messageEl = document.createElement('div');
             messageEl.className = `message ${type}`;
+            // #messageContainer is a polite live region, which is right for
+            // routine progress chatter but too easy to miss for a failure the
+            // user has to act on. Errors get role="alert" so assistive tech
+            // interrupts instead of queueing behind whatever is being read.
+            if (type === 'error') {
+                messageEl.setAttribute('role', 'alert');
+            }
             messageEl.textContent = message;
             
             container.appendChild(messageEl);

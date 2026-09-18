@@ -82,7 +82,7 @@
     <div class="header">
         <div class="container">
             <div class="header-content">
-                <svg width="48" height="48" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                <svg width="48" height="48" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
                     <!-- Brown border/frame -->
                     <rect x="5" y="5" width="90" height="90" rx="10" fill="#8B5A3C" stroke="#5C3A28" stroke-width="2"/>
                     <rect x="10" y="10" width="80" height="80" rx="8" fill="#A67C52"/>
@@ -275,7 +275,12 @@
     </div>
     
      <main class="container" id="mainContent" tabindex="-1">
-         <div id="messageContainer"></div>
+         <!-- showMessage() appends every status/error notification here, so the
+              container must be a live region: without it none of the app's
+              feedback (including failures) reaches screen reader users. It is
+              polite by default; individual error messages are given role="alert"
+              so they interrupt. -->
+         <div id="messageContainer" role="status" aria-live="polite" aria-atomic="false"></div>
  
          <div class="visually-hidden" id="mobileLibraryViewStatus" aria-live="polite"></div>
 
@@ -628,7 +633,7 @@
             </div>
             <div class="modal-body">
                 <div style="text-align: center; margin-bottom: 20px;">
-                    <svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                    <svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
                         <!-- Brown border/frame -->
                         <rect x="5" y="5" width="90" height="90" rx="10" fill="#8B5A3C" stroke="#5C3A28" stroke-width="2"/>
                         <rect x="10" y="10" width="80" height="80" rx="8" fill="#A67C52"/>

@@ -4177,6 +4177,13 @@ summary:focus-visible,
    ---------------------------------------------------------------------------
    Users who enable reduced motion (vestibular disorders, motion sensitivity)
    should not be exposed to transitions, animations or smooth scrolling.
+
+   Loading spinners are deliberately exempt. They are the only indication that
+   a request is in flight — several of them replace the button label while the
+   request runs — so freezing them leaves the user with no feedback at all.
+   WCAG 2.2.2 allows motion that is essential to conveying information; a
+   small, localised spinner is not the kind of large-scale movement the
+   preference is meant to suppress.
 --------------------------------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
     *,
@@ -4186,6 +4193,13 @@ summary:focus-visible,
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
         scroll-behavior: auto !important;
+    }
+
+    .spinner,
+    .reader-spinner,
+    .loading::before {
+        animation-duration: 1s !important;
+        animation-iteration-count: infinite !important;
     }
 
     html {

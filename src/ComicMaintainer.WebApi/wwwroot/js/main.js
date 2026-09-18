@@ -1258,7 +1258,34 @@
             }
         }
 
-        window.addEventListener('resize', applyMobileLibraryView);
+        // Viewport resize handling
+        // ------------------------
+        // Resize fires continuously while a window is dragged or a device is
+        // rotated, and the handlers below re-evaluate media queries and write
+        // to the DOM. Running them per event causes needless style/layout work,
+        // so they share a single debounced listener rather than registering one
+        // each.
+        const viewportResizeHandlers = [];
+        let viewportResizeTimer = null;
+        function onViewportResize(handler) {
+            viewportResizeHandlers.push(handler);
+        }
+        window.addEventListener('resize', () => {
+            if (viewportResizeTimer) clearTimeout(viewportResizeTimer);
+            viewportResizeTimer = setTimeout(() => {
+                viewportResizeTimer = null;
+                viewportResizeHandlers.forEach(handler => {
+                    // One failing handler must not stop the others running.
+                    try {
+                        handler();
+                    } catch (err) {
+                        console.error('Resize handler failed:', err);
+                    }
+                });
+            }, 150);
+        });
+
+        onViewportResize(applyMobileLibraryView);
 
         // Debounce library health refreshes so bursts of file events trigger only one refresh.
         // The delay can be overridden for cases like job completion where a faster refresh is useful.
@@ -1726,10 +1753,23 @@
                     .then((registration) => {
                         console.log('PWA: Service Worker registered successfully:', registration.scope);
 
-                        // Check for updates periodically
-                        setInterval(() => {
-                            registration.update();
-                        }, 60000); // Check every minute
+                        // Check for updates periodically. The poll is skipped
+                        // while the tab is hidden: a background tab has nobody
+                        // to show an update banner to, and a pinned tab left
+                        // open for days would otherwise keep issuing a request
+                        // a minute forever. Becoming visible again triggers an
+                        // immediate check so a returning user is not left
+                        // waiting up to a minute for the banner.
+                        const checkForUpdate = () => {
+                            if (document.hidden) return;
+                            registration.update().catch(err => {
+                                console.debug('PWA: Service Worker update check failed:', err);
+                            });
+                        };
+                        setInterval(checkForUpdate, 60000); // Check every minute
+                        document.addEventListener('visibilitychange', () => {
+                            if (!document.hidden) checkForUpdate();
+                        });
 
                         // When a new service worker has fully installed, surface
                         // it to the user instead of silently activating and
@@ -7547,7 +7587,7 @@
 
         // Re-evaluate sticky-class placement on viewport rotation/resize so
         // the indicator follows the user between mobile and desktop sizes.
-        window.addEventListener('resize', () => {
+        onViewportResize(() => {
             const indicator = document.getElementById('progressIndicator');
             if (indicator && indicator.style.display !== 'none') {
                 setProgressIndicatorVisible(true);
@@ -9836,3 +9876,107 @@
         } else {
             initDropdownAriaExpandedSync();
         }
+
+        // =================================================================
+        // Connectivity awareness
+        // =================================================================
+        //
+        // Every request in this app goes through fetch(), and a fetch made
+        // with no network rejects with a bare "Failed to fetch" TypeError.
+        // That surfaces as a generic "Failed to load ..." error which reads
+        // like a server fault, so users retry against a server they cannot
+        // reach. A persistent banner states the actual cause instead, and is
+        // removed as soon as connectivity returns.
+
+        function removeOfflineBanner() {
+            const existing = document.getElementById('appOfflineBanner');
+            if (existing) existing.remove();
+        }
+
+        function showOfflineBanner() {
+            if (document.getElementById('appOfflineBanner')) return;
+
+            const banner = document.createElement('div');
+            banner.id = 'appOfflineBanner';
+            banner.className = 'app-update-banner app-offline-banner';
+            // assertive: the user is about to be told their actions are failing,
+            // which should not wait behind whatever else is being announced.
+            banner.setAttribute('role', 'alert');
+            banner.setAttribute('aria-live', 'assertive');
+
+            const text = document.createElement('span');
+            text.className = 'app-update-banner-text';
+            text.textContent = 'You are offline. Changes cannot be saved until the connection returns.';
+
+            banner.appendChild(text);
+            document.body.appendChild(banner);
+        }
+
+        function handleConnectivityChange() {
+            if (navigator.onLine) {
+                removeOfflineBanner();
+            } else {
+                showOfflineBanner();
+            }
+        }
+
+        function initConnectivityAwareness() {
+            window.addEventListener('online', handleConnectivityChange);
+            window.addEventListener('offline', handleConnectivityChange);
+            // The page may have been restored from the bfcache, or loaded from
+            // the service worker cache, while already offline.
+            handleConnectivityChange();
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initConnectivityAwareness);
+        } else {
+            initConnectivityAwareness();
+        }
+
+        // =================================================================
+        // Last-resort error reporting
+        // =================================================================
+        //
+        // A rejected promise or a thrown error that no handler catches stops
+        // the surrounding code silently: spinners keep spinning and stale data
+        // stays on screen with nothing to explain why. These handlers do not
+        // attempt recovery; they exist so a bug is visible to the user rather
+        // than only to whoever has DevTools open.
+        //
+        // Reports are rate limited because a failure inside a loop or a render
+        // path can fire continuously, and a flood of identical banners would
+        // bury the rest of the UI.
+
+        let lastUnexpectedErrorReport = 0;
+        const UNEXPECTED_ERROR_REPORT_INTERVAL_MS = 10000;
+
+        function reportUnexpectedError(detail) {
+            console.error('Unhandled error:', detail);
+
+            const now = Date.now();
+            if (now - lastUnexpectedErrorReport < UNEXPECTED_ERROR_REPORT_INTERVAL_MS) return;
+            lastUnexpectedErrorReport = now;
+
+            // Offline is already explained by its own banner; reporting the
+            // resulting fetch failures on top of it is just noise.
+            if (!navigator.onLine) return;
+
+            // showMessage() needs #messageContainer, which only exists on the
+            // library page; nothing to do elsewhere.
+            if (typeof showMessage !== 'function' || !document.getElementById('messageContainer')) return;
+
+            showMessage('Something went wrong. If the page is not behaving as expected, reload it.', 'error');
+        }
+
+        window.addEventListener('unhandledrejection', event => {
+            reportUnexpectedError(event.reason);
+        });
+
+        window.addEventListener('error', event => {
+            // Failed <img>/<script>/<link> loads also fire 'error', but they
+            // bubble from the element rather than the window and carry no
+            // Error object. Covers that 404 are routine here, so ignore them.
+            if (!event.error) return;
+            reportUnexpectedError(event.error);
+        });

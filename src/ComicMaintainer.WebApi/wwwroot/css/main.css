@@ -4249,3 +4249,22 @@ summary:focus-visible,
 .app-update-banner-dismiss:hover {
     color: var(--text-primary);
 }
+
+/* ---------------------------------------------------------------------------
+   "You are offline" banner
+   ---------------------------------------------------------------------------
+   Shares the update banner's layout but is styled as a warning and has no
+   dismiss control: it is removed automatically when connectivity returns, and
+   letting it be dismissed while still offline would hide the explanation for
+   every request that is about to fail.
+
+   It sits above the update banner so the two cannot overlap if both are
+   visible, and uses explicit colours rather than theme variables so the
+   warning reads the same in light and dark themes.
+--------------------------------------------------------------------------- */
+.app-offline-banner {
+    bottom: 76px;
+    background: #7a2e2e;
+    border-color: #a33f3f;
+    color: #fff;
+}

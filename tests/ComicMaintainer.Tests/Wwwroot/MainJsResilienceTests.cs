@@ -98,12 +98,28 @@ public class MainJsResilienceTests
 
         // The poll runs for the lifetime of the page. A background tab has
         // nobody to show an update banner to, so it must not keep issuing a
-        // request a minute; returning to the tab checks immediately instead.
+        // request a minute; returning to the tab checks instead.
         Assert.Matches(
             new Regex(@"const checkForUpdate = \(\) => \{\s*if \(document\.hidden\) return;"),
             contents);
         Assert.Matches(
             new Regex(@"addEventListener\('visibilitychange',[\s\S]{0,60}?if \(!document\.hidden\) checkForUpdate\(\);"),
+            contents);
+    }
+
+    [Fact]
+    public void MainJs_ThrottlesServiceWorkerUpdateChecks()
+    {
+        var contents = ReadMainJs();
+
+        // sw.js is served no-store and the main script always bypasses the HTTP
+        // cache, so every update() is a real request. The visibility-triggered
+        // check must share the interval's minimum spacing, otherwise an actively
+        // used tab issues one request per focus change and ends up noisier than
+        // the plain interval this replaced.
+        Assert.Contains("SW_UPDATE_INTERVAL_MS", contents);
+        Assert.Matches(
+            new Regex(@"now\s*-\s*lastServiceWorkerUpdateCheck\s*<\s*SW_UPDATE_INTERVAL_MS\)\s*return;"),
             contents);
     }
 }

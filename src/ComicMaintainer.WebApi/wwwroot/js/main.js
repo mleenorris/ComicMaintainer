@@ -1757,16 +1757,29 @@
                         // while the tab is hidden: a background tab has nobody
                         // to show an update banner to, and a pinned tab left
                         // open for days would otherwise keep issuing a request
-                        // a minute forever. Becoming visible again triggers an
-                        // immediate check so a returning user is not left
-                        // waiting up to a minute for the banner.
+                        // a minute forever. Becoming visible again triggers a
+                        // check so a returning user is not left waiting up to a
+                        // minute for the banner.
+                        //
+                        // Both paths go through the same minimum interval. The
+                        // registration is not cached (sw.js is served no-store
+                        // and the main script always bypasses the HTTP cache),
+                        // so every update() is a real request — without the
+                        // guard, an actively used tab would issue one per
+                        // focus change and end up noisier than the plain
+                        // interval this replaced.
+                        const SW_UPDATE_INTERVAL_MS = 60000;
+                        let lastServiceWorkerUpdateCheck = 0;
                         const checkForUpdate = () => {
                             if (document.hidden) return;
+                            const now = Date.now();
+                            if (now - lastServiceWorkerUpdateCheck < SW_UPDATE_INTERVAL_MS) return;
+                            lastServiceWorkerUpdateCheck = now;
                             registration.update().catch(err => {
                                 console.debug('PWA: Service Worker update check failed:', err);
                             });
                         };
-                        setInterval(checkForUpdate, 60000); // Check every minute
+                        setInterval(checkForUpdate, SW_UPDATE_INTERVAL_MS);
                         document.addEventListener('visibilitychange', () => {
                             if (!document.hidden) checkForUpdate();
                         });

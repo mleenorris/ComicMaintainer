@@ -34,8 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Service worker update checks pause in hidden tabs.** The check ran every minute for the
   lifetime of the page, so a pinned tab left open kept issuing a request a minute
   indefinitely — to show an update banner nobody was looking at. It is now skipped while the
-  tab is hidden, and runs immediately when the tab becomes visible again so a returning user
-  is not left waiting.
+  tab is hidden, and runs when the tab becomes visible again so a returning user is not left
+  waiting. Both paths share the same minimum interval: `sw.js` is served `no-store` and the
+  main script always bypasses the HTTP cache, so every check is a real request and an
+  unthrottled focus-triggered check would be noisier than the plain interval it replaced.
 
 - **Documentation reorganised.** The repository root had accumulated 69 markdown files, most of
   them point-in-time fix write-ups and PR summaries, which buried the handful of documents

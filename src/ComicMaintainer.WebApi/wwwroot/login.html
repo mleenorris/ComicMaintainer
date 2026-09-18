@@ -122,6 +122,20 @@
             border-color: var(--primary-color);
         }
         
+        /* Controls above clear the default outline for mouse users. Keyboard
+           users still need a visible focus indicator, so restore one via
+           :focus-visible, which only matches keyboard/AT focus. This mirrors
+           the global rule in css/main.css; this page is standalone and does
+           not load that stylesheet. */
+        a:focus-visible,
+        button:focus-visible,
+        input:focus-visible,
+        select:focus-visible,
+        textarea:focus-visible {
+            outline: 2px solid var(--primary-color);
+            outline-offset: 2px;
+        }
+        
         .btn {
             width: 100%;
             padding: 12px 20px;
@@ -214,6 +228,29 @@
             transform: scale(1.1);
         }
         
+        /* Respect the OS "reduce motion" preference, as css/main.css does for
+           the rest of the app. The spinner is exempt: it replaces the button
+           label while the request is in flight, so freezing it would leave the
+           user with no feedback at all. */
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+            
+            .spinner {
+                animation-duration: 0.6s !important;
+                animation-iteration-count: infinite !important;
+            }
+            
+            .theme-toggle:hover {
+                transform: none;
+            }
+        }
+        
         .spinner {
             display: inline-block;
             width: 16px;
@@ -234,14 +271,14 @@
     </style>
 </head>
 <body>
-    <button class="theme-toggle" onclick="toggleTheme()" title="Toggle Theme">
-        🌓
+    <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle light/dark theme" title="Toggle Theme">
+        <span aria-hidden="true">🌓</span>
     </button>
     
-    <div class="login-container">
+    <main class="login-container">
         <div class="login-header">
             <div class="logo">
-                <svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                <svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
                     <!-- Brown border/frame -->
                     <rect x="5" y="5" width="90" height="90" rx="10" fill="#8B5A3C" stroke="#5C3A28" stroke-width="2"/>
                     <rect x="10" y="10" width="80" height="80" rx="8" fill="#A67C52"/>
@@ -286,8 +323,8 @@
             <p>Sign in to manage your comic library</p>
         </div>
         
-        <div id="errorMessage" class="error-message"></div>
-        <div id="successMessage" class="success-message"></div>
+        <div id="errorMessage" class="error-message" role="alert"></div>
+        <div id="successMessage" class="success-message" role="status" aria-live="polite"></div>
         
         <!-- Login Form -->
         <form id="loginForm">
@@ -306,7 +343,7 @@
         </form>
         
 
-    </div>
+    </main>
     
     <script>
         // Base path for reverse proxy support
@@ -336,22 +373,28 @@
         // Show error message
         function showError(message) {
             const errorElement = document.getElementById('errorMessage');
-            errorElement.textContent = message;
+            // The element is display:none until '.show' is added, which keeps it
+            // out of the accessibility tree. Reveal it first so the text lands in
+            // a live region that is already exposed, otherwise screen readers may
+            // not announce the failure at all.
             errorElement.classList.add('show');
+            errorElement.textContent = message;
             
             setTimeout(() => {
                 errorElement.classList.remove('show');
+                errorElement.textContent = '';
             }, 5000);
         }
         
         // Show success message
         function showSuccess(message) {
             const successElement = document.getElementById('successMessage');
-            successElement.textContent = message;
             successElement.classList.add('show');
+            successElement.textContent = message;
             
             setTimeout(() => {
                 successElement.classList.remove('show');
+                successElement.textContent = '';
             }, 3000);
         }
         

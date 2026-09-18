@@ -45,15 +45,15 @@
     </style>
 </head>
 <body>
-    <div class="jobs-page">
+    <main class="jobs-page">
         <div class="jobs-header">
             <h1>⏰ Scheduled Jobs</h1>
             <a href="/">← Back to Library</a>
         </div>
         <p class="meta">Recurring background jobs the server can run for you. Enable a job and set how often it should run; trigger an ad-hoc run any time with <strong>Run now</strong>.</p>
 
-        <div id="jobsContainer"><div class="empty">Loading…</div></div>
-    </div>
+        <div id="jobsContainer" aria-live="polite" aria-busy="true"><div class="empty">Loading…</div></div>
+    </main>
 
     <script>
         const BASE_PATH = '';
@@ -191,6 +191,10 @@
                 jobs.forEach(j => bindJobCard(j));
             } catch (e) {
                 container.innerHTML = '<div class="empty">Failed to load jobs: ' + escapeHtml(e.message) + '</div>';
+            } finally {
+                // Clear the busy flag on every path, including the error one, so
+                // assistive tech stops reporting the region as still loading.
+                container.setAttribute('aria-busy', 'false');
             }
         }
 

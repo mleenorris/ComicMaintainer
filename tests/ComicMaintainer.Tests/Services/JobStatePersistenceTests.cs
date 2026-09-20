@@ -1,3 +1,6 @@
+using System.Collections;
+using System.Collections.Concurrent;
+using System.Reflection;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
@@ -238,6 +241,54 @@ public class JobStatePersistenceTests : IDisposable
         // An interrupted job is terminal, so the user must be able to dismiss it.
         Assert.True(await processor.DeleteJobAsync(jobId));
         Assert.Null(processor.GetJob(jobId));
+    }
+
+    [Fact]
+    public async Task DeleteJob_LeavesNoPerJobStateBehind()
+    {
+        // Regression test for a SemaphoreSlim leak. Per-job state used to live in eight parallel
+        // dictionaries keyed by job id and the delete path cleaned only seven of them, so every
+        // job leaked its persistence gate for the lifetime of the process. Asserting over every
+        // Guid-keyed dictionary on the service — rather than a named one — keeps the invariant
+        // from drifting again if per-job state is ever added back alongside the entry.
+        var processor = CreateProcessor();
+        var jobId = Guid.NewGuid();
+        _jobStateStore
+            .Setup(s => s.DeleteAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        processor.RestoreJobs(new[]
+        {
+            new ProcessingJob { JobId = jobId, Status = JobStatus.Completed }
+        });
+
+        var perJobState = GetPerJobState(processor);
+        Assert.NotEmpty(perJobState);
+        Assert.Contains(perJobState, s => s.State.Contains(jobId));
+
+        Assert.True(await processor.DeleteJobAsync(jobId));
+
+        foreach (var (name, state) in perJobState)
+        {
+            Assert.False(
+                state.Contains(jobId),
+                $"{name} still holds state for job {jobId} after it was deleted");
+        }
+    }
+
+    /// <summary>
+    /// Returns every job-id-keyed dictionary held by the service, so tests can assert that
+    /// deleting a job drops all of its state without naming the fields individually.
+    /// </summary>
+    private static List<(string Name, IDictionary State)> GetPerJobState(ComicProcessorService processor)
+    {
+        return typeof(ComicProcessorService)
+            .GetFields(BindingFlags.Instance | BindingFlags.NonPublic)
+            .Where(f => f.FieldType.IsGenericType
+                && f.FieldType.GetGenericTypeDefinition() == typeof(ConcurrentDictionary<,>)
+                && f.FieldType.GetGenericArguments()[0] == typeof(Guid))
+            .Select(f => (f.Name, (IDictionary)f.GetValue(processor)!))
+            .ToList();
     }
 
     [Fact]

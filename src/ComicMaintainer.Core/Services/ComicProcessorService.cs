@@ -29,14 +29,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     private readonly IProcessingHistoryService _historyService;
     private readonly ISeriesNameResolver? _seriesNameResolver;
     private readonly IJobStateStore? _jobStateStore;
-    private readonly ConcurrentDictionary<Guid, ProcessingJob> _jobs = new();
-    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _jobCancellationTokens = new();
-    private readonly ConcurrentDictionary<Guid, object> _jobSyncLocks = new();
-    private readonly ConcurrentDictionary<Guid, JobStatus> _lastPersistedStatus = new();
-    private readonly ConcurrentDictionary<Guid, DateTime> _lastPersistedAt = new();
-    private readonly ConcurrentDictionary<Guid, bool> _persistedTerminalJobs = new();
-    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _jobPersistenceLocks = new();
-    private readonly ConcurrentDictionary<Guid, bool> _deletedPersistedJobs = new();
+    private readonly ConcurrentDictionary<Guid, JobEntry> _jobEntries = new();
 
     /// <summary>
     /// Minimum spacing between durable progress writes for a job that has not changed status.
@@ -571,17 +564,18 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             StartTime = DateTime.UtcNow
         };
 
-        _jobs[jobId] = job;
-        var jobSyncLock = _jobSyncLocks.GetOrAdd(jobId, static _ => new object());
-        
+        var entry = new JobEntry(job);
+        _jobEntries[jobId] = entry;
+        var jobSyncLock = entry.SyncLock;
+
         // Create a CancellationTokenSource for this job that can be cancelled independently
         var jobCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _jobCancellationTokens[jobId] = jobCts;
+        entry.SetCancellationTokenSource(jobCts);
 
         _logger.LogDebug("{OperationName}: Job {JobId} created and queued with {FileCount} files using up to {MaxWorkers} workers", operationName, jobId, fileList.Count, _maxWorkers);
 
         // Broadcast initial job status
-        _ = BroadcastJobStatusAsync(job);
+        _ = BroadcastJobStatusAsync(entry);
 
         // Process files asynchronously using LongRunning for potentially long batch operations
         _ = Task.Factory.StartNew(async () =>
@@ -593,7 +587,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                 {
                     job.Status = JobStatus.Running;
                 }
-                await BroadcastJobStatusAsync(job);
+                await BroadcastJobStatusAsync(entry);
 
                 var parallelOptions = new ParallelOptions
                 {
@@ -639,7 +633,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                             LoggingHelper.SanitizePathForLog(item.file));
 
                         // Broadcast progress after each file
-                        await BroadcastJobStatusAsync(job);
+                        await BroadcastJobStatusAsync(entry);
 
                         // Broadcast individual file processed event
                         if (_eventBroadcaster != null)
@@ -664,7 +658,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                 }
                 _logger.LogInformation("{OperationName}: Job {JobId} completed - Processed: {ProcessedFiles}, Failed: {FailedFiles}, Total: {TotalFiles}",
                     operationName, jobId, job.ProcessedFiles, job.FailedFiles, job.TotalFiles);
-                await BroadcastJobStatusAsync(job);
+                await BroadcastJobStatusAsync(entry);
             }
             catch (OperationCanceledException)
             {
@@ -674,7 +668,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                     job.Status = JobStatus.Cancelled;
                     job.EndTime = DateTime.UtcNow;
                 }
-                await BroadcastJobStatusAsync(job);
+                await BroadcastJobStatusAsync(entry);
             }
             catch (Exception ex)
             {
@@ -684,12 +678,12 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                     job.Status = JobStatus.Failed;
                     job.EndTime = DateTime.UtcNow;
                 }
-                await BroadcastJobStatusAsync(job);
+                await BroadcastJobStatusAsync(entry);
             }
             finally
             {
-                _jobCancellationTokens.TryRemove(jobId, out _);
-                jobCts.Dispose();
+                // Take before disposing so a concurrent CancelJob cannot observe a disposed source.
+                entry.TakeCancellationTokenSource()?.Dispose();
             }
         }, jobCts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
@@ -1003,9 +997,9 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
     }
 
-    private async Task BroadcastJobStatusAsync(ProcessingJob job)
+    private async Task BroadcastJobStatusAsync(JobEntry entry)
     {
-        var snapshot = CloneJob(job);
+        var snapshot = CloneJob(entry);
 
         if (_eventBroadcaster != null)
         {
@@ -1038,60 +1032,49 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             return;
         }
 
-        await WithJobPersistenceLockAsync(snapshot.JobId, async () =>
+        await WithJobPersistenceLockAsync(snapshot.JobId, async entry =>
         {
-            if (_deletedPersistedJobs.ContainsKey(snapshot.JobId))
+            if (entry.Deleted)
             {
                 return;
             }
 
             // Status broadcasts are fire-and-forget. Serialize per-job writes so a late queued/
             // running save cannot land after a terminal one.
-            if (_persistedTerminalJobs.ContainsKey(snapshot.JobId))
+            if (entry.TerminalStatePersisted)
             {
                 return;
             }
 
-            var isTransition = !_lastPersistedStatus.TryGetValue(snapshot.JobId, out var lastStatus)
-                || lastStatus != snapshot.Status;
+            var isTransition = entry.LastPersistedStatus != snapshot.Status;
 
             if (!isTransition)
             {
-                var lastWrite = _lastPersistedAt.TryGetValue(snapshot.JobId, out var at) ? at : DateTime.MinValue;
+                var lastWrite = entry.LastPersistedAt ?? DateTime.MinValue;
                 if (DateTime.UtcNow - lastWrite < JobPersistenceInterval)
                 {
                     return;
                 }
             }
 
-            if (snapshot.IsTerminal && !_persistedTerminalJobs.TryAdd(snapshot.JobId, true))
-            {
-                // Another thread is already writing the terminal state for this job.
-                return;
-            }
-
             try
             {
                 await _jobStateStore.SaveAsync(snapshot);
-                _lastPersistedStatus[snapshot.JobId] = snapshot.Status;
-                _lastPersistedAt[snapshot.JobId] = DateTime.UtcNow;
+                entry.LastPersistedStatus = snapshot.Status;
+                entry.LastPersistedAt = DateTime.UtcNow;
 
                 if (snapshot.IsTerminal)
                 {
                     // The job will never change again, so stop tracking its throttle state.
-                    _lastPersistedStatus.TryRemove(snapshot.JobId, out _);
-                    _lastPersistedAt.TryRemove(snapshot.JobId, out _);
+                    entry.TerminalStatePersisted = true;
+                    entry.LastPersistedStatus = null;
+                    entry.LastPersistedAt = null;
                 }
             }
             catch (Exception ex)
             {
-                if (snapshot.IsTerminal)
-                {
-                    // Let a retry write the final state rather than leaving it permanently blocked.
-                    _persistedTerminalJobs.TryRemove(snapshot.JobId, out _);
-                }
-
-                // Never let a persistence problem abort the batch the user asked for.
+                // Never let a persistence problem abort the batch the user asked for. Leaving
+                // TerminalStatePersisted unset lets a retry write the final state.
                 _logger.LogWarning(ex, "Failed to persist state for job {JobId}", snapshot.JobId);
             }
         });
@@ -1110,37 +1093,37 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
 
         foreach (var job in jobs)
         {
-            _jobs.TryAdd(job.JobId, job);
+            _jobEntries.TryAdd(job.JobId, new JobEntry(job));
         }
     }
 
     public ProcessingJob? GetJob(Guid jobId)
     {
-        return _jobs.TryGetValue(jobId, out var job) ? CloneJob(job) : null;
+        return _jobEntries.TryGetValue(jobId, out var entry) ? CloneJob(entry) : null;
     }
 
     public ProcessingJob? GetActiveJob()
     {
-        return _jobs.Values
+        return _jobEntries.Values
             .Select(CloneJob)
             .FirstOrDefault(j => j.Status == JobStatus.Running || j.Status == JobStatus.Queued);
     }
 
     public IEnumerable<ProcessingJob> GetAllJobs()
     {
-        return _jobs.Values
+        return _jobEntries.Values
             .Select(CloneJob)
             .OrderByDescending(j => j.StartTime);
     }
 
     public async Task<bool> DeleteJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
-        if (!_jobs.TryGetValue(jobId, out var job))
+        if (!_jobEntries.TryGetValue(jobId, out var entry))
         {
             return false;
         }
 
-        var snapshot = CloneJob(job);
+        var snapshot = CloneJob(entry);
         if (!snapshot.IsTerminal)
         {
             _logger.LogWarning("Cannot delete active job: {JobId}", jobId);
@@ -1150,49 +1133,62 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         if (_jobStateStore != null)
         {
             // Deleting only from memory would resurrect the job on the next restart.
-            await WithJobPersistenceLockAsync(jobId, async () =>
+            await WithJobPersistenceLockAsync(jobId, async persistEntry =>
             {
-                _deletedPersistedJobs[jobId] = true;
+                persistEntry.Deleted = true;
                 try
                 {
                     await _jobStateStore.DeleteAsync(jobId, cancellationToken);
                 }
                 catch
                 {
-                    _deletedPersistedJobs.TryRemove(jobId, out _);
+                    persistEntry.Deleted = false;
                     throw;
                 }
-
-                _persistedTerminalJobs.TryRemove(jobId, out _);
-                _lastPersistedStatus.TryRemove(jobId, out _);
-                _lastPersistedAt.TryRemove(jobId, out _);
             });
         }
 
-        var removed = _jobs.TryRemove(jobId, out _);
-        _jobCancellationTokens.TryRemove(jobId, out _);
-        _jobSyncLocks.TryRemove(jobId, out _);
+        // Removing the entry drops every piece of the job's state at once, including its
+        // persistence gate. Any write still in flight sees Deleted on the entry it already holds.
+        var removed = _jobEntries.TryRemove(jobId, out var removedEntry);
+        if (removed)
+        {
+            removedEntry!.TakeCancellationTokenSource()?.Dispose();
+        }
 
         return removed;
     }
 
     public bool CancelJob(Guid jobId)
     {
-        if (_jobCancellationTokens.TryGetValue(jobId, out var cts))
+        var cts = _jobEntries.TryGetValue(jobId, out var entry)
+            ? entry.PeekCancellationTokenSource()
+            : null;
+
+        if (cts != null)
         {
             _logger.LogInformation("Cancelling job: {JobId}", jobId);
-            cts.Cancel();
-            return true;
+            try
+            {
+                cts.Cancel();
+                return true;
+            }
+            catch (ObjectDisposedException)
+            {
+                // The job finished and tore its token source down between the lookup and here.
+                _logger.LogDebug("Job {JobId} completed before the cancellation request was applied", jobId);
+                return false;
+            }
         }
-        
+
         _logger.LogWarning("Cannot cancel job {JobId}: no active cancellation token found", jobId);
         return false;
     }
 
-    private ProcessingJob CloneJob(ProcessingJob job)
+    private ProcessingJob CloneJob(JobEntry entry)
     {
-        var syncLock = GetJobSyncLock(job.JobId);
-        lock (syncLock)
+        var job = entry.Job;
+        lock (entry.SyncLock)
         {
             return new ProcessingJob
             {
@@ -1211,18 +1207,25 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
     }
 
-    private object GetJobSyncLock(Guid jobId)
+    /// <summary>
+    /// Runs <paramref name="action"/> while holding the job's persistence gate.
+    /// </summary>
+    /// <remarks>
+    /// Does nothing when the job no longer exists: a deleted job has no state left to write, and
+    /// creating a gate on demand would reintroduce the unbounded growth this entry model removes.
+    /// </remarks>
+    private async Task WithJobPersistenceLockAsync(Guid jobId, Func<JobEntry, Task> action)
     {
-        return _jobSyncLocks.GetOrAdd(jobId, static _ => new object());
-    }
+        if (!_jobEntries.TryGetValue(jobId, out var entry))
+        {
+            return;
+        }
 
-    private async Task WithJobPersistenceLockAsync(Guid jobId, Func<Task> action)
-    {
-        var gate = _jobPersistenceLocks.GetOrAdd(jobId, static _ => new SemaphoreSlim(1, 1));
+        var gate = entry.PersistenceGate;
         await gate.WaitAsync();
         try
         {
-            await action();
+            await action(entry);
         }
         finally
         {
@@ -1230,12 +1233,12 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
     }
 
-    public Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default)
+    public async Task<ComicMetadata?> GetMetadataAsync(string filePath, CancellationToken cancellationToken = default)
     {
         try
         {
             if (!File.Exists(filePath) || !IsComicArchive(filePath))
-                return Task.FromResult<ComicMetadata?>(null);
+                return null;
 
             using var archive = ArchiveFactory.Open(filePath);
             
@@ -1245,30 +1248,30 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
 
             if (comicInfoEntry != null)
             {
-                var xmlContent = ReadComicInfoXml(comicInfoEntry);
-                return Task.FromResult(ParseComicInfoXml(xmlContent));
+                var xmlContent = await ReadComicInfoXmlAsync(comicInfoEntry, cancellationToken);
+                return ParseComicInfoXml(xmlContent);
             }
 
             // Fallback: parse from filename
-            return Task.FromResult<ComicMetadata?>(new ComicMetadata
+            return new ComicMetadata
             {
                 Series = ExtractSeriesFromFilename(filePath),
                 Issue = ParseIssueNumber(Path.GetFileNameWithoutExtension(filePath))
-            });
+            };
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error reading metadata from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return Task.FromResult<ComicMetadata?>(null);
+            return null;
         }
     }
 
-    public Task<SeriesMetadata?> GetSeriesMetadataAsync(string filePath, CancellationToken cancellationToken = default)
+    public async Task<SeriesMetadata?> GetSeriesMetadataAsync(string filePath, CancellationToken cancellationToken = default)
     {
         try
         {
             if (!File.Exists(filePath) || !IsComicArchive(filePath))
-                return Task.FromResult<SeriesMetadata?>(null);
+                return null;
 
             using var archive = ArchiveFactory.Open(filePath);
             var comicInfoEntry = archive.Entries.FirstOrDefault(e =>
@@ -1276,21 +1279,21 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
 
             if (comicInfoEntry != null)
             {
-                var xmlContent = ReadComicInfoXml(comicInfoEntry);
-                return Task.FromResult(ParseSeriesMetadataXml(xmlContent));
+                var xmlContent = await ReadComicInfoXmlAsync(comicInfoEntry, cancellationToken);
+                return ParseSeriesMetadataXml(xmlContent);
             }
 
-            return Task.FromResult<SeriesMetadata?>(new SeriesMetadata
+            return new SeriesMetadata
             {
                 Series = ExtractSeriesFromFilename(filePath),
                 Issue = ParseIssueNumber(Path.GetFileNameWithoutExtension(filePath)),
                 SeriesGroup = Path.GetFileName(Path.GetDirectoryName(filePath))
-            });
+            };
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error reading series metadata from {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
-            return Task.FromResult<SeriesMetadata?>(null);
+            return null;
         }
     }
 
@@ -1303,15 +1306,104 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
 
         if (disposing)
         {
-            foreach (var cancellationTokenSource in _jobCancellationTokens.Values)
+            foreach (var entry in _jobEntries.Values)
             {
-                cancellationTokenSource.Cancel();
+                var cts = entry.TakeCancellationTokenSource();
+                if (cts == null)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    cts.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // The job's own finally block won the race and already tore it down.
+                }
+                finally
+                {
+                    cts.Dispose();
+                }
             }
 
             _processingSemaphore.Dispose();
         }
 
         _disposed = true;
+    }
+
+    /// <summary>
+    /// All mutable bookkeeping for a single job.
+    /// </summary>
+    /// <remarks>
+    /// This state used to live in eight parallel <see cref="ConcurrentDictionary{TKey, TValue}"/>
+    /// fields keyed by job id, and every removal path had to remember to clean all eight. It did
+    /// not: the persistence gate was never removed, leaking a <see cref="SemaphoreSlim"/> per job.
+    /// Keeping the state in one entry means removing the job removes all of it by construction.
+    /// <para>
+    /// <see cref="LastPersistedStatus"/>, <see cref="LastPersistedAt"/>,
+    /// <see cref="TerminalStatePersisted"/> and <see cref="Deleted"/> are only ever touched while
+    /// <see cref="PersistenceGate"/> is held, so they need no further synchronisation.
+    /// </para>
+    /// </remarks>
+    private sealed class JobEntry
+    {
+        public JobEntry(ProcessingJob job)
+        {
+            Job = job;
+        }
+
+        public ProcessingJob Job { get; }
+
+        /// <summary>Guards mutation of <see cref="Job"/>'s status and counters.</summary>
+        public object SyncLock { get; } = new();
+
+        /// <summary>Serialises durable writes so a late progress save cannot follow a terminal one.</summary>
+        public SemaphoreSlim PersistenceGate { get; } = new(1, 1);
+
+        public JobStatus? LastPersistedStatus { get; set; }
+
+        public DateTime? LastPersistedAt { get; set; }
+
+        /// <summary>Set once the terminal state is durably stored; further writes are ignored.</summary>
+        public bool TerminalStatePersisted { get; set; }
+
+        /// <summary>Set when the job is removed from durable storage, to stop in-flight writes resurrecting it.</summary>
+        public bool Deleted { get; set; }
+
+        private CancellationTokenSource? _cancellationTokenSource;
+
+        public void SetCancellationTokenSource(CancellationTokenSource cancellationTokenSource)
+        {
+            lock (SyncLock)
+            {
+                _cancellationTokenSource = cancellationTokenSource;
+            }
+        }
+
+        /// <summary>
+        /// Atomically detaches the job's <see cref="CancellationTokenSource"/> so exactly one caller
+        /// owns disposing it.
+        /// </summary>
+        public CancellationTokenSource? TakeCancellationTokenSource()
+        {
+            lock (SyncLock)
+            {
+                var cancellationTokenSource = _cancellationTokenSource;
+                _cancellationTokenSource = null;
+                return cancellationTokenSource;
+            }
+        }
+
+        public CancellationTokenSource? PeekCancellationTokenSource()
+        {
+            lock (SyncLock)
+            {
+                return _cancellationTokenSource;
+            }
+        }
     }
 
     public void Dispose()
@@ -1393,7 +1485,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                                 continue;
                             }
                             var memStream = new MemoryStream();
-                            stream.CopyTo(memStream);
+                            await stream.CopyToAsync(memStream, cancellationToken);
                             memStream.Position = 0;
                             writer.AddEntry(entry.Key, memStream, true, entry.Size, entry.LastModifiedTime);
                         }
@@ -1517,7 +1609,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                             continue;
                         }
                         var memStream = new MemoryStream();
-                        stream.CopyTo(memStream);
+                        await stream.CopyToAsync(memStream, cancellationToken);
                         memStream.Position = 0;
                         writer.AddEntry(entry.Key, memStream, true, entry.Size, entry.LastModifiedTime);
                     }
@@ -1830,11 +1922,13 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
     }
 
-    private static string ReadComicInfoXml(IArchiveEntry comicInfoEntry)
+    private static async Task<string> ReadComicInfoXmlAsync(
+        IArchiveEntry comicInfoEntry,
+        CancellationToken cancellationToken)
     {
         using var stream = comicInfoEntry.OpenEntryStream();
         using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
+        return await reader.ReadToEndAsync(cancellationToken);
     }
 
     private static string GenerateComicInfoXml(ComicMetadata metadata)

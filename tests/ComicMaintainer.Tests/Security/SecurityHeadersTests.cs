@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using ComicMaintainer.Tests.Helpers;
 using Xunit;
 using System.Net.Http;
 using System.Threading;
@@ -8,7 +9,8 @@ using System.Linq;
 
 namespace ComicMaintainer.Tests.Security;
 
-public class SecurityHeadersTests : IClassFixture<WebApplicationFactory<Program>>
+[Collection(WebApplicationCollection.Name)]
+public class SecurityHeadersTests
 {
     private readonly WebApplicationFactory<Program> _factory;
 

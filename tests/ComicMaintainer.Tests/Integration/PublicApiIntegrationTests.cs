@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi;
 using Microsoft.AspNetCore.Mvc.Testing;
 
@@ -13,7 +14,8 @@ namespace ComicMaintainer.Tests.Integration;
 /// exercising more controllers end-to-end via <see cref="WebApplicationFactory{TEntryPoint}"/>.
 /// </summary>
 [Trait("Category", "Integration")]
-public class PublicApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+[Collection(WebApplicationCollection.Name)]
+public class PublicApiIntegrationTests
 {
     private readonly HttpClient _client;
 

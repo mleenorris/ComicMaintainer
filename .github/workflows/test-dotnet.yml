@@ -62,6 +62,7 @@ jobs:
         dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
         --no-build --configuration Release --verbosity normal
         --filter "Category!=Integration"
+        --settings coverlet.runsettings
         --collect:"XPlat Code Coverage"
         --results-directory ./TestResults
         --logger "trx;LogFileName=unit-tests.trx"
@@ -81,9 +82,11 @@ jobs:
       with:
         filename: TestResults/**/coverage.cobertura.xml
         badge: true
-        # Enforced rather than advisory. The unit-test run currently reports ~87% line
-        # coverage, so the 60% floor below is a regression guard with headroom, not a
-        # number the suite is scraping past.
+        # Enforced rather than advisory. With coverlet.runsettings applied (which excludes
+        # generated EF Core migrations and the test assembly) the unit-test run reports ~81%
+        # line coverage, so the 60% floor below is a regression guard with headroom, not a
+        # number the suite is scraping past. Without those exclusions the same run reports
+        # ~40%, so the --settings flag above is what makes this threshold meaningful.
         fail_below_min: true
         format: markdown
         hide_branch_rate: false
@@ -166,6 +169,7 @@ jobs:
         dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
         --no-build --configuration Release --verbosity normal
         --filter "Category=Integration"
+        --settings coverlet.runsettings
         --collect:"XPlat Code Coverage"
         --results-directory ./TestResults
         --logger "trx;LogFileName=integration-tests.trx"

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using ComicMaintainer.WebApi;
 using Microsoft.AspNetCore.Mvc.Testing;
+using ComicMaintainer.Tests.Helpers;
 using Xunit;
 
 namespace ComicMaintainer.Tests.Integration;
@@ -11,7 +12,8 @@ namespace ComicMaintainer.Tests.Integration;
 /// These tests verify that API endpoints return proper JSON responses for authentication failures.
 /// </summary>
 [Trait("Category", "Integration")]
-public class AuthResponseTests : IClassFixture<WebApplicationFactory<Program>>
+[Collection(WebApplicationCollection.Name)]
+public class AuthResponseTests
 {
     private readonly HttpClient _client;
 

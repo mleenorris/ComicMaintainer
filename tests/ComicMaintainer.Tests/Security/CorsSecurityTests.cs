@@ -1,10 +1,12 @@
 using Microsoft.AspNetCore.Mvc.Testing;
 using System.Net;
+using ComicMaintainer.Tests.Helpers;
 using Xunit;
 
 namespace ComicMaintainer.Tests.Security;
 
-public class CorsSecurityTests : IClassFixture<WebApplicationFactory<Program>>
+[Collection(WebApplicationCollection.Name)]
+public class CorsSecurityTests
 {
     private readonly WebApplicationFactory<Program> _factory;
 

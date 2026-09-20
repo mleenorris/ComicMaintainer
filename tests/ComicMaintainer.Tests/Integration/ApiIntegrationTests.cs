@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi;
 using Microsoft.AspNetCore.Mvc.Testing;
 
@@ -10,7 +11,8 @@ namespace ComicMaintainer.Tests.Integration;
 /// These tests verify end-to-end functionality of the web API.
 /// </summary>
 [Trait("Category", "Integration")]
-public class ApiIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+[Collection(WebApplicationCollection.Name)]
+public class ApiIntegrationTests
 {
     private readonly WebApplicationFactory<Program> _factory;
     private readonly HttpClient _client;

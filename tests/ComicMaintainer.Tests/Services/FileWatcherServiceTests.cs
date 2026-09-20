@@ -231,9 +231,10 @@ public class FileWatcherServiceTests : IDisposable
 
         // Act
         await _service.StartAsync();
-        
-        // Wait a bit for the async scan to complete
-        await Task.Delay(500);
+
+        // The initial scan runs in the background. Poll for it instead of sleeping a fixed
+        // interval, which loses the race on a loaded CI runner.
+        await WaitForScanAsync(cbzFile, cbrFile);
 
         // Assert - Should add both comic files but not the txt file
         _mockFileStore.Verify(
@@ -267,9 +268,8 @@ public class FileWatcherServiceTests : IDisposable
 
         // Act
         await _service.StartAsync();
-        
-        // Wait for scan to complete
-        await Task.Delay(500);
+
+        await WaitForScanAsync(rootFile, subFile);
 
         // Assert - Should find files in root and subdirectories
         _mockFileStore.Verify(
@@ -722,6 +722,51 @@ public class FileWatcherServiceTests : IDisposable
             p => p.ProcessFileAsync(comicFile, It.IsAny<CancellationToken>()),
             Times.Never,
             "A change flagged via SuppressProcessing should not trigger processing");
+    }
+
+    /// <summary>
+    /// Waits until the initial scan has reported every expected file, or the timeout elapses.
+    /// </summary>
+    /// <remarks>
+    /// The scan is kicked off in the background by <c>StartAsync</c>. Waiting a fixed interval
+    /// made these tests fail intermittently on loaded runners; polling keeps them fast when the
+    /// scan is quick and reliable when it is not. The assertions that follow still decide the
+    /// outcome, so a timeout here simply lets them report the real failure.
+    /// </remarks>
+    private async Task WaitForScanAsync(params string[] expectedFiles)
+    {
+        const int timeoutMs = 10000;
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+
+        while (DateTime.UtcNow < deadline)
+        {
+            if (HasAddedAll(expectedFiles))
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+    }
+
+    private bool HasAddedAll(IReadOnlyCollection<string> expectedFiles)
+    {
+        try
+        {
+            // The scan is still running, so snapshot the list before querying it.
+            var added = _mockFileStore.Invocations
+                .Where(i => i.Method.Name == nameof(IFileStoreService.AddFileAsync)
+                    && i.Arguments.Count > 0)
+                .Select(i => i.Arguments[0] as string)
+                .ToHashSet();
+
+            return expectedFiles.All(added.Contains);
+        }
+        catch (InvalidOperationException)
+        {
+            // The scan mutated the invocation list mid-enumeration; try again on the next tick.
+            return false;
+        }
     }
 
     public void Dispose()

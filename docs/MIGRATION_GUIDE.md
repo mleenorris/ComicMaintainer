@@ -18,7 +18,7 @@ The .NET version of ComicMaintainer provides the same core functionality as the 
 
 | Component | Python Version | .NET Version |
 |-----------|---------------|--------------|
-| Runtime | Python 3.11 | .NET 9.0 |
+| Runtime | Python 3.11 | .NET 10.0 |
 | Web Framework | Flask | ASP.NET Core |
 | Dependency Injection | Manual | Built-in DI Container |
 | Storage | File-based markers | In-memory (extensible to DB) |

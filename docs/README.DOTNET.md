@@ -1,6 +1,6 @@
 # ComicMaintainer - .NET Version (v2.0)
 
-**This is the main version of ComicMaintainer**, built on .NET 9.0 and C#. It provides a robust, production-ready solution for managing comic archive files with extensive testing, performance optimizations, and modern web technologies.
+**This is the main version of ComicMaintainer**, built on .NET 10.0 and C#. It provides a robust, production-ready solution for managing comic archive files with extensive testing, performance optimizations, and modern web technologies.
 
 This version has been converted from the original Python implementation and offers the same functionality plus additional features, including improved performance, better test coverage, and the ability to be deployed as a web application or packaged as a mobile app (Android/iOS) using .NET MAUI.
 
@@ -121,7 +121,7 @@ by calling `GET /api/files/series-resolution?filePath={path}`.
 
 ### Prerequisites
 
-- .NET 9.0 SDK or later
+- .NET 10.0 SDK or later
 - Docker (optional, for containerized deployment)
 
 ### Building Locally

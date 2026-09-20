@@ -29,7 +29,7 @@ This uses the same Docker Hub repository as the Python version (`iceburn1/comicm
 ## Workflow Steps
 
 1. **Checkout code** - Retrieves the repository code
-2. **Set up .NET** - Installs .NET 9.0 SDK
+2. **Set up .NET** - Installs .NET 10.0 SDK
 3. **Get version** - Extracts version from `ComicMaintainer.WebApi.csproj`
 4. **Determine Docker tags** - Calculates appropriate tags based on branch
 5. **Cache Docker layers** - Caches build layers for faster subsequent builds
@@ -100,7 +100,7 @@ To monitor build status:
 
 ### Build Fails
 - Check the workflow logs in the Actions tab
-- Verify .NET 9.0 SDK is available
+- Verify .NET 10.0 SDK is available
 - Ensure `Dockerfile.dotnet` is present and valid
 
 ### Push Fails

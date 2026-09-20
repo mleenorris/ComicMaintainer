@@ -4,7 +4,7 @@ This guide explains how to add a .NET MAUI Android app project to the ComicMaint
 
 ## Prerequisites
 
-- .NET 9.0 SDK or later
+- .NET 10.0 SDK or later
 - .NET MAUI workload installed
 - Android SDK (automatically installed with MAUI workload)
 - Visual Studio 2022 (Windows/Mac) or Visual Studio Code with C# Dev Kit
@@ -332,17 +332,17 @@ public class MainActivity : MauiAppCompatActivity
 
 ```bash
 # Build for Android
-dotnet build src/ComicMaintainer.MauiApp -f net9.0-android
+dotnet build src/ComicMaintainer.MauiApp -f net10.0-android
 
 # Build release version
-dotnet build src/ComicMaintainer.MauiApp -f net9.0-android -c Release
+dotnet build src/ComicMaintainer.MauiApp -f net10.0-android -c Release
 ```
 
 ### Run on Emulator
 
 ```bash
 # List available emulators
-dotnet build -t:Run -f net9.0-android
+dotnet build -t:Run -f net10.0-android
 
 # Or use Visual Studio:
 # 1. Set ComicMaintainer.MauiApp as startup project
@@ -357,19 +357,19 @@ dotnet build -t:Run -f net9.0-android
 3. Connect device via USB
 4. Run:
 ```bash
-dotnet build -t:Run -f net9.0-android
+dotnet build -t:Run -f net10.0-android
 ```
 
 ## Creating APK for Distribution
 
 ### Debug APK
 ```bash
-dotnet build src/ComicMaintainer.MauiApp -f net9.0-android -c Release
+dotnet build src/ComicMaintainer.MauiApp -f net10.0-android -c Release
 ```
 
 The APK will be in:
 ```
-src/ComicMaintainer.MauiApp/bin/Release/net9.0-android/
+src/ComicMaintainer.MauiApp/bin/Release/net10.0-android/
 ```
 
 ### Signed Release APK
@@ -381,7 +381,7 @@ keytool -genkey -v -keystore comicmaintainer.keystore -alias comicmaintainer -ke
 
 2. Update the `.csproj` file:
 ```xml
-<PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(TargetFramework)' == 'net9.0-android'">
+<PropertyGroup Condition="'$(Configuration)' == 'Release' and '$(TargetFramework)' == 'net10.0-android'">
     <AndroidKeyStore>true</AndroidKeyStore>
     <AndroidSigningKeyStore>comicmaintainer.keystore</AndroidSigningKeyStore>
     <AndroidSigningKeyAlias>comicmaintainer</AndroidSigningKeyAlias>
@@ -392,7 +392,7 @@ keytool -genkey -v -keystore comicmaintainer.keystore -alias comicmaintainer -ke
 
 3. Build signed APK:
 ```bash
-dotnet publish src/ComicMaintainer.MauiApp -f net9.0-android -c Release
+dotnet publish src/ComicMaintainer.MauiApp -f net10.0-android -c Release
 ```
 
 ## Testing the App
@@ -436,7 +436,7 @@ dotnet workload install maui
 ### Android SDK Issues
 ```bash
 # Update Android SDK
-dotnet build -t:InstallAndroidPlatform -f net9.0-android
+dotnet build -t:InstallAndroidPlatform -f net10.0-android
 ```
 
 ### Build Errors

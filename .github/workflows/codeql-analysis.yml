@@ -55,7 +55,7 @@ jobs:
       if: matrix.language == 'csharp'
       uses: actions/setup-dotnet@v6
       with:
-        dotnet-version: '9.0.x'
+        dotnet-version: '10.0.x'
 
     - name: Restore dependencies (excluding MAUI)
       if: matrix.language == 'csharp'

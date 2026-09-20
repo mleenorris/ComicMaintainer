@@ -22,7 +22,7 @@ The CodeQL workflow is defined in `.github/workflows/codeql-analysis.yml` and co
 - **JavaScript**: For frontend and Node.js code
 
 **Build Process**:
-- Sets up .NET 9.0.x
+- Sets up .NET 10.0.x
 - Restores dependencies for Core, WebApi, and Tests projects (excluding MAUI)
 - Builds projects in Release configuration
 

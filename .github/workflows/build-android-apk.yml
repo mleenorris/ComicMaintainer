@@ -20,7 +20,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '10.0.x'
       
       - name: Install MAUI workload
         run: dotnet workload install maui
@@ -44,14 +44,14 @@ jobs:
         run: |
           dotnet build src/ComicMaintainer.MauiApp/ComicMaintainer.MauiApp.csproj `
             -c Release `
-            -f net9.0-android `
+            -f net10.0-android `
             /p:AndroidPackageFormat=apk
       
       - name: Locate APK
         id: locate_apk
         shell: pwsh
         run: |
-          $apkPath = Get-ChildItem -Path "src/ComicMaintainer.MauiApp/bin/Release/net9.0-android" -Filter "*.apk" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          $apkPath = Get-ChildItem -Path "src/ComicMaintainer.MauiApp/bin/Release/net10.0-android" -Filter "*.apk" -Recurse | Select-Object -First 1 -ExpandProperty FullName
           if ($apkPath) {
             Write-Host "Found APK at: $apkPath"
             $apkName = "ComicMaintainer-v${{ steps.get_version.outputs.version }}-android.apk"

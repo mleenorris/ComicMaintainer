@@ -4,7 +4,7 @@ Get up and running with ComicMaintainer .NET in 5 minutes!
 
 ## Prerequisites
 
-- .NET 9.0 SDK (or Docker)
+- .NET 10.0 SDK (or Docker)
 - Git
 
 ## Option 1: Docker (Easiest)

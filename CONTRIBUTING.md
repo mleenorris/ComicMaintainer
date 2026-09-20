@@ -34,45 +34,48 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 ### Prerequisites
 
-- Python 3.11+
+- .NET 9.0 SDK
 - Docker (for container testing)
 - Git
 
-### Install Development Dependencies
+The Android client under `src/ComicMaintainer.MauiApp/` targets `net9.0-android` and
+needs the MAUI workload (`dotnet workload install maui-android`). It is not part of the
+normal development loop, and building `ComicMaintainer.sln` without that workload fails
+with NETSDK1147 — build the individual projects below instead.
+
+### Restore and Build
 
 ```bash
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
-```
+dotnet restore src/ComicMaintainer.Core/ComicMaintainer.Core.csproj
+dotnet restore src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
+dotnet restore tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
 
-### Create Test Environment
-
-```bash
-# Create /Config directory for tests
-sudo mkdir -p /Config
-sudo chmod 777 /Config
+dotnet build src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj --configuration Release
 ```
 
 ### Run the Application Locally
 
 ```bash
-# Set required environment variables
+# Point the service at a library and pick a port
 export WATCHED_DIR=/path/to/test/comics
 export WEB_PORT=5000
 
-# Start the web application
-python src/web_app.py
+dotnet run --project src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
 ```
+
+See [.env.example](.env.example) for the full set of supported environment variables.
 
 ## Making Changes
 
 ### Code Style
 
-- Follow PEP 8 guidelines
-- Use meaningful variable and function names
-- Keep functions focused and small
-- Add docstrings to functions and classes
-- Use type hints where appropriate
+- Follow the standard .NET naming conventions (PascalCase for types and members,
+  `_camelCase` for private fields)
+- Nullable reference types are enabled — keep new code warning-clean
+- Use meaningful variable and method names
+- Keep methods focused and small
+- Add XML doc comments to public types and members
+- Explain *why* in comments, not *what*; the code already says what
 
 ### Commit Messages
 
@@ -217,25 +220,26 @@ For detailed testing guidelines, see [TESTING_POLICY.md](docs/TESTING_POLICY.md)
 
 ## Code Quality
 
-### Run Linters
+### Formatting and Analyzers
 
 ```bash
-# Pylint
-pylint src/*.py
+# Verify formatting without writing changes (what you want before pushing)
+dotnet format src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj --verify-no-changes
 
-# Flake8
-flake8 src/
+# Apply formatting fixes
+dotnet format src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
 ```
 
 ### Security Scanning
 
 ```bash
-# Bandit - Python security scanner
-bandit -r src/ -c .bandit
-
-# pip-audit - Check dependencies for vulnerabilities
-pip-audit -r requirements.txt
+# Check direct and transitive dependencies against the GitHub Advisory Database
+dotnet list src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj package \
+  --vulnerable --include-transitive
 ```
+
+CodeQL (C#, JavaScript and Actions) and Trivy container scanning run in CI — see
+`.github/workflows/codeql-analysis.yml` and `.github/workflows/security-scan.yml`.
 
 ### Pre-commit Checks
 
@@ -243,8 +247,7 @@ Before committing, ensure:
 - [ ] **All tests pass** (`dotnet test`)
 - [ ] **New tests added** for all code changes (see [TESTING_POLICY.md](docs/TESTING_POLICY.md))
 - [ ] **Code coverage hasn't decreased**
-- [ ] No linter errors
-- [ ] Security scans pass
+- [ ] No new compiler warnings
 - [ ] Code is properly formatted
 - [ ] Documentation is updated
 
@@ -275,7 +278,7 @@ When making changes, update relevant documentation:
 - **README.md** - For user-facing features
 - **CHANGELOG.md** - For all notable changes
 - **Code comments** - For complex logic
-- **Docstrings** - For functions and classes
+- **XML doc comments** - For public types and members
 
 ### Documentation Standards
 
@@ -288,23 +291,32 @@ When making changes, update relevant documentation:
 
 ```
 ComicMaintainer/
-├── src/                    # Python source code
-│   ├── web_app.py         # Main Flask application
-│   ├── watcher.py         # File watcher service
-│   ├── process_file.py    # File processing logic
-│   └── ...                # Other modules
-├── templates/             # HTML templates
-├── docs/                  # Documentation
-│   ├── archive/          # Historical documentation
-│   └── ...               # Current documentation
-├── tests/                 # Test files (in root)
-├── .github/               # GitHub workflows
-├── Dockerfile             # Container definition
-├── docker-compose.yml     # Docker Compose config
-├── requirements.txt       # Python dependencies
-├── requirements-dev.txt   # Development dependencies
-└── README.md             # Main documentation
+├── src/
+│   ├── ComicMaintainer.Core/      # Domain logic, EF Core data layer, services
+│   │   ├── Services/              # File processing, watcher, metadata, series
+│   │   ├── Data/                  # DbContext and interceptors
+│   │   ├── Models/                # Entities and DTOs
+│   │   └── Migrations/            # EF Core migrations
+│   ├── ComicMaintainer.WebApi/    # ASP.NET Core host (primary entry point)
+│   │   ├── Controllers/           # REST endpoints
+│   │   ├── Hubs/                  # SignalR hubs
+│   │   ├── Middleware/            # Cross-cutting request handling
+│   │   └── wwwroot/               # Static web UI (HTML, CSS, vanilla JS)
+│   └── ComicMaintainer.MauiApp/   # .NET MAUI Android client (optional)
+├── tests/
+│   └── ComicMaintainer.Tests/     # xUnit test suite
+├── docs/                          # Documentation (see docs/README.md for the index)
+│   └── archive/                   # Superseded write-ups, kept for history
+├── scripts/                       # Build, coverage and smoke-test helpers
+├── .github/workflows/             # CI workflows
+├── Dockerfile.dotnet              # Container definition
+├── docker-compose.dotnet.yml      # Docker Compose config
+└── README.md                      # Main documentation
 ```
+
+> **Branching note:** the default and active branch is `dotnet`. Target your pull
+> requests at `dotnet` — CI workflows are filtered to that branch and will not run
+> against `main` or `master`.
 
 ## Need Help?
 

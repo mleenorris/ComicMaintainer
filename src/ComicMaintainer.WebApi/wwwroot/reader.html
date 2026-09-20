@@ -706,6 +706,10 @@
                     <span id="modeToggleLabel">Manga</span>
                 </button>
                 <span class="page-info hide-on-mobile" id="pageInfo" aria-live="polite">Page 1 / 1</span>
+                <button class="reader-btn" onclick="toggleOfflineDownload()" id="offlineBtn" title="Save this comic for offline reading" aria-label="Save this comic for offline reading" hidden>
+                    <span aria-hidden="true">⬇</span>
+                    <span class="btn-label" id="offlineBtnLabel">Save offline</span>
+                </button>
                 <button class="reader-btn reader-btn--icon" onclick="toggleFullscreen()" id="fullscreenBtn" title="Toggle fullscreen (F)" aria-label="Toggle fullscreen">
                     <span id="fullscreenIcon" aria-hidden="true">⛶</span>
                 </button>
@@ -2525,8 +2529,147 @@
             }
         }
 
+        // ------------------------------------------------------------------
+        // Offline reading
+        //
+        // The service worker keeps a dedicated cache of downloaded comics and
+        // serves their pages ahead of the network, so a saved comic reads the
+        // same way with or without a connection. This UI drives that cache:
+        // it asks the worker to download every page of the current comic,
+        // reports progress, and can delete the download again.
+        // ------------------------------------------------------------------
+        let offlineDownloadInProgress = false;
+        let offlineComicSaved = false;
+
+        function offlineButtonElements() {
+            return {
+                button: document.getElementById('offlineBtn'),
+                label: document.getElementById('offlineBtnLabel')
+            };
+        }
+
+        function updateOfflineButton(text, title) {
+            const { button, label } = offlineButtonElements();
+            if (!button || !label) return;
+            button.hidden = false;
+            label.textContent = text;
+            button.title = title;
+            button.setAttribute('aria-label', title);
+            button.disabled = offlineDownloadInProgress;
+        }
+
+        function sendServiceWorkerMessage(message) {
+            return new Promise((resolve) => {
+                const controller = navigator.serviceWorker && navigator.serviceWorker.controller;
+                if (!controller) {
+                    resolve(null);
+                    return;
+                }
+                const channel = new MessageChannel();
+                const timeout = setTimeout(() => resolve(null), 5000);
+                channel.port1.onmessage = (event) => {
+                    clearTimeout(timeout);
+                    resolve(event.data);
+                };
+                controller.postMessage(message, [channel.port2]);
+            });
+        }
+
+        async function refreshOfflineStatus() {
+            if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
+                return;
+            }
+            const response = await sendServiceWorkerMessage({ type: 'LIST_OFFLINE_COMICS' });
+            const comics = (response && response.comics) || [];
+            offlineComicSaved = comics.some((comic) => comic.filePath === comicFilePath);
+            if (offlineDownloadInProgress) return;
+            updateOfflineButton(
+                offlineComicSaved ? 'Saved' : 'Save offline',
+                offlineComicSaved
+                    ? 'Remove this comic from offline storage'
+                    : 'Save this comic for offline reading'
+            );
+        }
+
+        async function toggleOfflineDownload() {
+            if (offlineDownloadInProgress) return;
+
+            const controller = navigator.serviceWorker && navigator.serviceWorker.controller;
+            if (!controller) {
+                showMessage('Offline downloads are not available in this browser', 'error');
+                return;
+            }
+
+            if (offlineComicSaved) {
+                await sendServiceWorkerMessage({ type: 'REMOVE_OFFLINE_COMIC', filePath: comicFilePath });
+                offlineComicSaved = false;
+                updateOfflineButton('Save offline', 'Save this comic for offline reading');
+                showMessage('Removed from offline storage', 'info');
+                return;
+            }
+
+            offlineDownloadInProgress = true;
+            updateOfflineButton('Saving…', 'Downloading this comic for offline reading');
+
+            // Reuse the reader's normal auth headers: the worker cannot read
+            // the token out of localStorage itself.
+            const headers = Object.assign({}, buildFetchOptions().headers || {});
+
+            controller.postMessage({
+                type: 'DOWNLOAD_COMIC',
+                filePath: comicFilePath,
+                headers: headers
+            });
+        }
+
+        function handleServiceWorkerMessage(event) {
+            const data = event.data;
+            if (!data || data.filePath !== comicFilePath) return;
+
+            if (data.type === 'OFFLINE_DOWNLOAD_PROGRESS') {
+                const percent = data.total ? Math.round((data.completed / data.total) * 100) : 0;
+                updateOfflineButton(`Saving ${percent}%`, 'Downloading this comic for offline reading');
+                return;
+            }
+
+            if (data.type === 'OFFLINE_DOWNLOAD_COMPLETE') {
+                offlineDownloadInProgress = false;
+                offlineComicSaved = true;
+                updateOfflineButton('Saved', 'Remove this comic from offline storage');
+                showMessage('Available for offline reading', 'success');
+                return;
+            }
+
+            if (data.type === 'OFFLINE_DOWNLOAD_FAILED') {
+                offlineDownloadInProgress = false;
+                offlineComicSaved = false;
+                updateOfflineButton('Save offline', 'Save this comic for offline reading');
+                showMessage('Offline download failed', 'error');
+            }
+        }
+
+        async function setupOfflineReading() {
+            if (!('serviceWorker' in navigator)) return;
+            try {
+                navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+                if (!navigator.serviceWorker.controller) {
+                    // The reader can be opened directly (deep link, home-screen
+                    // shortcut) without ever visiting the library page that
+                    // normally registers the worker.
+                    await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+                    await navigator.serviceWorker.ready;
+                }
+                await refreshOfflineStatus();
+            } catch (error) {
+                console.log('Offline reading unavailable:', error);
+            }
+        }
+
         // Initialize on load
-        window.addEventListener('DOMContentLoaded', initReader);
+        window.addEventListener('DOMContentLoaded', () => {
+            initReader();
+            setupOfflineReading();
+        });
     </script>
 </body>
 </html>

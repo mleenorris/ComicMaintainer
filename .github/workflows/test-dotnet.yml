@@ -2,19 +2,26 @@ name: .NET Tests
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ dotnet ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ dotnet ]
   workflow_dispatch:
 
 permissions:
   contents: read
   pull-requests: write
 
+# A superseded push or PR update makes the run it replaced irrelevant, so cancel it
+# rather than paying for a full build+test of code nobody will merge.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         dotnet-version: ['9.0.x']
@@ -26,6 +33,17 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ matrix.dotnet-version }}
+
+    # setup-dotnet's built-in cache requires packages.lock.json, which this repo does not
+    # use, so the package folder is cached directly and keyed on the project files that
+    # determine its contents.
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
 
     - name: Restore dependencies (excluding MAUI)
       run: |
@@ -63,7 +81,10 @@ jobs:
       with:
         filename: TestResults/**/coverage.cobertura.xml
         badge: true
-        fail_below_min: false
+        # Enforced rather than advisory. The unit-test run currently reports ~87% line
+        # coverage, so the 60% floor below is a regression guard with headroom, not a
+        # number the suite is scraping past.
+        fail_below_min: true
         format: markdown
         hide_branch_rate: false
         hide_complexity: true
@@ -119,6 +140,14 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ matrix.dotnet-version }}
+
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
 
     - name: Restore dependencies (excluding MAUI)
       run: |

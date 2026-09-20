@@ -8,12 +8,19 @@ on:
     branches: 
       - dotnet
 
+# PR builds are throwaway validation, so a superseded one is cancelled. Pushes to the
+# default branch publish the `:dotnet` tag and are allowed to finish so a cancelled run
+# cannot leave the tag pointing at an older image than the newest completed build.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-and-push-dotnet:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -70,7 +77,7 @@ jobs:
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Build and push .NET Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.dotnet

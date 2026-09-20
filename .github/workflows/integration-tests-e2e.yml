@@ -2,13 +2,19 @@ name: Integration Tests (E2E Container)
 
 on:
   pull_request:
-    branches: [ main, develop ]
+    branches: [ dotnet ]
   push:
-    branches: [ main, develop ]
+    branches: [ dotnet ]
   workflow_dispatch:
 
 permissions:
   contents: read
+
+# Building and booting a container image is the most expensive job in the repo, so
+# superseded runs are cancelled rather than left to finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   container-smoke:

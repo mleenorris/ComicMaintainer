@@ -2466,66 +2466,159 @@
             }
         }
 
-        // Save reading progress
-        async function saveReadingProgress(pageNum) {
+        // ------------------------------------------------------------------
+        // Reading progress (with offline queueing)
+        //
+        // Progress updates are plain POSTs, which simply fail while the device
+        // is offline. Because comics can now be downloaded and read without a
+        // connection, a failed update is parked in localStorage and replayed
+        // once the network returns, so the server ends up with the page the
+        // user actually reached instead of where they were when they went
+        // offline.
+        // ------------------------------------------------------------------
+        const PENDING_PROGRESS_KEY = 'pendingReadingProgress';
+        let flushingPendingProgress = false;
+
+        function readPendingProgress() {
             try {
-                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
-                const fetchOptions = {
-                    method: 'POST',
-                    credentials: 'include'
-                };
-                
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
-                }
-                
-                const response = await fetch(
-                    `/api/ComicReader/progress?filePath=${encodeURIComponent(comicFilePath)}&page=${pageNum}`,
-                    fetchOptions
-                );
-                
-                if (response.ok) {
-                    console.log('Saved reading progress:', comicFilePath, 'page', pageNum);
-                } else {
-                    console.error('Failed to save reading progress:', response.status);
-                }
-            } catch (error) {
-                console.error('Error saving reading progress:', error);
+                const raw = localStorage.getItem(PENDING_PROGRESS_KEY);
+                if (!raw) return {};
+                const parsed = JSON.parse(raw);
+                return (parsed && typeof parsed === 'object') ? parsed : {};
+            } catch (_e) {
+                return {};
             }
         }
 
-        // Load reading progress
-        async function loadReadingProgress() {
+        function writePendingProgress(pending) {
             try {
-                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
-                const fetchOptions = {
-                    credentials: 'include'
-                };
-                
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
+                if (!pending || Object.keys(pending).length === 0) {
+                    localStorage.removeItem(PENDING_PROGRESS_KEY);
+                } else {
+                    localStorage.setItem(PENDING_PROGRESS_KEY, JSON.stringify(pending));
                 }
-                
+            } catch (error) {
+                console.log('Unable to persist pending reading progress:', error);
+            }
+        }
+
+        // One entry per comic: only the furthest point the user reached while
+        // offline matters, so a later update for the same file replaces the
+        // earlier one rather than queueing every page turn.
+        function queuePendingProgress(filePath, pageNum) {
+            if (!filePath || !pageNum) return;
+            const pending = readPendingProgress();
+            pending[filePath] = { page: pageNum, updatedAt: Date.now() };
+            writePendingProgress(pending);
+        }
+
+        function clearPendingProgress(filePath) {
+            const pending = readPendingProgress();
+            if (!(filePath in pending)) return;
+            delete pending[filePath];
+            writePendingProgress(pending);
+        }
+
+        function getPendingProgress(filePath) {
+            const entry = readPendingProgress()[filePath];
+            return entry && entry.page ? entry.page : null;
+        }
+
+        // Returns true when the request reached the server (so the queued entry
+        // can be dropped), false when it should be retried later.
+        async function postReadingProgress(filePath, pageNum) {
+            const response = await fetch(
+                `/api/ComicReader/progress?filePath=${encodeURIComponent(filePath)}&page=${pageNum}`,
+                buildFetchOptions({ method: 'POST' })
+            );
+
+            if (response.ok) {
+                return true;
+            }
+
+            // 5xx (and the service worker's synthetic 503 while offline) are
+            // transient; a 4xx will never succeed on replay, so the entry is
+            // dropped rather than retried forever.
+            if (response.status >= 500) {
+                throw new Error(`Server returned ${response.status}`);
+            }
+
+            console.error('Failed to save reading progress:', response.status);
+            return true;
+        }
+
+        // Replay everything parked while offline. Runs on reconnect, on reader
+        // start-up, and after each successful save so a queue left behind by an
+        // earlier session is not stranded.
+        async function flushPendingProgress() {
+            if (flushingPendingProgress) return;
+            const pending = readPendingProgress();
+            const filePaths = Object.keys(pending);
+            if (filePaths.length === 0) return;
+
+            flushingPendingProgress = true;
+            try {
+                for (const filePath of filePaths) {
+                    const entry = pending[filePath];
+                    if (!entry || !entry.page) {
+                        clearPendingProgress(filePath);
+                        continue;
+                    }
+                    try {
+                        await postReadingProgress(filePath, entry.page);
+                    } catch (error) {
+                        // Still unreachable; keep this and any remaining
+                        // entries queued for the next attempt.
+                        console.log('Reading progress still pending:', error);
+                        return;
+                    }
+                    // Only drop the entry if a newer page was not queued while
+                    // this request was in flight.
+                    const current = readPendingProgress()[filePath];
+                    if (current && current.updatedAt === entry.updatedAt) {
+                        clearPendingProgress(filePath);
+                    }
+                }
+            } finally {
+                flushingPendingProgress = false;
+            }
+        }
+
+        // Save reading progress
+        async function saveReadingProgress(pageNum) {
+            try {
+                await postReadingProgress(comicFilePath, pageNum);
+                console.log('Saved reading progress:', comicFilePath, 'page', pageNum);
+                clearPendingProgress(comicFilePath);
+                await flushPendingProgress();
+            } catch (error) {
+                console.log('Queueing reading progress until back online:', error);
+                queuePendingProgress(comicFilePath, pageNum);
+            }
+        }
+
+        // Load reading progress. A page queued offline is newer than whatever
+        // the server currently holds, so it wins until it has been replayed.
+        async function loadReadingProgress() {
+            const pendingPage = getPendingProgress(comicFilePath);
+
+            try {
                 const response = await fetch(
                     `/api/ComicReader/progress?filePath=${encodeURIComponent(comicFilePath)}`,
-                    fetchOptions
+                    buildFetchOptions()
                 );
-                
+
                 if (response.ok) {
                     const data = await response.json();
                     console.log('Loaded reading progress:', comicFilePath, 'page', data.currentPage);
-                    return data.currentPage;
-                } else {
-                    console.error('Failed to load reading progress:', response.status);
-                    return 1; // Default to page 1
+                    return pendingPage || data.currentPage;
                 }
+
+                console.error('Failed to load reading progress:', response.status);
+                return pendingPage || 1; // Default to page 1
             } catch (error) {
                 console.error('Error loading reading progress:', error);
-                return 1; // Default to page 1
+                return pendingPage || 1; // Default to page 1
             }
         }
 
@@ -2665,10 +2758,28 @@
             }
         }
 
+        // Replay queued progress as soon as the connection returns, and once
+        // more when the tab is brought back to the foreground (mobile browsers
+        // often deliver no 'online' event to a backgrounded tab).
+        function setupProgressSync() {
+            window.addEventListener('online', () => {
+                flushPendingProgress();
+            });
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden && navigator.onLine) {
+                    flushPendingProgress();
+                }
+            });
+            if (navigator.onLine) {
+                flushPendingProgress();
+            }
+        }
+
         // Initialize on load
         window.addEventListener('DOMContentLoaded', () => {
             initReader();
             setupOfflineReading();
+            setupProgressSync();
         });
     </script>
 </body>

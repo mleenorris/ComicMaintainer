@@ -121,6 +121,31 @@ public class OfflineReadingTests
     }
 
     [Fact]
+    public void Reader_QueuesReadingProgressWhileOffline()
+    {
+        var contents = ReadAsset("reader.html");
+
+        // Progress POSTs fail outright while offline, so they are parked in
+        // localStorage instead of being lost.
+        Assert.Contains("PENDING_PROGRESS_KEY", contents);
+        Assert.Contains("queuePendingProgress(comicFilePath, pageNum)", contents);
+        // A queued page is newer than the server's copy, so it must win when
+        // the comic is reopened before the queue has been replayed.
+        Assert.Contains("getPendingProgress(comicFilePath)", contents);
+    }
+
+    [Fact]
+    public void Reader_ReplaysQueuedProgressWhenBackOnline()
+    {
+        var contents = ReadAsset("reader.html");
+
+        Assert.Contains("flushPendingProgress", contents);
+        // Reconnecting must trigger the replay; without this the queue would
+        // only drain on the next page turn.
+        Assert.Matches(new Regex(@"addEventListener\('online'"), contents);
+    }
+
+    [Fact]
     public void OfflinePage_ListsDownloadedComicsWithoutNetworkAccess()
     {
         var contents = ReadAsset("offline.html");

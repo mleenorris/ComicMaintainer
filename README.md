@@ -281,7 +281,7 @@ Once saved:
 Notes:
 - Downloads require the PWA service worker, so the site must be served over HTTPS (or `localhost`)
 - Downloaded pages are authenticated content, so signing out deletes them
-- Reading progress made while offline is not synced; it is recorded the next time you read online
+- Reading progress made while offline is queued on the device and sent to the server automatically once the connection returns
 
 ### Performance
 - **Fast initial page load**: HTML reduced from 217KB to 43KB by extracting CSS/JS to external cached files (see [PERFORMANCE_IMPROVEMENT_INITIAL_LOAD.md](docs/archive/PERFORMANCE_IMPROVEMENT_INITIAL_LOAD.md))

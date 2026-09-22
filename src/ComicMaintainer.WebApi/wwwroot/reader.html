@@ -866,6 +866,11 @@
         // browser cache keyed by explicit page URL, so it can never reorder or
         // duplicate pages.
         const NEXT_COMIC_PRELOAD_LEAD_PAGES = 3;
+        // How long (ms) the view stays pinned to the start of a newly stitched
+        // issue in webcomic mode. The pages around the transition keep loading
+        // and re-flowing for a moment afterwards, so the position is re-asserted
+        // over this window rather than set once.
+        const WEBCOMIC_TRANSITION_SETTLE_MS = 1500;
         // Monotonic token for manga-mode page loads. Each loadPage() call claims
         // the latest token; when its (possibly out-of-order) fetch resolves it
         // only touches the DOM if it is still the most recent request. This
@@ -1708,20 +1713,22 @@
                     // transition.
                     await pageLoads[0];
                     
-                    // Scroll to the start marker (beginning of new comic) immediately.
+                    // Scroll to the start marker (beginning of new comic).
                     // Use the marker reference we just created rather than a shared id
                     // lookup so we always target the correct (newest) comic start.
-                    // The marker sits above the freshly appended pages, so its
-                    // position is already stable and we don't need to wait for the
-                    // new images to finish decoding before scrolling.
+                    // A single scrollTop assignment is not enough: the freshly
+                    // appended images have no layout height until they decode, so
+                    // the requested offset can be clamped short, and pages that
+                    // are still filling in (above or below the marker) move the
+                    // marker afterwards — which is how the reader sometimes ended
+                    // up parked several pages into the new comic. Pin the view to
+                    // the marker until layout settles instead.
                     const content = document.getElementById('readerContent');
                     if (startMarker && content) {
-                        const markerPosition = startMarker.offsetTop;
-                        content.scrollTop = markerPosition;
-                        console.log('Scrolled to new comic start at position:', markerPosition);
-                        
                         // Update page info to show page 1 of new comic
                         updatePageInfoInWebcomicMode();
+                        await pinScrollToComicStart(content, startMarker);
+                        console.log('Scrolled to new comic start at position:', startMarker.offsetTop);
                     }
                     
                     // Prefetch the next one
@@ -1743,6 +1750,92 @@
             }
         }
         
+        // Keeps the view pinned to the start of a freshly stitched comic while
+        // the surrounding pages are still sizing up.
+        //
+        // Images appended in webcomic mode have no layout height until their
+        // blob decodes, and pages of both the outgoing and incoming issue keep
+        // arriving (out of order, and above as well as below the marker) for a
+        // while after the transition. A one-shot `scrollTop = marker.offsetTop`
+        // therefore lands on a position that is no longer the start of the new
+        // comic once layout settles — the reader could end up several pages in,
+        // forcing the user to scroll back. Browser scroll anchoring makes it
+        // worse by locking onto whichever already-sized page happened to be at
+        // the top of the viewport, so it is suspended for the settle window.
+        //
+        // Re-asserting the (re-measured) marker offset each frame keeps page 1
+        // at the top no matter how the images resolve. Any scroll the user
+        // performs themselves cancels the pin immediately so the reader never
+        // fights their input.
+        function pinScrollToComicStart(content, marker, settleMs = WEBCOMIC_TRANSITION_SETTLE_MS) {
+            return new Promise(resolve => {
+                const previousAnchor = content.style.overflowAnchor;
+                content.style.overflowAnchor = 'none';
+                // Suppress visible-page bookkeeping while we are moving the
+                // viewport ourselves, so progress isn't saved for pages that
+                // merely scrolled past during the transition.
+                const previousIsScrolling = isScrolling;
+                isScrolling = true;
+
+                let cancelled = false;
+                let finished = false;
+
+                const apply = () => {
+                    const maxScroll = Math.max(0, content.scrollHeight - content.clientHeight);
+                    const target = Math.min(marker.offsetTop, maxScroll);
+                    if (Math.abs(content.scrollTop - target) > 1) {
+                        content.scrollTop = target;
+                    }
+                };
+
+                // Cancel on deliberate user input only. Scroll events are not
+                // usable as the signal here: they also fire for our own
+                // assignments and for the residual momentum of the very flick
+                // that reached the bottom and triggered the transition, which
+                // would cancel the pin before it ever had an effect.
+                const cancelEvents = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
+                const onUserInput = () => { cancelled = true; };
+                cancelEvents.forEach(name =>
+                    document.addEventListener(name, onUserInput, { passive: true }));
+
+                let safetyTimer = null;
+                const finish = () => {
+                    if (finished) return;
+                    finished = true;
+                    clearTimeout(safetyTimer);
+                    cancelEvents.forEach(name =>
+                        document.removeEventListener(name, onUserInput));
+                    content.style.overflowAnchor = previousAnchor;
+                    isScrolling = previousIsScrolling;
+                    resolve();
+                };
+
+                // requestAnimationFrame stops firing in a hidden tab, so a
+                // timer backstop guarantees the transition always completes
+                // (otherwise the "loading next comic" latch would stay set and
+                // no further issue could be stitched in).
+                safetyTimer = setTimeout(finish, settleMs + 1000);
+
+                const startedAt = Date.now();
+                apply();
+
+                const tick = () => {
+                    if (finished) return;
+                    if (cancelled) {
+                        finish();
+                        return;
+                    }
+                    apply();
+                    if (Date.now() - startedAt >= settleMs) {
+                        finish();
+                        return;
+                    }
+                    requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
+            });
+        }
+
         // Load a page for the next comic (needed to maintain correct page numbering)
         async function loadWebcomicPageForNextComic(pageNum, container, filePath) {
             const loadKey = pageLoadedKey(filePath, pageNum);

@@ -41,12 +41,12 @@ public class ReaderWebcomicTransitionTests
     [Fact]
     public void LoadNextComic_DoesNotUseOneShotScrollAssignment()
     {
-        var html = ReaderHtml;
+        var loadNextComic = ExtractFunction(ReaderHtml, "loadNextComic");
 
         // A single `content.scrollTop = <captured offset>` cannot survive the
         // images that keep loading (and re-flowing the stream) right after the
         // transition — re-measure inside the pin loop instead.
-        Assert.DoesNotMatch(new Regex(@"content\.scrollTop\s*=\s*markerPosition"), html);
+        Assert.DoesNotMatch(new Regex(@"content\.scrollTop\s*="), loadNextComic);
     }
 
     [Fact]

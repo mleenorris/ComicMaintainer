@@ -1796,7 +1796,7 @@
                 const cancelEvents = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
                 const onUserInput = () => { cancelled = true; };
                 cancelEvents.forEach(name =>
-                    content.addEventListener(name, onUserInput, { passive: true }));
+                    document.addEventListener(name, onUserInput, { passive: true }));
 
                 let safetyTimer = null;
                 const finish = () => {
@@ -1804,7 +1804,7 @@
                     finished = true;
                     clearTimeout(safetyTimer);
                     cancelEvents.forEach(name =>
-                        content.removeEventListener(name, onUserInput));
+                        document.removeEventListener(name, onUserInput));
                     content.style.overflowAnchor = previousAnchor;
                     isScrolling = previousIsScrolling;
                     resolve();

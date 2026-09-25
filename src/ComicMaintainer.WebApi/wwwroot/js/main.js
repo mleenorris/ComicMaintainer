@@ -3932,6 +3932,9 @@
                                             <button class="dropdown-item" onclick="readComic('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                 📖 Read Comic
                                             </button>
+                                            <button class="dropdown-item" data-requires-write onclick="openEmailSendModalForFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
+                                                📧 Email to Ereader…
+                                            </button>
                                             ${issue.duplicate
                                                 ? `<button class="dropdown-item" onclick="openDuplicateReviewModal('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
                                                     🔁 Review Duplicate
@@ -4094,6 +4097,12 @@
                                             <button class="dropdown-item" onclick="updateSeriesCoversDirect('${jsArg(series.title)}'); closeAllDropdowns();" title="Re-apply the current cached series image to this series' cover sidecars and first-issue archive. This may rewrite the archive file.">
                                                 🖼️ Update Covers
                                             </button>
+                                            <button class="dropdown-item" data-requires-write onclick="openEmailSendModalForSeries('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();">
+                                                📧 Email All Issues
+                                            </button>
+                                            <button class="dropdown-item" data-requires-write onclick="openEmailSubscriptionModal('${jsArg(series.title)}'); closeAllDropdowns();">
+                                                🔁 Auto-send New Issues
+                                            </button>
                                             <div class="dropdown-divider"></div>
                                             <button class="dropdown-item" onclick="resetSeriesProcessedStatus('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
                                                 ♻️ Reset Processed Status
@@ -4114,6 +4123,7 @@
                                 <span>Select all issues</span>
                             </label>
                             <span class="series-detail-selection-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} in this series${!allLoaded ? ` · showing ${issues.length}` : ''}</span>
+                            <button type="button" class="btn btn-small" data-requires-write onclick="openEmailSendModalForSelected()">📧 Email Selected</button>
                         </div>
                         ${rawHtml(renderMissingIssuesBanner(issues))}
                     ` : ''}
@@ -4223,6 +4233,9 @@
                                 </button>
                                 <button class="dropdown-item" onclick="readComic('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
                                     📖 Read Comic
+                                </button>
+                                <button class="dropdown-item" data-requires-write onclick="openEmailSendModalForFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
+                                    📧 Email to Ereader…
                                 </button>
                                 ${file.duplicate
                                     ? `<button class="dropdown-item" onclick="openDuplicateReviewModal('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
@@ -4768,6 +4781,7 @@
             const markSelectedUnreadItem = document.getElementById('markSelectedUnreadItem');
             const clearSelectedStatusItem = document.getElementById('clearSelectedStatusItem');
             const removeMetadataSelectedItem = document.getElementById('removeMetadataSelectedItem');
+            const emailSelectedItem = document.getElementById('emailSelectedItem');
             const updateSeriesCoversSelectedItem = document.getElementById('updateSeriesCoversSelectedItem');
             const canUpdateSelectedSeriesCovers = getSelectedSeriesTitlesForCoverUpdate().length > 0;
             
@@ -4782,6 +4796,7 @@
                 if (markSelectedUnreadItem) markSelectedUnreadItem.disabled = true;
                 if (clearSelectedStatusItem) clearSelectedStatusItem.disabled = true;
                 if (removeMetadataSelectedItem) removeMetadataSelectedItem.disabled = true;
+                if (emailSelectedItem) emailSelectedItem.disabled = true;
             } else {
                 info.textContent = describeCurrentSelection(count);
                 batchBtn.disabled = false;
@@ -4793,6 +4808,7 @@
                 if (markSelectedUnreadItem) markSelectedUnreadItem.disabled = false;
                 if (clearSelectedStatusItem) clearSelectedStatusItem.disabled = false;
                 if (removeMetadataSelectedItem) removeMetadataSelectedItem.disabled = false;
+                if (emailSelectedItem) emailSelectedItem.disabled = false;
             }
             if (updateSeriesCoversSelectedItem) updateSeriesCoversSelectedItem.disabled = !canUpdateSelectedSeriesCovers;
             syncSeriesSelectionControls();
@@ -7201,7 +7217,33 @@
                 if (defaultPreferredLanguageSelect) {
                     defaultPreferredLanguageSelect.value = settingsData.default_preferred_language || '';
                 }
-                
+
+                const smtpHost = document.getElementById('smtpHost');
+                const smtpPort = document.getElementById('smtpPort');
+                const smtpUsername = document.getElementById('smtpUsername');
+                const smtpPassword = document.getElementById('smtpPassword');
+                const smtpPasswordHint = document.getElementById('smtpPasswordHint');
+                const smtpClearPassword = document.getElementById('smtpClearPasswordCheckbox');
+                const smtpUseSsl = document.getElementById('smtpUseSslCheckbox');
+                const emailFromAddress = document.getElementById('emailFromAddress');
+                const emailFromName = document.getElementById('emailFromName');
+                const emailMaxAttachmentMb = document.getElementById('emailMaxAttachmentMb');
+                if (smtpHost) smtpHost.value = settingsData.smtp_host || '';
+                if (smtpPort) smtpPort.value = settingsData.smtp_port || '';
+                if (smtpUsername) smtpUsername.value = settingsData.smtp_username || '';
+                if (smtpPassword) smtpPassword.value = '';
+                if (smtpPasswordHint) {
+                   smtpPasswordHint.textContent = settingsData.smtp_password_set
+                       ? 'Leave blank to keep the stored password.'
+                       : 'Enter a password if your SMTP server requires one.';
+                }
+                if (smtpClearPassword) smtpClearPassword.checked = false;
+                if (smtpUseSsl) smtpUseSsl.checked = !!settingsData.smtp_use_ssl;
+                if (emailFromAddress) emailFromAddress.value = settingsData.email_from_address || '';
+                if (emailFromName) emailFromName.value = settingsData.email_from_name || '';
+                if (emailMaxAttachmentMb) emailMaxAttachmentMb.value = settingsData.email_max_attachment_mb || '';
+                loadEmailStatus();
+                 
                 console.log('[SETTINGS] All settings loaded successfully, opening modal');
                 document.getElementById('settingsModal').classList.add('active');
             } catch (error) {
@@ -7934,6 +7976,371 @@
             }
         }
         
+        let emailDevicesCache = [];
+        let currentEmailSend = null;
+        let currentEmailSubscriptionSeriesTitle = '';
+
+        async function fetchEmailJson(path, options = {}) {
+            const response = await fetch(apiUrl(path), {
+                credentials: 'include',
+                ...options,
+                headers: {
+                    ...getAuthHeaders(),
+                    ...(options.headers || {})
+                }
+            });
+            if (handleAuthError(response)) {
+                throw new Error('Authentication required');
+            }
+            if (!response.ok) {
+                let message = `HTTP error! status: ${response.status}`;
+                try {
+                    const body = await response.json();
+                    if (body && (body.error || body.message)) {
+                        message = body.error || body.message;
+                    }
+                } catch (_) {}
+                throw new Error(message);
+            }
+            if (response.status === 204) return {};
+            try {
+                return await response.json();
+            } catch (_) {
+                return {};
+            }
+        }
+
+        async function loadEmailStatus() {
+            try {
+                const data = await fetchEmailJson('/api/email/status');
+                const summary = document.getElementById('emailStatusSummary');
+                if (summary) {
+                    const from = data.from_address ? ` · From: ${data.from_address}` : '';
+                    const max = data.max_attachment_mb ? ` · Max: ${data.max_attachment_mb} MB` : '';
+                    summary.textContent = `${data.configured ? '✅ Email delivery is configured' : '⚠️ Email delivery is not fully configured'}${from}${max}`;
+                }
+            } catch (error) {
+                const summary = document.getElementById('emailStatusSummary');
+                if (summary) summary.textContent = 'Unable to load email status.';
+                console.error('Failed to load email status:', error);
+            }
+        }
+
+        async function loadEmailDevices(force = false) {
+            if (!force && emailDevicesCache.length) return emailDevicesCache;
+            const data = await fetchEmailJson('/api/email/devices');
+            emailDevicesCache = Array.isArray(data.devices) ? data.devices : [];
+            return emailDevicesCache;
+        }
+
+        function renderEmailDeviceOptions(select, devices) {
+            if (!select) return;
+            renderHtml(select, devices.map(device => html`
+                <option value="${device.id}">${device.name} (${device.emailAddress})</option>
+            `));
+        }
+
+        function formatEmailDeliveryFormat(value) {
+            const normalized = String(value || '').toLowerCase();
+            if (normalized === 'epub') return 'EPUB';
+            if (normalized === 'device') return 'Device default';
+            return 'Original archive';
+        }
+
+        function formatEmailDate(value) {
+            if (!value) return '—';
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+        }
+
+        function renderEmailDevicesList(devices) {
+            const list = document.getElementById('emailDevicesList');
+            if (!list) return;
+            if (!devices.length) {
+                renderHtml(list, html`<div class="empty-state"><p>No ereader devices saved yet.</p></div>`);
+                return;
+            }
+            renderHtml(list, html`
+                ${devices.map(device => html`
+                    <div class="duplicate-review-card" style="margin-bottom: 10px;">
+                        <h3>${device.name}</h3>
+                        <p>${device.emailAddress}</p>
+                        <div class="duplicate-review-meta">
+                            <div><span>Format</span><strong>${formatEmailDeliveryFormat(device.deliveryFormat)}</strong></div>
+                            <div><span>Updated</span><strong>${formatEmailDate(device.updatedAt || device.createdAt)}</strong></div>
+                        </div>
+                        <div class="duplicate-review-actions" style="margin-top: 12px;">
+                            <button class="btn btn-small" onclick="editEmailDevice('${jsArg(device.id)}')">Edit</button>
+                            <button class="btn btn-small" data-requires-write onclick="sendEmailDeviceTest('${jsArg(device.id)}')">Send Test Email</button>
+                            <button class="btn btn-danger btn-small" data-requires-write onclick="deleteEmailDevice('${jsArg(device.id)}')">Delete</button>
+                        </div>
+                    </div>
+                `)}
+            `);
+        }
+
+        async function openEmailDevicesModal() {
+            const modal = document.getElementById('emailDevicesModal');
+            const list = document.getElementById('emailDevicesList');
+            if (!modal || !list) return;
+            modal.classList.add('active');
+            renderHtml(list, html`<div class="loading"><div class="spinner"></div><p>Loading devices...</p></div>`);
+            resetEmailDeviceForm();
+            try {
+                renderEmailDevicesList(await loadEmailDevices(true));
+            } catch (error) {
+                renderHtml(list, html`<div class="empty-state"><p>Failed to load devices: ${error.message}</p></div>`);
+            }
+        }
+
+        function closeEmailDevicesModal() {
+            document.getElementById('emailDevicesModal')?.classList.remove('active');
+        }
+
+        function resetEmailDeviceForm() {
+            const id = document.getElementById('emailDeviceId');
+            const title = document.getElementById('emailDeviceFormTitle');
+            if (id) id.value = '';
+            if (title) title.textContent = 'Add Device';
+            const name = document.getElementById('emailDeviceName');
+            const address = document.getElementById('emailDeviceAddress');
+            const format = document.getElementById('emailDeviceFormat');
+            if (name) name.value = '';
+            if (address) address.value = '';
+            if (format) format.value = 'original';
+        }
+
+        function editEmailDevice(id) {
+            const device = emailDevicesCache.find(d => String(d.id) === String(id));
+            if (!device) return;
+            document.getElementById('emailDeviceId').value = device.id;
+            document.getElementById('emailDeviceFormTitle').textContent = 'Edit Device';
+            document.getElementById('emailDeviceName').value = device.name || '';
+            document.getElementById('emailDeviceAddress').value = device.emailAddress || '';
+            document.getElementById('emailDeviceFormat').value = String(device.deliveryFormat || 'original').toLowerCase() === 'epub' ? 'epub' : 'original';
+        }
+
+        async function saveEmailDevice() {
+            const id = document.getElementById('emailDeviceId').value;
+            const name = document.getElementById('emailDeviceName').value.trim();
+            const emailAddress = document.getElementById('emailDeviceAddress').value.trim();
+            const deliveryFormat = document.getElementById('emailDeviceFormat').value === 'epub' ? 'epub' : 'original';
+            if (!name || !emailAddress) {
+                showMessage('Device name and email address are required.', 'error');
+                return;
+            }
+            try {
+                await fetchEmailJson(id ? `/api/email/devices/${encodeURIComponent(id)}` : '/api/email/devices', {
+                    method: id ? 'PUT' : 'POST',
+                    body: JSON.stringify({ name, emailAddress, deliveryFormat })
+                });
+                showMessage(id ? 'Ereader device updated.' : 'Ereader device added.', 'success');
+                resetEmailDeviceForm();
+                renderEmailDevicesList(await loadEmailDevices(true));
+            } catch (error) {
+                showMessage('Failed to save ereader device: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteEmailDevice(id) {
+            if (!confirm('Delete this ereader device?')) return;
+            try {
+                await fetchEmailJson(`/api/email/devices/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                showMessage('Ereader device deleted.', 'success');
+                renderEmailDevicesList(await loadEmailDevices(true));
+            } catch (error) {
+                showMessage('Failed to delete ereader device: ' + error.message, 'error');
+            }
+        }
+
+        async function sendEmailDeviceTest(id) {
+            try {
+                await fetchEmailJson(`/api/email/devices/${encodeURIComponent(id)}/test`, { method: 'POST' });
+                showMessage('Test email queued.', 'success');
+            } catch (error) {
+                showMessage('Failed to send test email: ' + error.message, 'error');
+            }
+        }
+
+        async function openEmailSendModalForFile(filePath) {
+            await openEmailSendModal({ mode: 'files', files: [filePath] });
+        }
+
+        async function openEmailSendModalForSelected() {
+            const files = Array.from(selectedFiles);
+            if (!files.length) {
+                showMessage('Select at least one file to email.', 'error');
+                return;
+            }
+            await openEmailSendModal({ mode: 'files', files });
+        }
+
+        async function openEmailSendModalForSeries(seriesId, seriesTitle) {
+            await openEmailSendModal({ mode: 'series', seriesId, seriesTitle, files: [] });
+        }
+
+        async function openEmailSendModal(context) {
+            const modal = document.getElementById('emailSendModal');
+            const deviceSelect = document.getElementById('emailSendDeviceSelect');
+            const summary = document.getElementById('emailSendSummary');
+            if (!modal || !deviceSelect || !summary) return;
+            currentEmailSend = context;
+            summary.textContent = context.mode === 'series'
+                ? `Send all issues in "${context.seriesTitle || 'this series'}".`
+                : `Send ${context.files.length} selected file${context.files.length === 1 ? '' : 's'}.`;
+            renderHtml(deviceSelect, html`<option value="">Loading devices...</option>`);
+            modal.classList.add('active');
+            try {
+                const devices = await loadEmailDevices(true);
+                if (!devices.length) {
+                    renderHtml(deviceSelect, html`<option value="">No devices saved</option>`);
+                    document.getElementById('emailSendSubmitBtn').disabled = true;
+                    showMessage('Add an ereader device before sending comics.', 'error');
+                    return;
+                }
+                renderEmailDeviceOptions(deviceSelect, devices);
+                document.getElementById('emailSendSubmitBtn').disabled = false;
+            } catch (error) {
+                renderHtml(deviceSelect, html`<option value="">Failed to load devices</option>`);
+                document.getElementById('emailSendSubmitBtn').disabled = true;
+                showMessage('Failed to load ereader devices: ' + error.message, 'error');
+            }
+        }
+
+        function closeEmailSendModal() {
+            document.getElementById('emailSendModal')?.classList.remove('active');
+            currentEmailSend = null;
+        }
+
+        async function submitEmailSend() {
+            if (!currentEmailSend) return;
+            const deviceId = document.getElementById('emailSendDeviceSelect').value;
+            const format = document.getElementById('emailSendFormatSelect').value;
+            const skipAlreadyDelivered = document.getElementById('emailSkipAlreadyDeliveredCheckbox').checked;
+            if (!deviceId) {
+                showMessage('Choose an ereader device.', 'error');
+                return;
+            }
+            const button = document.getElementById('emailSendSubmitBtn');
+            if (button) button.disabled = true;
+            try {
+                const result = currentEmailSend.mode === 'series'
+                    ? await fetchEmailJson('/api/email/send-series', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            seriesId: currentEmailSend.seriesId,
+                            deviceId,
+                            deliveryFormat: format,
+                            skipAlreadyDelivered
+                        })
+                    })
+                    : await fetchEmailJson('/api/email/send', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            files: currentEmailSend.files,
+                            deviceId,
+                            deliveryFormat: format === 'device' ? undefined : format,
+                            skipAlreadyDelivered
+                        })
+                    });
+                closeEmailSendModal();
+                reportEmailSendResult(result);
+            } catch (error) {
+                showMessage('Failed to email comics: ' + error.message, 'error');
+            } finally {
+                if (button) button.disabled = false;
+            }
+        }
+
+        function reportEmailSendResult(result) {
+            const queued = Array.isArray(result.queued) ? result.queued.length : 0;
+            const skipped = result.skipped && typeof result.skipped === 'object' ? Object.entries(result.skipped) : [];
+            showMessage(`Queued ${queued} email deliver${queued === 1 ? 'y' : 'ies'}${skipped.length ? `; skipped ${skipped.length}.` : '.'}`, queued ? 'success' : 'info');
+            if (skipped.length) {
+                const detail = skipped.slice(0, 5).map(([path, reason]) => `${extractDisplayName(path)}: ${reason}`).join('; ');
+                showMessage(`Skipped: ${detail}${skipped.length > 5 ? '; …' : ''}`, 'warning');
+            }
+        }
+
+        async function openEmailSubscriptionModal(seriesTitle) {
+            currentEmailSubscriptionSeriesTitle = seriesTitle || '';
+            const modal = document.getElementById('emailSubscriptionModal');
+            const series = document.getElementById('emailSubscriptionSeries');
+            const deviceSelect = document.getElementById('emailSubscriptionDeviceSelect');
+            const list = document.getElementById('emailSubscriptionsList');
+            if (!modal || !series || !deviceSelect || !list) return;
+            series.textContent = `Series: ${seriesTitle}`;
+            renderHtml(deviceSelect, html`<option value="">Loading devices...</option>`);
+            renderHtml(list, html`<div class="loading"><div class="spinner"></div><p>Loading auto-send subscriptions...</p></div>`);
+            modal.classList.add('active');
+            try {
+                const devices = await loadEmailDevices(true);
+                renderEmailDeviceOptions(deviceSelect, devices);
+                const data = await fetchEmailJson(`/api/email/subscriptions?series=${encodeURIComponent(seriesTitle)}`);
+                renderEmailSubscriptionsList(Array.isArray(data.subscriptions) ? data.subscriptions : []);
+            } catch (error) {
+                renderHtml(list, html`<div class="empty-state"><p>Failed to load subscriptions: ${error.message}</p></div>`);
+            }
+        }
+
+        function renderEmailSubscriptionsList(subscriptions) {
+            const list = document.getElementById('emailSubscriptionsList');
+            if (!list) return;
+            if (!subscriptions.length) {
+                renderHtml(list, html`<div class="empty-state"><p>No auto-send subscriptions for this series.</p></div>`);
+                return;
+            }
+            renderHtml(list, subscriptions.map(sub => html`
+                <div class="combine-folder-row" style="padding: 8px 0; border-bottom: 1px solid var(--border-primary);">
+                    <div style="font-weight: 500;">${sub.deviceName} · ${formatEmailDeliveryFormat(sub.deliveryFormat)} · ${sub.enabled ? 'Enabled' : 'Disabled'}</div>
+                    <div class="combine-folders-meta">${sub.deviceEmail}${sub.lastSentAt ? ` · Last sent ${formatEmailDate(sub.lastSentAt)}` : ''}</div>
+                    <button class="btn btn-danger btn-small" type="button" data-requires-write onclick="deleteEmailSubscription('${jsArg(sub.id)}')">Delete</button>
+                </div>
+            `));
+        }
+
+        function closeEmailSubscriptionModal() {
+            document.getElementById('emailSubscriptionModal')?.classList.remove('active');
+            currentEmailSubscriptionSeriesTitle = '';
+        }
+
+        async function saveEmailSubscription() {
+            const deviceId = document.getElementById('emailSubscriptionDeviceSelect').value;
+            const deliveryFormat = document.getElementById('emailSubscriptionFormatSelect').value;
+            const enabled = document.getElementById('emailSubscriptionEnabledCheckbox').checked;
+            if (!currentEmailSubscriptionSeriesTitle || !deviceId) {
+                showMessage('Choose an ereader device for auto-send.', 'error');
+                return;
+            }
+            try {
+                await fetchEmailJson('/api/email/subscriptions', {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        seriesTitle: currentEmailSubscriptionSeriesTitle,
+                        deviceId,
+                        deliveryFormat,
+                        enabled
+                    })
+                });
+                showMessage('Auto-send subscription saved.', 'success');
+                const data = await fetchEmailJson(`/api/email/subscriptions?series=${encodeURIComponent(currentEmailSubscriptionSeriesTitle)}`);
+                renderEmailSubscriptionsList(Array.isArray(data.subscriptions) ? data.subscriptions : []);
+            } catch (error) {
+                showMessage('Failed to save auto-send subscription: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteEmailSubscription(id) {
+            try {
+                await fetchEmailJson(`/api/email/subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                showMessage('Auto-send subscription deleted.', 'success');
+                const data = await fetchEmailJson(`/api/email/subscriptions?series=${encodeURIComponent(currentEmailSubscriptionSeriesTitle)}`);
+                renderEmailSubscriptionsList(Array.isArray(data.subscriptions) ? data.subscriptions : []);
+            } catch (error) {
+                showMessage('Failed to delete auto-send subscription: ' + error.message, 'error');
+            }
+        }
+
         async function saveFilenameFormat() {
             const format = document.getElementById('filenameFormat').value.trim();
             const logMaxSize = parseFloat(document.getElementById('logMaxSize').value);
@@ -7949,6 +8356,17 @@
             const seriesImageMaxMB = parseFloat(document.getElementById('seriesImageMaxMB').value);
             const seriesImageMaxDownloadMB = parseFloat(document.getElementById('seriesImageMaxDownloadMB').value);
             const seriesImageMaxDimension = parseInt(document.getElementById('seriesImageMaxDimension').value);
+            const smtpHost = document.getElementById('smtpHost').value.trim();
+            const smtpPortValue = document.getElementById('smtpPort').value.trim();
+            const smtpPort = smtpPortValue ? parseInt(smtpPortValue, 10) : null;
+            const smtpUsername = document.getElementById('smtpUsername').value.trim();
+            const smtpPasswordInput = document.getElementById('smtpPassword').value;
+            const smtpClearPassword = document.getElementById('smtpClearPasswordCheckbox').checked;
+            const smtpUseSsl = document.getElementById('smtpUseSslCheckbox').checked;
+            const emailFromAddress = document.getElementById('emailFromAddress').value.trim();
+            const emailFromName = document.getElementById('emailFromName').value.trim();
+            const emailMaxAttachmentValue = document.getElementById('emailMaxAttachmentMb').value.trim();
+            const emailMaxAttachmentMb = emailMaxAttachmentValue ? parseFloat(emailMaxAttachmentValue) : null;
             
             if (!format) {
                 showMessage('Filename format cannot be empty', 'error');
@@ -7987,6 +8405,16 @@
             
             if (isNaN(seriesImageMaxDimension) || seriesImageMaxDimension <= 0) {
                 showMessage('Max cover dimension must be a positive number', 'error');
+                return;
+            }
+
+            if (smtpPortValue && (isNaN(smtpPort) || smtpPort < 1 || smtpPort > 65535)) {
+                showMessage('SMTP port must be between 1 and 65535', 'error');
+                return;
+            }
+
+            if (emailMaxAttachmentValue && (isNaN(emailMaxAttachmentMb) || emailMaxAttachmentMb <= 0)) {
+                showMessage('Max email attachment size must be a positive number', 'error');
                 return;
             }
             
@@ -8125,7 +8553,38 @@
                     showMessage(seriesImageResult.error || 'Failed to save series image limits', 'error');
                     return;
                 }
-                
+
+                const emailSettingsBody = {
+                   smtpHost: smtpHost || null,
+                   smtpPort: smtpPort,
+                   smtpUsername: smtpUsername || null,
+                   smtpPassword: smtpClearPassword ? '' : (smtpPasswordInput ? smtpPasswordInput : null),
+                   smtpUseSsl,
+                   emailFromAddress: emailFromAddress || null,
+                   emailFromName: emailFromName || null,
+                   emailMaxAttachmentMb: emailMaxAttachmentMb
+                };
+                const emailSettingsResponse = await fetch(apiUrl('/api/settings/email'), {
+                   method: 'PUT',
+                   headers: {
+                       'Content-Type': 'application/json',
+                       ...getAuthHeaders()
+                   },
+                   body: JSON.stringify(emailSettingsBody)
+                });
+                if (handleAuthError(emailSettingsResponse)) return;
+                if (!emailSettingsResponse.ok) {
+                   let errorMsg = `HTTP error! status: ${emailSettingsResponse.status}`;
+                   try {
+                       const errBody = await emailSettingsResponse.json();
+                       if (errBody && (errBody.error || errBody.message)) {
+                           errorMsg = errBody.error || errBody.message;
+                       }
+                   } catch (e) { /* ignore parse errors */ }
+                   showMessage('Failed to save email settings: ' + errorMsg, 'error');
+                   return;
+                }
+                 
                 showMessage('Settings saved successfully! Changes to log rotation, external metadata, and database cleanup will take effect on restart.', 'success');
                 closeSettings();
             } catch (error) {

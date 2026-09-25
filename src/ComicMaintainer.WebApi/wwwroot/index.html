@@ -437,6 +437,9 @@
                             <button class="action-dropdown-item" id="removeMetadataSelectedItem" onclick="removeMetadataSelected(); closeAllActionDropdowns();" disabled title="Strip the embedded ComicInfo.xml from each selected file and mark them unprocessed so they can be re-processed.">
                                 🧹 Remove Metadata Selected
                             </button>
+                            <button class="action-dropdown-item" id="emailSelectedItem" onclick="openEmailSendModalForSelected(); closeAllActionDropdowns();" disabled>
+                                📧 Email Selected to Ereader
+                            </button>
                             <button class="action-dropdown-item" onclick="removeMetadataAll(); closeAllActionDropdowns();" title="Strip the embedded ComicInfo.xml from every file in the library and mark them unprocessed so they can be re-processed.">
                                 🧹 Remove Metadata All
                             </button>
@@ -834,7 +837,57 @@
                         When enabled, metadata will be normalized during processing.
                     </small>
                 </div>
-                
+
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Send to Ereader</h3>
+                <div class="form-group">
+                   <small id="emailStatusSummary" style="display: block; margin-bottom: 15px; color: var(--text-muted);">
+                       Configure SMTP delivery and saved ereader devices.
+                   </small>
+                   <button class="btn btn-small" type="button" data-requires-write onclick="openEmailDevicesModal()">Manage Ereader Devices</button>
+                   <button class="btn btn-small" type="button" onclick="loadEmailStatus()">Refresh Status</button>
+                </div>
+                <div class="form-group">
+                   <label for="smtpHost">SMTP Host</label>
+                   <input type="text" id="smtpHost" name="smtpHost" autocomplete="off" placeholder="smtp.example.com">
+                </div>
+                <div class="form-group">
+                   <label for="smtpPort">SMTP Port</label>
+                   <input type="number" id="smtpPort" name="smtpPort" min="1" max="65535" step="1" autocomplete="off" placeholder="587">
+                </div>
+                <div class="form-group">
+                   <label for="smtpUsername">SMTP Username</label>
+                   <input type="text" id="smtpUsername" name="smtpUsername" autocomplete="off">
+                </div>
+                <div class="form-group">
+                   <label for="smtpPassword">SMTP Password</label>
+                   <input type="password" id="smtpPassword" name="smtpPassword" autocomplete="new-password">
+                   <small id="smtpPasswordHint" style="display: block; margin-top: 5px; color: var(--text-muted);">
+                       Leave blank to keep the stored password.
+                   </small>
+                   <label for="smtpClearPasswordCheckbox" style="display: flex; align-items: center; cursor: pointer; margin-top: 8px; font-weight: 400;">
+                       <input type="checkbox" id="smtpClearPasswordCheckbox" name="smtpClearPassword" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                       <span>Clear stored SMTP password on save</span>
+                   </label>
+                </div>
+                <div class="form-group">
+                   <label for="smtpUseSslCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                       <input type="checkbox" id="smtpUseSslCheckbox" name="smtpUseSsl" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                       <span>Use SSL/TLS</span>
+                   </label>
+                </div>
+                <div class="form-group">
+                   <label for="emailFromAddress">From Address</label>
+                   <input type="email" id="emailFromAddress" name="emailFromAddress" autocomplete="off" placeholder="comics@example.com">
+                </div>
+                <div class="form-group">
+                   <label for="emailFromName">From Name</label>
+                   <input type="text" id="emailFromName" name="emailFromName" autocomplete="off" placeholder="ComicMaintainer">
+                </div>
+                <div class="form-group">
+                   <label for="emailMaxAttachmentMb">Max Attachment Size (MB)</label>
+                   <input type="number" id="emailMaxAttachmentMb" name="emailMaxAttachmentMb" min="1" step="1" autocomplete="off" placeholder="25">
+                </div>
+                 
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Log Rotation</h3>
                 <div class="form-group">
                     <label for="logMaxSize">
@@ -1146,7 +1199,111 @@
             </div>
         </div>
     </div>
-    
+
+    <div class="modal" id="emailDevicesModal" role="dialog" aria-modal="true" aria-labelledby="emailDevicesModalTitle" aria-hidden="true">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h2 id="emailDevicesModalTitle">Ereader Devices</h2>
+                <button class="close-btn" onclick="closeEmailDevicesModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="emailDevicesList">
+                    <div class="loading"><div class="spinner"></div><p>Loading devices...</p></div>
+                </div>
+                <hr style="border: 0; border-top: 1px solid var(--border-primary); margin: 20px 0;">
+                <h3 id="emailDeviceFormTitle" style="margin-bottom: 10px; color: var(--text-secondary);">Add Device</h3>
+                <input type="hidden" id="emailDeviceId">
+                <div class="form-group">
+                    <label for="emailDeviceName">Device Name</label>
+                    <input type="text" id="emailDeviceName" autocomplete="off" placeholder="Kindle">
+                </div>
+                <div class="form-group">
+                    <label for="emailDeviceAddress">Device Email Address</label>
+                    <input type="email" id="emailDeviceAddress" autocomplete="off" placeholder="name@kindle.com">
+                </div>
+                <div class="form-group">
+                    <label for="emailDeviceFormat">Default Format</label>
+                    <select id="emailDeviceFormat" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                        <option value="original">Original archive</option>
+                        <option value="epub">EPUB</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="resetEmailDeviceForm()">Clear</button>
+                <button class="btn btn-primary" data-requires-write onclick="saveEmailDevice()">Save Device</button>
+                <button class="btn" onclick="closeEmailDevicesModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="emailSendModal" role="dialog" aria-modal="true" aria-labelledby="emailSendModalTitle" aria-hidden="true">
+        <div class="modal-content" style="max-width: 520px;">
+            <div class="modal-header">
+                <h2 id="emailSendModalTitle">Email to Ereader</h2>
+                <button class="close-btn" onclick="closeEmailSendModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="emailSendSummary" style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;"></p>
+                <div class="form-group">
+                    <label for="emailSendDeviceSelect">Device</label>
+                    <select id="emailSendDeviceSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="emailSendFormatSelect">Format</label>
+                    <select id="emailSendFormatSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                        <option value="device">Device default</option>
+                        <option value="original">Original archive</option>
+                        <option value="epub">EPUB</option>
+                    </select>
+                </div>
+                <label for="emailSkipAlreadyDeliveredCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="emailSkipAlreadyDeliveredCheckbox" checked style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                    <span>Skip files already sent to this device</span>
+                </label>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeEmailSendModal()">Cancel</button>
+                <button class="btn btn-primary" id="emailSendSubmitBtn" data-requires-write onclick="submitEmailSend()">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="emailSubscriptionModal" role="dialog" aria-modal="true" aria-labelledby="emailSubscriptionModalTitle" aria-hidden="true">
+        <div class="modal-content" style="max-width: 700px;">
+            <div class="modal-header">
+                <h2 id="emailSubscriptionModalTitle">Auto-send New Issues</h2>
+                <button class="close-btn" onclick="closeEmailSubscriptionModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="emailSubscriptionSeries" style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;"></p>
+                <div id="emailSubscriptionsList" style="margin-bottom: 18px;"></div>
+                <div class="form-group">
+                    <label for="emailSubscriptionDeviceSelect">Device</label>
+                    <select id="emailSubscriptionDeviceSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="emailSubscriptionFormatSelect">Format</label>
+                    <select id="emailSubscriptionFormatSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                        <option value="device">Device default</option>
+                        <option value="original">Original archive</option>
+                        <option value="epub">EPUB</option>
+                    </select>
+                </div>
+                <label for="emailSubscriptionEnabledCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                    <input type="checkbox" id="emailSubscriptionEnabledCheckbox" checked style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                    <span>Enable automatic delivery for new issues</span>
+                </label>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" data-requires-write onclick="saveEmailSubscription()">Save Auto-send</button>
+                <button class="btn" onclick="closeEmailSubscriptionModal()">Close</button>
+            </div>
+        </div>
+    </div>
+     
      <div class="modal" id="processingHistoryModal" role="dialog" aria-modal="true" aria-labelledby="processingHistoryModalTitle" aria-hidden="true">
         <div class="modal-content" style="max-width: 1200px; height: 85vh; display: flex; flex-direction: column;">
             <div class="modal-header">

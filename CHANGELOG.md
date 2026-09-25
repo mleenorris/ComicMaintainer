@@ -79,6 +79,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retagged. Reverting such a series to automatic remains a no-op.
 
 ### Added
+- **Email comics to an e-reader.** Issues can be sent to saved e-reader addresses one at a
+  time, as a whole series, or as an arbitrary selection, and a series can be subscribed so
+  that every newly processed issue is delivered automatically once the watcher has finished
+  renaming and normalizing it. Each delivery is sent either as the original archive or
+  converted to a fixed-layout EPUB 3 first, which is the format e-readers actually render
+  page-per-image rather than reflowing. Sends are queued and drained by a single background
+  consumer, so a large series does not block the API or the watcher and does not hammer the
+  mail server; already-delivered files are skipped by default, making a re-send of a series
+  safe. Only files inside the watched or duplicate directory can be sent, the SMTP password
+  is never returned by the API and is redacted from logs, and deliveries larger than the
+  configured attachment limit fail rather than being sent. See
+  [Email to E-Reader](docs/EMAIL_DELIVERY.md).
 - **Offline awareness.** A `fetch()` made with no network rejects with a bare
   "Failed to fetch", which the UI surfaced as a generic "Failed to load …" — indistinguishable
   from a server fault, so users retried against a server they could not reach. A banner now

@@ -28,7 +28,7 @@ Email is disabled until an SMTP host and a from-address are configured. Set them
 | `SMTP_PORT` | `SmtpPort` | `587` | SMTP port. `465` implies implicit SSL. |
 | `SMTP_USERNAME` | `SmtpUsername` | *(empty)* | Username for authentication. Leave empty for anonymous relays. |
 | `SMTP_PASSWORD` | `SmtpPassword` | *(empty)* | Password for authentication. Never returned by the API and redacted in logs. |
-| `SMTP_USE_SSL` | `SmtpUseSsl` | `true` | Use SSL/STARTTLS. Set to `false` only for a trusted local relay. |
+| `SMTP_USE_SSL` | `SmtpUseSsl` | `false` | Use implicit TLS (SMTPS, usually port 465). When false, use STARTTLS when available. |
 | `EMAIL_FROM_ADDRESS` | `EmailFromAddress` | *(empty)* | Envelope sender. Must be an address your e-reader service accepts. |
 | `EMAIL_FROM_NAME` | `EmailFromName` | `ComicMaintainer` | Display name on outgoing mail. |
 | `EMAIL_MAX_ATTACHMENT_MB` | `EmailMaxAttachmentMegabytes` | `25` | Deliveries larger than this fail instead of being sent. |

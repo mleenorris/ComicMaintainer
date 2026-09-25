@@ -17,9 +17,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.12" />
-    <!-- Stay on 0.41.x: 0.46+ replaced the static ZipArchive/RarArchive/ArchiveFactory.Open
-         factory methods with SharpCompress.Factories, which the archive services still use. -->
-    <PackageReference Include="SharpCompress" Version="0.41.0" />
+    <PackageReference Include="SharpCompress" Version="1.0.0" />
     <!-- Stay on 3.1.x: ImageSharp 4.x requires a paid Six Labors license key and fails the
          build with "No Six Labors license found". -->
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />

@@ -60,6 +60,7 @@ public class ComicEmailServiceTests : IDisposable
             _epub.Object,
             _queue.Object,
             seriesCache.Object,
+            new Mock<ISeriesImageStore>().Object,
             settingsMonitor.Object,
             new Mock<ILogger<ComicEmailService>>().Object);
 
@@ -284,8 +285,8 @@ public class ComicEmailServiceTests : IDisposable
             new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
 
         string? epubPath = null;
-        _epub.Setup(e => e.ConvertToEpubAsync(file, It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns<string, string, CancellationToken>((_, outDir, _) =>
+        _epub.Setup(e => e.ConvertToEpubAsync(file, It.IsAny<string>(), It.IsAny<EpubConversionOptions?>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, EpubConversionOptions?, CancellationToken>((_, outDir, _, _) =>
             {
                 Directory.CreateDirectory(outDir);
                 epubPath = Path.Combine(outDir, "Series - Chapter 0001.epub");

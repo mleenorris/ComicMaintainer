@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The
+  converter previously marked the first comic page as the cover and wrote the issue number
+  into the title exactly as ComicInfo.xml spelled it, so a library whose covers were
+  curated in ComicMaintainer lost that artwork on the device, and issues sorted `#1, #10,
+  #2`. The cached series image is now embedded as a dedicated cover page (`cover-image`,
+  first in the spine, referenced from the navigation landmarks), falling back to the first
+  page when no image is cached or the cached file cannot be decoded. The issue number is
+  zero-padded in the title and its `file-as` sort key (`Series Name #012`), which is the
+  only lever available on Kindle since it ignores series metadata for sideloaded books, and
+  the series/position is written in both the EPUB 3 (`belongs-to-collection` /
+  `group-position`) and legacy calibre (`calibre:series_index`) forms so Kobo, calibre and
+  Kavita all pick it up. Decorated numbers (`#42`, `007`, `12a`) are normalised for the
+  collection position; non-numeric ones (`Annual`) are left verbatim.
+
 - **The web UI now announces what it is doing to assistive technology.** `showMessage()` is
   the library page's only notification channel — roughly a hundred call sites, including
   every error path — but `#messageContainer` was not a live region, so none of it reached

@@ -24,6 +24,7 @@ public class SettingsService : ISettingsService
 
     /// <summary>
     /// Setting names whose values are secrets and must never be written to the log.
+    /// Updates for these names go through <c>UpdateSecretSettingAsync</c>.
     /// </summary>
     private static readonly HashSet<string> SecretSettingNames = new(StringComparer.Ordinal)
     {
@@ -199,7 +200,7 @@ public class SettingsService : ISettingsService
 
     public async Task UpdateComicVineApiKeyAsync(string? apiKey, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("ComicVineApiKey", apiKey, cancellationToken);
+        await UpdateSecretSettingAsync("ComicVineApiKey", apiKey, cancellationToken);
     }
 
     public async Task UpdateComicVineBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default)
@@ -274,11 +275,42 @@ public class SettingsService : ISettingsService
         // A null password means "keep the stored secret"; an empty string clears it.
         if (smtpPassword is not null)
         {
-            await UpdateSettingAsync("SmtpPassword", smtpPassword.Length == 0 ? null : smtpPassword, cancellationToken);
+            await UpdateSecretSettingAsync("SmtpPassword", smtpPassword.Length == 0 ? null : smtpPassword, cancellationToken);
         }
     }
 
     private async Task UpdateSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
+    {
+        if (SecretSettingNames.Contains(settingName))
+        {
+            throw new InvalidOperationException(
+                $"'{settingName}' is a secret and must be persisted with UpdateSecretSettingAsync so its value is never logged");
+        }
+
+        await PersistSettingAsync(settingName, value, cancellationToken);
+
+        // Sanitize value for logging to prevent log forging.
+        var sanitizedValue = value is string strValue
+            ? LoggingHelper.SanitizeForLog(strValue)
+            : value?.ToString() ?? "null";
+        _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, sanitizedValue);
+    }
+
+    /// <summary>
+    /// Persists a setting whose value is a secret. The value is never passed to the
+    /// logger, only the fact that it was set or cleared.
+    /// </summary>
+    private async Task UpdateSecretSettingAsync(string settingName, string? value, CancellationToken cancellationToken)
+    {
+        var cleared = string.IsNullOrEmpty(value);
+        await PersistSettingAsync(settingName, value, cancellationToken);
+        _logger.LogInformation(
+            "Updated setting {SettingName} ({State})",
+            settingName,
+            cleared ? "cleared" : "value hidden");
+    }
+
+    private async Task PersistSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);
         try
@@ -311,22 +343,6 @@ public class SettingsService : ISettingsService
             var tempPath = _settingsFilePath + ".tmp";
             await File.WriteAllTextAsync(tempPath, updatedJson, cancellationToken);
             File.Move(tempPath, _settingsFilePath, overwrite: true);
-
-            // Sanitize value for logging to prevent log forging, and never log secrets.
-            string sanitizedValue;
-            if (SecretSettingNames.Contains(settingName))
-            {
-                sanitizedValue = value is null ? "null" : "***";
-            }
-            else if (value is string strValue)
-            {
-                sanitizedValue = LoggingHelper.SanitizeForLog(strValue);
-            }
-            else
-            {
-                sanitizedValue = value?.ToString() ?? "null";
-            }
-            _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, sanitizedValue);
         }
         catch (Exception ex)
         {

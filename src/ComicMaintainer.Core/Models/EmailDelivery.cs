@@ -30,10 +30,17 @@ public static class EmailDeliveryFormat
             return fallback;
         }
 
+        // Return the constant rather than the caller's string so no user-controlled
+        // value flows onward into logs or storage.
         var trimmed = value.Trim().ToLowerInvariant();
-        if (trimmed is Original or Epub)
+        if (trimmed == Original)
         {
-            return trimmed;
+            return Original;
+        }
+
+        if (trimmed == Epub)
+        {
+            return Epub;
         }
 
         throw new ArgumentException($"Unsupported delivery format '{value}'. Expected 'original' or 'epub'.", paramName);
@@ -51,9 +58,19 @@ public static class EmailDeliveryFormat
         }
 
         var trimmed = value.Trim().ToLowerInvariant();
-        if (trimmed is Original or Epub or Device)
+        if (trimmed == Device)
         {
-            return trimmed;
+            return Device;
+        }
+
+        if (trimmed == Original)
+        {
+            return Original;
+        }
+
+        if (trimmed == Epub)
+        {
+            return Epub;
         }
 
         throw new ArgumentException($"Unsupported delivery format '{value}'. Expected 'original', 'epub' or 'device'.", paramName);

@@ -66,6 +66,47 @@
             color: #95a5a6;
         }
 
+        .downloads {
+            margin-top: 28px;
+            text-align: left;
+        }
+
+        .downloads h2 {
+            font-size: 1.05rem;
+            margin: 0 0 10px;
+        }
+
+        .downloads ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .downloads li {
+            margin-bottom: 8px;
+        }
+
+        .downloads a {
+            display: block;
+            padding: 10px 12px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.08);
+            color: #ecf0f1;
+            text-decoration: none;
+            word-break: break-word;
+        }
+
+        .downloads a:hover,
+        .downloads a:focus-visible {
+            background: rgba(255, 255, 255, 0.16);
+        }
+
+        .downloads .pages {
+            display: block;
+            font-size: 0.8rem;
+            color: #bdc3c7;
+        }
+
         @media (prefers-reduced-motion: reduce) {
             * {
                 animation: none !important;
@@ -84,16 +125,64 @@
         </p>
         <button type="button" id="retryButton">Try again</button>
         <p class="status" id="statusText" role="status" aria-live="polite"></p>
+        <section class="downloads" id="downloads" hidden>
+            <h2>Saved for offline reading</h2>
+            <ul id="downloadsList"></ul>
+        </section>
     </main>
     <script>
         (function () {
             var status = document.getElementById('statusText');
             var retry = document.getElementById('retryButton');
+            var downloads = document.getElementById('downloads');
+            var downloadsList = document.getElementById('downloadsList');
 
             function render() {
                 status.textContent = navigator.onLine
                     ? 'Connection restored — try again.'
                     : 'Waiting for a network connection…';
+            }
+
+            // Comics the user downloaded are stored by the service worker, so
+            // they can be listed and opened here without any network access.
+            function renderDownloads(comics) {
+                if (!comics || !comics.length) {
+                    return;
+                }
+                comics
+                    .slice()
+                    .sort(function (a, b) {
+                        return a.filePath.localeCompare(b.filePath);
+                    })
+                    .forEach(function (comic) {
+                        var item = document.createElement('li');
+                        var link = document.createElement('a');
+                        link.href = '/reader.html?file=' + encodeURIComponent(comic.filePath);
+                        var segments = comic.filePath.split(/[\\/]/);
+                        link.textContent = segments[segments.length - 1] || comic.filePath;
+                        var pages = document.createElement('span');
+                        pages.className = 'pages';
+                        pages.textContent = comic.pageCount === 1
+                            ? '1 page saved'
+                            : comic.pageCount + ' pages saved';
+                        link.appendChild(pages);
+                        item.appendChild(link);
+                        downloadsList.appendChild(item);
+                    });
+                downloads.hidden = false;
+            }
+
+            function loadDownloads() {
+                if (!('serviceWorker' in navigator) || !navigator.serviceWorker.controller) {
+                    return;
+                }
+                var channel = new MessageChannel();
+                channel.port1.onmessage = function (event) {
+                    if (event.data && event.data.type === 'OFFLINE_COMICS') {
+                        renderDownloads(event.data.comics);
+                    }
+                };
+                navigator.serviceWorker.controller.postMessage({ type: 'LIST_OFFLINE_COMICS' }, [channel.port2]);
             }
 
             retry.addEventListener('click', function () {
@@ -103,6 +192,7 @@
             window.addEventListener('online', render);
             window.addEventListener('offline', render);
             render();
+            loadDownloads();
         })();
     </script>
 </body>

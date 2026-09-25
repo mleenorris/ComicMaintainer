@@ -39,6 +39,7 @@ This service automatically watches a directory for new or changed comic archive 
   - App-like experience with dedicated window
   - Add to home screen on mobile devices
   - Offline-ready with cached assets, including a dedicated offline page when the server is unreachable
+  - Download individual comics for offline reading straight from the reader
   - Easy access from your app drawer or desktop
 
 ## How It Works
@@ -262,6 +263,25 @@ The web interface can be installed as a standalone application on your device, p
 - Works offline with cached assets
 - Full-screen experience on mobile devices
 - Feels like a native app
+
+### Offline Reading
+
+Individual comics can be downloaded to the device so they stay readable without a
+connection (on a plane, commute, or anywhere the library server is unreachable):
+
+1. Open a comic in the reader
+2. Click **⬇ Save offline** in the reader header
+3. The button shows progress while every page is downloaded, then reads **Saved**
+
+Once saved:
+- Opening that comic works with no network — pages are served from the device
+- Clicking **Saved** again removes the download and frees the storage
+- While offline, the offline page lists everything saved and links straight into the reader
+
+Notes:
+- Downloads require the PWA service worker, so the site must be served over HTTPS (or `localhost`)
+- Downloads persist across sign-out and app updates; remove them with the **Saved** button when you no longer need them
+- Reading progress made while offline is queued on the device and sent to the server automatically once the connection returns
 
 ### Performance
 - **Fast initial page load**: HTML reduced from 217KB to 43KB by extracting CSS/JS to external cached files (see [PERFORMANCE_IMPROVEMENT_INITIAL_LOAD.md](docs/archive/PERFORMANCE_IMPROVEMENT_INITIAL_LOAD.md))

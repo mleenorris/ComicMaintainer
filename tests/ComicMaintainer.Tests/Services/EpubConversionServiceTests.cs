@@ -287,6 +287,91 @@ public class EpubConversionServiceTests : IDisposable
             () => _service.ConvertToEpubAsync(path, _workDir));
     }
 
+    [Fact]
+    public async Task ConvertToEpubAsync_WithUndecodablePage_ThrowsAndWritesNoEpub()
+    {
+        var cbz = Path.Combine(_workDir, "corrupt.cbz");
+        using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
+        {
+            WriteImageEntry(zip, "001.jpg");
+
+            // A page that is not a decodable image would render blank on the device.
+            var entry = zip.CreateEntry("002.jpg");
+            using var stream = entry.Open();
+            var bytes = Encoding.UTF8.GetBytes("not an image");
+            stream.Write(bytes, 0, bytes.Length);
+        }
+
+        var outDir = Path.Combine(_workDir, "out-corrupt");
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.ConvertToEpubAsync(cbz, outDir));
+
+        Assert.False(Directory.Exists(outDir) && Directory.EnumerateFiles(outDir).Any());
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_WithEmptyPageEntry_Throws()
+    {
+        var cbz = Path.Combine(_workDir, "empty-page.cbz");
+        using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
+        {
+            WriteImageEntry(zip, "001.jpg");
+            zip.CreateEntry("002.jpg").Open().Dispose();
+        }
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-empty-page")));
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_WithUnsupportedPageFormat_ReencodesAsJpeg()
+    {
+        var cbz = Path.Combine(_workDir, "webp.cbz");
+        using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
+        {
+            using var image = new Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(20, 30);
+            using var buffer = new MemoryStream();
+            image.Save(buffer, new SixLabors.ImageSharp.Formats.Webp.WebpEncoder());
+
+            var entry = zip.CreateEntry("001.webp");
+            using var stream = entry.Open();
+            var bytes = buffer.ToArray();
+            stream.Write(bytes, 0, bytes.Length);
+        }
+
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-webp"));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        var names = archive.Entries.Select(e => e.FullName).ToList();
+        Assert.Contains("OEBPS/images/page0001.jpg", names);
+        Assert.DoesNotContain("OEBPS/images/page0001.webp", names);
+        Assert.Contains("media-type=\"image/jpeg\"", ReadEntry(archive, "OEBPS/content.opf"));
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_WithMislabeledPageExtension_UsesTheRealFormat()
+    {
+        var cbz = Path.Combine(_workDir, "mislabeled.cbz");
+        using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
+        {
+            using var image = new Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(20, 30);
+            using var buffer = new MemoryStream();
+            image.Save(buffer, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+
+            // PNG data stored under a .jpg name: declaring image/jpeg makes readers show a blank page.
+            var entry = zip.CreateEntry("001.jpg");
+            using var stream = entry.Open();
+            var bytes = buffer.ToArray();
+            stream.Write(bytes, 0, bytes.Length);
+        }
+
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-mislabeled"));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        Assert.Contains("OEBPS/images/page0001.png", archive.Entries.Select(e => e.FullName));
+        Assert.Contains("media-type=\"image/png\"", ReadEntry(archive, "OEBPS/content.opf"));
+    }
+
     private string CreateCbz(
         string fileName,
         int pageCount,

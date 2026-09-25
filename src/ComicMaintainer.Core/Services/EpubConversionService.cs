@@ -11,6 +11,7 @@ using SharpCompress.Archives;
 using SharpCompress.Archives.Rar;
 using SystemZipArchive = System.IO.Compression.ZipArchive;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -102,12 +103,15 @@ public class EpubConversionService : IEpubConversionService
 
         try
         {
+            List<string>? expectedEntries = null;
             using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
             using (var epub = new SystemZipArchive(fileStream, ZipArchiveMode.Create))
             {
                 // The mimetype entry must be first and stored uncompressed (OCF spec).
                 WriteEntry(epub, "mimetype", "application/epub+zip", CompressionLevel.NoCompression);
                 WriteEntry(epub, "META-INF/container.xml", ContainerXml);
+
+                var requiredEntries = new List<string> { "META-INF/container.xml" };
 
                 if (seriesCover is not null)
                 {
@@ -121,6 +125,9 @@ public class EpubConversionService : IEpubConversionService
                         epub,
                         "OEBPS/" + seriesCover.XhtmlPath,
                         BuildCoverXhtml(title, seriesCover.ImagePath, seriesCover.Width, seriesCover.Height));
+
+                    requiredEntries.Add("OEBPS/" + seriesCover.ImagePath);
+                    requiredEntries.Add("OEBPS/" + seriesCover.XhtmlPath);
                 }
 
                 var manifestPages = new List<EpubPage>(pages.Count);
@@ -131,7 +138,6 @@ public class EpubConversionService : IEpubConversionService
                     index++;
 
                     var extension = NormalizeImageExtension(Path.GetExtension(page.Key) ?? ".jpg");
-                    var imageName = $"images/page{index:D4}{extension}";
 
                     byte[] imageBytes;
                     using (var entryStream = page.OpenEntryStream())
@@ -141,30 +147,43 @@ public class EpubConversionService : IEpubConversionService
                         imageBytes = buffer.ToArray();
                     }
 
-                    var (width, height) = GetImageSize(imageBytes, page.Key);
+                    // A page that cannot be decoded (empty, truncated, or not an
+                    // image at all) would silently render as a blank page on the
+                    // device, so the whole conversion fails instead.
+                    var prepared = PrepareImage(imageBytes, extension, page.Key);
+                    var imageName = $"images/page{index:D4}{prepared.Extension}";
 
                     var imageEntry = epub.CreateEntry("OEBPS/" + imageName, CompressionLevel.NoCompression);
                     using (var imageStream = imageEntry.Open())
                     {
-                        imageStream.Write(imageBytes, 0, imageBytes.Length);
+                        imageStream.Write(prepared.Bytes, 0, prepared.Bytes.Length);
                     }
 
                     var pageName = $"page{index:D4}.xhtml";
-                    WriteEntry(epub, "OEBPS/" + pageName, BuildPageXhtml(index, imageName, width, height));
+                    WriteEntry(epub, "OEBPS/" + pageName, BuildPageXhtml(index, imageName, prepared.Width, prepared.Height));
+
+                    requiredEntries.Add("OEBPS/" + imageName);
+                    requiredEntries.Add("OEBPS/" + pageName);
 
                     manifestPages.Add(new EpubPage(
                         Id: $"page{index:D4}",
                         XhtmlPath: pageName,
                         ImagePath: imageName,
-                        MediaType: GetMediaType(extension),
-                        Width: width,
-                        Height: height));
+                        MediaType: prepared.MediaType,
+                        Width: prepared.Width,
+                        Height: prepared.Height));
                 }
 
                 WriteEntry(epub, "OEBPS/content.opf", BuildOpf(bookId, title, seriesName, comicInfo, seriesCover, manifestPages));
                 WriteEntry(epub, "OEBPS/nav.xhtml", BuildNav(title, seriesCover, manifestPages));
+                requiredEntries.Add("OEBPS/content.opf");
+                requiredEntries.Add("OEBPS/nav.xhtml");
+                expectedEntries = requiredEntries;
             }
 
+            // The archive is complete only after the ZipArchive above is disposed;
+            // re-read it so a structurally broken book is never handed to callers.
+            ValidateEpub(tempPath, expectedEntries!, comicFilePath);
             File.Move(tempPath, epubPath, overwrite: true);
             _logger.LogInformation(
                 "Converted {FilePath} to EPUB with {PageCount} page(s)",
@@ -366,9 +385,15 @@ public class EpubConversionService : IEpubConversionService
                 ? "." + ext
                 : Path.GetExtension(seriesImagePath));
             var mediaType = GetMediaType(extension);
-            if (mediaType == "application/octet-stream")
+            if (!IsEreaderSafeMediaType(mediaType))
             {
-                return null;
+                // Same reasoning as page images: an unsupported format would show
+                // up as a blank cover, so re-encode it as JPEG.
+                using var buffer = new MemoryStream();
+                image.Save(buffer, new JpegEncoder { Quality = 90 });
+                bytes = buffer.ToArray();
+                extension = ".jpg";
+                mediaType = "image/jpeg";
             }
 
             return new SeriesCover(
@@ -379,7 +404,7 @@ public class EpubConversionService : IEpubConversionService
                 Height: image.Height,
                 Bytes: bytes);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or UnknownImageFormatException or InvalidImageContentException or NotSupportedException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or UnknownImageFormatException or InvalidImageContentException or NotSupportedException or ImageFormatException)
         {
             _logger.LogWarning(
                 ex,
@@ -389,25 +414,99 @@ public class EpubConversionService : IEpubConversionService
         }
     }
 
-    private static (int Width, int Height) GetImageSize(byte[] imageBytes, string? entryKey)
+    /// <summary>
+    /// Fully decodes a page image so a corrupt/truncated entry fails the
+    /// conversion instead of shipping a blank page, determines the real format
+    /// from the bytes (archive file names routinely lie about it, and a wrong
+    /// media type also renders blank) and re-encodes formats that ereaders do
+    /// not support as JPEG.
+    /// </summary>
+    private static PreparedImage PrepareImage(byte[] imageBytes, string fallbackExtension, string? entryKey)
     {
-        try
+        if (imageBytes.Length == 0)
         {
-            var info = Image.Identify(imageBytes);
-            if (info is not null && info.Width > 0 && info.Height > 0)
-            {
-                return (info.Width, info.Height);
-            }
-        }
-        catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException or NotSupportedException)
-        {
-            // Fall through to the default viewport below; a wrong viewport still renders,
-            // whereas failing the whole conversion for one odd page would not.
-            _ = entryKey;
+            throw new InvalidOperationException(
+                $"Page image '{entryKey}' is empty and would render as a blank page.");
         }
 
-        // Common digital comic page size; used only when the image cannot be identified.
-        return (1600, 2400);
+        try
+        {
+            using var image = Image.Load(imageBytes);
+            if (image.Width <= 0 || image.Height <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"Page image '{entryKey}' has no usable dimensions.");
+            }
+
+            var extension = NormalizeImageExtension(
+                image.Metadata.DecodedImageFormat?.FileExtensions.FirstOrDefault() is { } detected
+                    ? "." + detected
+                    : fallbackExtension);
+            var mediaType = GetMediaType(extension);
+
+            if (IsEreaderSafeMediaType(mediaType))
+            {
+                return new PreparedImage(imageBytes, extension, mediaType, image.Width, image.Height);
+            }
+
+            // WebP/BMP and anything else outside the widely supported set shows
+            // up as a blank page on most ereaders, so re-encode it as JPEG.
+            using var buffer = new MemoryStream();
+            image.Save(buffer, new JpegEncoder { Quality = 90 });
+            return new PreparedImage(buffer.ToArray(), ".jpg", "image/jpeg", image.Width, image.Height);
+        }
+        catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException or NotSupportedException or ImageFormatException)
+        {
+            throw new InvalidOperationException(
+                $"Page image '{entryKey}' could not be decoded and would render as a blank page.",
+                ex);
+        }
+    }
+
+    private static bool IsEreaderSafeMediaType(string mediaType)
+        => mediaType is "image/jpeg" or "image/png" or "image/gif";
+
+    /// <summary>
+    /// Re-reads the finished EPUB and verifies it is a readable OCF container
+    /// whose declared resources all exist and are non-empty. Callers (email
+    /// delivery in particular) must never ship a book that fails this check.
+    /// </summary>
+    private static void ValidateEpub(string epubPath, IReadOnlyList<string> expectedEntries, string comicFilePath)
+    {
+        var name = Path.GetFileName(comicFilePath);
+
+        try
+        {
+            using var stream = new FileStream(epubPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var archive = new SystemZipArchive(stream, ZipArchiveMode.Read);
+
+            if (archive.Entries.Count == 0 ||
+                !string.Equals(archive.Entries[0].FullName, "mimetype", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Generated EPUB for {name} is missing the leading mimetype entry.");
+            }
+
+            foreach (var expected in expectedEntries)
+            {
+                var entry = archive.GetEntry(expected);
+                if (entry is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Generated EPUB for {name} is missing required entry '{expected}'.");
+                }
+
+                if (entry.Length == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Generated EPUB for {name} contains an empty entry '{expected}'.");
+                }
+            }
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new InvalidOperationException($"Generated EPUB for {name} is not a readable archive.", ex);
+        }
     }
 
     private static string BuildPageXhtml(int index, string imagePath, int width, int height)
@@ -672,6 +771,13 @@ public class EpubConversionService : IEpubConversionService
         string Id,
         string XhtmlPath,
         string ImagePath,
+        string MediaType,
+        int Width,
+        int Height);
+
+    private sealed record PreparedImage(
+        byte[] Bytes,
+        string Extension,
         string MediaType,
         int Width,
         int Height);

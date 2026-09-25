@@ -320,6 +320,12 @@ public class ComicEmailService : IComicEmailService
 
             var maxBytes = (long)Math.Max(1, _settings.CurrentValue.EmailMaxAttachmentMegabytes) * 1024 * 1024;
             var attachmentLength = new FileInfo(attachmentPath).Length;
+            if (attachmentLength <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"Generated attachment for {Path.GetFileName(delivery.FilePath)} is empty; nothing was sent.");
+            }
+
             if (attachmentLength > maxBytes)
             {
                 throw new InvalidOperationException(

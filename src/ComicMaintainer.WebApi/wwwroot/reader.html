@@ -710,6 +710,10 @@
                     <span aria-hidden="true">⬇</span>
                     <span class="btn-label" id="offlineBtnLabel">Save offline</span>
                 </button>
+                <button class="reader-btn" onclick="openReaderEmailPrompt()" id="emailComicBtn" title="Email this comic to an ereader" aria-label="Email this comic to an ereader">
+                    <span aria-hidden="true">📧</span>
+                    <span class="btn-label">Email</span>
+                </button>
                 <button class="reader-btn reader-btn--icon" onclick="toggleFullscreen()" id="fullscreenBtn" title="Toggle fullscreen (F)" aria-label="Toggle fullscreen">
                     <span id="fullscreenIcon" aria-hidden="true">⛶</span>
                 </button>
@@ -766,6 +770,19 @@
         <input type="number" id="gotoPromptInput" min="1" inputmode="numeric">
         <button class="reader-btn reader-btn--primary" onclick="submitGotoPage()">Go</button>
         <button class="reader-btn" onclick="hideGotoPrompt()">Cancel</button>
+    </div>
+
+    <div class="goto-prompt" id="emailPrompt" role="dialog" aria-modal="true" aria-label="Email this comic to an ereader">
+        <label for="emailPromptDevice">Email to:</label>
+        <select id="emailPromptDevice" style="background: var(--reader-surface); border: 1px solid var(--reader-border); color: var(--reader-text); border-radius: var(--reader-radius-sm); padding: 0.4rem 0.6rem; font-size: 0.95rem;"></select>
+        <label for="emailPromptFormat">Format:</label>
+        <select id="emailPromptFormat" style="background: var(--reader-surface); border: 1px solid var(--reader-border); color: var(--reader-text); border-radius: var(--reader-radius-sm); padding: 0.4rem 0.6rem; font-size: 0.95rem;">
+            <option value="device">Device default</option>
+            <option value="original">Original archive</option>
+            <option value="epub">EPUB</option>
+        </select>
+        <button class="reader-btn reader-btn--primary" id="emailPromptSendBtn" onclick="submitReaderEmail()">Send</button>
+        <button class="reader-btn" onclick="hideReaderEmailPrompt()">Cancel</button>
     </div>
 
     <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="false"></div>
@@ -922,6 +939,8 @@
                 const savedDir = localStorage.getItem('readingDirection');
                 if (savedDir === 'rtl' || savedDir === 'ltr') readingDirection = savedDir;
             } catch (_e) { /* localStorage may be unavailable */ }
+
+            applyReaderEmailVisibility();
 
             try {
                 // Get comic info
@@ -2319,6 +2338,116 @@
             }
         }
 
+        // Email this comic to a saved ereader device. Self-contained here because
+        // reader.html does not load the library's main.js.
+        async function applyReaderEmailVisibility() {
+            const button = document.getElementById('emailComicBtn');
+            if (!button) return;
+            // Sending is a write operation; hide the button for read-only users
+            // rather than letting them hit a 403.
+            try {
+                const response = await fetch('/api/auth/user', buildFetchOptions());
+                if (!response.ok) return;
+                const user = await response.json();
+                button.hidden = user.canModifyLibrary === false;
+            } catch (_) { /* leave the button visible; the API still enforces */ }
+        }
+
+        async function openReaderEmailPrompt() {
+            const dlg = document.getElementById('emailPrompt');
+            const select = document.getElementById('emailPromptDevice');
+            const sendBtn = document.getElementById('emailPromptSendBtn');
+            if (!dlg || !select || !sendBtn) return;
+            if (!comicFilePath) {
+                showMessage('No comic is open.', 'error');
+                return;
+            }
+
+            select.replaceChildren(new Option('Loading devices…', ''));
+            sendBtn.disabled = true;
+            dlg.classList.add('show');
+
+            try {
+                const [status, devices] = await Promise.all([
+                    readerEmailJson('/api/email/status').catch(() => null),
+                    readerEmailJson('/api/email/devices')
+                ]);
+
+                const list = Array.isArray(devices.devices) ? devices.devices : [];
+                if (!list.length) {
+                    select.replaceChildren(new Option('No devices saved', ''));
+                    showMessage('Add an ereader device from the library menu first.', 'error');
+                    return;
+                }
+
+                select.replaceChildren(...list.map(d => new Option(`${d.name} (${d.emailAddress})`, d.id)));
+
+                if (status && status.configured === false) {
+                    showMessage('Email delivery is not configured. Ask an administrator to set the SMTP settings.', 'error');
+                    return;
+                }
+
+                sendBtn.disabled = false;
+            } catch (error) {
+                select.replaceChildren(new Option('Failed to load devices', ''));
+                showMessage('Failed to load ereader devices: ' + error.message, 'error');
+            }
+        }
+
+        function hideReaderEmailPrompt() {
+            document.getElementById('emailPrompt')?.classList.remove('show');
+        }
+
+        async function readerEmailJson(path, options = {}) {
+            const response = await fetch(path, buildFetchOptions({
+                ...options,
+                headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+            }));
+            if (!response.ok) {
+                let message = `HTTP error! status: ${response.status}`;
+                try {
+                    const body = await response.json();
+                    if (body && (body.error || body.message)) message = body.error || body.message;
+                } catch (_) {}
+                throw new Error(message);
+            }
+            if (response.status === 204) return {};
+            try {
+                return await response.json();
+            } catch (_) {
+                return {};
+            }
+        }
+
+        async function submitReaderEmail() {
+            const deviceId = document.getElementById('emailPromptDevice')?.value;
+            const format = document.getElementById('emailPromptFormat')?.value;
+            const sendBtn = document.getElementById('emailPromptSendBtn');
+            if (!deviceId) {
+                showMessage('Choose an ereader device.', 'error');
+                return;
+            }
+            if (sendBtn) sendBtn.disabled = true;
+            try {
+                const result = await readerEmailJson('/api/email/send', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        files: [comicFilePath],
+                        deviceId: parseInt(deviceId, 10),
+                        deliveryFormat: format === 'device' ? undefined : format,
+                        skipAlreadyDelivered: false
+                    })
+                });
+                hideReaderEmailPrompt();
+                const queued = Array.isArray(result.queued) ? result.queued.length : 0;
+                showMessage(queued ? 'Comic queued for delivery.' : 'Nothing was queued.', queued ? 'success' : 'info');
+            } catch (error) {
+                showMessage('Failed to email comic: ' + error.message, 'error');
+            } finally {
+                if (sendBtn) sendBtn.disabled = false;
+            }
+        }
+
         // Show a friendlier error state with a "Back to library" button.
         function showError(message) {
             const content = document.getElementById('readerContent');
@@ -2396,8 +2525,10 @@
                 // interacting with a form control.
                 const help = document.getElementById('shortcutsHelp');
                 const goto = document.getElementById('gotoPrompt');
+                const emailPrompt = document.getElementById('emailPrompt');
                 if (help && help.classList.contains('show')) return;
                 if (goto && goto.classList.contains('show')) return;
+                if (emailPrompt && emailPrompt.classList.contains('show')) return;
                 setChromeHidden(true);
             }, CHROME_IDLE_MS);
         }
@@ -2437,6 +2568,12 @@
             if (goto && goto.classList.contains('show')) {
                 if (e.key === 'Enter') { e.preventDefault(); submitGotoPage(); }
                 else if (e.key === 'Escape') { e.preventDefault(); hideGotoPrompt(); }
+                return;
+            }
+            // Escape closes the email prompt rather than exiting the reader.
+            const emailPrompt = document.getElementById('emailPrompt');
+            if (emailPrompt && emailPrompt.classList.contains('show')) {
+                if (e.key === 'Escape') { e.preventDefault(); hideReaderEmailPrompt(); }
                 return;
             }
             // Ignore shortcuts when focus is in any other input/textarea.

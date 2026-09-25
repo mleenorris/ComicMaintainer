@@ -59,26 +59,42 @@ A device is a saved name, email address and default delivery format.
 - **Delivery format** – `original` (send the archive untouched) or `epub` (convert
   before sending).
 
+Devices are managed from **⋮ menu → 📧 Ereader Devices**. Managing devices only needs
+the `CanModifyLibrary` policy, so it is deliberately *not* inside the Settings modal
+(which is administrator-only) — the same dialog is also linked from the SMTP section of
+Settings for convenience.
+
 Use **Send test email** after adding a device: it sends a short message with no
 attachment and reports the SMTP error verbatim if the server rejects it.
 
 ## Sending comics
 
-Three entry points exist in the web interface, all of which queue work and return
+Several entry points exist in the web interface, all of which queue work and return
 immediately:
 
 | Action | Where | Endpoint |
 |---|---|---|
-| Single issue | The ✉ action on a file row | `POST /api/email/send` |
-| Selection | "Email Selected" in the bulk actions bar | `POST /api/email/send` |
-| Whole series | The series card menu | `POST /api/email/send-series` |
+| Single issue | **📧 Email to Ereader…** in a file row or series issue ⋮ menu | `POST /api/email/send` |
+| Selection | **📧 Email Selected** in the bulk actions bar, the series-detail selection bar, or the series-list selection toolbar | `POST /api/email/send` |
+| Whole series | **📧 Email All Issues** in the series ⚙️ Actions menu | `POST /api/email/send-series` |
+| Current comic | The **📧 Email** button in the reader toolbar | `POST /api/email/send` |
 
 Every send picks a device and a format. Format `device` (the default) uses the format
 saved on the device, so changing the device later changes future sends.
 
+The send dialog checks `GET /api/email/status` and the saved device list before it is
+usable: if no devices exist it offers an **Add Ereader Device** shortcut instead of an
+empty picker, and if SMTP is not configured it disables **Send** and says so, rather than
+failing only after the button is pressed.
+
+All send actions require the `CanModifyLibrary` policy and are hidden from read-only
+users.
+
 `skipAlreadyDelivered` (on by default) suppresses files that already have a pending or
 sent delivery for the same device, which makes re-sending a series safe. The response
-reports `queued` and `skipped` counts.
+reports `queued` and `skipped` counts. The reader's **📧 Email** button deliberately sets
+it to `false`, because sending the issue you are currently reading is always an explicit
+request.
 
 A whole-series send is capped at 1000 issues; a larger series is rejected with an error
 rather than silently truncated.
@@ -140,7 +156,8 @@ are not resumed automatically, but re-sending is a no-op-free operation because
 `skipAlreadyDelivered` treats `pending` rows as already handled.
 
 Recent deliveries — including failures and their error text — are available from
-`GET /api/email/deliveries`.
+`GET /api/email/deliveries`, and are shown in the UI under
+**⋮ menu → 📨 Email Delivery History** (also reachable from the Ereader Devices dialog).
 
 ## API reference
 

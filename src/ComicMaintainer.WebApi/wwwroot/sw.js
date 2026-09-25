@@ -58,8 +58,11 @@ const IMAGE_API_PATHS = ['/api/comicreader/cover', '/api/comicreader/page'];
 // download is a deliberate snapshot the user expects to still be there on a
 // plane) and survive app version bumps.
 //
-// Like the image cache this holds *authenticated* content, so it is dropped
-// on logout together with the image cache.
+// Unlike the opportunistic image cache, this cache also survives logout: a
+// download is an explicit user action, and signing out (which can happen
+// simply because a token expired, including while offline) must not silently
+// throw away content the user deliberately saved for a trip. Downloads are
+// only removed when the user removes them, via REMOVE_OFFLINE_COMIC.
 const OFFLINE_CACHE_NAME = `${CACHE_PREFIX}offline-comics-v1`;
 
 // Synthetic, canonical cache keys for downloaded content. The reader requests
@@ -588,14 +591,12 @@ self.addEventListener('message', (event) => {
     return;
   }
 
-  // Cached covers/pages are authenticated content, so drop them when the user
-  // signs out rather than leaving them readable for whoever logs in next.
-  // Offline downloads are authenticated content too and go with them.
+  // Cached covers/pages are authenticated content that the user never asked
+  // to keep, so drop them when the user signs out rather than leaving them
+  // readable for whoever logs in next. Explicit offline downloads are
+  // deliberately *not* cleared here — see OFFLINE_CACHE_NAME above.
   if (event.data.type === 'CLEAR_IMAGE_CACHE') {
-    event.waitUntil(Promise.all([
-      caches.delete(IMAGE_CACHE_NAME),
-      caches.delete(OFFLINE_CACHE_NAME)
-    ]));
+    event.waitUntil(caches.delete(IMAGE_CACHE_NAME));
     return;
   }
 

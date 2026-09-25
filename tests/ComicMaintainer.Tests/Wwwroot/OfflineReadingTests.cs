@@ -68,14 +68,17 @@ public class OfflineReadingTests
     }
 
     [Fact]
-    public void ServiceWorker_ClearsDownloadsOnLogout()
+    public void ServiceWorker_KeepsDownloadsOnLogout()
     {
         var contents = ReadAsset("sw.js");
 
-        // Downloaded pages are authenticated content shared by every user of
-        // the device, so logout must purge them alongside the image cache.
+        // Downloads are an explicit user action, and a sign-out can happen
+        // just because a token expired (possibly while offline), so logging
+        // out must not silently discard saved comics. Only the opportunistic
+        // image cache is purged; downloads go away via REMOVE_OFFLINE_COMIC.
+        Assert.DoesNotContain("caches.delete(OFFLINE_CACHE_NAME)", contents);
         var clearHandler = contents[contents.IndexOf("CLEAR_IMAGE_CACHE", StringComparison.Ordinal)..];
-        Assert.Contains("caches.delete(OFFLINE_CACHE_NAME)", clearHandler);
+        Assert.Contains("caches.delete(IMAGE_CACHE_NAME)", clearHandler);
     }
 
     [Fact]

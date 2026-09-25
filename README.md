@@ -280,7 +280,7 @@ Once saved:
 
 Notes:
 - Downloads require the PWA service worker, so the site must be served over HTTPS (or `localhost`)
-- Downloaded pages are authenticated content, so signing out deletes them
+- Downloads persist across sign-out and app updates; remove them with the **Saved** button when you no longer need them
 - Reading progress made while offline is queued on the device and sent to the server automatically once the connection returns
 
 ### Performance

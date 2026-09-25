@@ -20,12 +20,6 @@ updates:
       - dependency-name: "SixLabors.ImageSharp"
         update-types:
           - version-update:semver-major
-      # SharpCompress 0.46+ removed the static archive Open/Create factory methods the
-      # archive services are written against, so these bumps do not compile.
-      - dependency-name: "SharpCompress"
-        update-types:
-          - version-update:semver-major
-          - version-update:semver-minor
     groups:
       # Test-only dependencies carry no production risk, so batching them keeps the review
       # queue focused on packages that ship. Listed before the Microsoft group would match

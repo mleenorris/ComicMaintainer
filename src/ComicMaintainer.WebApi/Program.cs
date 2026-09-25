@@ -648,11 +648,27 @@ builder.Services.AddSingleton<IUserPreferencesService, UserPreferencesService>()
 
 builder.Services.AddScoped<IAuthService, AuthService>();
 
+// Email delivery to saved ereader devices (with optional EPUB conversion).
+builder.Services.AddSingleton<IEpubConversionService, EpubConversionService>();
+builder.Services.AddSingleton<IComicEmailSender, SmtpComicEmailSender>();
+builder.Services.AddSingleton<IEreaderDeviceService, EreaderDeviceService>();
+// The queue resolves the delivery service lazily: the service enqueues work and
+// the queue executes it, so constructor injection both ways would be a cycle.
+builder.Services.AddSingleton<ComicEmailQueue>(sp => new ComicEmailQueue(
+    () => sp.GetRequiredService<IComicEmailService>(),
+    sp.GetRequiredService<ILogger<ComicEmailQueue>>()));
+builder.Services.AddSingleton<IComicEmailQueue>(sp => sp.GetRequiredService<ComicEmailQueue>());
+builder.Services.AddSingleton<IComicEmailService, ComicEmailService>();
+
+
 // Add hosted service for file watcher
 builder.Services.AddHostedService<FileWatcherHostedService>();
 
 // Add hosted service that drains the background series archive cover write queue
 builder.Services.AddHostedService<SeriesArchiveCoverWriteQueueHostedService>();
+
+// Add hosted service that drains the background comic email delivery queue
+builder.Services.AddHostedService<ComicEmailQueueHostedService>();
 
 // Add hosted service for database cleanup
 builder.Services.AddHostedService<DatabaseCleanupHostedService>();
@@ -1161,6 +1177,42 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         var seriesImageMaxDimension = Environment.GetEnvironmentVariable("SERIES_IMAGE_MAX_DIMENSION");
         if (!string.IsNullOrEmpty(seriesImageMaxDimension) && int.TryParse(seriesImageMaxDimension, out var siMaxDim) && siMaxDim > 0)
             options.SeriesImageMaxDimension = siMaxDim;
+
+        var smtpHost = Environment.GetEnvironmentVariable("SMTP_HOST");
+        if (!string.IsNullOrEmpty(smtpHost))
+            options.SmtpHost = smtpHost;
+
+        var smtpPort = Environment.GetEnvironmentVariable("SMTP_PORT");
+        if (!string.IsNullOrEmpty(smtpPort) && int.TryParse(smtpPort, out var smtpPortValue) && smtpPortValue is > 0 and <= 65535)
+            options.SmtpPort = smtpPortValue;
+
+        var smtpUsername = Environment.GetEnvironmentVariable("SMTP_USERNAME");
+        if (!string.IsNullOrEmpty(smtpUsername))
+            options.SmtpUsername = smtpUsername;
+
+        var smtpPassword = Environment.GetEnvironmentVariable("SMTP_PASSWORD");
+        if (!string.IsNullOrEmpty(smtpPassword))
+            options.SmtpPassword = smtpPassword;
+
+        var smtpUseSsl = Environment.GetEnvironmentVariable("SMTP_USE_SSL");
+        if (!string.IsNullOrEmpty(smtpUseSsl))
+            options.SmtpUseSsl = smtpUseSsl.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        var smtpAllowInsecure = Environment.GetEnvironmentVariable("SMTP_ALLOW_INSECURE");
+        if (!string.IsNullOrEmpty(smtpAllowInsecure))
+            options.SmtpAllowInsecure = smtpAllowInsecure.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        var emailFromAddress = Environment.GetEnvironmentVariable("EMAIL_FROM_ADDRESS");
+        if (!string.IsNullOrEmpty(emailFromAddress))
+            options.EmailFromAddress = emailFromAddress;
+
+        var emailFromName = Environment.GetEnvironmentVariable("EMAIL_FROM_NAME");
+        if (!string.IsNullOrEmpty(emailFromName))
+            options.EmailFromName = emailFromName;
+
+        var emailMaxAttachmentMb = Environment.GetEnvironmentVariable("EMAIL_MAX_ATTACHMENT_MB");
+        if (!string.IsNullOrEmpty(emailMaxAttachmentMb) && int.TryParse(emailMaxAttachmentMb, out var maxAttachmentMb) && maxAttachmentMb > 0)
+            options.EmailMaxAttachmentMegabytes = maxAttachmentMb;
     }
 }
 

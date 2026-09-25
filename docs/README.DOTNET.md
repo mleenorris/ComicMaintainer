@@ -19,6 +19,7 @@ ComicMaintainer is a service that automatically watches a directory for new or c
 - **Series Library View**: Browse comics as cover-based series cards and drill into issue lists
 - **External Alias Grouping**: Optionally enrich series grouping with ComicVine aliases so alternate titles collapse into one series
 - **Duplicate Detection**: Automatically identifies and handles duplicate files
+- **Email to E-Reader**: Email individual issues, a whole series or a selection to saved e-reader addresses, optionally converted to EPUB, and subscribe a series so new issues are delivered automatically. See [Email to E-Reader](EMAIL_DELIVERY.md).
 - **RESTful API**: Clean API for integration with other tools
 - **Cross-Platform**: Runs on Windows, Linux, macOS
 - **Docker Support**: Easy deployment with Docker
@@ -279,6 +280,16 @@ For a complete, ready-to-use API collection with all endpoints, see:
 
 - `GET /api/watcher/status` - Get watcher status
 - `POST /api/watcher/enable` - Enable/disable watcher
+
+### Email API
+
+- `GET /api/email/status` - Whether email delivery is configured
+- `GET|POST /api/email/devices` - Manage saved e-reader addresses
+- `POST /api/email/send` - Queue specific files for delivery
+- `POST /api/email/send-series` - Queue every issue of a series
+- `GET|PUT /api/email/subscriptions` - Manage automatic per-series delivery
+
+See [Email to E-Reader](EMAIL_DELIVERY.md) for the full endpoint list and configuration.
 
 **Note**: The above is a brief overview. See the [Postman Collection](POSTMAN_API_COLLECTION.md) for the complete API documentation with 52 endpoints organized into 9 categories.
 

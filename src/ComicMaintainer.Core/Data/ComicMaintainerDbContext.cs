@@ -30,6 +30,9 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<ScheduledJobEntity> ScheduledJobs { get; set; } = null!;
     public DbSet<MetadataAuditFindingEntity> MetadataAuditFindings { get; set; } = null!;
     public DbSet<ProcessingJobEntity> ProcessingJobs { get; set; } = null!;
+    public DbSet<EreaderDeviceEntity> EreaderDevices { get; set; } = null!;
+    public DbSet<SeriesEmailSubscriptionEntity> SeriesEmailSubscriptions { get; set; } = null!;
+    public DbSet<ComicEmailDeliveryEntity> ComicEmailDeliveries { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -258,6 +261,47 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.Details).HasMaxLength(1024);
             entity.HasIndex(e => e.FindingType);
             entity.HasIndex(e => e.FilePath);
+        });
+
+        // Configure EreaderDeviceEntity
+        modelBuilder.Entity<EreaderDeviceEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.EmailAddress).IsRequired().HasMaxLength(320);
+            entity.Property(e => e.DeliveryFormat).IsRequired().HasMaxLength(16);
+            entity.HasIndex(e => e.EmailAddress).IsUnique();
+        });
+
+        // Configure SeriesEmailSubscriptionEntity
+        modelBuilder.Entity<SeriesEmailSubscriptionEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.NormalizedSeriesKey).IsRequired().HasMaxLength(512);
+            entity.Property(e => e.SeriesTitle).IsRequired().HasMaxLength(512);
+            entity.Property(e => e.DeliveryFormat).IsRequired().HasMaxLength(16);
+            // One subscription per (series, device) pair so repeated opt-ins are idempotent.
+            entity.HasIndex(e => new { e.NormalizedSeriesKey, e.DeviceId }).IsUnique();
+            entity.HasOne<EreaderDeviceEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.DeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Configure ComicEmailDeliveryEntity
+        modelBuilder.Entity<ComicEmailDeliveryEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.FilePath).IsRequired().HasMaxLength(2048);
+            entity.Property(e => e.DeviceName).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.DeviceEmail).IsRequired().HasMaxLength(320);
+            entity.Property(e => e.DeliveryFormat).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.Source).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.ErrorMessage).HasMaxLength(1024);
+            // Auto-send dedupe looks up "was this file already delivered to this device".
+            entity.HasIndex(e => new { e.FilePath, e.DeviceId, e.Status });
+            entity.HasIndex(e => e.CreatedAt);
         });
     }
 }
@@ -589,4 +633,92 @@ public class SeriesMetadataCacheEntity
     /// provider returned no description or the series is unmatched.
     /// </summary>
     public string? Synopsis { get; set; }
+}
+
+/// <summary>
+/// A saved ereader email address (e.g. a Kindle "send to" address) that comics
+/// can be delivered to.
+/// </summary>
+public class EreaderDeviceEntity
+{
+    public int Id { get; set; }
+
+    /// <summary>Friendly device name shown in the UI.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Destination email address for this device.</summary>
+    public string EmailAddress { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Default delivery format for this device: <c>original</c> (send the CBZ/CBR
+    /// as-is) or <c>epub</c> (convert before sending).
+    /// </summary>
+    public string DeliveryFormat { get; set; } = "original";
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+}
+
+/// <summary>
+/// Marks a series for automatic delivery: every newly processed issue of the
+/// series is queued for email to the referenced device.
+/// </summary>
+public class SeriesEmailSubscriptionEntity
+{
+    public int Id { get; set; }
+
+    /// <summary>Normalized series key (same normalization used by the series cache).</summary>
+    public string NormalizedSeriesKey { get; set; } = string.Empty;
+
+    /// <summary>Display title captured when the subscription was created.</summary>
+    public string SeriesTitle { get; set; } = string.Empty;
+
+    public int DeviceId { get; set; }
+
+    /// <summary>
+    /// Delivery format override for this series: <c>original</c>, <c>epub</c>, or
+    /// <c>device</c> to inherit the device default.
+    /// </summary>
+    public string DeliveryFormat { get; set; } = "device";
+
+    public bool Enabled { get; set; } = true;
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? LastSentAt { get; set; }
+}
+
+/// <summary>
+/// Durable log of a comic emailed (or attempted) to a device. Doubles as the
+/// dedupe record that stops automatic delivery from re-sending an issue that has
+/// already been delivered to the same device.
+/// </summary>
+public class ComicEmailDeliveryEntity
+{
+    public int Id { get; set; }
+    public string FilePath { get; set; } = string.Empty;
+    public int DeviceId { get; set; }
+    public string DeviceName { get; set; } = string.Empty;
+    public string DeviceEmail { get; set; } = string.Empty;
+
+    /// <summary><c>original</c> or <c>epub</c>.</summary>
+    public string DeliveryFormat { get; set; } = "original";
+
+    /// <summary><c>pending</c>, <c>sent</c> or <c>failed</c>.</summary>
+    public string Status { get; set; } = "pending";
+
+    /// <summary><c>manual</c> for user-initiated sends, <c>auto</c> for series subscriptions.</summary>
+    public string Source { get; set; } = "manual";
+
+    /// <summary>
+    /// Subscription that triggered an automatic send, so its last-sent
+    /// timestamp can be stamped once this delivery actually succeeds. Null for
+    /// user-initiated sends. Not a foreign key: the delivery history outlives
+    /// the subscription.
+    /// </summary>
+    public int? SubscriptionId { get; set; }
+
+    public string? ErrorMessage { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? SentAt { get; set; }
 }

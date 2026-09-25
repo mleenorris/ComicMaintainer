@@ -203,4 +203,60 @@ public class AppSettings
     /// are pruned opportunistically on cache writes. Defaults to 512 MiB.
     /// </summary>
     public int FileCoverCacheMaxMegabytes { get; set; } = 512;
+
+    // ---------------------------------------------------------------------
+    // Email delivery (send-to-ereader)
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Hostname of the SMTP server used to email comics to saved ereader
+    /// devices. When empty, email delivery is disabled and send requests are
+    /// rejected with a clear error instead of being queued.
+    /// </summary>
+    public string? SmtpHost { get; set; }
+
+    /// <summary>Port of the SMTP server. Defaults to 587 (submission/STARTTLS).</summary>
+    public int SmtpPort { get; set; } = 587;
+
+    /// <summary>Optional SMTP username. When empty the connection is unauthenticated.</summary>
+    public string? SmtpUsername { get; set; }
+
+    /// <summary>
+    /// Optional SMTP password / app password. Stored in <c>user-settings.json</c>
+    /// alongside the other settings and never returned by the settings API; the
+    /// API only reports whether a password is configured.
+    /// </summary>
+    public string? SmtpPassword { get; set; }
+
+    /// <summary>
+    /// When true, connect using implicit TLS (SMTPS, usually port 465). When
+    /// false the connection starts plaintext and STARTTLS is required before
+    /// credentials or attachments are transmitted, unless
+    /// <see cref="SmtpAllowInsecure"/> is also set.
+    /// </summary>
+    public bool SmtpUseSsl { get; set; }
+
+    /// <summary>
+    /// Opt-in escape hatch for a trusted local relay that offers no TLS at all.
+    /// When true, and <see cref="SmtpUseSsl"/> is false, the connection is
+    /// allowed to stay plaintext if the server does not advertise STARTTLS,
+    /// which exposes credentials and attachments on the network. Defaults to
+    /// false, which requires STARTTLS.
+    /// </summary>
+    public bool SmtpAllowInsecure { get; set; }
+
+    /// <summary>Envelope/from address used for outgoing comic emails.</summary>
+    public string? EmailFromAddress { get; set; }
+
+    /// <summary>Display name used for outgoing comic emails.</summary>
+    public string EmailFromName { get; set; } = "ComicMaintainer";
+
+    /// <summary>
+    /// Maximum size, in megabytes, of a single comic attachment. Issues larger
+    /// than this are failed with a clear message rather than being handed to the
+    /// SMTP server, which would reject them anyway (Kindle's personal-document
+    /// limit is 50 MB, most providers cap at 25 MB). Defaults to 25.
+    /// </summary>
+    public int EmailMaxAttachmentMegabytes { get; set; } = 25;
+
 }

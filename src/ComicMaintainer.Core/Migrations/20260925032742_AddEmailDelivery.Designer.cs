@@ -3,6 +3,7 @@ using System;
 using ComicMaintainer.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ComicMaintainer.Core.Migrations
 {
     [DbContext(typeof(ComicMaintainerDbContext))]
-    partial class ComicMaintainerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260925032742_AddEmailDelivery")]
+    partial class AddEmailDelivery
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
@@ -65,9 +68,6 @@ namespace ComicMaintainer.Core.Migrations
                         .IsRequired()
                         .HasMaxLength(16)
                         .HasColumnType("TEXT");
-
-                    b.Property<int?>("SubscriptionId")
-                        .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
 

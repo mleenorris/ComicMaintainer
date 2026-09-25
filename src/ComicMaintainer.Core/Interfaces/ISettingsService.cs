@@ -114,4 +114,22 @@ public interface ISettingsService
     /// <c>ja</c>, <c>ko</c>, <c>zh</c>, or null/empty to clear.
     /// </summary>
     Task UpdateDefaultPreferredLanguageAsync(string? language, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persist the SMTP / email-delivery settings used to send comics to saved
+    /// ereader devices. A null <paramref name="smtpPassword"/> leaves the stored
+    /// password untouched so the UI never has to round-trip the secret; pass an
+    /// empty string to clear it.
+    /// </summary>
+    Task UpdateEmailSettingsAsync(
+        string? smtpHost,
+        int smtpPort,
+        string? smtpUsername,
+        string? smtpPassword,
+        bool smtpUseSsl,
+        bool smtpAllowInsecure,
+        string? fromAddress,
+        string? fromName,
+        int maxAttachmentMegabytes,
+        CancellationToken cancellationToken = default);
 }

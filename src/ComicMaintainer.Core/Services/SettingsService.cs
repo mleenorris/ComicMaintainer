@@ -22,6 +22,16 @@ public class SettingsService : ISettingsService
         WriteIndented = true
     };
 
+    /// <summary>
+    /// Setting names whose values are secrets and must never be written to the log.
+    /// Updates for these names go through <c>UpdateSecretSettingAsync</c>.
+    /// </summary>
+    private static readonly HashSet<string> SecretSettingNames = new(StringComparer.Ordinal)
+    {
+        "SmtpPassword",
+        "ComicVineApiKey"
+    };
+
     public SettingsService(
         ILogger<SettingsService> logger,
         IOptionsMonitor<AppSettings> appSettings)
@@ -190,7 +200,7 @@ public class SettingsService : ISettingsService
 
     public async Task UpdateComicVineApiKeyAsync(string? apiKey, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("ComicVineApiKey", apiKey, cancellationToken);
+        await UpdateSecretSettingAsync("ComicVineApiKey", apiKey, cancellationToken);
     }
 
     public async Task UpdateComicVineBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default)
@@ -227,7 +237,82 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("DefaultPreferredLanguage", normalized, cancellationToken);
     }
 
+    public async Task UpdateEmailSettingsAsync(
+        string? smtpHost,
+        int smtpPort,
+        string? smtpUsername,
+        string? smtpPassword,
+        bool smtpUseSsl,
+        bool smtpAllowInsecure,
+        string? fromAddress,
+        string? fromName,
+        int maxAttachmentMegabytes,
+        CancellationToken cancellationToken = default)
+    {
+        if (smtpPort is < 1 or > 65535)
+        {
+            throw new ArgumentException("SMTP port must be between 1 and 65535", nameof(smtpPort));
+        }
+
+        if (maxAttachmentMegabytes is < 1 or > 200)
+        {
+            throw new ArgumentException("Max attachment size must be between 1 and 200 MB", nameof(maxAttachmentMegabytes));
+        }
+
+        var normalizedFrom = string.IsNullOrWhiteSpace(fromAddress) ? null : fromAddress.Trim();
+        if (normalizedFrom is not null && !EmailAddressUtils.IsValid(normalizedFrom))
+        {
+            throw new ArgumentException($"'{normalizedFrom}' is not a valid email address", nameof(fromAddress));
+        }
+
+        await UpdateSettingAsync("SmtpHost", string.IsNullOrWhiteSpace(smtpHost) ? null : smtpHost.Trim(), cancellationToken);
+        await UpdateSettingAsync("SmtpPort", smtpPort, cancellationToken);
+        await UpdateSettingAsync("SmtpUsername", string.IsNullOrWhiteSpace(smtpUsername) ? null : smtpUsername.Trim(), cancellationToken);
+        await UpdateSettingAsync("SmtpUseSsl", smtpUseSsl, cancellationToken);
+        await UpdateSettingAsync("SmtpAllowInsecure", smtpAllowInsecure, cancellationToken);
+        await UpdateSettingAsync("EmailFromAddress", normalizedFrom, cancellationToken);
+        await UpdateSettingAsync("EmailFromName", string.IsNullOrWhiteSpace(fromName) ? "ComicMaintainer" : fromName.Trim(), cancellationToken);
+        await UpdateSettingAsync("EmailMaxAttachmentMegabytes", maxAttachmentMegabytes, cancellationToken);
+
+        // A null password means "keep the stored secret"; an empty string clears it.
+        if (smtpPassword is not null)
+        {
+            await UpdateSecretSettingAsync("SmtpPassword", smtpPassword.Length == 0 ? null : smtpPassword, cancellationToken);
+        }
+    }
+
     private async Task UpdateSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
+    {
+        if (SecretSettingNames.Contains(settingName))
+        {
+            throw new InvalidOperationException(
+                $"'{settingName}' is a secret and must be persisted with UpdateSecretSettingAsync so its value is never logged");
+        }
+
+        await PersistSettingAsync(settingName, value, cancellationToken);
+
+        // Sanitize value for logging to prevent log forging.
+        var sanitizedValue = value is string strValue
+            ? LoggingHelper.SanitizeForLog(strValue)
+            : value?.ToString() ?? "null";
+        _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, sanitizedValue);
+    }
+
+    /// <summary>
+    /// Persists a setting whose value is a secret. The value is never passed to the
+    /// logger, only the fact that it was set or cleared.
+    /// </summary>
+    private async Task UpdateSecretSettingAsync(string settingName, string? value, CancellationToken cancellationToken)
+    {
+        var cleared = string.IsNullOrEmpty(value);
+        await PersistSettingAsync(settingName, value, cancellationToken);
+        _logger.LogInformation(
+            "Updated setting {SettingName} ({State})",
+            settingName,
+            cleared ? "cleared" : "value hidden");
+    }
+
+    private async Task PersistSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);
         try
@@ -260,14 +345,6 @@ public class SettingsService : ISettingsService
             var tempPath = _settingsFilePath + ".tmp";
             await File.WriteAllTextAsync(tempPath, updatedJson, cancellationToken);
             File.Move(tempPath, _settingsFilePath, overwrite: true);
-
-            // Sanitize value for logging to prevent log forging
-            var sanitizedValue = value?.ToString() ?? "null";
-            if (value is string strValue)
-            {
-                sanitizedValue = LoggingHelper.SanitizeForLog(strValue);
-            }
-            _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, sanitizedValue);
         }
         catch (Exception ex)
         {

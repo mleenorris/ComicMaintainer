@@ -285,9 +285,11 @@ public class ComicEmailServiceTests : IDisposable
             new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
 
         string? epubPath = null;
+        EpubConversionOptions? usedOptions = null;
         _epub.Setup(e => e.ConvertToEpubAsync(file, It.IsAny<string>(), It.IsAny<EpubConversionOptions?>(), It.IsAny<CancellationToken>()))
-            .Returns<string, string, EpubConversionOptions?, CancellationToken>((_, outDir, _, _) =>
+            .Returns<string, string, EpubConversionOptions?, CancellationToken>((_, outDir, options, _) =>
             {
+                usedOptions = options;
                 Directory.CreateDirectory(outDir);
                 epubPath = Path.Combine(outDir, "Series - Chapter 0001.epub");
                 File.WriteAllText(epubPath, "epub-bytes");
@@ -309,6 +311,8 @@ public class ComicEmailServiceTests : IDisposable
         Assert.Equal("application/epub+zip", sent!.AttachmentContentType);
         Assert.Equal(EmailDeliveryStatus.Sent, (await GetDeliveryAsync(queued.Id)).Status);
         Assert.False(File.Exists(epubPath!));
+        Assert.NotNull(usedOptions);
+        Assert.Equal(25L * 1024 * 1024, usedOptions!.MaxSizeBytes);
     }
 
     [Fact]

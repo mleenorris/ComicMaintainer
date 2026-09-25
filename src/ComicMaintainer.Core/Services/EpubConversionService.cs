@@ -11,6 +11,8 @@ using SharpCompress.Archives;
 using SharpCompress.Archives.Rar;
 using SystemZipArchive = System.IO.Compression.ZipArchive;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.Processing;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -18,15 +20,25 @@ namespace ComicMaintainer.Core.Services;
 /// Converts CBZ/CBR archives into fixed-layout EPUB3 files.
 /// </summary>
 /// <remarks>
-/// The generated EPUB keeps the original page images untouched and wraps each of
-/// them in a pre-paginated XHTML page whose viewport matches the image size, which
-/// is what ereaders (Kindle/Kobo) expect for comics. Metadata is taken from the
-/// archive's ComicInfo.xml when present so the book shows up with the right
-/// series/issue title on the device.
+/// Page images are only kept byte-for-byte when the source format is already
+/// safe for ereaders and no size-budget compression tier applies; otherwise
+/// they are re-encoded as JPEG (and downscaled, once the book needs to shrink
+/// to fit <see cref="EpubConversionOptions.MaxSizeBytes"/>). Each image is
+/// wrapped in a pre-paginated XHTML page whose viewport matches the image
+/// size, which is what ereaders (Kindle/Kobo) expect for comics. Metadata is
+/// taken from the archive's ComicInfo.xml when present so the book shows up
+/// with the right series/issue title on the device.
 /// </remarks>
 public class EpubConversionService : IEpubConversionService
 {
     private static readonly string[] ImageExtensions = { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp" };
+
+    // Upper bound on decoded pixel count. A small (byte-capped) but pathological
+    // archive entry could otherwise declare enormous dimensions and exhaust
+    // memory/CPU when fully decoded (a "decompression bomb"). 100 megapixels is
+    // far larger than any real comic page yet cheap to reject from the header
+    // alone. Mirrors SeriesImageDownscaler.MaxDecodedPixels.
+    private const long MaxDecodedPixels = 100L * 1000 * 1000;
 
     private readonly ILogger<EpubConversionService> _logger;
 
@@ -100,84 +112,180 @@ public class EpubConversionService : IEpubConversionService
         var epubPath = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(comicFilePath) + ".epub");
         var tempPath = epubPath + ".tmp";
 
+        // Ereader mailboxes cap attachment size, so an oversized book is rebuilt
+        // with progressively stronger page compression instead of failing.
+        var tiers = BuildCompressionTiers(options?.MaxSizeBytes);
+
         try
         {
-            using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
-            using (var epub = new SystemZipArchive(fileStream, ZipArchiveMode.Create))
+            for (var tierIndex = 0; tierIndex < tiers.Count; tierIndex++)
             {
-                // The mimetype entry must be first and stored uncompressed (OCF spec).
-                WriteEntry(epub, "mimetype", "application/epub+zip", CompressionLevel.NoCompression);
-                WriteEntry(epub, "META-INF/container.xml", ContainerXml);
+                cancellationToken.ThrowIfCancellationRequested();
 
-                if (seriesCover is not null)
+                var tier = tiers[tierIndex];
+                var expectedEntries = WriteEpub(
+                    tempPath,
+                    pages,
+                    comicInfo,
+                    seriesName,
+                    title,
+                    bookId,
+                    seriesCover,
+                    tier,
+                    cancellationToken);
+
+                // The archive is complete only after the ZipArchive is disposed;
+                // re-read it so a structurally broken book is never handed to callers.
+                ValidateEpub(tempPath, expectedEntries, comicFilePath);
+
+                var length = new FileInfo(tempPath).Length;
+                var isLastTier = tierIndex == tiers.Count - 1;
+                if (!isLastTier && options?.MaxSizeBytes is long budget && length > budget)
                 {
-                    var coverEntry = epub.CreateEntry("OEBPS/" + seriesCover.ImagePath, CompressionLevel.NoCompression);
-                    using (var coverStream = coverEntry.Open())
-                    {
-                        coverStream.Write(seriesCover.Bytes, 0, seriesCover.Bytes.Length);
-                    }
-
-                    WriteEntry(
-                        epub,
-                        "OEBPS/" + seriesCover.XhtmlPath,
-                        BuildCoverXhtml(title, seriesCover.ImagePath, seriesCover.Width, seriesCover.Height));
+                    _logger.LogInformation(
+                        "EPUB for {FilePath} is {Bytes} bytes which exceeds the {Budget} byte budget; retrying with stronger page compression",
+                        LoggingHelper.SanitizePathForLog(comicFilePath),
+                        length,
+                        budget);
+                    TryDelete(tempPath);
+                    continue;
                 }
 
-                var manifestPages = new List<EpubPage>(pages.Count);
-                var index = 0;
-                foreach (var page in pages)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    index++;
+                File.Move(tempPath, epubPath, overwrite: true);
+                _logger.LogInformation(
+                    "Converted {FilePath} to EPUB with {PageCount} page(s) ({Bytes} bytes, compression tier {Tier})",
+                    LoggingHelper.SanitizePathForLog(comicFilePath),
+                    pages.Count,
+                    length,
+                    tierIndex);
 
-                    var extension = NormalizeImageExtension(Path.GetExtension(page.Key) ?? ".jpg");
-                    var imageName = $"images/page{index:D4}{extension}";
-
-                    byte[] imageBytes;
-                    using (var entryStream = page.OpenEntryStream())
-                    using (var buffer = new MemoryStream())
-                    {
-                        entryStream.CopyTo(buffer);
-                        imageBytes = buffer.ToArray();
-                    }
-
-                    var (width, height) = GetImageSize(imageBytes, page.Key);
-
-                    var imageEntry = epub.CreateEntry("OEBPS/" + imageName, CompressionLevel.NoCompression);
-                    using (var imageStream = imageEntry.Open())
-                    {
-                        imageStream.Write(imageBytes, 0, imageBytes.Length);
-                    }
-
-                    var pageName = $"page{index:D4}.xhtml";
-                    WriteEntry(epub, "OEBPS/" + pageName, BuildPageXhtml(index, imageName, width, height));
-
-                    manifestPages.Add(new EpubPage(
-                        Id: $"page{index:D4}",
-                        XhtmlPath: pageName,
-                        ImagePath: imageName,
-                        MediaType: GetMediaType(extension),
-                        Width: width,
-                        Height: height));
-                }
-
-                WriteEntry(epub, "OEBPS/content.opf", BuildOpf(bookId, title, seriesName, comicInfo, seriesCover, manifestPages));
-                WriteEntry(epub, "OEBPS/nav.xhtml", BuildNav(title, seriesCover, manifestPages));
+                return epubPath;
             }
 
-            File.Move(tempPath, epubPath, overwrite: true);
-            _logger.LogInformation(
-                "Converted {FilePath} to EPUB with {PageCount} page(s)",
-                LoggingHelper.SanitizePathForLog(comicFilePath),
-                pages.Count);
-
-            return epubPath;
+            // BuildCompressionTiers always yields at least one tier.
+            throw new InvalidOperationException(
+                $"No EPUB could be produced for {Path.GetFileName(comicFilePath)}.");
         }
         catch
         {
             TryDelete(tempPath);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Writes one complete EPUB variant and returns the entries it must contain.
+    /// </summary>
+    private List<string> WriteEpub(
+        string tempPath,
+        IReadOnlyList<IArchiveEntry> pages,
+        ComicInfo? comicInfo,
+        string? seriesName,
+        string title,
+        string bookId,
+        SeriesCover? seriesCover,
+        CompressionTier tier,
+        CancellationToken cancellationToken)
+    {
+        var requiredEntries = new List<string> { "META-INF/container.xml" };
+
+        using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        using (var epub = new SystemZipArchive(fileStream, ZipArchiveMode.Create))
+        {
+            // The mimetype entry must be first and stored uncompressed (OCF spec).
+            WriteEntry(epub, "mimetype", "application/epub+zip", CompressionLevel.NoCompression);
+            WriteEntry(epub, "META-INF/container.xml", ContainerXml);
+
+            if (seriesCover is not null)
+            {
+                var coverEntry = epub.CreateEntry("OEBPS/" + seriesCover.ImagePath, CompressionLevel.NoCompression);
+                using (var coverStream = coverEntry.Open())
+                {
+                    coverStream.Write(seriesCover.Bytes, 0, seriesCover.Bytes.Length);
+                }
+
+                WriteEntry(
+                    epub,
+                    "OEBPS/" + seriesCover.XhtmlPath,
+                    BuildCoverXhtml(title, seriesCover.ImagePath, seriesCover.Width, seriesCover.Height));
+
+                requiredEntries.Add("OEBPS/" + seriesCover.ImagePath);
+                requiredEntries.Add("OEBPS/" + seriesCover.XhtmlPath);
+            }
+
+            var manifestPages = new List<EpubPage>(pages.Count);
+            var index = 0;
+            foreach (var page in pages)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                index++;
+
+                var extension = NormalizeImageExtension(Path.GetExtension(page.Key) ?? ".jpg");
+
+                byte[] imageBytes;
+                using (var entryStream = page.OpenEntryStream())
+                using (var buffer = new MemoryStream())
+                {
+                    entryStream.CopyTo(buffer);
+                    imageBytes = buffer.ToArray();
+                }
+
+                // A page that cannot be decoded (empty, truncated, or not an
+                // image at all) would silently render as a blank page on the
+                // device, so the whole conversion fails instead.
+                var prepared = PrepareImage(imageBytes, extension, page.Key, tier);
+                var imageName = $"images/page{index:D4}{prepared.Extension}";
+
+                var imageEntry = epub.CreateEntry("OEBPS/" + imageName, CompressionLevel.NoCompression);
+                using (var imageStream = imageEntry.Open())
+                {
+                    imageStream.Write(prepared.Bytes, 0, prepared.Bytes.Length);
+                }
+
+                var pageName = $"page{index:D4}.xhtml";
+                WriteEntry(epub, "OEBPS/" + pageName, BuildPageXhtml(index, imageName, prepared.Width, prepared.Height));
+
+                requiredEntries.Add("OEBPS/" + imageName);
+                requiredEntries.Add("OEBPS/" + pageName);
+
+                manifestPages.Add(new EpubPage(
+                    Id: $"page{index:D4}",
+                    XhtmlPath: pageName,
+                    ImagePath: imageName,
+                    MediaType: prepared.MediaType,
+                    Width: prepared.Width,
+                    Height: prepared.Height));
+            }
+
+            WriteEntry(epub, "OEBPS/content.opf", BuildOpf(bookId, title, seriesName, comicInfo, seriesCover, manifestPages));
+            WriteEntry(epub, "OEBPS/nav.xhtml", BuildNav(title, seriesCover, manifestPages));
+            requiredEntries.Add("OEBPS/content.opf");
+            requiredEntries.Add("OEBPS/nav.xhtml");
+        }
+
+        return requiredEntries;
+    }
+
+    /// <summary>
+    /// Compression variants tried in order. The first keeps the original page
+    /// data (best fidelity); the later ones re-encode every page as JPEG at a
+    /// lower quality and, eventually, a smaller resolution. Without a size
+    /// budget only the lossless variant is ever built.
+    /// </summary>
+    private static IReadOnlyList<CompressionTier> BuildCompressionTiers(long? maxSizeBytes)
+    {
+        if (maxSizeBytes is null or <= 0)
+        {
+            return new[] { CompressionTier.Lossless };
+        }
+
+        return new[]
+        {
+            CompressionTier.Lossless,
+            new CompressionTier(Quality: 80, MaxDimension: 2400),
+            new CompressionTier(Quality: 65, MaxDimension: 1800),
+            new CompressionTier(Quality: 50, MaxDimension: 1400)
+        };
     }
 
     private static IArchive OpenArchive(string comicFilePath)
@@ -366,9 +474,14 @@ public class EpubConversionService : IEpubConversionService
                 ? "." + ext
                 : Path.GetExtension(seriesImagePath));
             var mediaType = GetMediaType(extension);
-            if (mediaType == "application/octet-stream")
+            if (!IsEreaderSafeMediaType(mediaType))
             {
-                return null;
+                // Same reasoning as page images: an unsupported format would show
+                // up as a blank cover, so re-encode it as JPEG.
+                var encoded = EncodeAsJpeg(image, CompressionTier.Lossless);
+                bytes = encoded.Bytes;
+                extension = encoded.Extension;
+                mediaType = encoded.MediaType;
             }
 
             return new SeriesCover(
@@ -379,7 +492,7 @@ public class EpubConversionService : IEpubConversionService
                 Height: image.Height,
                 Bytes: bytes);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or UnknownImageFormatException or InvalidImageContentException or NotSupportedException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or UnknownImageFormatException or InvalidImageContentException or NotSupportedException or ImageFormatException)
         {
             _logger.LogWarning(
                 ex,
@@ -389,25 +502,136 @@ public class EpubConversionService : IEpubConversionService
         }
     }
 
-    private static (int Width, int Height) GetImageSize(byte[] imageBytes, string? entryKey)
+    /// <summary>
+    /// Fully decodes a page image so a corrupt/truncated entry fails the
+    /// conversion instead of shipping a blank page, determines the real format
+    /// from the bytes (archive file names routinely lie about it, and a wrong
+    /// media type also renders blank) and re-encodes formats that ereaders do
+    /// not support as JPEG.
+    /// </summary>
+    private static PreparedImage PrepareImage(
+        byte[] imageBytes,
+        string fallbackExtension,
+        string? entryKey,
+        CompressionTier tier)
     {
-        try
+        if (imageBytes.Length == 0)
         {
-            var info = Image.Identify(imageBytes);
-            if (info is not null && info.Width > 0 && info.Height > 0)
-            {
-                return (info.Width, info.Height);
-            }
-        }
-        catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException or NotSupportedException)
-        {
-            // Fall through to the default viewport below; a wrong viewport still renders,
-            // whereas failing the whole conversion for one odd page would not.
-            _ = entryKey;
+            throw new InvalidOperationException(
+                $"Page image '{entryKey}' is empty and would render as a blank page.");
         }
 
-        // Common digital comic page size; used only when the image cannot be identified.
-        return (1600, 2400);
+        try
+        {
+            // Cheaply inspect the header dimensions before a full decode so a
+            // tiny archive entry that declares an enormous size (a
+            // "decompression bomb") is rejected without allocating its pixel
+            // buffer.
+            var info = Image.Identify(imageBytes);
+            if (info is not null && (long)info.Width * info.Height > MaxDecodedPixels)
+            {
+                throw new InvalidOperationException(
+                    $"Page image '{entryKey}' dimensions ({info.Width}x{info.Height}) exceed the decode limit.");
+            }
+
+            using var image = Image.Load(imageBytes);
+            if (image.Width <= 0 || image.Height <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"Page image '{entryKey}' has no usable dimensions.");
+            }
+
+            var extension = NormalizeImageExtension(
+                image.Metadata.DecodedImageFormat?.FileExtensions.FirstOrDefault() is { } detected
+                    ? "." + detected
+                    : fallbackExtension);
+            var mediaType = GetMediaType(extension);
+
+            if (tier.IsLossless && IsEreaderSafeMediaType(mediaType))
+            {
+                return new PreparedImage(imageBytes, extension, mediaType, image.Width, image.Height);
+            }
+
+            // Re-encoded either because the source format shows up as a blank
+            // page on most ereaders (WebP/BMP) or because the book has to shrink
+            // to fit the delivery size budget.
+            return EncodeAsJpeg(image, tier);
+        }
+        catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException or NotSupportedException or ImageFormatException)
+        {
+            throw new InvalidOperationException(
+                $"Page image '{entryKey}' could not be decoded and would render as a blank page.",
+                ex);
+        }
+    }
+
+    /// <summary>
+    /// Re-encodes a decoded image as JPEG, downscaling it first when the tier
+    /// caps the longest edge. JPEG is the only format every ereader renders
+    /// reliably and it is what keeps an oversized book under the mail limit.
+    /// </summary>
+    private static PreparedImage EncodeAsJpeg(Image image, CompressionTier tier)
+    {
+        var width = image.Width;
+        var height = image.Height;
+
+        if (tier.MaxDimension is int max && max > 0 && Math.Max(width, height) > max)
+        {
+            var scale = (double)max / Math.Max(width, height);
+            width = Math.Max(1, (int)Math.Round(width * scale));
+            height = Math.Max(1, (int)Math.Round(height * scale));
+            image.Mutate(ctx => ctx.Resize(width, height));
+        }
+
+        using var buffer = new MemoryStream();
+        image.Save(buffer, new JpegEncoder { Quality = tier.Quality ?? 90 });
+        return new PreparedImage(buffer.ToArray(), ".jpg", "image/jpeg", width, height);
+    }
+
+    private static bool IsEreaderSafeMediaType(string mediaType)
+        => mediaType is "image/jpeg" or "image/png" or "image/gif";
+
+    /// <summary>
+    /// Re-reads the finished EPUB and verifies it is a readable OCF container
+    /// whose declared resources all exist and are non-empty. Callers (email
+    /// delivery in particular) must never ship a book that fails this check.
+    /// </summary>
+    private static void ValidateEpub(string epubPath, IReadOnlyList<string> expectedEntries, string comicFilePath)
+    {
+        var name = Path.GetFileName(comicFilePath);
+
+        try
+        {
+            using var stream = new FileStream(epubPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var archive = new SystemZipArchive(stream, ZipArchiveMode.Read);
+
+            if (archive.Entries.Count == 0 ||
+                !string.Equals(archive.Entries[0].FullName, "mimetype", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Generated EPUB for {name} is missing the leading mimetype entry.");
+            }
+
+            foreach (var expected in expectedEntries)
+            {
+                var entry = archive.GetEntry(expected);
+                if (entry is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Generated EPUB for {name} is missing required entry '{expected}'.");
+                }
+
+                if (entry.Length == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Generated EPUB for {name} contains an empty entry '{expected}'.");
+                }
+            }
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new InvalidOperationException($"Generated EPUB for {name} is not a readable archive.", ex);
+        }
     }
 
     private static string BuildPageXhtml(int index, string imagePath, int width, int height)
@@ -672,6 +896,24 @@ public class EpubConversionService : IEpubConversionService
         string Id,
         string XhtmlPath,
         string ImagePath,
+        string MediaType,
+        int Width,
+        int Height);
+
+    /// <summary>
+    /// One page-compression variant. <see cref="Lossless"/> keeps the original
+    /// page bytes whenever their format is ereader-safe.
+    /// </summary>
+    private sealed record CompressionTier(int? Quality = null, int? MaxDimension = null)
+    {
+        public static readonly CompressionTier Lossless = new();
+
+        public bool IsLossless => Quality is null && MaxDimension is null;
+    }
+
+    private sealed record PreparedImage(
+        byte[] Bytes,
+        string Extension,
         string MediaType,
         int Width,
         int Height);

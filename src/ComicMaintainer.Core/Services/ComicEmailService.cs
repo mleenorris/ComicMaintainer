@@ -309,17 +309,26 @@ public class ComicEmailService : IComicEmailService
                 throw new FileNotFoundException($"File not found: {Path.GetFileName(delivery.FilePath)}");
             }
 
+            var maxBytes = (long)Math.Max(1, _settings.CurrentValue.EmailMaxAttachmentMegabytes) * 1024 * 1024;
+
             var attachmentPath = fullPath;
             if (string.Equals(delivery.DeliveryFormat, EmailDeliveryFormat.Epub, StringComparison.OrdinalIgnoreCase))
             {
                 var workDirectory = Path.Combine(GetTempDirectory(), "email", Guid.NewGuid().ToString("N"));
-                var options = await BuildEpubOptionsAsync(fullPath, cancellationToken);
+                // Hand the converter the mail size budget so an oversized book is
+                // recompressed rather than rejected below.
+                var options = await BuildEpubOptionsAsync(fullPath, maxBytes, cancellationToken);
                 attachmentPath = await _epubConverter.ConvertToEpubAsync(fullPath, workDirectory, options, cancellationToken);
                 temporaryAttachment = attachmentPath;
             }
 
-            var maxBytes = (long)Math.Max(1, _settings.CurrentValue.EmailMaxAttachmentMegabytes) * 1024 * 1024;
             var attachmentLength = new FileInfo(attachmentPath).Length;
+            if (attachmentLength <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"Generated attachment for {Path.GetFileName(delivery.FilePath)} is empty; nothing was sent.");
+            }
+
             if (attachmentLength > maxBytes)
             {
                 throw new InvalidOperationException(
@@ -451,10 +460,13 @@ public class ComicEmailService : IComicEmailService
     /// a miss (or any lookup failure) simply produces an EPUB that falls back
     /// to the first comic page as its cover.
     /// </summary>
-    private async Task<EpubConversionOptions?> BuildEpubOptionsAsync(
+    private async Task<EpubConversionOptions> BuildEpubOptionsAsync(
         string fullPath,
+        long maxSizeBytes,
         CancellationToken cancellationToken)
     {
+        var fallback = new EpubConversionOptions(MaxSizeBytes: maxSizeBytes);
+
         try
         {
             // The library groups a series by the name of its containing folder,
@@ -462,13 +474,13 @@ public class ComicEmailService : IComicEmailService
             var folderTitle = Path.GetFileName(Path.GetDirectoryName(fullPath));
             if (string.IsNullOrWhiteSpace(folderTitle))
             {
-                return null;
+                return fallback;
             }
 
             var record = await _seriesCache.GetByTitleAsync(folderTitle, cancellationToken);
             if (record is null)
             {
-                return null;
+                return fallback;
             }
 
             var imagePath = string.IsNullOrWhiteSpace(record.LocalImageFile)
@@ -481,10 +493,10 @@ public class ComicEmailService : IComicEmailService
 
             if (imagePath is null && string.IsNullOrWhiteSpace(seriesTitle))
             {
-                return null;
+                return fallback;
             }
 
-            return new EpubConversionOptions(imagePath, seriesTitle);
+            return new EpubConversionOptions(imagePath, seriesTitle, maxSizeBytes);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -492,7 +504,7 @@ public class ComicEmailService : IComicEmailService
                 ex,
                 "Could not resolve series artwork for {FilePath}; sending EPUB without series cover",
                 LoggingHelper.SanitizePathForLog(fullPath));
-            return null;
+            return fallback;
         }
     }
 

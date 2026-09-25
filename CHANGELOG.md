@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Oversized EPUBs are now compressed to fit the mail attachment limit instead of failing.**
+  A book that came out larger than the configured `EmailMaxAttachmentMegabytes` was simply
+  rejected. The converter now takes the delivery size budget and, when the lossless build
+  exceeds it, rebuilds the book with progressively stronger page compression (JPEG quality
+  80/65/50 with the longest edge capped at 2400/1800/1400 px), stopping at the first variant
+  that fits. Conversions without a budget are unchanged and keep the original page data.
+
+- **Emailed EPUBs no longer contain blank pages, and a book that cannot be built correctly is
+  never sent.** Page images were embedded verbatim with the media type guessed from the entry
+  name inside the archive, so a page whose data did not match its extension (PNG bytes stored
+  as `.jpg`), a format ereaders cannot render (WebP, BMP), or a truncated/empty entry produced
+  a page that silently rendered blank — typically every page after the series cover. Each page
+  is now fully decoded: the real format decides the media type, formats outside the
+  widely-supported JPEG/PNG/GIF set (including the series cover) are re-encoded as JPEG, and a
+  page that cannot be decoded fails the conversion instead of shipping a blank page. The
+  finished EPUB is re-opened and verified before it is handed back (leading `mimetype` entry,
+  and every declared resource present and non-empty), and email delivery additionally rejects
+  an empty attachment, so a bad conversion is recorded as a failed delivery rather than mailed
+  to the device.
+
 ### Changed
 - **Emailed EPUBs now carry the series artwork and a properly encoded issue number.** The
   converter previously marked the first comic page as the cover and wrote the issue number

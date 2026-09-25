@@ -459,6 +459,7 @@
         // seriesId -> string[] of the file paths contributed to selectedFiles,
         // so a deselect can remove exactly the paths a series added.
         let selectedSeriesFilePaths = new Map();
+        let selectedSeriesPathLoads = new Map();
         let currentEditFile = null;
         let collapsedDirectories = new Set();
         let searchQuery = '';
@@ -3183,14 +3184,19 @@
                 if (selectedSeries.has(seriesId)) return;
                 selectedSeries.add(seriesId);
                 // Reflect the pending state immediately, then resolve files.
+                const pathLoad = fetchSeriesFilePaths(seriesId);
+                selectedSeriesPathLoads.set(seriesId, pathLoad);
                 updateSeriesSelectionUI();
-                const paths = await fetchSeriesFilePaths(seriesId);
+                const paths = await pathLoad;
+                if (selectedSeriesPathLoads.get(seriesId) !== pathLoad) return;
+                selectedSeriesPathLoads.delete(seriesId);
                 // The user may have deselected while the request was in flight.
                 if (!selectedSeries.has(seriesId)) return;
                 selectedSeriesFilePaths.set(seriesId, paths);
                 paths.forEach(p => selectedFiles.add(p));
             } else {
                 selectedSeries.delete(seriesId);
+                selectedSeriesPathLoads.delete(seriesId);
                 const paths = selectedSeriesFilePaths.get(seriesId) || [];
                 paths.forEach(p => selectedFiles.delete(p));
                 selectedSeriesFilePaths.delete(seriesId);
@@ -3213,6 +3219,7 @@
             }
             selectedSeries.clear();
             selectedSeriesFilePaths.clear();
+            selectedSeriesPathLoads.clear();
             updateSeriesSelectionUI();
             updateSelectInfo();
         }
@@ -3223,6 +3230,7 @@
         function resetSeriesSelectionState() {
             selectedSeries.clear();
             selectedSeriesFilePaths.clear();
+            selectedSeriesPathLoads.clear();
         }
 
         // Drop selected series that are no longer present in the loaded library
@@ -3236,6 +3244,7 @@
                     paths.forEach(p => selectedFiles.delete(p));
                     selectedSeries.delete(id);
                     selectedSeriesFilePaths.delete(id);
+                    selectedSeriesPathLoads.delete(id);
                 }
             }
         }
@@ -4849,6 +4858,7 @@
             const emailBtn = document.getElementById('seriesSelectionEmailBtn');
             if (emailBtn) {
                 emailBtn.hidden = selectedSeries.size === 0;
+                emailBtn.disabled = Array.from(selectedSeries).some(id => selectedSeriesPathLoads.has(id));
             }
         }
 
@@ -8184,6 +8194,11 @@
         }
 
         async function openEmailSendModalForSelected() {
+            while (true) {
+                const pendingLoads = Array.from(selectedSeries, id => selectedSeriesPathLoads.get(id)).filter(Boolean);
+                if (!pendingLoads.length) break;
+                await Promise.all(pendingLoads);
+            }
             const files = Array.from(selectedFiles);
             if (!files.length) {
                 showMessage('Select at least one file to email.', 'error');
@@ -8690,6 +8705,7 @@
                    showMessage('Failed to save email settings: ' + errorMsg, 'error');
                    return;
                 }
+                emailStatusCache = null;
                  
                 showMessage('Settings saved successfully! Changes to log rotation, external metadata, and database cleanup will take effect on restart.', 'success');
                 closeSettings();

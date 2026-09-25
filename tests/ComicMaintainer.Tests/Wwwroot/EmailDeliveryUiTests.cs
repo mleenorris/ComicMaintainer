@@ -119,6 +119,27 @@ public class EmailDeliveryUiTests
     }
 
     [Fact]
+    public void MainJs_SeriesEmailWaitsForPendingPathLoads()
+    {
+        var js = Read("js", "main.js");
+
+        Assert.Contains("emailBtn.disabled = Array.from(selectedSeries).some", js);
+        Assert.Matches(
+            new Regex(@"async function openEmailSendModalForSelected\(\).*await Promise\.all\(pendingLoads\).*const files = Array\.from\(selectedFiles\)", RegexOptions.Singleline),
+            js);
+    }
+
+    [Fact]
+    public void MainJs_SavingEmailSettingsInvalidatesStatusCache()
+    {
+        var js = Read("js", "main.js");
+
+        Assert.Matches(
+            new Regex(@"if \(!emailSettingsResponse\.ok\).*emailStatusCache = null;", RegexOptions.Singleline),
+            js);
+    }
+
+    [Fact]
     public void ReaderHtml_HasEmailCurrentComicAction()
     {
         var html = Read("reader.html");
@@ -127,6 +148,14 @@ public class EmailDeliveryUiTests
         Assert.Contains("openReaderEmailPrompt()", html);
         Assert.Contains("id=\"emailPrompt\"", html);
         Assert.Contains("/api/email/send", html);
+    }
+
+    [Fact]
+    public void ReaderHtml_EmailFormatSelectorHasLabel()
+    {
+        var html = Read("reader.html");
+
+        Assert.Contains("<label for=\"emailPromptFormat\">Format:</label>", html);
     }
 
     [Fact]

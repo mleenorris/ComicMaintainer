@@ -20,15 +20,25 @@ namespace ComicMaintainer.Core.Services;
 /// Converts CBZ/CBR archives into fixed-layout EPUB3 files.
 /// </summary>
 /// <remarks>
-/// The generated EPUB keeps the original page images untouched and wraps each of
-/// them in a pre-paginated XHTML page whose viewport matches the image size, which
-/// is what ereaders (Kindle/Kobo) expect for comics. Metadata is taken from the
-/// archive's ComicInfo.xml when present so the book shows up with the right
-/// series/issue title on the device.
+/// Page images are only kept byte-for-byte when the source format is already
+/// safe for ereaders and no size-budget compression tier applies; otherwise
+/// they are re-encoded as JPEG (and downscaled, once the book needs to shrink
+/// to fit <see cref="EpubConversionOptions.MaxSizeBytes"/>). Each image is
+/// wrapped in a pre-paginated XHTML page whose viewport matches the image
+/// size, which is what ereaders (Kindle/Kobo) expect for comics. Metadata is
+/// taken from the archive's ComicInfo.xml when present so the book shows up
+/// with the right series/issue title on the device.
 /// </remarks>
 public class EpubConversionService : IEpubConversionService
 {
     private static readonly string[] ImageExtensions = { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp" };
+
+    // Upper bound on decoded pixel count. A small (byte-capped) but pathological
+    // archive entry could otherwise declare enormous dimensions and exhaust
+    // memory/CPU when fully decoded (a "decompression bomb"). 100 megapixels is
+    // far larger than any real comic page yet cheap to reject from the header
+    // alone. Mirrors SeriesImageDownscaler.MaxDecodedPixels.
+    private const long MaxDecodedPixels = 100L * 1000 * 1000;
 
     private readonly ILogger<EpubConversionService> _logger;
 
@@ -513,6 +523,17 @@ public class EpubConversionService : IEpubConversionService
 
         try
         {
+            // Cheaply inspect the header dimensions before a full decode so a
+            // tiny archive entry that declares an enormous size (a
+            // "decompression bomb") is rejected without allocating its pixel
+            // buffer.
+            var info = Image.Identify(imageBytes);
+            if (info is not null && (long)info.Width * info.Height > MaxDecodedPixels)
+            {
+                throw new InvalidOperationException(
+                    $"Page image '{entryKey}' dimensions ({info.Width}x{info.Height}) exceed the decode limit.");
+            }
+
             using var image = Image.Load(imageBytes);
             if (image.Width <= 0 || image.Height <= 0)
             {

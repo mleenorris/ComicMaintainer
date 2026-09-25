@@ -77,7 +77,17 @@ public class SettingsController : ControllerBase
             download_external_series_images = _appSettings.CurrentValue.DownloadExternalSeriesImages,
             series_image_max_bytes = _appSettings.CurrentValue.SeriesImageMaxBytes,
             series_image_max_download_bytes = _appSettings.CurrentValue.SeriesImageMaxDownloadBytes,
-            series_image_max_dimension = _appSettings.CurrentValue.SeriesImageMaxDimension
+            series_image_max_dimension = _appSettings.CurrentValue.SeriesImageMaxDimension,
+            smtp_host = _appSettings.CurrentValue.SmtpHost,
+            smtp_port = _appSettings.CurrentValue.SmtpPort,
+            smtp_username = _appSettings.CurrentValue.SmtpUsername,
+            // The password itself is never returned; the UI only needs to know
+            // whether one is stored so it can show a "leave blank to keep" hint.
+            smtp_password_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.SmtpPassword),
+            smtp_use_ssl = _appSettings.CurrentValue.SmtpUseSsl,
+            email_from_address = _appSettings.CurrentValue.EmailFromAddress,
+            email_from_name = _appSettings.CurrentValue.EmailFromName,
+            email_max_attachment_mb = _appSettings.CurrentValue.EmailMaxAttachmentMegabytes
         };
         
         _logger.LogDebug("Returning settings: FilenameFormat={FilenameFormat}, IssueNumberPadding={IssueNumberPadding}, WatcherEnableRename={WatcherEnableRename}, WatcherEnableNormalize={WatcherEnableNormalize}, LogMaxBytes={LogMaxBytes}, DatabaseCleanupIntervalHours={DatabaseCleanupIntervalHours}",
@@ -770,6 +780,60 @@ public class SettingsController : ControllerBase
     {
         /// <summary>One of <c>en</c>, <c>ja</c>, <c>ko</c>, <c>zh</c>, or null/empty to clear.</summary>
         public string? Language { get; set; }
+    }
+
+
+    /// <summary>
+    /// Updates the SMTP settings used to email comics to saved ereader devices.
+    /// Omit <c>smtpPassword</c> to keep the stored password; send an empty string to clear it.
+    /// </summary>
+    [HttpPut("email")]
+    public async Task<ActionResult> UpdateEmailSettings([FromBody] EmailSettingsRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { error = "Request body is required" });
+        }
+
+        try
+        {
+            await _settingsService.UpdateEmailSettingsAsync(
+                request.SmtpHost,
+                request.SmtpPort,
+                request.SmtpUsername,
+                request.SmtpPassword,
+                request.SmtpUseSsl,
+                request.EmailFromAddress,
+                request.EmailFromName,
+                request.EmailMaxAttachmentMb,
+                cancellationToken);
+
+            return Ok(new { message = "Email settings updated successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update email settings");
+            return StatusCode(500, new { error = "Failed to update email settings" });
+        }
+    }
+
+    public class EmailSettingsRequest
+    {
+        public string? SmtpHost { get; set; }
+        public int SmtpPort { get; set; } = 587;
+        public string? SmtpUsername { get; set; }
+
+        /// <summary>Null keeps the stored password; empty string clears it.</summary>
+        public string? SmtpPassword { get; set; }
+
+        public bool SmtpUseSsl { get; set; }
+        public string? EmailFromAddress { get; set; }
+        public string? EmailFromName { get; set; }
+        public int EmailMaxAttachmentMb { get; set; } = 25;
     }
 
     public class ExternalSeriesMetadataSettingsRequest

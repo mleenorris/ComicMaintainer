@@ -42,6 +42,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     /// Minimum spacing between durable progress writes for a job that has not changed status.
     /// </summary>
     private static readonly TimeSpan JobPersistenceInterval = TimeSpan.FromSeconds(5);
+    private readonly IComicEmailService? _comicEmail;
     private readonly SemaphoreSlim _processingSemaphore;
     private readonly int _maxWorkers;
     private bool _disposed;
@@ -64,7 +65,8 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         IExternalSeriesMetadataService? externalSeriesMetadata = null,
         ISeriesMetadataCacheService? seriesMetadataCache = null,
         ISeriesNameResolver? seriesNameResolver = null,
-        IJobStateStore? jobStateStore = null)
+        IJobStateStore? jobStateStore = null,
+        IComicEmailService? comicEmail = null)
     {
         _settingsMonitor = settings;
         _logger = logger;
@@ -75,6 +77,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         _seriesMetadataCache = seriesMetadataCache;
         _seriesNameResolver = seriesNameResolver;
         _jobStateStore = jobStateStore;
+        _comicEmail = comicEmail;
         _maxWorkers = Math.Max(1, _settingsMonitor.CurrentValue.MaxWorkers);
         _processingSemaphore = new SemaphoreSlim(_maxWorkers, _maxWorkers);
     }
@@ -333,6 +336,15 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             await LogHistoryAsync(filePath, "Process", isFullyProcessed, 
                 isFullyProcessed ? null : "File not fully processed (rename or normalize incomplete)", 
                 cancellationToken);
+
+            // Series marked for automatic ereader delivery get the freshly
+            // processed issue queued for email. Queueing is cheap (a database
+            // row plus a channel write); the send itself happens on the email
+            // queue's background worker.
+            if (isFullyProcessed)
+            {
+                await TryQueueAutomaticEmailAsync(filePath, metadata?.Series, cancellationToken);
+            }
 
             return true;
         }
@@ -891,6 +903,37 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     /// the file needs another normalize. Best-effort; cache lookup failure
     /// must not fail the normalize itself.
     /// </summary>
+    /// <summary>
+    /// Queues automatic email delivery for a newly processed issue. Failures are
+    /// logged and swallowed: a delivery problem must never fail file processing.
+    /// </summary>
+    private async Task TryQueueAutomaticEmailAsync(string filePath, string? seriesName, CancellationToken cancellationToken)
+    {
+        if (_comicEmail is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var queued = await _comicEmail.QueueAutoSendAsync(filePath, seriesName, cancellationToken);
+            if (queued > 0)
+            {
+                _logger.LogInformation(
+                    "Queued {Count} automatic ereader delivery/deliveries for {FilePath}",
+                    queued,
+                    LoggingHelper.SanitizePathForLog(filePath));
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to queue automatic ereader delivery for {FilePath}",
+                LoggingHelper.SanitizePathForLog(filePath));
+        }
+    }
+
     private async Task StampSeriesMetadataVersionAsync(string filePath, string? resolvedSeries, CancellationToken cancellationToken)
     {
         if (_seriesMetadataCache is null || string.IsNullOrWhiteSpace(resolvedSeries)) return;

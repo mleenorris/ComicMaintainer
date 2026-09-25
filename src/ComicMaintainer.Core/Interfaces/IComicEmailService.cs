@@ -27,7 +27,8 @@ public interface IComicEmailService
 
     /// <summary>
     /// Queues a newly processed issue for every enabled subscription of its
-    /// series. Returns the number of deliveries queued.
+    /// series. Matches subscriptions created from either the metadata series
+    /// name or the containing folder name. Returns the number of deliveries queued.
     /// </summary>
     Task<int> QueueAutoSendAsync(string filePath, string? seriesTitle, CancellationToken cancellationToken = default);
 

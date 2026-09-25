@@ -157,18 +157,24 @@ public class ComicEmailService : IComicEmailService
         string? seriesTitle,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(filePath) || string.IsNullOrWhiteSpace(seriesTitle))
+        if (string.IsNullOrWhiteSpace(filePath))
         {
             return 0;
         }
 
-        var key = _seriesCache.NormalizeKey(seriesTitle);
+        // A subscription may have been created from either the metadata series
+        // name or the folder-derived title the library groups by, so match both.
+        var keys = BuildSeriesKeyCandidates(filePath, seriesTitle);
+        if (keys.Count == 0)
+        {
+            return 0;
+        }
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
         var subscriptions = await (
             from subscription in db.SeriesEmailSubscriptions.AsNoTracking()
             join device in db.EreaderDevices.AsNoTracking() on subscription.DeviceId equals device.Id
-            where subscription.NormalizedSeriesKey == key && subscription.Enabled
+            where keys.Contains(subscription.NormalizedSeriesKey) && subscription.Enabled
             select new { subscription, device })
             .ToListAsync(cancellationToken);
 
@@ -181,7 +187,7 @@ public class ComicEmailService : IComicEmailService
         {
             _logger.LogWarning(
                 "Series {SeriesKey} is marked for automatic email delivery but SMTP is not configured; skipping",
-                LoggingHelper.SanitizeForLog(key));
+                LoggingHelper.SanitizeForLog(subscriptions[0].subscription.NormalizedSeriesKey));
             return 0;
         }
 
@@ -218,7 +224,7 @@ public class ComicEmailService : IComicEmailService
         {
             var now = DateTime.UtcNow;
             var tracked = await db.SeriesEmailSubscriptions
-                .Where(s => s.NormalizedSeriesKey == key && s.Enabled)
+                .Where(s => keys.Contains(s.NormalizedSeriesKey) && s.Enabled)
                 .ToListAsync(cancellationToken);
             foreach (var subscription in tracked)
             {
@@ -338,6 +344,43 @@ public class ComicEmailService : IComicEmailService
             .ToListAsync(cancellationToken);
 
         return deliveries.Select(ToDto).ToList();
+    }
+
+    /// <summary>
+    /// Normalized series keys a file could be subscribed under: its metadata
+    /// series name and the name of the folder that contains it (the title the
+    /// library groups series by).
+    /// </summary>
+    private List<string> BuildSeriesKeyCandidates(string filePath, string? seriesTitle)
+    {
+        var keys = new List<string>(2);
+
+        void Add(string? title)
+        {
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                return;
+            }
+
+            var key = _seriesCache.NormalizeKey(title);
+            if (!string.IsNullOrWhiteSpace(key) && !keys.Contains(key, StringComparer.Ordinal))
+            {
+                keys.Add(key);
+            }
+        }
+
+        Add(seriesTitle);
+
+        try
+        {
+            Add(Path.GetFileName(Path.GetDirectoryName(filePath)));
+        }
+        catch (ArgumentException)
+        {
+            // Malformed path: the metadata-derived key (if any) is still usable.
+        }
+
+        return keys;
     }
 
     private string GetTempDirectory()

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Oversized EPUBs are now compressed to fit the mail attachment limit instead of failing.**
+  A book that came out larger than the configured `EmailMaxAttachmentMegabytes` was simply
+  rejected. The converter now takes the delivery size budget and, when the lossless build
+  exceeds it, rebuilds the book with progressively stronger page compression (JPEG quality
+  80/65/50 with the longest edge capped at 2400/1800/1400 px), stopping at the first variant
+  that fits. Conversions without a budget are unchanged and keep the original page data.
+
 - **Emailed EPUBs no longer contain blank pages, and a book that cannot be built correctly is
   never sent.** Page images were embedded verbatim with the media type guessed from the entry
   name inside the archive, so a page whose data did not match its extension (PNG bytes stored

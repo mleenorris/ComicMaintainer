@@ -13,9 +13,17 @@ namespace ComicMaintainer.Core.Interfaces;
 /// Display name of the series, used for the title and the EPUB collection
 /// metadata when the archive's ComicInfo.xml has no (or a worse) series name.
 /// </param>
+/// <param name="MaxSizeBytes">
+/// Optional size budget for the generated book. When the first (lossless) pass
+/// exceeds it, the converter retries with progressively stronger page
+/// compression so the book can still be delivered. The budget is best-effort:
+/// if even the smallest variant is over it, that variant is returned and the
+/// caller decides what to do.
+/// </param>
 public record EpubConversionOptions(
     string? SeriesImagePath = null,
-    string? SeriesTitle = null);
+    string? SeriesTitle = null,
+    long? MaxSizeBytes = null);
 
 /// <summary>
 /// Converts comic archives (CBZ/CBR) into fixed-layout EPUB3 files suitable for

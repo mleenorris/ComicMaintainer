@@ -372,6 +372,62 @@ public class EpubConversionServiceTests : IDisposable
         Assert.Contains("media-type=\"image/png\"", ReadEntry(archive, "OEBPS/content.opf"));
     }
 
+    [Fact]
+    public async Task ConvertToEpubAsync_WhenOverSizeBudget_CompressesPagesToFit()
+    {
+        var cbz = Path.Combine(_workDir, "large.cbz");
+        using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
+        {
+            for (var i = 1; i <= 3; i++)
+            {
+                WriteImageEntry(zip, $"{i:D3}.png", CreateNoisyPng(1200, 1600));
+            }
+        }
+
+        var uncompressed = await _service.ConvertToEpubAsync(
+            cbz,
+            Path.Combine(_workDir, "out-nobudget"),
+            new EpubConversionOptions());
+        var uncompressedLength = new FileInfo(uncompressed).Length;
+
+        var budget = uncompressedLength / 4;
+        var compressed = await _service.ConvertToEpubAsync(
+            cbz,
+            Path.Combine(_workDir, "out-budget"),
+            new EpubConversionOptions(MaxSizeBytes: budget));
+
+        Assert.True(
+            new FileInfo(compressed).Length <= budget,
+            $"Expected the book to fit in {budget} bytes, got {new FileInfo(compressed).Length}.");
+
+        using var archive = ZipFile.OpenRead(compressed);
+        var names = archive.Entries.Select(e => e.FullName).ToList();
+        // Compressed variants are always re-encoded as JPEG.
+        Assert.Contains("OEBPS/images/page0001.jpg", names);
+        Assert.Equal(3, names.Count(n => n.StartsWith("OEBPS/images/", StringComparison.Ordinal)));
+
+        var opf = ReadEntry(archive, "OEBPS/content.opf");
+        Assert.Contains("""<itemref idref="page0003"/>""", opf);
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_WhenWithinSizeBudget_KeepsOriginalPageData()
+    {
+        var cbz = CreateCbz("Small.cbz", pageCount: 2, includeComicInfo: true);
+
+        var epubPath = await _service.ConvertToEpubAsync(
+            cbz,
+            Path.Combine(_workDir, "out-within-budget"),
+            new EpubConversionOptions(MaxSizeBytes: 50L * 1024 * 1024));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        var page = archive.GetEntry("OEBPS/images/page0001.jpg");
+        Assert.NotNull(page);
+
+        using var source = ZipFile.OpenRead(cbz);
+        Assert.Equal(source.GetEntry("001.jpg")!.Length, page!.Length);
+    }
+
     private string CreateCbz(
         string fileName,
         int pageCount,
@@ -427,16 +483,53 @@ public class EpubConversionServiceTests : IDisposable
         return count;
     }
 
-    private static void WriteImageEntry(ZipArchive zip, string entryName)
+    private static void WriteImageEntry(ZipArchive zip, string entryName, byte[]? content = null)
     {
-        using var image = new Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(20, 30);
-        using var buffer = new MemoryStream();
-        image.Save(buffer, new JpegEncoder());
+        byte[] bytes;
+        if (content is not null)
+        {
+            bytes = content;
+        }
+        else
+        {
+            using var image = new Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(20, 30);
+            using var buffer = new MemoryStream();
+            image.Save(buffer, new JpegEncoder());
+            bytes = buffer.ToArray();
+        }
 
         var entry = zip.CreateEntry(entryName);
         using var stream = entry.Open();
-        var bytes = buffer.ToArray();
         stream.Write(bytes, 0, bytes.Length);
+    }
+
+    /// <summary>
+    /// A noisy PNG: large and incompressible, so the size-budget tiers have
+    /// something real to shrink.
+    /// </summary>
+    private static byte[] CreateNoisyPng(int width, int height)
+    {
+        using var image = new Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(width, height);
+        var random = new Random(1234);
+        image.ProcessPixelRows(accessor =>
+        {
+            for (var y = 0; y < accessor.Height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (var x = 0; x < row.Length; x++)
+                {
+                    row[x] = new SixLabors.ImageSharp.PixelFormats.Rgba32(
+                        (byte)random.Next(256),
+                        (byte)random.Next(256),
+                        (byte)random.Next(256),
+                        255);
+                }
+            }
+        });
+
+        using var buffer = new MemoryStream();
+        image.Save(buffer, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+        return buffer.ToArray();
     }
 
     private static string ReadEntry(ZipArchive archive, string name)

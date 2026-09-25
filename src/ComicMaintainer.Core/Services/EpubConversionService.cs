@@ -353,6 +353,9 @@ public class EpubConversionService : IEpubConversionService
                 return null;
             }
 
+            // Image.Load fully decodes the pixel data rather than just reading the
+            // header (as Image.Identify does), so a truncated/corrupt cached cover
+            // reliably throws here and falls back to the first-page cover below.
             using var image = Image.Load(bytes);
             if (image.Width <= 0 || image.Height <= 0)
             {

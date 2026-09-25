@@ -25,7 +25,8 @@ public interface IEpubConversionService
 {
     /// <summary>
     /// Convert <paramref name="comicFilePath"/> into an EPUB written inside
-    /// <paramref name="outputDirectory"/>.
+    /// <paramref name="outputDirectory"/> using default options. Equivalent to
+    /// calling the <see cref="EpubConversionOptions"/> overload with no options.
     /// </summary>
     /// <returns>The absolute path of the generated .epub file.</returns>
     /// <exception cref="FileNotFoundException">The source comic does not exist.</exception>

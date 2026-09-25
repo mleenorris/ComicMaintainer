@@ -35,6 +35,12 @@ public class EpubConversionService : IEpubConversionService
         _logger = logger;
     }
 
+    public Task<string> ConvertToEpubAsync(
+        string comicFilePath,
+        string outputDirectory,
+        CancellationToken cancellationToken)
+        => ConvertToEpubAsync(comicFilePath, outputDirectory, options: null, cancellationToken);
+
     public async Task<string> ConvertToEpubAsync(
         string comicFilePath,
         string outputDirectory,
@@ -86,7 +92,7 @@ public class EpubConversionService : IEpubConversionService
         }
 
         var comicInfo = ReadComicInfo(archive);
-        var seriesName = FirstNonEmpty(comicInfo?.Series, options?.SeriesTitle);
+        var seriesName = FirstNonEmpty(options?.SeriesTitle, comicInfo?.Series);
         var title = BuildTitle(seriesName, comicInfo, comicFilePath);
         var bookId = "urn:uuid:" + Guid.NewGuid().ToString("D");
         var seriesCover = LoadSeriesCover(options?.SeriesImagePath);
@@ -347,13 +353,13 @@ public class EpubConversionService : IEpubConversionService
                 return null;
             }
 
-            var info = Image.Identify(bytes);
-            if (info is null || info.Width <= 0 || info.Height <= 0)
+            using var image = Image.Load(bytes);
+            if (image.Width <= 0 || image.Height <= 0)
             {
                 return null;
             }
 
-            var extension = NormalizeImageExtension(info.Metadata.DecodedImageFormat?.FileExtensions.FirstOrDefault() is { } ext
+            var extension = NormalizeImageExtension(image.Metadata.DecodedImageFormat?.FileExtensions.FirstOrDefault() is { } ext
                 ? "." + ext
                 : Path.GetExtension(seriesImagePath));
             var mediaType = GetMediaType(extension);
@@ -366,8 +372,8 @@ public class EpubConversionService : IEpubConversionService
                 ImagePath: "images/cover" + extension,
                 XhtmlPath: "cover.xhtml",
                 MediaType: mediaType,
-                Width: info.Width,
-                Height: info.Height,
+                Width: image.Width,
+                Height: image.Height,
                 Bytes: bytes);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or UnknownImageFormatException or InvalidImageContentException or NotSupportedException)

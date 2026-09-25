@@ -34,6 +34,19 @@ public interface IEpubConversionService
     Task<string> ConvertToEpubAsync(
         string comicFilePath,
         string outputDirectory,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Convert <paramref name="comicFilePath"/> into an EPUB written inside
+    /// <paramref name="outputDirectory"/>, honoring the supplied <paramref name="options"/>.
+    /// </summary>
+    /// <returns>The absolute path of the generated .epub file.</returns>
+    /// <exception cref="FileNotFoundException">The source comic does not exist.</exception>
+    /// <exception cref="NotSupportedException">The source file is not a supported comic archive.</exception>
+    /// <exception cref="InvalidOperationException">The archive contains no images.</exception>
+    Task<string> ConvertToEpubAsync(
+        string comicFilePath,
+        string outputDirectory,
         EpubConversionOptions? options = null,
         CancellationToken cancellationToken = default);
 }

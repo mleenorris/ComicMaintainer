@@ -895,15 +895,6 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     }
 
     /// <summary>
-    /// After a successful normalize, look up the cache record for the
-    /// resolved series and stamp the file with the record's current
-    /// <c>MetadataVersion</c>. This is the read-side of the
-    /// metadata-version invalidation scheme: a future library-scan run
-    /// compares this stamp to the latest record version to decide whether
-    /// the file needs another normalize. Best-effort; cache lookup failure
-    /// must not fail the normalize itself.
-    /// </summary>
-    /// <summary>
     /// Queues automatic email delivery for a newly processed issue. Failures are
     /// logged and swallowed: a delivery problem must never fail file processing.
     /// </summary>
@@ -934,6 +925,15 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
     }
 
+    /// <summary>
+    /// After a successful normalize, look up the cache record for the
+    /// resolved series and stamp the file with the record's current
+    /// <c>MetadataVersion</c>. This is the read-side of the
+    /// metadata-version invalidation scheme: a future library-scan run
+    /// compares this stamp to the latest record version to decide whether
+    /// the file needs another normalize. Best-effort; cache lookup failure
+    /// must not fail the normalize itself.
+    /// </summary>
     private async Task StampSeriesMetadataVersionAsync(string filePath, string? resolvedSeries, CancellationToken cancellationToken)
     {
         if (_seriesMetadataCache is null || string.IsNullOrWhiteSpace(resolvedSeries)) return;

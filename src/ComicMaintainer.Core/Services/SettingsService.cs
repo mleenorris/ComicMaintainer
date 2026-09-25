@@ -243,6 +243,7 @@ public class SettingsService : ISettingsService
         string? smtpUsername,
         string? smtpPassword,
         bool smtpUseSsl,
+        bool smtpAllowInsecure,
         string? fromAddress,
         string? fromName,
         int maxAttachmentMegabytes,
@@ -268,6 +269,7 @@ public class SettingsService : ISettingsService
         await UpdateSettingAsync("SmtpPort", smtpPort, cancellationToken);
         await UpdateSettingAsync("SmtpUsername", string.IsNullOrWhiteSpace(smtpUsername) ? null : smtpUsername.Trim(), cancellationToken);
         await UpdateSettingAsync("SmtpUseSsl", smtpUseSsl, cancellationToken);
+        await UpdateSettingAsync("SmtpAllowInsecure", smtpAllowInsecure, cancellationToken);
         await UpdateSettingAsync("EmailFromAddress", normalizedFrom, cancellationToken);
         await UpdateSettingAsync("EmailFromName", string.IsNullOrWhiteSpace(fromName) ? "ComicMaintainer" : fromName.Trim(), cancellationToken);
         await UpdateSettingAsync("EmailMaxAttachmentMegabytes", maxAttachmentMegabytes, cancellationToken);

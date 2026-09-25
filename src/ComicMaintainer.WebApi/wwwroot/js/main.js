@@ -7225,6 +7225,7 @@
                 const smtpPasswordHint = document.getElementById('smtpPasswordHint');
                 const smtpClearPassword = document.getElementById('smtpClearPasswordCheckbox');
                 const smtpUseSsl = document.getElementById('smtpUseSslCheckbox');
+                const smtpAllowInsecure = document.getElementById('smtpAllowInsecureCheckbox');
                 const emailFromAddress = document.getElementById('emailFromAddress');
                 const emailFromName = document.getElementById('emailFromName');
                 const emailMaxAttachmentMb = document.getElementById('emailMaxAttachmentMb');
@@ -7239,6 +7240,7 @@
                 }
                 if (smtpClearPassword) smtpClearPassword.checked = false;
                 if (smtpUseSsl) smtpUseSsl.checked = !!settingsData.smtp_use_ssl;
+                if (smtpAllowInsecure) smtpAllowInsecure.checked = !!settingsData.smtp_allow_insecure;
                 if (emailFromAddress) emailFromAddress.value = settingsData.email_from_address || '';
                 if (emailFromName) emailFromName.value = settingsData.email_from_name || '';
                 if (emailMaxAttachmentMb) emailMaxAttachmentMb.value = settingsData.email_max_attachment_mb || '';
@@ -8363,6 +8365,7 @@
             const smtpPasswordInput = document.getElementById('smtpPassword').value;
             const smtpClearPassword = document.getElementById('smtpClearPasswordCheckbox').checked;
             const smtpUseSsl = document.getElementById('smtpUseSslCheckbox').checked;
+            const smtpAllowInsecure = document.getElementById('smtpAllowInsecureCheckbox').checked;
             const emailFromAddress = document.getElementById('emailFromAddress').value.trim();
             const emailFromName = document.getElementById('emailFromName').value.trim();
             const emailMaxAttachmentValue = document.getElementById('emailMaxAttachmentMb').value.trim();
@@ -8560,6 +8563,7 @@
                    smtpUsername: smtpUsername || null,
                    smtpPassword: smtpClearPassword ? '' : (smtpPasswordInput ? smtpPasswordInput : null),
                    smtpUseSsl,
+                   smtpAllowInsecure,
                    emailFromAddress: emailFromAddress || null,
                    emailFromName: emailFromName || null,
                    emailMaxAttachmentMb: emailMaxAttachmentMb

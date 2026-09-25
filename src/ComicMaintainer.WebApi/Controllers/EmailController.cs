@@ -165,6 +165,7 @@ public class EmailController : ControllerBase
                 request.DeliveryFormat,
                 EmailDeliverySource.Manual,
                 request.SkipAlreadyDelivered,
+                subscriptionId: null,
                 cancellationToken);
 
             return Ok(new { queued = result.Queued, skipped = result.Skipped });
@@ -202,6 +203,16 @@ public class EmailController : ControllerBase
             return NotFound(new { error = "Series not found" });
         }
 
+        // Never silently truncate: a series larger than one page would drop
+        // issues from the send without the caller noticing.
+        if (issues.IssueCount > MaxSeriesIssuesPerSend || issues.TotalPages > 1)
+        {
+            return BadRequest(new
+            {
+                error = $"Series has {issues.IssueCount} issues, which exceeds the {MaxSeriesIssuesPerSend} issue limit for a single send. Select the issues to send instead."
+            });
+        }
+
         var files = issues.Issues.Select(i => i.FilePath).ToList();
         if (files.Count == 0)
         {
@@ -216,6 +227,7 @@ public class EmailController : ControllerBase
                 request.DeliveryFormat,
                 EmailDeliverySource.Manual,
                 request.SkipAlreadyDelivered,
+                subscriptionId: null,
                 cancellationToken);
 
             return Ok(new
@@ -309,8 +321,11 @@ public class EmailController : ControllerBase
         /// <summary>Overrides the device default when set.</summary>
         public string? DeliveryFormat { get; set; }
 
-        /// <summary>When true, files already delivered to the device are skipped.</summary>
-public bool SkipAlreadyDelivered { get; set; } = true;
+        /// <summary>
+        /// When true (the default), files that already have a pending or sent
+        /// delivery for the device are skipped.
+        /// </summary>
+        public bool SkipAlreadyDelivered { get; set; } = true;
     }
 
     public class SendSeriesRequest
@@ -318,7 +333,12 @@ public bool SkipAlreadyDelivered { get; set; } = true;
         public string? SeriesId { get; set; }
         public int DeviceId { get; set; }
         public string? DeliveryFormat { get; set; }
-        public bool SkipAlreadyDelivered { get; set; }
+
+        /// <summary>
+        /// When true (the default), files that already have a pending or sent
+        /// delivery for the device are skipped.
+        /// </summary>
+        public bool SkipAlreadyDelivered { get; set; } = true;
     }
 
     public class SubscriptionRequest

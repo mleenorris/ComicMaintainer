@@ -68,11 +68,26 @@ public class SmtpComicEmailSender : IComicEmailSender
         mime.Body = body.ToMessageBody();
 
         using var client = new SmtpClient();
+
+        // Implicit TLS when requested, otherwise STARTTLS is *required* so
+        // credentials and attachments are never sent in the clear. Plaintext is
+        // only possible through the explicit SmtpAllowInsecure opt-in, which is
+        // intended for a trusted local relay.
         var socketOptions = settings.SmtpUseSsl
             ? SecureSocketOptions.SslOnConnect
-            : SecureSocketOptions.StartTlsWhenAvailable;
+            : settings.SmtpAllowInsecure
+                ? SecureSocketOptions.StartTlsWhenAvailable
+                : SecureSocketOptions.StartTls;
 
-        await client.ConnectAsync(settings.SmtpHost, settings.SmtpPort, socketOptions, cancellationToken);
+        var host = settings.SmtpHost!;
+        await client.ConnectAsync(host, settings.SmtpPort, socketOptions, cancellationToken);
+
+        if (!client.IsSecure)
+        {
+            _logger.LogWarning(
+                "SMTP connection to {Host} is not encrypted because SmtpAllowInsecure is enabled",
+                LoggingHelper.SanitizeForLog(host));
+        }
 
         if (!string.IsNullOrWhiteSpace(settings.SmtpUsername))
         {

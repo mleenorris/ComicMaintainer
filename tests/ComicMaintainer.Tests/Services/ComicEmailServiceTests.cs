@@ -119,6 +119,96 @@ public class ComicEmailServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task QueueFilesAsync_SkipsSymlinksPointingOutsideTheLibrary()
+    {
+        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
+        var outside = Path.Combine(Path.GetTempPath(), $"outside-{Guid.NewGuid():N}.cbz");
+        await File.WriteAllTextAsync(outside, "x");
+        var link = Path.Combine(_watchedDir, "link.cbz");
+
+        try
+        {
+            File.CreateSymbolicLink(link, outside);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            // The platform/filesystem does not allow creating links here.
+            File.Delete(outside);
+            return;
+        }
+
+        try
+        {
+            var result = await _service.QueueFilesAsync(
+                new[] { link }, device.Id, null, EmailDeliverySource.Manual, false);
+
+            Assert.Empty(result.Queued);
+            Assert.Equal("File is outside the comic library", result.Skipped[link]);
+        }
+        finally
+        {
+            File.Delete(link);
+            File.Delete(outside);
+        }
+    }
+
+    [Fact]
+    public async Task QueueAutoSendAsync_DoesNotStampLastSentUntilTheDeliverySucceeds()
+    {
+        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var subscription = await _devices.UpsertSubscriptionAsync(
+            "My Series", device.Id, EmailDeliveryFormat.Device, enabled: true);
+        var file = CreateComic("My Series - Chapter 0005.cbz");
+
+        Assert.Equal(1, await _service.QueueAutoSendAsync(file, "My Series"));
+        Assert.Null(await GetSubscriptionLastSentAsync(subscription!.Id));
+
+        await using (var db = await _dbFactory.CreateDbContextAsync())
+        {
+            var pending = Assert.Single(db.ComicEmailDeliveries.ToList());
+            Assert.Equal(subscription.Id, pending.SubscriptionId);
+        }
+
+        var delivery = Assert.Single(await _service.GetRecentDeliveriesAsync(10));
+
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IOException("smtp exploded"));
+        await _service.ProcessDeliveryAsync(delivery.Id);
+        Assert.Null(await GetSubscriptionLastSentAsync(subscription.Id));
+
+        // Requeue and let the send succeed this time.
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        Assert.Equal(1, await _service.QueueAutoSendAsync(file, "My Series"));
+        var retry = (await _service.GetRecentDeliveriesAsync(10))[0];
+        await _service.ProcessDeliveryAsync(retry.Id);
+
+        Assert.NotNull(await GetSubscriptionLastSentAsync(subscription.Id));
+    }
+
+    [Fact]
+    public async Task QueueAutoSendAsync_DoesNotStampSubscriptionsForOtherDevices()
+    {
+        var kindle = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var kobo = await _devices.CreateDeviceAsync("Kobo", "kobo@kobo.com", EmailDeliveryFormat.Original);
+        var kindleSub = await _devices.UpsertSubscriptionAsync("My Series", kindle.Id, EmailDeliveryFormat.Device, true);
+        var koboSub = await _devices.UpsertSubscriptionAsync("My Series", kobo.Id, EmailDeliveryFormat.Device, true);
+        var file = CreateComic("My Series - Chapter 0006.cbz");
+
+        await _service.QueueAutoSendAsync(file, "My Series");
+
+        // Only the Kindle delivery is processed.
+        var kindleDelivery = (await _service.GetRecentDeliveriesAsync(10))
+            .First(d => d.DeviceId == kindle.Id);
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        await _service.ProcessDeliveryAsync(kindleDelivery.Id);
+
+        Assert.NotNull(await GetSubscriptionLastSentAsync(kindleSub!.Id));
+        Assert.Null(await GetSubscriptionLastSentAsync(koboSub!.Id));
+    }
+
+    [Fact]
     public async Task QueueFilesAsync_SkipsMissingAndUnsupportedFiles()
     {
         var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
@@ -367,6 +457,14 @@ public class ComicEmailServiceTests : IDisposable
         var path = Path.Combine(_watchedDir, fileName);
         File.WriteAllBytes(path, new byte[sizeBytes]);
         return path;
+    }
+
+    private async Task<DateTime?> GetSubscriptionLastSentAsync(int subscriptionId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var subscription = await db.SeriesEmailSubscriptions.AsNoTracking()
+            .FirstAsync(s => s.Id == subscriptionId);
+        return subscription.LastSentAt;
     }
 
     private async Task<ComicEmailDeliveryEntity> GetDeliveryAsync(int id)

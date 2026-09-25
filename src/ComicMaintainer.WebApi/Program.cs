@@ -1198,6 +1198,10 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         if (!string.IsNullOrEmpty(smtpUseSsl))
             options.SmtpUseSsl = smtpUseSsl.Equals("true", StringComparison.OrdinalIgnoreCase);
 
+        var smtpAllowInsecure = Environment.GetEnvironmentVariable("SMTP_ALLOW_INSECURE");
+        if (!string.IsNullOrEmpty(smtpAllowInsecure))
+            options.SmtpAllowInsecure = smtpAllowInsecure.Equals("true", StringComparison.OrdinalIgnoreCase);
+
         var emailFromAddress = Environment.GetEnvironmentVariable("EMAIL_FROM_ADDRESS");
         if (!string.IsNullOrEmpty(emailFromAddress))
             options.EmailFromAddress = emailFromAddress;

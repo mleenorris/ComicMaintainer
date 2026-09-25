@@ -25,13 +25,18 @@ Email is disabled until an SMTP host and a from-address are configured. Set them
 | Environment variable | Setting | Default | Description |
 |---|---|---|---|
 | `SMTP_HOST` | `SmtpHost` | *(empty)* | SMTP server host name. Email is disabled while empty. |
-| `SMTP_PORT` | `SmtpPort` | `587` | SMTP port. `465` implies implicit SSL. |
+| `SMTP_PORT` | `SmtpPort` | `587` | SMTP port. `587` is submission (STARTTLS); `465` is implicit TLS. |
 | `SMTP_USERNAME` | `SmtpUsername` | *(empty)* | Username for authentication. Leave empty for anonymous relays. |
 | `SMTP_PASSWORD` | `SmtpPassword` | *(empty)* | Password for authentication. Never returned by the API and redacted in logs. |
-| `SMTP_USE_SSL` | `SmtpUseSsl` | `false` | Use implicit TLS (SMTPS, usually port 465). When false, use STARTTLS when available. |
+| `SMTP_USE_SSL` | `SmtpUseSsl` | `false` | Connect with **implicit TLS** (SMTPS, port 465). Leave `false` for port 587, which is upgraded with STARTTLS. |
+| `SMTP_ALLOW_INSECURE` | `SmtpAllowInsecure` | `false` | Allow the connection to stay plaintext when the server does not advertise STARTTLS. Only enable for a trusted local relay. |
 | `EMAIL_FROM_ADDRESS` | `EmailFromAddress` | *(empty)* | Envelope sender. Must be an address your e-reader service accepts. |
 | `EMAIL_FROM_NAME` | `EmailFromName` | `ComicMaintainer` | Display name on outgoing mail. |
 | `EMAIL_MAX_ATTACHMENT_MB` | `EmailMaxAttachmentMegabytes` | `25` | Deliveries larger than this fail instead of being sent. |
+
+When `SMTP_USE_SSL` is `false` and `SMTP_ALLOW_INSECURE` is `false` (the defaults),
+STARTTLS is *required*: a server that does not offer it is refused rather than being
+handed credentials and attachments in the clear.
 
 Environment variables take precedence over values saved in `user-settings.json`, exactly
 as for the rest of the application settings.
@@ -75,8 +80,13 @@ saved on the device, so changing the device later changes future sends.
 sent delivery for the same device, which makes re-sending a series safe. The response
 reports `queued` and `skipped` counts.
 
+A whole-series send is capped at 1000 issues; a larger series is rejected with an error
+rather than silently truncated.
+
 Only files inside the watched directory (or the configured duplicate directory) can be
-sent; any other path is rejected.
+sent; any other path is rejected. Symlinks and junctions are resolved first — on the file
+and on every parent directory — so a link inside the library cannot point at a file
+outside it.
 
 ## Automatic delivery for a series
 
@@ -91,6 +101,8 @@ enabled subscription whose series matches.
 - Subscriptions can be disabled without deleting them.
 - Automatic deliveries always skip files that were already delivered to that device, so
   reprocessing an existing file does not resend it.
+- A subscription's "last sent" timestamp is stamped only once one of its deliveries has
+  actually been sent, not when it is queued.
 
 Deleting a device deletes its subscriptions.
 
@@ -172,3 +184,5 @@ curl -X POST http://localhost:5000/api/email/send \
 | Delivery fails with a size error | The attachment exceeds `EMAIL_MAX_ATTACHMENT_MB`, or the receiving service has a lower limit of its own. |
 | Nothing is sent automatically | The subscription is disabled, the series name does not match the folder or metadata series, or the file was already delivered to that device. |
 | Authentication errors | Providers with 2FA usually require an app-specific password rather than the account password. |
+| "The SMTP server does not support the STARTTLS extension" | The server offers no TLS. Use implicit TLS (`SMTP_USE_SSL=true`, port 465) or, for a trusted local relay only, set `SMTP_ALLOW_INSECURE=true`. |
+| "Series has N issues, which exceeds the ... limit" | A whole-series send is capped at 1000 issues; select the issues to send instead. |

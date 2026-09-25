@@ -16,6 +16,9 @@ public interface IComicEmailService
     /// Files that do not exist, live outside the library, or (when
     /// <paramref name="skipAlreadyDelivered"/> is true) were already delivered to
     /// the device are reported in <see cref="EmailQueueResult.Skipped"/>.
+    /// <paramref name="subscriptionId"/> records the series subscription that
+    /// triggered an automatic send so its last-sent timestamp can be stamped
+    /// once the message is actually delivered.
     /// </summary>
     Task<EmailQueueResult> QueueFilesAsync(
         IEnumerable<string> filePaths,
@@ -23,6 +26,7 @@ public interface IComicEmailService
         string? deliveryFormat,
         string source,
         bool skipAlreadyDelivered,
+        int? subscriptionId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

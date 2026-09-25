@@ -127,6 +127,7 @@ public interface ISettingsService
         string? smtpUsername,
         string? smtpPassword,
         bool smtpUseSsl,
+        bool smtpAllowInsecure,
         string? fromAddress,
         string? fromName,
         int maxAttachmentMegabytes,

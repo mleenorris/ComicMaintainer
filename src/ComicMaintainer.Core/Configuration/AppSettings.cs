@@ -230,10 +230,20 @@ public class AppSettings
 
     /// <summary>
     /// When true, connect using implicit TLS (SMTPS, usually port 465). When
-    /// false the connection starts plaintext and is upgraded with STARTTLS when
-    /// the server advertises it.
+    /// false the connection starts plaintext and STARTTLS is required before
+    /// credentials or attachments are transmitted, unless
+    /// <see cref="SmtpAllowInsecure"/> is also set.
     /// </summary>
     public bool SmtpUseSsl { get; set; }
+
+    /// <summary>
+    /// Opt-in escape hatch for a trusted local relay that offers no TLS at all.
+    /// When true, and <see cref="SmtpUseSsl"/> is false, the connection is
+    /// allowed to stay plaintext if the server does not advertise STARTTLS,
+    /// which exposes credentials and attachments on the network. Defaults to
+    /// false, which requires STARTTLS.
+    /// </summary>
+    public bool SmtpAllowInsecure { get; set; }
 
     /// <summary>Envelope/from address used for outgoing comic emails.</summary>
     public string? EmailFromAddress { get; set; }

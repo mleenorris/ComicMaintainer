@@ -85,6 +85,7 @@ public class SettingsController : ControllerBase
             // whether one is stored so it can show a "leave blank to keep" hint.
             smtp_password_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.SmtpPassword),
             smtp_use_ssl = _appSettings.CurrentValue.SmtpUseSsl,
+            smtp_allow_insecure = _appSettings.CurrentValue.SmtpAllowInsecure,
             email_from_address = _appSettings.CurrentValue.EmailFromAddress,
             email_from_name = _appSettings.CurrentValue.EmailFromName,
             email_max_attachment_mb = _appSettings.CurrentValue.EmailMaxAttachmentMegabytes
@@ -803,6 +804,7 @@ public class SettingsController : ControllerBase
                 request.SmtpUsername,
                 request.SmtpPassword,
                 request.SmtpUseSsl,
+                request.SmtpAllowInsecure,
                 request.EmailFromAddress,
                 request.EmailFromName,
                 request.EmailMaxAttachmentMb,
@@ -830,7 +832,15 @@ public class SettingsController : ControllerBase
         /// <summary>Null keeps the stored password; empty string clears it.</summary>
         public string? SmtpPassword { get; set; }
 
+        /// <summary>Connect with implicit TLS (SMTPS, usually port 465).</summary>
         public bool SmtpUseSsl { get; set; }
+
+        /// <summary>
+        /// Allow a plaintext connection when the server does not advertise
+        /// STARTTLS. Only enable for a trusted local relay.
+        /// </summary>
+        public bool SmtpAllowInsecure { get; set; }
+
         public string? EmailFromAddress { get; set; }
         public string? EmailFromName { get; set; }
         public int EmailMaxAttachmentMb { get; set; } = 25;

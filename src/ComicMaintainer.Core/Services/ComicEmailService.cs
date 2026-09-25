@@ -23,6 +23,14 @@ public class ComicEmailService : IComicEmailService
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<ComicEmailService> _logger;
 
+    /// <summary>
+    /// Serializes the "is this file already queued/sent?" check with the insert
+    /// that follows it. Without it two concurrent send requests can both see no
+    /// handled row and create duplicate deliveries for the same file/device;
+    /// the single background consumer only serializes the SMTP work.
+    /// </summary>
+    private readonly SemaphoreSlim _queueLock = new(1, 1);
+
     public ComicEmailService(
         IDbContextFactory<ComicMaintainerDbContext> dbFactory,
         IComicEmailSender sender,
@@ -49,6 +57,7 @@ public class ComicEmailService : IComicEmailService
         string? deliveryFormat,
         string source,
         bool skipAlreadyDelivered,
+        int? subscriptionId = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(filePaths);
@@ -74,6 +83,62 @@ public class ComicEmailService : IComicEmailService
         var format = EmailDeliveryFormat.NormalizeOrThrow(deliveryFormat, device.DeliveryFormat, nameof(deliveryFormat));
 
         var skipped = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        List<ComicEmailDeliveryEntity> queued;
+
+        // The dedupe read and the insert it guards must not interleave with a
+        // concurrent request for the same file/device, or both would queue.
+        await _queueLock.WaitAsync(cancellationToken);
+        try
+        {
+            queued = await CreateDeliveriesAsync(
+                db,
+                filePaths,
+                device,
+                format,
+                normalizedSource,
+                subscriptionId,
+                skipAlreadyDelivered,
+                skipped,
+                cancellationToken);
+        }
+        finally
+        {
+            _queueLock.Release();
+        }
+
+        if (queued.Count > 0)
+        {
+            foreach (var delivery in queued)
+            {
+                _queue.Enqueue(delivery.Id);
+            }
+
+            _logger.LogInformation(
+                "Queued {Count} comic email(s) to {DeviceName} as {Format}",
+                queued.Count,
+                LoggingHelper.SanitizeForLog(device.Name),
+                format);
+        }
+
+        return new EmailQueueResult(queued.Select(ToDto).ToList(), skipped);
+    }
+
+    /// <summary>
+    /// Validates each requested path and inserts a pending delivery row for it.
+    /// Always called while <see cref="_queueLock"/> is held so the dedupe check
+    /// and the insert cannot be interleaved by a concurrent request.
+    /// </summary>
+    private async Task<List<ComicEmailDeliveryEntity>> CreateDeliveriesAsync(
+        ComicMaintainerDbContext db,
+        IEnumerable<string> filePaths,
+        EreaderDeviceEntity device,
+        string format,
+        string normalizedSource,
+        int? subscriptionId,
+        bool skipAlreadyDelivered,
+        Dictionary<string, string> skipped,
+        CancellationToken cancellationToken)
+    {
         var queued = new List<ComicEmailDeliveryEntity>();
 
         foreach (var rawPath in filePaths.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -107,7 +172,7 @@ public class ComicEmailService : IComicEmailService
             {
                 var alreadyHandled = await db.ComicEmailDeliveries.AnyAsync(
                     d => d.FilePath == fullPath &&
-                         d.DeviceId == deviceId &&
+                         d.DeviceId == device.Id &&
                          (d.Status == EmailDeliveryStatus.Sent || d.Status == EmailDeliveryStatus.Pending),
                     cancellationToken);
 
@@ -127,6 +192,7 @@ public class ComicEmailService : IComicEmailService
                 DeliveryFormat = format,
                 Status = EmailDeliveryStatus.Pending,
                 Source = normalizedSource,
+                SubscriptionId = subscriptionId,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -137,19 +203,9 @@ public class ComicEmailService : IComicEmailService
         if (queued.Count > 0)
         {
             await db.SaveChangesAsync(cancellationToken);
-            foreach (var delivery in queued)
-            {
-                _queue.Enqueue(delivery.Id);
-            }
-
-            _logger.LogInformation(
-                "Queued {Count} comic email(s) to {DeviceName} as {Format}",
-                queued.Count,
-                LoggingHelper.SanitizeForLog(device.Name),
-                format);
         }
 
-        return new EmailQueueResult(queued.Select(ToDto).ToList(), skipped);
+        return queued;
     }
 
     public async Task<int> QueueAutoSendAsync(
@@ -206,6 +262,7 @@ public class ComicEmailService : IComicEmailService
                     format,
                     EmailDeliverySource.Auto,
                     skipAlreadyDelivered: true,
+                    subscriptionId: row.subscription.Id,
                     cancellationToken);
 
                 queuedCount += result.Queued.Count;
@@ -220,20 +277,9 @@ public class ComicEmailService : IComicEmailService
             }
         }
 
-        if (queuedCount > 0)
-        {
-            var now = DateTime.UtcNow;
-            var tracked = await db.SeriesEmailSubscriptions
-                .Where(s => keys.Contains(s.NormalizedSeriesKey) && s.Enabled)
-                .ToListAsync(cancellationToken);
-            foreach (var subscription in tracked)
-            {
-                subscription.LastSentAt = now;
-            }
-
-            await db.SaveChangesAsync(cancellationToken);
-        }
-
+        // LastSentAt is deliberately not stamped here: the message has only been
+        // queued. It is set in ProcessDeliveryAsync, per subscription, once the
+        // delivery it produced has actually been sent.
         return queuedCount;
     }
 
@@ -290,6 +336,18 @@ public class ComicEmailService : IComicEmailService
             delivery.Status = EmailDeliveryStatus.Sent;
             delivery.SentAt = DateTime.UtcNow;
             delivery.ErrorMessage = null;
+
+            if (delivery.SubscriptionId is int subscriptionId)
+            {
+                // The message is already out; do not let a cancellation here
+                // lose the sent status or the timestamp.
+                var subscription = await db.SeriesEmailSubscriptions
+                    .FirstOrDefaultAsync(s => s.Id == subscriptionId, CancellationToken.None);
+                if (subscription is not null)
+                {
+                    subscription.LastSentAt = delivery.SentAt;
+                }
+            }
         }
         catch (OperationCanceledException)
         {
@@ -394,7 +452,9 @@ public class ComicEmailService : IComicEmailService
     /// <summary>
     /// Resolves a caller-supplied path and confirms it lives inside the watched
     /// or duplicate directory, so a delivery request can never be used to email
-    /// arbitrary files off the host.
+    /// arbitrary files off the host. Symlinks and junctions are resolved first —
+    /// both on the file itself and on every ancestor directory — so a link
+    /// inside the library cannot smuggle in an external target.
     /// </summary>
     private bool TryResolveLibraryPath(string path, out string fullPath)
     {
@@ -402,7 +462,7 @@ public class ComicEmailService : IComicEmailService
 
         try
         {
-            var resolved = Path.GetFullPath(path);
+            var resolved = ResolveRealPath(Path.GetFullPath(path));
             var settings = _settings.CurrentValue;
 
             if (!IsWithin(resolved, settings.WatchedDirectory) &&
@@ -420,6 +480,44 @@ public class ComicEmailService : IComicEmailService
         }
     }
 
+    /// <summary>
+    /// Returns the physical path a (possibly linked) path ultimately refers to,
+    /// resolving each path segment from the root down. Segments that do not
+    /// exist, or are not links, are kept verbatim.
+    /// </summary>
+    private static string ResolveRealPath(string fullPath)
+    {
+        var parent = Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrEmpty(parent))
+        {
+            // Root of the volume: nothing above it can be a link.
+            return ResolveLinkTarget(fullPath) ?? fullPath;
+        }
+
+        var candidate = Path.Combine(ResolveRealPath(parent), Path.GetFileName(fullPath));
+        return ResolveLinkTarget(candidate) ?? candidate;
+    }
+
+    private static string? ResolveLinkTarget(string path)
+    {
+        try
+        {
+            FileSystemInfo? target = Directory.Exists(path)
+                ? Directory.ResolveLinkTarget(path, returnFinalTarget: true)
+                : File.Exists(path)
+                    ? File.ResolveLinkTarget(path, returnFinalTarget: true)
+                    : null;
+
+            return target is null ? null : Path.GetFullPath(target.FullName);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            // Unresolvable (broken or cyclic link, or no permission): treat the
+            // path as-is; the containment check below still has to pass.
+            return null;
+        }
+    }
+
     private static bool IsWithin(string fullPath, string? directory)
     {
         if (string.IsNullOrWhiteSpace(directory))
@@ -427,7 +525,7 @@ public class ComicEmailService : IComicEmailService
             return false;
         }
 
-        var root = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar);
+        var root = ResolveRealPath(Path.GetFullPath(directory)).TrimEnd(Path.DirectorySeparatorChar);
         return fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     }
 

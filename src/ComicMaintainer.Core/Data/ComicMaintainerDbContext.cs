@@ -710,6 +710,14 @@ public class ComicEmailDeliveryEntity
     /// <summary><c>manual</c> for user-initiated sends, <c>auto</c> for series subscriptions.</summary>
     public string Source { get; set; } = "manual";
 
+    /// <summary>
+    /// Subscription that triggered an automatic send, so its last-sent
+    /// timestamp can be stamped once this delivery actually succeeds. Null for
+    /// user-initiated sends. Not a foreign key: the delivery history outlives
+    /// the subscription.
+    /// </summary>
+    public int? SubscriptionId { get; set; }
+
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? SentAt { get; set; }

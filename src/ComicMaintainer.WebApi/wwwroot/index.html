@@ -872,8 +872,20 @@
                 <div class="form-group">
                    <label for="smtpUseSslCheckbox" style="display: flex; align-items: center; cursor: pointer;">
                        <input type="checkbox" id="smtpUseSslCheckbox" name="smtpUseSsl" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                       <span>Use SSL/TLS</span>
+                       <span>Use implicit TLS (SMTPS, usually port 465)</span>
                    </label>
+                   <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                       Leave unchecked for the common submission port 587, which upgrades the connection with STARTTLS.
+                   </small>
+                </div>
+                <div class="form-group">
+                   <label for="smtpAllowInsecureCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                       <input type="checkbox" id="smtpAllowInsecureCheckbox" name="smtpAllowInsecure" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                       <span>Allow insecure plaintext connection</span>
+                   </label>
+                   <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                       Only enable for a trusted local relay that offers no TLS. Credentials and attachments are sent unencrypted.
+                   </small>
                 </div>
                 <div class="form-group">
                    <label for="emailFromAddress">From Address</label>

@@ -310,7 +310,7 @@ public class EmailController : ControllerBase
         public string? DeliveryFormat { get; set; }
 
         /// <summary>When true, files already delivered to the device are skipped.</summary>
-        public bool SkipAlreadyDelivered { get; set; }
+public bool SkipAlreadyDelivered { get; set; } = true;
     }
 
     public class SendSeriesRequest

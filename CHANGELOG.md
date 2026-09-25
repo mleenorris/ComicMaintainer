@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **SharpCompress upgraded from 0.41.0 to 1.0.0, and Dependabot is now allowed to bump it.**
+  The pin existed because 0.46 removed the static `ZipArchive.Open` / `RarArchive.Open` /
+  `ArchiveFactory.Open` / `ZipArchive.Create` entry points that every archive service is
+  written against. Those factory methods were reinstated before 1.0.0 — `ZipArchive`,
+  `RarArchive` and `ArchiveFactory` all expose the `Open`/`Create` overloads again — so the
+  archive services compile and behave unchanged against the current release. The remaining
+  signature drift (`IArchive.Entries` going from `ICollection<T>` to `IEnumerable<T>`,
+  `IArchiveEntry.Key` becoming nullable) is already satisfied by the existing code, which
+  only ever enumerates `Entries` through LINQ and null-checks `Key`. The `ignore` entry for
+  SharpCompress has been dropped from `.github/dependabot.yml`; the ImageSharp major-version
+  ignore stays, because that one is a licensing wall rather than an API break.
+
 - **The web UI now announces what it is doing to assistive technology.** `showMessage()` is
   the library page's only notification channel — roughly a hundred call sites, including
   every error path — but `#messageContainer` was not a live region, so none of it reached

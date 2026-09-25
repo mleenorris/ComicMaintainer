@@ -163,6 +163,12 @@
                         <button class="settings-dropdown-item" onclick="openExternalProvidersModal(); closeSettingsMenu();">
                             🌐 External Providers Status
                         </button>
+                        <button class="settings-dropdown-item" onclick="openEmailDevicesModal(); closeSettingsMenu();">
+                            📧 Ereader Devices
+                        </button>
+                        <button class="settings-dropdown-item" onclick="openEmailDeliveryHistoryModal(); closeSettingsMenu();">
+                            📨 Email Delivery History
+                        </button>
                         <button class="settings-dropdown-item" onclick="window.location.href='/jobs.html'; closeSettingsMenu();">
                             ⏰ Scheduled Jobs
                         </button>
@@ -1244,7 +1250,29 @@
             <div class="modal-footer">
                 <button class="btn" onclick="resetEmailDeviceForm()">Clear</button>
                 <button class="btn btn-primary" data-requires-write onclick="saveEmailDevice()">Save Device</button>
+                <button class="btn" onclick="openEmailDeliveryHistoryModal()">Delivery History</button>
                 <button class="btn" onclick="closeEmailDevicesModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="emailDeliveryHistoryModal" role="dialog" aria-modal="true" aria-labelledby="emailDeliveryHistoryModalTitle" aria-hidden="true">
+        <div class="modal-content" style="max-width: 900px;">
+            <div class="modal-header">
+                <h2 id="emailDeliveryHistoryModalTitle">Email Delivery History</h2>
+                <button class="close-btn" onclick="closeEmailDeliveryHistoryModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">
+                    Recent comics queued for delivery, including failures and their error text.
+                </p>
+                <div id="emailDeliveryHistoryList">
+                    <div class="loading"><div class="spinner"></div><p>Loading deliveries...</p></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="loadEmailDeliveryHistory()">Refresh</button>
+                <button class="btn" onclick="closeEmailDeliveryHistoryModal()">Close</button>
             </div>
         </div>
     </div>
@@ -1257,7 +1285,12 @@
             </div>
             <div class="modal-body">
                 <p id="emailSendSummary" style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;"></p>
-                <div class="form-group">
+                <div id="emailSendStatusHint" hidden style="margin-bottom: 12px; padding: 10px; border-radius: 5px; background: var(--bg-primary); color: var(--text-muted); font-size: 13px;"></div>
+                <div id="emailSendNoDevices" hidden style="margin-bottom: 12px;">
+                    <p style="margin-bottom: 10px;">No devices yet — add one to start sending comics to your ereader.</p>
+                    <button class="btn btn-small btn-primary" type="button" data-requires-write onclick="closeEmailSendModal(); openEmailDevicesModal();">Add Ereader Device</button>
+                </div>
+                <div class="form-group" id="emailSendDeviceGroup">
                     <label for="emailSendDeviceSelect">Device</label>
                     <select id="emailSendDeviceSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
                     </select>

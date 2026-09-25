@@ -3132,6 +3132,7 @@
                         ${selectedCount > 0 ? `${selectedCount} series selected` : 'No series selected'}
                     </span>
                     <button type="button" class="btn btn-small" id="seriesSelectionClearBtn" onclick="clearSeriesSelection()" ${selectedCount > 0 ? '' : 'hidden'}>Clear</button>
+                    <button type="button" class="btn btn-small" id="seriesSelectionEmailBtn" data-requires-write onclick="openEmailSendModalForSelected()" ${selectedCount > 0 ? '' : 'hidden'}>📧 Email Selected</button>
                 </div>
             `;
         }
@@ -4844,6 +4845,10 @@
             const clearBtn = document.getElementById('seriesSelectionClearBtn');
             if (clearBtn) {
                 clearBtn.hidden = selectedSeries.size === 0;
+            }
+            const emailBtn = document.getElementById('seriesSelectionEmailBtn');
+            if (emailBtn) {
+                emailBtn.hidden = selectedSeries.size === 0;
             }
         }
 
@@ -7979,6 +7984,7 @@
         }
         
         let emailDevicesCache = [];
+        let emailStatusCache = null;
         let currentEmailSend = null;
         let currentEmailSubscriptionSeriesTitle = '';
 
@@ -8014,7 +8020,7 @@
 
         async function loadEmailStatus() {
             try {
-                const data = await fetchEmailJson('/api/email/status');
+                const data = await fetchEmailStatus(true);
                 const summary = document.getElementById('emailStatusSummary');
                 if (summary) {
                     const from = data.from_address ? ` · From: ${data.from_address}` : '';
@@ -8026,6 +8032,15 @@
                 if (summary) summary.textContent = 'Unable to load email status.';
                 console.error('Failed to load email status:', error);
             }
+        }
+
+        // Shared /api/email/status fetch. Cached so opening the send modal
+        // repeatedly doesn't re-query, but always refreshed when the settings
+        // page asks for it (the admin may have just changed SMTP settings).
+        async function fetchEmailStatus(force = false) {
+            if (!force && emailStatusCache) return emailStatusCache;
+            emailStatusCache = await fetchEmailJson('/api/email/status');
+            return emailStatusCache;
         }
 
         async function loadEmailDevices(force = false) {
@@ -8191,27 +8206,114 @@
                 ? `Send all issues in "${context.seriesTitle || 'this series'}".`
                 : `Send ${context.files.length} selected file${context.files.length === 1 ? '' : 's'}.`;
             renderHtml(deviceSelect, html`<option value="">Loading devices...</option>`);
+            setEmailSendHint('');
+            setEmailSendNoDevicesVisible(false);
             modal.classList.add('active');
             try {
-                const devices = await loadEmailDevices(true);
+                // Both requests are needed before the modal is usable: an
+                // unconfigured SMTP server and an empty device list are the two
+                // reasons a send would otherwise fail only after pressing Send.
+                const [status, devices] = await Promise.all([
+                    fetchEmailStatus().catch(() => null),
+                    loadEmailDevices(true)
+                ]);
+
                 if (!devices.length) {
                     renderHtml(deviceSelect, html`<option value="">No devices saved</option>`);
-                    document.getElementById('emailSendSubmitBtn').disabled = true;
-                    showMessage('Add an ereader device before sending comics.', 'error');
+                    setEmailSendNoDevicesVisible(true);
+                    setEmailSendEnabled(false);
                     return;
                 }
+
                 renderEmailDeviceOptions(deviceSelect, devices);
-                document.getElementById('emailSendSubmitBtn').disabled = false;
+
+                if (status && status.configured === false) {
+                    setEmailSendHint('⚠️ Email delivery is not configured yet. Ask an administrator to set the SMTP host and from-address in Settings → Send to Ereader.');
+                    setEmailSendEnabled(false);
+                    return;
+                }
+
+                setEmailSendEnabled(true);
             } catch (error) {
                 renderHtml(deviceSelect, html`<option value="">Failed to load devices</option>`);
-                document.getElementById('emailSendSubmitBtn').disabled = true;
+                setEmailSendEnabled(false);
                 showMessage('Failed to load ereader devices: ' + error.message, 'error');
             }
+        }
+
+        function setEmailSendEnabled(enabled) {
+            const button = document.getElementById('emailSendSubmitBtn');
+            if (button) button.disabled = !enabled;
+        }
+
+        function setEmailSendHint(text) {
+            const hint = document.getElementById('emailSendStatusHint');
+            if (!hint) return;
+            hint.textContent = text || '';
+            hint.hidden = !text;
+        }
+
+        function setEmailSendNoDevicesVisible(visible) {
+            const empty = document.getElementById('emailSendNoDevices');
+            if (empty) empty.hidden = !visible;
+            const group = document.getElementById('emailSendDeviceGroup');
+            if (group) group.hidden = visible;
         }
 
         function closeEmailSendModal() {
             document.getElementById('emailSendModal')?.classList.remove('active');
             currentEmailSend = null;
+        }
+
+        async function openEmailDeliveryHistoryModal() {
+            const modal = document.getElementById('emailDeliveryHistoryModal');
+            if (!modal) return;
+            modal.classList.add('active');
+            await loadEmailDeliveryHistory();
+        }
+
+        function closeEmailDeliveryHistoryModal() {
+            document.getElementById('emailDeliveryHistoryModal')?.classList.remove('active');
+        }
+
+        async function loadEmailDeliveryHistory() {
+            const list = document.getElementById('emailDeliveryHistoryList');
+            if (!list) return;
+            renderHtml(list, html`<div class="loading"><div class="spinner"></div><p>Loading deliveries...</p></div>`);
+            try {
+                const data = await fetchEmailJson('/api/email/deliveries?limit=50');
+                renderEmailDeliveryHistory(Array.isArray(data.deliveries) ? data.deliveries : []);
+            } catch (error) {
+                renderHtml(list, html`<div class="empty-state"><p>Failed to load delivery history: ${error.message}</p></div>`);
+            }
+        }
+
+        function formatEmailDeliveryStatus(status) {
+            const normalized = String(status || '').toLowerCase();
+            if (normalized === 'sent') return '✅ Sent';
+            if (normalized === 'failed') return '❌ Failed';
+            if (normalized === 'pending') return '⏳ Pending';
+            return status || 'Unknown';
+        }
+
+        function renderEmailDeliveryHistory(deliveries) {
+            const list = document.getElementById('emailDeliveryHistoryList');
+            if (!list) return;
+            if (!deliveries.length) {
+                renderHtml(list, html`<div class="empty-state"><p>No comics have been emailed yet.</p></div>`);
+                return;
+            }
+            renderHtml(list, deliveries.map(delivery => html`
+                <div class="combine-folder-row" style="padding: 8px 0; border-bottom: 1px solid var(--border-primary);">
+                    <div style="font-weight: 500;">${delivery.fileName || delivery.filePath}</div>
+                    <div class="combine-folders-meta">
+                        ${formatEmailDeliveryStatus(delivery.status)} · ${delivery.deviceName} (${delivery.deviceEmail}) · ${formatEmailDeliveryFormat(delivery.deliveryFormat)} · ${formatEmailDate(delivery.sentAt || delivery.createdAt)}
+                    </div>
+                    ${delivery.errorMessage
+                        ? html`<div class="combine-folders-meta" style="color: var(--text-error, #d9534f);">${delivery.errorMessage}</div>`
+                        : ''}
+                </div>
+            `));
         }
 
         async function submitEmailSend() {

@@ -38,6 +38,7 @@ public class EpubConversionService : IEpubConversionService
     public async Task<string> ConvertToEpubAsync(
         string comicFilePath,
         string outputDirectory,
+        EpubConversionOptions? options = null,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(comicFilePath))
@@ -60,10 +61,14 @@ public class EpubConversionService : IEpubConversionService
             throw new NotSupportedException($"Unsupported comic format: {Path.GetExtension(comicFilePath)}");
         }
 
-        return await Task.Run(() => Convert(comicFilePath, outputDirectory, cancellationToken), cancellationToken);
+        return await Task.Run(() => Convert(comicFilePath, outputDirectory, options, cancellationToken), cancellationToken);
     }
 
-    private string Convert(string comicFilePath, string outputDirectory, CancellationToken cancellationToken)
+    private string Convert(
+        string comicFilePath,
+        string outputDirectory,
+        EpubConversionOptions? options,
+        CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(outputDirectory);
 
@@ -81,8 +86,10 @@ public class EpubConversionService : IEpubConversionService
         }
 
         var comicInfo = ReadComicInfo(archive);
-        var title = BuildTitle(comicInfo, comicFilePath);
+        var seriesName = FirstNonEmpty(comicInfo?.Series, options?.SeriesTitle);
+        var title = BuildTitle(seriesName, comicInfo, comicFilePath);
         var bookId = "urn:uuid:" + Guid.NewGuid().ToString("D");
+        var seriesCover = LoadSeriesCover(options?.SeriesImagePath);
 
         var epubPath = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(comicFilePath) + ".epub");
         var tempPath = epubPath + ".tmp";
@@ -95,6 +102,20 @@ public class EpubConversionService : IEpubConversionService
                 // The mimetype entry must be first and stored uncompressed (OCF spec).
                 WriteEntry(epub, "mimetype", "application/epub+zip", CompressionLevel.NoCompression);
                 WriteEntry(epub, "META-INF/container.xml", ContainerXml);
+
+                if (seriesCover is not null)
+                {
+                    var coverEntry = epub.CreateEntry("OEBPS/" + seriesCover.ImagePath, CompressionLevel.NoCompression);
+                    using (var coverStream = coverEntry.Open())
+                    {
+                        coverStream.Write(seriesCover.Bytes, 0, seriesCover.Bytes.Length);
+                    }
+
+                    WriteEntry(
+                        epub,
+                        "OEBPS/" + seriesCover.XhtmlPath,
+                        BuildCoverXhtml(title, seriesCover.ImagePath, seriesCover.Width, seriesCover.Height));
+                }
 
                 var manifestPages = new List<EpubPage>(pages.Count);
                 var index = 0;
@@ -134,8 +155,8 @@ public class EpubConversionService : IEpubConversionService
                         Height: height));
                 }
 
-                WriteEntry(epub, "OEBPS/content.opf", BuildOpf(bookId, title, comicInfo, manifestPages));
-                WriteEntry(epub, "OEBPS/nav.xhtml", BuildNav(title, manifestPages));
+                WriteEntry(epub, "OEBPS/content.opf", BuildOpf(bookId, title, seriesName, comicInfo, seriesCover, manifestPages));
+                WriteEntry(epub, "OEBPS/nav.xhtml", BuildNav(title, seriesCover, manifestPages));
             }
 
             File.Move(tempPath, epubPath, overwrite: true);
@@ -189,12 +210,12 @@ public class EpubConversionService : IEpubConversionService
         }
     }
 
-    private static string BuildTitle(ComicInfo? info, string comicFilePath)
+    private static string BuildTitle(string? seriesName, ComicInfo? info, string comicFilePath)
     {
-        var series = info?.Series?.Trim();
-        var number = info?.Number?.Trim();
+        var series = seriesName?.Trim();
+        var number = FormatIssueNumberForTitle(info?.Number);
 
-        if (!string.IsNullOrEmpty(series) && !string.IsNullOrEmpty(number))
+        if (!string.IsNullOrEmpty(series) && number is not null)
         {
             return $"{series} #{number}";
         }
@@ -210,6 +231,153 @@ public class EpubConversionService : IEpubConversionService
         }
 
         return Path.GetFileNameWithoutExtension(comicFilePath);
+    }
+
+    /// <summary>
+    /// Parses a ComicInfo issue number into a sortable value. Accepts the
+    /// decorations that show up in the wild ("#12", "12.", "007") and returns
+    /// null for purely alphabetic numbers such as "Annual".
+    /// </summary>
+    private static decimal? TryParseIssueNumber(string? number)
+    {
+        if (string.IsNullOrWhiteSpace(number))
+        {
+            return null;
+        }
+
+        var trimmed = number.Trim().TrimStart('#', ' ').Trim();
+        if (trimmed.Length == 0)
+        {
+            return null;
+        }
+
+        // Keep only the leading numeric run so "12a" / "12 (of 20)" still sort.
+        var end = 0;
+        var seenDot = false;
+        while (end < trimmed.Length)
+        {
+            var c = trimmed[end];
+            if (char.IsAsciiDigit(c))
+            {
+                end++;
+                continue;
+            }
+
+            if (c == '.' && !seenDot && end + 1 < trimmed.Length && char.IsAsciiDigit(trimmed[end + 1]))
+            {
+                seenDot = true;
+                end++;
+                continue;
+            }
+
+            break;
+        }
+
+        if (end == 0)
+        {
+            return null;
+        }
+
+        return decimal.TryParse(
+            trimmed[..end],
+            NumberStyles.Number,
+            CultureInfo.InvariantCulture,
+            out var parsed)
+            ? parsed
+            : null;
+    }
+
+    /// <summary>
+    /// Renders the issue number the way ereaders need it in the title. Kindle
+    /// and most sideload-friendly readers have no series support and sort
+    /// library entries lexicographically by title, so a numeric issue number is
+    /// zero-padded ("#010" sorts after "#009", "#10" would not). Non-numeric
+    /// numbers ("Annual") are kept verbatim.
+    /// </summary>
+    private static string? FormatIssueNumberForTitle(string? number)
+    {
+        var trimmed = number?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return null;
+        }
+
+        var parsed = TryParseIssueNumber(trimmed);
+        if (parsed is null)
+        {
+            return trimmed;
+        }
+
+        var whole = decimal.Truncate(Math.Abs(parsed.Value));
+        var fraction = Math.Abs(parsed.Value) - whole;
+        var padded = whole.ToString("000", CultureInfo.InvariantCulture);
+
+        if (fraction != 0m)
+        {
+            padded += fraction
+                .ToString("0.###", CultureInfo.InvariantCulture)
+                .TrimStart('0');
+        }
+
+        return parsed.Value < 0 ? "-" + padded : padded;
+    }
+
+    /// <summary>
+    /// Reads the cached series cover so it can be embedded as the book cover.
+    /// Any problem (missing file, unreadable, undecodable) degrades silently to
+    /// "no series cover" because the first page is still a usable cover.
+    /// </summary>
+    private SeriesCover? LoadSeriesCover(string? seriesImagePath)
+    {
+        if (string.IsNullOrWhiteSpace(seriesImagePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            if (!File.Exists(seriesImagePath))
+            {
+                return null;
+            }
+
+            var bytes = File.ReadAllBytes(seriesImagePath);
+            if (bytes.Length == 0)
+            {
+                return null;
+            }
+
+            var info = Image.Identify(bytes);
+            if (info is null || info.Width <= 0 || info.Height <= 0)
+            {
+                return null;
+            }
+
+            var extension = NormalizeImageExtension(info.Metadata.DecodedImageFormat?.FileExtensions.FirstOrDefault() is { } ext
+                ? "." + ext
+                : Path.GetExtension(seriesImagePath));
+            var mediaType = GetMediaType(extension);
+            if (mediaType == "application/octet-stream")
+            {
+                return null;
+            }
+
+            return new SeriesCover(
+                ImagePath: "images/cover" + extension,
+                XhtmlPath: "cover.xhtml",
+                MediaType: mediaType,
+                Width: info.Width,
+                Height: info.Height,
+                Bytes: bytes);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or UnknownImageFormatException or InvalidImageContentException or NotSupportedException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not embed series cover {ImagePath} into EPUB; falling back to the first page",
+                LoggingHelper.SanitizePathForLog(seriesImagePath));
+            return null;
+        }
     }
 
     private static (int Width, int Height) GetImageSize(byte[] imageBytes, string? entryKey)
@@ -257,15 +425,50 @@ public class EpubConversionService : IEpubConversionService
             """;
     }
 
-    private static string BuildOpf(string bookId, string title, ComicInfo? info, IReadOnlyList<EpubPage> pages)
+    private static string BuildCoverXhtml(string title, string imagePath, int width, int height)
+    {
+        var w = width.ToString(CultureInfo.InvariantCulture);
+        var h = height.ToString(CultureInfo.InvariantCulture);
+
+        return $$"""
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!DOCTYPE html>
+            <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+            <head>
+              <title>{{Escape(title)}}</title>
+              <meta name="viewport" content="width={{w}}, height={{h}}"/>
+              <style type="text/css">
+                html, body { margin: 0; padding: 0; height: 100%; background-color: #000000; }
+                img { display: block; width: 100%; height: 100%; }
+              </style>
+            </head>
+            <body epub:type="cover">
+              <div><img src="{{imagePath}}" alt="{{Escape(title)}}"/></div>
+            </body>
+            </html>
+            """;
+    }
+
+    private static string BuildOpf(
+        string bookId,
+        string title,
+        string? seriesName,
+        ComicInfo? info,
+        SeriesCover? cover,
+        IReadOnlyList<EpubPage> pages)
     {
         var builder = new StringBuilder();
         builder.AppendLine("""<?xml version="1.0" encoding="UTF-8"?>""");
         builder.AppendLine("""<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" prefix="rendition: http://www.idpf.org/vocab/rendition/#">""");
         builder.AppendLine("""  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">""");
         builder.AppendLine($"""    <dc:identifier id="bookid">{Escape(bookId)}</dc:identifier>""");
-        builder.AppendLine($"""    <dc:title>{Escape(title)}</dc:title>""");
+        builder.AppendLine($"""    <dc:title id="title">{Escape(title)}</dc:title>""");
+        builder.AppendLine("""    <meta refines="#title" property="title-type">main</meta>""");
+        // The title is already zero-padded, so reusing it as the sort key keeps
+        // readers that sort by "file-as" consistent with those that sort by title.
+        builder.AppendLine($"""    <meta refines="#title" property="file-as">{Escape(title)}</meta>""");
         builder.AppendLine($"""    <dc:language>{Escape(NormalizeLanguage(info?.LanguageISO))}</dc:language>""");
+
 
         var creator = FirstNonEmpty(info?.Writer, info?.Penciller);
         if (creator is not null)
@@ -283,14 +486,27 @@ public class EpubConversionService : IEpubConversionService
             builder.AppendLine($"""    <dc:description>{Escape(info.Summary.Trim())}</dc:description>""");
         }
 
-        if (!string.IsNullOrWhiteSpace(info?.Series))
+        var issueNumber = TryParseIssueNumber(info?.Number);
+
+        if (!string.IsNullOrWhiteSpace(seriesName))
         {
-            builder.AppendLine($"""    <meta property="belongs-to-collection" id="series">{Escape(info.Series.Trim())}</meta>""");
+            var series = seriesName.Trim();
+
+            // EPUB3 collection metadata: read by Kobo, Calibre, Kavita, ...
+            builder.AppendLine($"""    <meta property="belongs-to-collection" id="series">{Escape(series)}</meta>""");
             builder.AppendLine("""    <meta refines="#series" property="collection-type">series</meta>""");
 
-            if (decimal.TryParse(info.Number, NumberStyles.Number, CultureInfo.InvariantCulture, out var issueNumber))
+            if (issueNumber.HasValue)
             {
-                builder.AppendLine($"""    <meta refines="#series" property="group-position">{issueNumber.ToString(CultureInfo.InvariantCulture)}</meta>""");
+                builder.AppendLine($"""    <meta refines="#series" property="group-position">{FormatNumber(issueNumber.Value)}</meta>""");
+            }
+
+            // Legacy calibre-style series metadata, still the only form many
+            // readers and library managers understand.
+            builder.AppendLine($"""    <meta name="calibre:series" content="{Escape(series)}"/>""");
+            if (issueNumber.HasValue)
+            {
+                builder.AppendLine($"""    <meta name="calibre:series_index" content="{FormatNumber(issueNumber.Value)}"/>""");
             }
         }
 
@@ -302,17 +518,28 @@ public class EpubConversionService : IEpubConversionService
 
         builder.AppendLine("""  <manifest>""");
         builder.AppendLine("""    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>""");
+        if (cover is not null)
+        {
+            builder.AppendLine($"""    <item id="cover-image" href="{Escape(cover.ImagePath)}" media-type="{cover.MediaType}" properties="cover-image"/>""");
+            builder.AppendLine($"""    <item id="cover-page" href="{Escape(cover.XhtmlPath)}" media-type="application/xhtml+xml"/>""");
+        }
         for (var i = 0; i < pages.Count; i++)
         {
             var page = pages[i];
-            var imageProperties = i == 0 ? """ properties="cover-image" """.Trim() : string.Empty;
-            var imageId = i == 0 ? "cover-image" : $"img{page.Id}";
-            builder.AppendLine($"""    <item id="{imageId}" href="{Escape(page.ImagePath)}" media-type="{page.MediaType}"{(imageProperties.Length > 0 ? " " + imageProperties : string.Empty)}/>""");
+            // Without a series cover the first page doubles as the cover image.
+            var isCoverImage = cover is null && i == 0;
+            var imageId = isCoverImage ? "cover-image" : $"img{page.Id}";
+            var imageProperties = isCoverImage ? """ properties="cover-image" """.TrimEnd() : string.Empty;
+            builder.AppendLine($"""    <item id="{imageId}" href="{Escape(page.ImagePath)}" media-type="{page.MediaType}"{imageProperties}/>""");
             builder.AppendLine($"""    <item id="{page.Id}" href="{Escape(page.XhtmlPath)}" media-type="application/xhtml+xml"/>""");
         }
         builder.AppendLine("""  </manifest>""");
 
         builder.AppendLine("""  <spine>""");
+        if (cover is not null)
+        {
+            builder.AppendLine("""    <itemref idref="cover-page" properties="rendition:page-spread-center"/>""");
+        }
         foreach (var page in pages)
         {
             builder.AppendLine($"""    <itemref idref="{page.Id}"/>""");
@@ -323,7 +550,9 @@ public class EpubConversionService : IEpubConversionService
         return builder.ToString();
     }
 
-    private static string BuildNav(string title, IReadOnlyList<EpubPage> pages)
+    private static string FormatNumber(decimal value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+
+    private static string BuildNav(string title, SeriesCover? cover, IReadOnlyList<EpubPage> pages)
     {
         var builder = new StringBuilder();
         builder.AppendLine("""<?xml version="1.0" encoding="UTF-8"?>""");
@@ -331,11 +560,20 @@ public class EpubConversionService : IEpubConversionService
         builder.AppendLine("""<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">""");
         builder.AppendLine($"""<head><title>{Escape(title)}</title></head>""");
         builder.AppendLine("""<body><nav epub:type="toc" id="toc"><h1>Contents</h1><ol>""");
+        if (cover is not null)
+        {
+            builder.AppendLine($"""<li><a href="{Escape(cover.XhtmlPath)}">Cover</a></li>""");
+        }
         for (var i = 0; i < pages.Count; i++)
         {
             builder.AppendLine($"""<li><a href="{Escape(pages[i].XhtmlPath)}">Page {(i + 1).ToString(CultureInfo.InvariantCulture)}</a></li>""");
         }
-        builder.AppendLine("""</ol></nav></body></html>""");
+        builder.AppendLine("""</ol></nav>""");
+        if (cover is not null)
+        {
+            builder.AppendLine($"""<nav epub:type="landmarks" id="landmarks" hidden="hidden"><ol><li><a epub:type="cover" href="{Escape(cover.XhtmlPath)}">Cover</a></li></ol></nav>""");
+        }
+        builder.AppendLine("""</body></html>""");
         return builder.ToString();
     }
 
@@ -428,4 +666,12 @@ public class EpubConversionService : IEpubConversionService
         string MediaType,
         int Width,
         int Height);
+
+    private sealed record SeriesCover(
+        string ImagePath,
+        string XhtmlPath,
+        string MediaType,
+        int Width,
+        int Height,
+        byte[] Bytes);
 }

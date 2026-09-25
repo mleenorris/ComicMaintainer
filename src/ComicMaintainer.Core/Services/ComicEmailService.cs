@@ -20,6 +20,7 @@ public class ComicEmailService : IComicEmailService
     private readonly IEpubConversionService _epubConverter;
     private readonly IComicEmailQueue _queue;
     private readonly ISeriesMetadataCacheService _seriesCache;
+    private readonly ISeriesImageStore _seriesImages;
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<ComicEmailService> _logger;
 
@@ -37,6 +38,7 @@ public class ComicEmailService : IComicEmailService
         IEpubConversionService epubConverter,
         IComicEmailQueue queue,
         ISeriesMetadataCacheService seriesCache,
+        ISeriesImageStore seriesImages,
         IOptionsMonitor<AppSettings> settings,
         ILogger<ComicEmailService> logger)
     {
@@ -45,6 +47,7 @@ public class ComicEmailService : IComicEmailService
         _epubConverter = epubConverter;
         _queue = queue;
         _seriesCache = seriesCache;
+        _seriesImages = seriesImages;
         _settings = settings;
         _logger = logger;
     }
@@ -310,7 +313,8 @@ public class ComicEmailService : IComicEmailService
             if (string.Equals(delivery.DeliveryFormat, EmailDeliveryFormat.Epub, StringComparison.OrdinalIgnoreCase))
             {
                 var workDirectory = Path.Combine(GetTempDirectory(), "email", Guid.NewGuid().ToString("N"));
-                attachmentPath = await _epubConverter.ConvertToEpubAsync(fullPath, workDirectory, cancellationToken);
+                var options = await BuildEpubOptionsAsync(fullPath, cancellationToken);
+                attachmentPath = await _epubConverter.ConvertToEpubAsync(fullPath, workDirectory, options, cancellationToken);
                 temporaryAttachment = attachmentPath;
             }
 
@@ -439,6 +443,57 @@ public class ComicEmailService : IComicEmailService
         }
 
         return keys;
+    }
+
+    /// <summary>
+    /// Looks up the cached series record for a file so the generated EPUB can
+    /// carry the series cover art and the resolved series name. Best-effort:
+    /// a miss (or any lookup failure) simply produces an EPUB that falls back
+    /// to the first comic page as its cover.
+    /// </summary>
+    private async Task<EpubConversionOptions?> BuildEpubOptionsAsync(
+        string fullPath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // The library groups a series by the name of its containing folder,
+            // which is also how the cache record is keyed.
+            var folderTitle = Path.GetFileName(Path.GetDirectoryName(fullPath));
+            if (string.IsNullOrWhiteSpace(folderTitle))
+            {
+                return null;
+            }
+
+            var record = await _seriesCache.GetByTitleAsync(folderTitle, cancellationToken);
+            if (record is null)
+            {
+                return null;
+            }
+
+            var imagePath = string.IsNullOrWhiteSpace(record.LocalImageFile)
+                ? null
+                : _seriesImages.ResolveAbsolutePath(record.LocalImageFile);
+
+            var seriesTitle = string.IsNullOrWhiteSpace(record.ResolvedSeriesName)
+                ? record.CanonicalTitle
+                : record.ResolvedSeriesName;
+
+            if (imagePath is null && string.IsNullOrWhiteSpace(seriesTitle))
+            {
+                return null;
+            }
+
+            return new EpubConversionOptions(imagePath, seriesTitle);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not resolve series artwork for {FilePath}; sending EPUB without series cover",
+                LoggingHelper.SanitizePathForLog(fullPath));
+            return null;
+        }
     }
 
     private string GetTempDirectory()

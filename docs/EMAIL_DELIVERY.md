@@ -131,8 +131,20 @@ e-readers expect for comics:
   `__MACOSX/` entries are ignored.
 - Each page is a minimal XHTML document whose viewport matches the image dimensions, so
   pages are displayed whole rather than reflowed.
-- The first image is marked as the cover.
-- Series, issue number and the series collection are written to the OPF metadata.
+- The cached series artwork (the same image the library shows for the series) is embedded
+  as a dedicated cover page, marked `cover-image`, placed first in the spine and referenced
+  from the navigation landmarks. When no series image is cached — or the cached file is
+  missing or undecodable — the first comic page is marked as the cover instead, as before.
+- Series, issue number and the series collection are written to the OPF metadata in both
+  the EPUB 3 form (`belongs-to-collection` / `collection-type` / `group-position`) and the
+  legacy calibre form (`calibre:series` / `calibre:series_index`), because readers support
+  one or the other and rarely both.
+- The issue number in the title is zero-padded to three digits (`Series Name #012`, and
+  `#012.5` for half issues). Kindle has no series support for sideloaded books and sorts by
+  title, so an unpadded `#10` would sort before `#2`. The same padded value is written as
+  the title's `file-as` sort key. Numbers that are not numeric at all (`Annual`) are kept
+  verbatim, and decorated numbers (`#42`, `007`, `12a`) are normalised to a plain value for
+  the collection position.
 - The file is written to a temporary name and moved into place, so an interrupted
   conversion cannot leave a truncated EPUB behind.
 

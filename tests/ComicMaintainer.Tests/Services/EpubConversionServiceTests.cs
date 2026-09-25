@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -51,7 +52,7 @@ public class EpubConversionServiceTests : IDisposable
 
         var opf = ReadEntry(archive, "OEBPS/content.opf");
         Assert.Contains("pre-paginated", opf);
-        Assert.Contains("<dc:title>Series Name #1</dc:title>", opf);
+        Assert.Contains("""<dc:title id="title">Series Name #001</dc:title>""", opf);
         Assert.Contains("""<itemref idref="page0003"/>""", opf);
         Assert.Contains("""properties="cover-image" """.TrimEnd(), opf);
     }
@@ -64,7 +65,7 @@ public class EpubConversionServiceTests : IDisposable
         var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out2"));
 
         using var archive = ZipFile.OpenRead(epubPath);
-        Assert.Contains("<dc:title>Mystery Issue</dc:title>", ReadEntry(archive, "OEBPS/content.opf"));
+        Assert.Contains("""<dc:title id="title">Mystery Issue</dc:title>""", ReadEntry(archive, "OEBPS/content.opf"));
     }
 
     [Fact]
@@ -81,8 +82,139 @@ public class EpubConversionServiceTests : IDisposable
 
         using var archive = ZipFile.OpenRead(epubPath);
         var opf = ReadEntry(archive, "OEBPS/content.opf");
-        Assert.Contains("Tom &amp; Jerry &lt;Deluxe&gt; #2", opf);
+        Assert.Contains("Tom &amp; Jerry &lt;Deluxe&gt; #002", opf);
         Assert.DoesNotContain("<Deluxe>", opf);
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_EncodesSeriesAndIssueNumberMetadata()
+    {
+        var cbz = CreateCbz("Numbered.cbz", pageCount: 1, includeComicInfo: true, number: "12.5");
+
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-number"));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        var opf = ReadEntry(archive, "OEBPS/content.opf");
+
+        // Zero-padded in the title so readers without series support still sort correctly.
+        Assert.Contains("""<dc:title id="title">Series Name #012.5</dc:title>""", opf);
+        Assert.Contains("""<meta refines="#title" property="file-as">Series Name #012.5</meta>""", opf);
+        Assert.Contains("""<meta property="belongs-to-collection" id="series">Series Name</meta>""", opf);
+        Assert.Contains("""<meta refines="#series" property="collection-type">series</meta>""", opf);
+        Assert.Contains("""<meta refines="#series" property="group-position">12.5</meta>""", opf);
+        Assert.Contains("""<meta name="calibre:series" content="Series Name"/>""", opf);
+        Assert.Contains("""<meta name="calibre:series_index" content="12.5"/>""", opf);
+    }
+
+    [Theory]
+    [InlineData("7", "Series Name #007", "7")]
+    [InlineData("007", "Series Name #007", "7")]
+    [InlineData("#42", "Series Name #042", "42")]
+    [InlineData("100", "Series Name #100", "100")]
+    public async Task ConvertToEpubAsync_NormalizesDecoratedIssueNumbers(
+        string number,
+        string expectedTitle,
+        string expectedPosition)
+    {
+        var cbz = CreateCbz($"decorated-{expectedPosition}.cbz", pageCount: 1, includeComicInfo: true, number: number);
+
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, $"out-num-{expectedPosition}"));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        var opf = ReadEntry(archive, "OEBPS/content.opf");
+        Assert.Contains($"""<dc:title id="title">{expectedTitle}</dc:title>""", opf);
+        Assert.Contains($"""<meta refines="#series" property="group-position">{expectedPosition}</meta>""", opf);
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_WithNonNumericIssueNumber_KeepsItVerbatim()
+    {
+        var cbz = CreateCbz("annual.cbz", pageCount: 1, includeComicInfo: true, number: "Annual");
+
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-annual"));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        var opf = ReadEntry(archive, "OEBPS/content.opf");
+        Assert.Contains("""<dc:title id="title">Series Name #Annual</dc:title>""", opf);
+        Assert.DoesNotContain("group-position", opf);
+        Assert.DoesNotContain("calibre:series_index", opf);
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_WithSeriesImage_EmbedsItAsTheCover()
+    {
+        var cbz = CreateCbz("Covered.cbz", pageCount: 2, includeComicInfo: true);
+        var coverPath = Path.Combine(_workDir, "series-cover.jpg");
+        await File.WriteAllBytesAsync(coverPath, CreateJpeg(60, 90));
+
+        var epubPath = await _service.ConvertToEpubAsync(
+            cbz,
+            Path.Combine(_workDir, "out-cover"),
+            new EpubConversionOptions(coverPath, "Series Name"));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        var names = archive.Entries.Select(e => e.FullName).ToList();
+        Assert.Contains("OEBPS/images/cover.jpg", names);
+        Assert.Contains("OEBPS/cover.xhtml", names);
+
+        var coverXhtml = ReadEntry(archive, "OEBPS/cover.xhtml");
+        Assert.Contains("images/cover.jpg", coverXhtml);
+        Assert.Contains("content=\"width=60, height=90\"", coverXhtml);
+
+        var opf = ReadEntry(archive, "OEBPS/content.opf");
+        Assert.Contains("""<item id="cover-image" href="images/cover.jpg" media-type="image/jpeg" properties="cover-image"/>""", opf);
+        // The first page must no longer claim the cover-image property.
+        Assert.Equal(1, CountOccurrences(opf, "properties=\"cover-image\""));
+        Assert.Contains("""<itemref idref="cover-page" properties="rendition:page-spread-center"/>""", opf);
+        Assert.True(
+            opf.IndexOf("<itemref idref=\"cover-page\"", StringComparison.Ordinal) <
+            opf.IndexOf("""<itemref idref="page0001"/>""", StringComparison.Ordinal));
+
+        var nav = ReadEntry(archive, "OEBPS/nav.xhtml");
+        Assert.Contains("epub:type=\"landmarks\"", nav);
+        Assert.Contains("""<a epub:type="cover" href="cover.xhtml">Cover</a>""", nav);
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_WithMissingOrInvalidSeriesImage_FallsBackToFirstPage()
+    {
+        var cbz = CreateCbz("Fallback.cbz", pageCount: 2, includeComicInfo: true);
+        var notAnImage = Path.Combine(_workDir, "broken-cover.jpg");
+        await File.WriteAllTextAsync(notAnImage, "not an image");
+
+        foreach (var (candidate, outDir) in new[]
+                 {
+                     (Path.Combine(_workDir, "missing-cover.jpg"), "out-missing"),
+                     (notAnImage, "out-broken")
+                 })
+        {
+            var epubPath = await _service.ConvertToEpubAsync(
+                cbz,
+                Path.Combine(_workDir, outDir),
+                new EpubConversionOptions(candidate, "Series Name"));
+
+            using var archive = ZipFile.OpenRead(epubPath);
+            Assert.DoesNotContain("OEBPS/cover.xhtml", archive.Entries.Select(e => e.FullName));
+
+            var opf = ReadEntry(archive, "OEBPS/content.opf");
+            Assert.Contains("<item id=\"cover-image\" href=\"images/page0001.jpg\"", opf);
+        }
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_WithoutComicInfoSeries_UsesTheProvidedSeriesTitle()
+    {
+        var cbz = CreateCbz("No Series.cbz", pageCount: 1, includeComicInfo: false);
+
+        var epubPath = await _service.ConvertToEpubAsync(
+            cbz,
+            Path.Combine(_workDir, "out-series-title"),
+            new EpubConversionOptions(null, "Library Series"));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        var opf = ReadEntry(archive, "OEBPS/content.opf");
+        Assert.Contains("""<meta property="belongs-to-collection" id="series">Library Series</meta>""", opf);
+        Assert.Contains("""<dc:title id="title">Library Series</dc:title>""", opf);
     }
 
     [Fact]
@@ -187,6 +319,27 @@ public class EpubConversionServiceTests : IDisposable
         }
 
         return path;
+    }
+
+    private static byte[] CreateJpeg(int width, int height)
+    {
+        using var image = new Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(width, height);
+        using var buffer = new MemoryStream();
+        image.Save(buffer, new JpegEncoder());
+        return buffer.ToArray();
+    }
+
+    private static int CountOccurrences(string haystack, string needle)
+    {
+        var count = 0;
+        var index = haystack.IndexOf(needle, StringComparison.Ordinal);
+        while (index >= 0)
+        {
+            count++;
+            index = haystack.IndexOf(needle, index + needle.Length, StringComparison.Ordinal);
+        }
+
+        return count;
     }
 
     private static void WriteImageEntry(ZipArchive zip, string entryName)

@@ -1560,8 +1560,10 @@
                     // appended.
                     const stitched = await ensureNextComicStitched();
 
-                    if (!stitched && (!nextComicInfo || !nextComicInfo.hasAdjacent)) {
-                        showStreamEndMessage(nextComicPrefetchFailed
+                    const tailPath = streamTailPath || comicFilePath;
+                    const tailFullyRequested = tailPath && isComicFullyRequested(tailPath);
+                    if (!stitched && (!tailFullyRequested || !nextComicInfo || !nextComicInfo.hasAdjacent)) {
+                        showStreamEndMessage(!tailFullyRequested || nextComicPrefetchFailed
                             ? NEXT_COMIC_RETRY_MESSAGE
                             : 'End of series');
                     }
@@ -1588,11 +1590,15 @@
             if (readingMode !== 'webcomic') return false;
             if (isLoadingNext) return false;
 
-            const tailPath = streamTailPath || comicFilePath;
-            if (!tailPath || !isComicFullyRequested(tailPath)) return false;
-
             isLoadingNext = true;
             try {
+                const tailPath = streamTailPath || comicFilePath;
+                if (!tailPath) return false;
+                if (!isComicFullyRequested(tailPath)) {
+                    await requestTailFinalPage(tailPath);
+                    if (!isComicFullyRequested(tailPath)) return false;
+                }
+
                 if (!nextComicInfo) {
                     // No pointer available: the lookup either failed or has not
                     // completed yet. Resolve it here so a transient error — or a
@@ -1620,6 +1626,13 @@
             }
         }
 
+        async function requestTailFinalPage(tailPath) {
+            const meta = comicMeta.get(tailPath);
+            const container = document.getElementById('webcomicContainer');
+            if (!meta || !meta.totalPages || !container) return;
+            await loadWebcomicPageForNextComic(meta.totalPages, container, tailPath);
+        }
+
         // Append the given issue after the current stream tail: a transition
         // separator, a start marker, and the opening buffer of pages. Nothing
         // here touches the viewport — the content goes in below whatever the
@@ -1643,10 +1656,6 @@
             }
 
             const data = await response.json();
-
-            // A previous end-of-series / retry notice no longer applies once
-            // another issue is being stitched in.
-            clearStreamEndMessage();
 
             const tailMeta = comicMeta.get(tailPath);
             const leavingComicName = tailMeta ? tailMeta.name : currentComicName;
@@ -1685,7 +1694,29 @@
             for (let i = startIdx; i <= endIdx; i++) {
                 pageLoads.push(loadWebcomicPageForNextComic(i, container, nextPath));
             }
-            await Promise.all(pageLoads);
+            const loadedImages = await Promise.all(pageLoads);
+            if (loadedImages.some(img => !img)) {
+                const stitchedImages = Array.from(container.querySelectorAll('img[data-page]'))
+                    .filter(img => img.dataset.comic === nextPath);
+                for (const img of stitchedImages) {
+                    if (pageObserver) pageObserver.unobserve(img);
+                    img.remove();
+                }
+                for (let i = startIdx; i <= endIdx; i++) {
+                    loadedPages.delete(pageLoadedKey(nextPath, i));
+                }
+                transitionDiv.remove();
+                startMarker.remove();
+                comicMeta.delete(nextPath);
+                stitchedComicPaths.delete(nextPath);
+                streamTailPath = tailPath;
+                showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
+                return false;
+            }
+
+            // A previous end-of-series / retry notice no longer applies once
+            // another issue has successfully been stitched in.
+            clearStreamEndMessage();
 
             // Resolve the pointer for the issue that follows the new tail, so
             // the next stitch can start as soon as the reader gets close.

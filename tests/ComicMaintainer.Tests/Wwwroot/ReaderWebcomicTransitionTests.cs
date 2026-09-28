@@ -63,6 +63,9 @@ public class ReaderWebcomicTransitionTests
         Assert.Contains("stitchedComicPaths.add(nextPath)", stitch);
         Assert.Contains("streamTailPath = nextPath", stitch);
         Assert.Contains("loadWebcomicPageForNextComic(i, container, nextPath)", stitch);
+        Assert.Contains("loadedImages.some(img => !img)", stitch);
+        Assert.Contains("streamTailPath = tailPath", stitch);
+        Assert.Contains("showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE)", stitch);
 
         // The pointer for the issue after the new tail must be resolved from
         // the tail, otherwise the same issue is stitched again.
@@ -80,6 +83,18 @@ public class ReaderWebcomicTransitionTests
 
         // An issue already in the stream must never be appended twice.
         Assert.Contains("stitchedComicPaths.has(nextComicInfo.filePath)", ensure);
+    }
+
+    [Fact]
+    public void BottomCatchUp_RetriesMissingTailFinalPage()
+    {
+        var handler = ExtractFunction(ReaderHtml, "handleWebcomicScroll");
+        var ensure = ExtractFunction(ReaderHtml, "ensureNextComicStitched");
+        var requestTail = ExtractFunction(ReaderHtml, "requestTailFinalPage");
+
+        Assert.Contains("await requestTailFinalPage(tailPath)", ensure);
+        Assert.Contains("loadWebcomicPageForNextComic(meta.totalPages, container, tailPath)", requestTail);
+        Assert.Contains("!tailFullyRequested || nextComicPrefetchFailed", handler);
     }
 
     [Fact]

@@ -87,7 +87,7 @@ public class ReaderIntegrationTests
 
         // Assert - Verify continuous scroll functions exist
         Assert.Contains("handleWebcomicScroll", content);
-        Assert.Contains("loadNextComic", content);
+        Assert.Contains("stitchNextComic", content);
         Assert.Contains("prefetchNextComic", content);
     }
 

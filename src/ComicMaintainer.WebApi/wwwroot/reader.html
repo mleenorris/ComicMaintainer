@@ -835,6 +835,15 @@
         }
         let isLoadingNext = false;
         let nextComicInfo = null;
+        // The comic currently sitting at the end of the stitched webcomic
+        // stream. New issues are appended after this one, which is not
+        // necessarily the issue on screen: stitching deliberately runs ahead of
+        // the reader so the transition needs no work when it is reached.
+        let streamTailPath = '';
+        // Comics already appended to the stream, in stitch order. Used both to
+        // avoid appending an issue twice and to tell whether the reader has
+        // moved forwards past an earlier issue.
+        const stitchedComicPaths = new Set();
         // True when the last adjacent-issue lookup failed (network error or a
         // non-OK response) rather than legitimately reporting "no next issue".
         // Distinguishing the two lets the reader retry instead of silently
@@ -887,11 +896,16 @@
         // browser cache keyed by explicit page URL, so it can never reorder or
         // duplicate pages.
         const NEXT_COMIC_PRELOAD_LEAD_PAGES = 3;
-        // How long (ms) the view stays pinned to the start of a newly stitched
-        // issue in webcomic mode. The pages around the transition keep loading
-        // and re-flowing for a moment afterwards, so the position is re-asserted
-        // over this window rather than set once.
-        const WEBCOMIC_TRANSITION_SETTLE_MS = 1500;
+        // How close to the end of the stitched stream (in viewport heights) the
+        // reader must get before the following issue is fetched and appended.
+        // Appending ahead of the reader is what makes the comic-to-comic
+        // transition seamless: the pages are already in the DOM — and usually
+        // decoded — by the time the reader scrolls onto them, so there is no
+        // pause, no spinner and no scroll repositioning at the boundary.
+        const WEBCOMIC_STITCH_AHEAD_VIEWPORTS = 2;
+        // Floor for the stitch-ahead distance so short viewports still get a
+        // useful head start.
+        const WEBCOMIC_STITCH_AHEAD_MIN_PX = 2000;
         // Monotonic token for manga-mode page loads. Each loadPage() call claims
         // the latest token; when its (possibly out-of-order) fetch resolves it
         // only touches the DOM if it is still the most recent request. This
@@ -1008,7 +1022,12 @@
                 // restored progress close to the end), warm the next issue now
                 // that its pointer is available. Manga mode only; webcomic mode
                 // stitches the next issue inline instead.
-                if (readingMode !== 'webcomic' && currentPage >= totalPages - (NEXT_COMIC_PRELOAD_LEAD_PAGES - 1)) {
+                if (readingMode === 'webcomic') {
+                    // Append the following issue ahead of the reader (no-op
+                    // until the end of this one is actually in reach) so the
+                    // transition costs nothing when it is reached.
+                    void ensureNextComicStitched();
+                } else if (currentPage >= totalPages - (NEXT_COMIC_PRELOAD_LEAD_PAGES - 1)) {
                     preloadNextComicPages();
                 }
 
@@ -1046,7 +1065,15 @@
             if (readingMode === 'webcomic') {
                 await loadWebcomicMode(pageBeforeSwitch);
             } else {
+                // Leaving the continuous stream: drop the stitched-stream
+                // bookkeeping so next-issue lookups resolve against the comic
+                // actually being read.
+                streamTailPath = '';
+                stitchedComicPaths.clear();
                 await loadPage(pageBeforeSwitch);
+                // The pointer may have been resolved against the stream tail
+                // rather than the comic on screen; re-resolve it.
+                await prefetchNextComic();
             }
         }
 
@@ -1110,6 +1137,10 @@
             // Register the comic we are starting with so prefetching knows its
             // page bounds.
             comicMeta.set(comicFilePath, { totalPages: totalPages, name: currentComicName });
+            // The stream starts (and, for now, ends) with this comic.
+            streamTailPath = comicFilePath;
+            stitchedComicPaths.clear();
+            stitchedComicPaths.add(comicFilePath);
             allImagesLoaded = false;
             
             // Reset current visible page
@@ -1155,6 +1186,11 @@
             // issue would never be marked read. Run the completion check once
             // after the initial render.
             await maybeMarkFinishedComic();
+
+            // Likewise, if the whole issue is already on screen the reader may
+            // never scroll far enough to trigger the stitch-ahead check, so run
+            // it once here too.
+            void ensureNextComicStitched();
         }
         
         // Calculate prefetch indices based on current page and buffer
@@ -1441,11 +1477,30 @@
             if (!filePath || filePath === comicFilePath) return;
             const meta = comicMeta.get(filePath);
             if (!meta) return;
+            // Moving forward onto a later issue of the stream means the
+            // previous one has been read through. Because the next issue is now
+            // stitched in before the reader gets to the end, that issue never
+            // sits at the bottom of the stream, so the bottom-of-stream check
+            // alone would never mark it read.
+            if (isStitchedBefore(comicFilePath, filePath)) {
+                void markFileAsRead(comicFilePath);
+            }
             comicFilePath = filePath;
             currentComicName = meta.name;
             totalPages = meta.totalPages;
             const titleEl = document.getElementById('comicTitle');
             if (titleEl) titleEl.textContent = meta.name;
+        }
+
+        // True when `earlierPath` was stitched into the stream before
+        // `laterPath`, i.e. the reader moving from the former to the latter is
+        // moving forwards through the series.
+        function isStitchedBefore(earlierPath, laterPath) {
+            if (!earlierPath || !laterPath || earlierPath === laterPath) return false;
+            const order = Array.from(stitchedComicPaths);
+            const earlierIdx = order.indexOf(earlierPath);
+            const laterIdx = order.indexOf(laterPath);
+            return earlierIdx >= 0 && laterIdx >= 0 && earlierIdx < laterIdx;
         }
 
         // Prefetch pages based on current page and scroll direction
@@ -1471,16 +1526,21 @@
             const content = document.getElementById('readerContent');
             const scrollPosition = content.scrollTop + content.clientHeight;
             const scrollHeight = content.scrollHeight;
+            const distanceToEnd = scrollHeight - scrollPosition;
 
-            // Warm the next issue's first pages into the browser HTTP cache well
-            // before the user reaches the bottom, so the eventual transition can
-            // render page 1 instantly instead of waiting on a cold network fetch.
-            if (scrollHeight - scrollPosition < 2000 && nextComicInfo && nextComicInfo.hasAdjacent) {
-                preloadNextComicPages();
+            // Append the following issue while the reader is still a screen or
+            // two away from the end of the stream. By the time the reader gets
+            // there the pages are already in the DOM, so the comic-to-comic
+            // boundary is just more scrolling — no fetch, no spinner, no jump.
+            const stitchAhead = Math.max(
+                content.clientHeight * WEBCOMIC_STITCH_AHEAD_VIEWPORTS,
+                WEBCOMIC_STITCH_AHEAD_MIN_PX);
+            if (distanceToEnd < stitchAhead) {
+                void ensureNextComicStitched();
             }
 
             // Check if scrolled near bottom (within 200px)
-            if (scrollHeight - scrollPosition < 200) {
+            if (distanceToEnd < 200) {
                 // Reaching the bottom means the issue whose pages sit at the end
                 // of the stitched stream has been read through. Mark that issue
                 // read — even when there is NO adjacent next issue (i.e. the last
@@ -1489,33 +1549,148 @@
                 // Reading row and reappears on refresh.
                 await maybeMarkFinishedComic();
 
-                // Continuously stitch in the next issue when one exists.
+                // The stitch-ahead above normally has the next issue in place
+                // already; this is the catch-up path for a reader that arrived
+                // at the bottom first (a fast flick, or a failed/at-the-time
+                // unresolved lookup).
                 if (!isLoadingNext) {
-                    if (!nextComicInfo) {
-                        // No pointer available: the lookup either failed or has
-                        // not completed yet. Resolve it here so a transient
-                        // error — or a race with the initial prefetch — doesn't
-                        // strand the reader at the bottom with no way forward
-                        // and no explanation.
-                        isLoadingNext = true;
-                        try {
-                            await prefetchNextComic();
-                        } finally {
-                            isLoadingNext = false;
-                        }
-                    }
+                    // A stitch that happens now means there is more to read, so
+                    // no end-of-stream notice — even though the pointer it
+                    // leaves behind describes the issue *after* the one just
+                    // appended.
+                    const stitched = await ensureNextComicStitched();
 
-                    if (nextComicInfo && nextComicInfo.hasAdjacent) {
-                        clearStreamEndMessage();
-                        isLoadingNext = true;
-                        await loadNextComic();
-                    } else if (nextComicPrefetchFailed) {
-                        showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
-                    } else {
-                        showStreamEndMessage('End of series');
+                    if (!stitched && (!nextComicInfo || !nextComicInfo.hasAdjacent)) {
+                        showStreamEndMessage(nextComicPrefetchFailed
+                            ? NEXT_COMIC_RETRY_MESSAGE
+                            : 'End of series');
                     }
                 }
             }
+        }
+
+        // True once every page of the given comic has been requested, i.e. the
+        // stream really does end with that issue's final page. Stitching the
+        // next issue before then would append it above pages that are still
+        // filling in.
+        function isComicFullyRequested(filePath) {
+            const meta = comicMeta.get(filePath);
+            if (!meta || !meta.totalPages) return false;
+            return loadedPages.has(pageLoadedKey(filePath, meta.totalPages));
+        }
+
+        // Append the next issue to the end of the continuous stream. Idempotent
+        // and safe to call repeatedly from scroll handlers: it returns early
+        // unless the stream genuinely ends with a fully requested issue that has
+        // an adjacent next issue which is not stitched in yet.
+        // Returns true when an issue was appended.
+        async function ensureNextComicStitched() {
+            if (readingMode !== 'webcomic') return false;
+            if (isLoadingNext) return false;
+
+            const tailPath = streamTailPath || comicFilePath;
+            if (!tailPath || !isComicFullyRequested(tailPath)) return false;
+
+            isLoadingNext = true;
+            try {
+                if (!nextComicInfo) {
+                    // No pointer available: the lookup either failed or has not
+                    // completed yet. Resolve it here so a transient error — or a
+                    // race with the initial prefetch — doesn't strand the reader
+                    // at the bottom with no way forward and no explanation.
+                    await prefetchNextComic(tailPath);
+                }
+
+                if (!nextComicInfo || !nextComicInfo.hasAdjacent || !nextComicInfo.filePath) return false;
+                // A stale pointer that names an issue already in the stream
+                // would otherwise duplicate it; re-resolve from the tail.
+                if (stitchedComicPaths.has(nextComicInfo.filePath)) {
+                    await prefetchNextComic(tailPath);
+                    if (!nextComicInfo || !nextComicInfo.hasAdjacent || !nextComicInfo.filePath) return false;
+                    if (stitchedComicPaths.has(nextComicInfo.filePath)) return false;
+                }
+
+                return await stitchNextComic(tailPath, nextComicInfo.filePath);
+            } catch (error) {
+                console.error('Error stitching next comic:', error);
+                showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
+                return false;
+            } finally {
+                isLoadingNext = false;
+            }
+        }
+
+        // Append the given issue after the current stream tail: a transition
+        // separator, a start marker, and the opening buffer of pages. Nothing
+        // here touches the viewport — the content goes in below whatever the
+        // reader is looking at, which is exactly what makes the transition
+        // seamless.
+        // Returns true when the issue was appended.
+        async function stitchNextComic(tailPath, nextPath) {
+            const container = document.getElementById('webcomicContainer');
+            if (!container || !nextPath || nextPath === tailPath) return false;
+
+            const response = await fetch(
+                `/api/ComicReader/info?filePath=${encodeURIComponent(nextPath)}`,
+                buildFetchOptions()
+            );
+
+            if (!response.ok) {
+                // Leave the stream as it is and surface a retry hint; a later
+                // scroll to the bottom tries again.
+                showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
+                return false;
+            }
+
+            const data = await response.json();
+
+            // A previous end-of-series / retry notice no longer applies once
+            // another issue is being stitched in.
+            clearStreamEndMessage();
+
+            const tailMeta = comicMeta.get(tailPath);
+            const leavingComicName = tailMeta ? tailMeta.name : currentComicName;
+
+            const transitionDiv = document.createElement('div');
+            transitionDiv.className = 'comic-transition';
+            transitionDiv.innerHTML = `
+                <div class="comic-transition-title">◆ ◆ ◆</div>
+                <div class="comic-transition-info">
+                    <div class="comic-transition-leaving">Finished: ${escapeHtml(leavingComicName)}</div>
+                    <div class="comic-transition-arrow">↓</div>
+                    <div class="comic-transition-entering">Continue: ${escapeHtml(data.fileName)}</div>
+                </div>
+                <div class="comic-transition-subtitle">Keep scrolling</div>
+            `;
+            container.appendChild(transitionDiv);
+
+            // Marker for the start of the new comic. The id is unique per comic
+            // so markers from earlier transitions are never re-selected.
+            const startMarker = document.createElement('div');
+            startMarker.id = `newComicStartMarker-${encodeURIComponent(nextPath)}`;
+            startMarker.className = 'new-comic-start-marker';
+            startMarker.dataset.comicPath = nextPath;
+            container.appendChild(startMarker);
+
+            // Register the new comic so prefetching, the title bar and progress
+            // saving can resolve its bounds once its pages scroll into view.
+            comicMeta.set(nextPath, { totalPages: data.pageCount, name: data.fileName });
+            stitchedComicPaths.add(nextPath);
+            streamTailPath = nextPath;
+
+            // Load the opening buffer in parallel so a slow page doesn't
+            // serially block the ones after it.
+            const [startIdx, endIdx] = calculatePrefetchIndices(1, data.pageCount);
+            const pageLoads = [];
+            for (let i = startIdx; i <= endIdx; i++) {
+                pageLoads.push(loadWebcomicPageForNextComic(i, container, nextPath));
+            }
+            await Promise.all(pageLoads);
+
+            // Resolve the pointer for the issue that follows the new tail, so
+            // the next stitch can start as soon as the reader gets close.
+            await prefetchNextComic(nextPath);
+            return true;
         }
 
         // Marks the issue at the end of the stitched stream as read when the
@@ -1562,8 +1737,13 @@
             return filePath;
         }
 
-        // Prefetch next comic information
-        async function prefetchNextComic() {
+        // Prefetch next comic information.
+        //
+        // In webcomic mode the pointer must be resolved from the comic at the
+        // end of the stitched stream (which runs ahead of the comic on screen),
+        // not from the active comic, or the reader would keep re-stitching the
+        // issue it already appended.
+        async function prefetchNextComic(filePath = streamTailPath || comicFilePath) {
             try {
                 const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
                 const fetchOptions = {
@@ -1577,7 +1757,7 @@
                 }
                 
                 const response = await fetch(
-                    `/api/ComicReader/adjacent?filePath=${encodeURIComponent(comicFilePath)}&direction=next`,
+                    `/api/ComicReader/adjacent?filePath=${encodeURIComponent(filePath)}&direction=next`,
                     fetchOptions
                 );
 
@@ -1620,243 +1800,6 @@
         function clearStreamEndMessage() {
             const message = document.getElementById('webcomicStreamEndMessage');
             if (message) message.remove();
-        }
-
-        // Load next comic seamlessly with buffered loading
-        async function loadNextComic() {
-            if (!nextComicInfo || !nextComicInfo.hasAdjacent) {
-                showStreamEndMessage('End of series');
-                isLoadingNext = false;
-                return;
-            }
-            
-            // Guard against a stale/duplicate next-comic info that still points
-            // at the comic we already have loaded. Without this, a transition
-            // like "48 → 48" would briefly appear before being corrected to
-            // "48 → 49" once a fresh prefetch resolves the real next issue.
-            if (nextComicInfo.filePath === comicFilePath) {
-                await prefetchNextComic();
-                isLoadingNext = false;
-                return;
-            }
-
-            try {
-                const container = document.getElementById('webcomicContainer');
-
-                // A previous end-of-series / retry notice no longer applies once
-                // another issue is being stitched in.
-                clearStreamEndMessage();
-                
-                // Store the name/path of the comic we're leaving
-                const leavingComicName = currentComicName;
-                const leavingComicPath = comicFilePath;
-                const enteringComicName = nextComicInfo.fileName;
-                
-                // Add comic transition separator
-                const transitionDiv = document.createElement('div');
-                transitionDiv.className = 'comic-transition';
-                transitionDiv.innerHTML = `
-                    <div class="comic-transition-title">◆ ◆ ◆</div>
-                    <div class="comic-transition-info">
-                        <div class="comic-transition-leaving">Finished: ${escapeHtml(leavingComicName)}</div>
-                        <div class="comic-transition-arrow">↓</div>
-                        <div class="comic-transition-entering">Continue: ${escapeHtml(enteringComicName)}</div>
-                    </div>
-                    <div class="comic-transition-subtitle">Automatically loading next comic...</div>
-                `;
-                container.appendChild(transitionDiv);
-                
-                // Load next comic info
-                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
-                const fetchOptions = {
-                    credentials: 'include'
-                };
-                
-                if (!isAutheliaAuth && token) {
-                    fetchOptions.headers = {
-                        'Authorization': `Bearer ${token}`
-                    };
-                }
-                
-                const response = await fetch(
-                    `/api/ComicReader/info?filePath=${encodeURIComponent(nextComicInfo.filePath)}`,
-                    fetchOptions
-                );
-
-                if (response.ok) {
-                    const data = await response.json();
-                    
-                    // The reader is moving past the issue it was on, so that issue
-                    // has been read through even if its final page never rendered
-                    // (e.g. a page request failed). Fire-and-forget so the
-                    // transition isn't delayed by the request; the path is
-                    // captured up-front and markFileAsRead handles its own
-                    // errors, so it can never mis-attribute or reject.
-                    void markFileAsRead(leavingComicPath);
-                    
-                    // Update current comic info
-                    comicFilePath = nextComicInfo.filePath;
-                    currentComicName = data.fileName;
-                    totalPages = data.pageCount;
-                    document.getElementById('comicTitle').textContent = data.fileName;
-                    
-                    // Register the new comic so prefetching can resolve its page
-                    // bounds / title when its images come into view.
-                    comicMeta.set(comicFilePath, { totalPages: totalPages, name: currentComicName });
-                    
-                    // Reset page tracking to 1 for the new comic
-                    currentPage = 1;
-                    currentVisiblePage = 1;
-                    
-                    // Create a marker at the start of the new comic for scrolling.
-                    // Use a unique id per transition so older markers (from earlier
-                    // comic-to-comic transitions) are never accidentally selected,
-                    // which previously caused the view to jump back to an earlier
-                    // comic's start.
-                    const startMarker = document.createElement('div');
-                    startMarker.id = `newComicStartMarker-${encodeURIComponent(comicFilePath)}`;
-                    startMarker.className = 'new-comic-start-marker';
-                    startMarker.dataset.comicPath = comicFilePath;
-                    container.appendChild(startMarker);
-                    
-                    // Use buffered loading for next comic (Kavita approach)
-                    const [startIdx, endIdx] = calculatePrefetchIndices(1, totalPages);
-                    console.log('Loading next comic, prefetching pages', startIdx, 'to', endIdx);
-                    
-                    // Load buffered pages of next comic in parallel so a slow
-                    // page doesn't serially block the ones after it. The first
-                    // pages were typically already warmed into the browser cache
-                    // by preloadNextComicPages(), so these resolve quickly.
-                    const pageLoads = [];
-                    for (let i = startIdx; i <= endIdx; i++) {
-                        pageLoads.push(loadWebcomicPageForNextComic(i, container, comicFilePath));
-                    }
-                    // Only wait for the first page before scrolling; the rest
-                    // continue filling in below the fold without holding up the
-                    // transition.
-                    await pageLoads[0];
-                    
-                    // Scroll to the start marker (beginning of new comic).
-                    // Use the marker reference we just created rather than a shared id
-                    // lookup so we always target the correct (newest) comic start.
-                    // A single scrollTop assignment is not enough: the freshly
-                    // appended images have no layout height until they decode, so
-                    // the requested offset can be clamped short, and pages that
-                    // are still filling in (above or below the marker) move the
-                    // marker afterwards — which is how the reader sometimes ended
-                    // up parked several pages into the new comic. Pin the view to
-                    // the marker until layout settles instead.
-                    const content = document.getElementById('readerContent');
-                    if (startMarker && content) {
-                        // Update page info to show page 1 of new comic
-                        updatePageInfoInWebcomicMode();
-                        await pinScrollToComicStart(content, startMarker);
-                        console.log('Scrolled to new comic start at position:', startMarker.offsetTop);
-                    }
-                    
-                    // Prefetch the next one
-                    await prefetchNextComic();
-                    isLoadingNext = false;
-                } else {
-                    // The lookup for the next issue failed. Roll back the
-                    // transition banner and surface a retry hint instead of
-                    // leaving the reader stuck mid-transition; a later scroll to
-                    // the bottom will try again.
-                    transitionDiv.remove();
-                    showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
-                    isLoadingNext = false;
-                }
-            } catch (error) {
-                console.error('Error loading next comic:', error);
-                showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE);
-                isLoadingNext = false;
-            }
-        }
-        
-        // Keeps the view pinned to the start of a freshly stitched comic while
-        // the surrounding pages are still sizing up.
-        //
-        // Images appended in webcomic mode have no layout height until their
-        // blob decodes, and pages of both the outgoing and incoming issue keep
-        // arriving (out of order, and above as well as below the marker) for a
-        // while after the transition. A one-shot `scrollTop = marker.offsetTop`
-        // therefore lands on a position that is no longer the start of the new
-        // comic once layout settles — the reader could end up several pages in,
-        // forcing the user to scroll back. Browser scroll anchoring makes it
-        // worse by locking onto whichever already-sized page happened to be at
-        // the top of the viewport, so it is suspended for the settle window.
-        //
-        // Re-asserting the (re-measured) marker offset each frame keeps page 1
-        // at the top no matter how the images resolve. Any scroll the user
-        // performs themselves cancels the pin immediately so the reader never
-        // fights their input.
-        function pinScrollToComicStart(content, marker, settleMs = WEBCOMIC_TRANSITION_SETTLE_MS) {
-            return new Promise(resolve => {
-                const previousAnchor = content.style.overflowAnchor;
-                content.style.overflowAnchor = 'none';
-                // Suppress visible-page bookkeeping while we are moving the
-                // viewport ourselves, so progress isn't saved for pages that
-                // merely scrolled past during the transition.
-                const previousIsScrolling = isScrolling;
-                isScrolling = true;
-
-                let cancelled = false;
-                let finished = false;
-
-                const apply = () => {
-                    const maxScroll = Math.max(0, content.scrollHeight - content.clientHeight);
-                    const target = Math.min(marker.offsetTop, maxScroll);
-                    if (Math.abs(content.scrollTop - target) > 1) {
-                        content.scrollTop = target;
-                    }
-                };
-
-                // Cancel on deliberate user input only. Scroll events are not
-                // usable as the signal here: they also fire for our own
-                // assignments and for the residual momentum of the very flick
-                // that reached the bottom and triggered the transition, which
-                // would cancel the pin before it ever had an effect.
-                const cancelEvents = ['wheel', 'touchstart', 'pointerdown', 'keydown'];
-                const onUserInput = () => { cancelled = true; };
-                cancelEvents.forEach(name =>
-                    document.addEventListener(name, onUserInput, { passive: true }));
-
-                let safetyTimer = null;
-                const finish = () => {
-                    if (finished) return;
-                    finished = true;
-                    clearTimeout(safetyTimer);
-                    cancelEvents.forEach(name =>
-                        document.removeEventListener(name, onUserInput));
-                    content.style.overflowAnchor = previousAnchor;
-                    isScrolling = previousIsScrolling;
-                    resolve();
-                };
-
-                // requestAnimationFrame stops firing in a hidden tab, so a
-                // timer backstop guarantees the transition always completes
-                // (otherwise the "loading next comic" latch would stay set and
-                // no further issue could be stitched in).
-                safetyTimer = setTimeout(finish, settleMs + 1000);
-
-                const startedAt = Date.now();
-                apply();
-
-                const tick = () => {
-                    if (finished) return;
-                    if (cancelled) {
-                        finish();
-                        return;
-                    }
-                    apply();
-                    if (Date.now() - startedAt >= settleMs) {
-                        finish();
-                        return;
-                    }
-                    requestAnimationFrame(tick);
-                };
-                requestAnimationFrame(tick);
-            });
         }
 
         // Load a page for the next comic (needed to maintain correct page numbering)

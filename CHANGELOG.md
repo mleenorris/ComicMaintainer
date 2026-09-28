@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Webcomic mode now flows straight from one issue into the next.** The following issue was
+  only looked up, fetched and appended once the reader hit the bottom of the current one, so
+  every comic boundary paused on a "loading next comic" banner and then jumped the viewport to
+  the new issue's first page. The next issue is now stitched into the continuous stream ahead
+  of the reader — as soon as the current issue is fully requested and the end is within a
+  couple of screens — so its opening pages are already in the DOM when the boundary is reached
+  and no scroll repositioning is needed at all. The finished issue is marked read when the
+  reader scrolls past it rather than when the stream bottom is reached.
+
 - **Oversized EPUBs are now compressed to fit the mail attachment limit instead of failing.**
   A book that came out larger than the configured `EmailMaxAttachmentMegabytes` was simply
   rejected. The converter now takes the delivery size budget and, when the lossless build

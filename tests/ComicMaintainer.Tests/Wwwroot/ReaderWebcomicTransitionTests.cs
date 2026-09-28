@@ -4,10 +4,9 @@ namespace ComicMaintainer.Tests.Wwwroot;
 
 /// <summary>
 /// Guards the webcomic-mode comic-to-comic transition in <c>reader.html</c>.
-/// Pages appended during a transition have no layout height until their blob
-/// decodes, so a one-shot <c>scrollTop</c> assignment left the reader parked
-/// somewhere in the middle of the newly stitched issue. The transition must
-/// keep re-asserting the start marker position until layout settles.
+/// The next issue must be stitched into the continuous stream *before* the
+/// reader reaches the end of the current one, so crossing the boundary costs
+/// no fetch and needs no scroll repositioning.
 /// </summary>
 public class ReaderWebcomicTransitionTests
 {
@@ -30,52 +29,83 @@ public class ReaderWebcomicTransitionTests
     }
 
     [Fact]
-    public void LoadNextComic_PinsScrollToNewComicStartMarker()
+    public void WebcomicScroll_StitchesNextIssueBeforeReachingTheEnd()
+    {
+        var handler = ExtractFunction(ReaderHtml, "handleWebcomicScroll");
+
+        // The stitch must be triggered from a stitch-ahead distance, not only
+        // from the 200px "at the bottom" check, otherwise the reader waits for
+        // the next issue at the boundary.
+        Assert.Contains("WEBCOMIC_STITCH_AHEAD_VIEWPORTS", handler);
+        Assert.Contains("ensureNextComicStitched()", handler);
+    }
+
+    [Fact]
+    public void StitchNextComic_DoesNotMoveTheViewport()
     {
         var html = ReaderHtml;
+        var stitch = ExtractFunction(html, "stitchNextComic");
 
-        Assert.Contains("function pinScrollToComicStart(", html);
-        Assert.Contains("await pinScrollToComicStart(content, startMarker)", html);
+        // Content is appended below the reader, so any scroll assignment or
+        // scrollIntoView would visibly jump the view at the boundary.
+        Assert.DoesNotMatch(new Regex(@"scrollTop\s*="), stitch);
+        Assert.DoesNotContain("scrollIntoView", stitch);
+
+        // The superseded pin-the-view-to-the-new-comic transition must be gone.
+        Assert.DoesNotContain("pinScrollToComicStart", html);
     }
 
     [Fact]
-    public void LoadNextComic_DoesNotUseOneShotScrollAssignment()
+    public void StitchNextComic_RegistersTheNewTailAndPreloadsItsOpeningPages()
     {
-        var loadNextComic = ExtractFunction(ReaderHtml, "loadNextComic");
+        var stitch = ExtractFunction(ReaderHtml, "stitchNextComic");
 
-        // A single `content.scrollTop = <captured offset>` cannot survive the
-        // images that keep loading (and re-flowing the stream) right after the
-        // transition — re-measure inside the pin loop instead.
-        Assert.DoesNotMatch(new Regex(@"content\.scrollTop\s*="), loadNextComic);
+        Assert.Contains("stitchedComicPaths.add(nextPath)", stitch);
+        Assert.Contains("streamTailPath = nextPath", stitch);
+        Assert.Contains("loadWebcomicPageForNextComic(i, container, nextPath)", stitch);
+        Assert.Contains("loadedImages.some(img => !img)", stitch);
+        Assert.Contains("streamTailPath = tailPath", stitch);
+        Assert.Contains("showStreamEndMessage(NEXT_COMIC_RETRY_MESSAGE)", stitch);
+
+        // The pointer for the issue after the new tail must be resolved from
+        // the tail, otherwise the same issue is stitched again.
+        Assert.Contains("prefetchNextComic(nextPath)", stitch);
     }
 
     [Fact]
-    public void PinScrollToComicStart_ReMeasuresMarkerAndSuspendsScrollAnchoring()
+    public void EnsureNextComicStitched_WaitsForTheTailIssueToBeFullyRequested()
     {
-        var html = ReaderHtml;
-        var pin = ExtractFunction(html, "pinScrollToComicStart");
+        var ensure = ExtractFunction(ReaderHtml, "ensureNextComicStitched");
 
-        // The marker offset must be read inside the settle loop, not captured
-        // once up front.
-        Assert.Contains("marker.offsetTop", pin);
-        Assert.Contains("requestAnimationFrame(tick)", pin);
+        // Appending the next issue while pages of the current one are still
+        // missing would put it ahead of content the reader has not seen.
+        Assert.Contains("isComicFullyRequested(tailPath)", ensure);
 
-        // Browser scroll anchoring otherwise locks the viewport onto whichever
-        // page happened to be sized already, skipping the first pages.
-        Assert.Contains("overflowAnchor = 'none'", pin);
-        Assert.Contains("overflowAnchor = previousAnchor", pin);
+        // An issue already in the stream must never be appended twice.
+        Assert.Contains("stitchedComicPaths.has(nextComicInfo.filePath)", ensure);
     }
 
     [Fact]
-    public void PinScrollToComicStart_AlwaysCompletes()
+    public void BottomCatchUp_RetriesMissingTailFinalPage()
     {
-        var pin = ExtractFunction(ReaderHtml, "pinScrollToComicStart");
+        var handler = ExtractFunction(ReaderHtml, "handleWebcomicScroll");
+        var ensure = ExtractFunction(ReaderHtml, "ensureNextComicStitched");
+        var requestTail = ExtractFunction(ReaderHtml, "requestTailFinalPage");
 
-        // requestAnimationFrame does not fire in a hidden tab; without the
-        // timer backstop the isLoadingNext latch would never be released and
-        // no further issue could be stitched in.
-        Assert.Contains("safetyTimer = setTimeout(finish", pin);
-        Assert.Contains("clearTimeout(safetyTimer)", pin);
+        Assert.Contains("await requestTailFinalPage(tailPath)", ensure);
+        Assert.Contains("loadWebcomicPageForNextComic(meta.totalPages, container, tailPath)", requestTail);
+        Assert.Contains("!tailFullyRequested || nextComicPrefetchFailed", handler);
+    }
+
+    [Fact]
+    public void SetActiveComic_MarksThePrecedingIssueRead()
+    {
+        var setActive = ExtractFunction(ReaderHtml, "setActiveComic");
+
+        // With pre-stitching, a finished issue no longer sits at the bottom of
+        // the stream, so the bottom-of-stream check alone would never mark it.
+        Assert.Contains("isStitchedBefore(comicFilePath, filePath)", setActive);
+        Assert.Contains("markFileAsRead(comicFilePath)", setActive);
     }
 
     /// <summary>

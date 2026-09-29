@@ -25,14 +25,16 @@ namespace ComicMaintainer.WebApi.Middleware;
 /// </remarks>
 public sealed class GlobalExceptionHandler : IExceptionHandler
 {
-    private readonly IErrorReportService _errorReports;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<GlobalExceptionHandler> _logger;
 
     public GlobalExceptionHandler(
-        IErrorReportService errorReports,
+        IServiceScopeFactory scopeFactory,
         ILogger<GlobalExceptionHandler> logger)
     {
-        _errorReports = errorReports;
+        // The handler is a singleton but the reporter is scoped (it owns a
+        // DbContext), so the scope is created per failure rather than injected.
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -59,7 +61,10 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
 
         try
         {
-            await _errorReports.CaptureAsync(
+            using var scope = _scopeFactory.CreateScope();
+            var errorReports = scope.ServiceProvider.GetRequiredService<IErrorReportService>();
+
+            await errorReports.CaptureAsync(
                 exception,
                 ErrorReportSource.Api,
                 origin,

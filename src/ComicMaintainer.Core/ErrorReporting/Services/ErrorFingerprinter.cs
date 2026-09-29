@@ -45,6 +45,31 @@ public static class ErrorFingerprinter
         @"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
         RegexOptions.CultureInvariant, MatchTimeout);
 
+    /// <summary>
+    /// A redaction placeholder, optionally carrying the file extension the
+    /// redactor preserved.
+    /// </summary>
+    /// <remarks>
+    /// The extension has to be folded in with the placeholder. Two instances
+    /// hitting the same defect on <c>.cbz</c> and <c>.cbr</c> files would
+    /// otherwise produce different fingerprints and file two issues for one
+    /// bug.
+    /// </remarks>
+    private static readonly Regex PlaceholderPattern = new(
+        @"\[redacted\](?:\.[A-Za-z0-9]{1,8})?",
+        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, MatchTimeout);
+
+    /// <summary>
+    /// Opaque identifiers: job ids, request trace ids, short hashes. Requiring
+    /// both a digit and a letter keeps ordinary words out — <c>added</c> is
+    /// valid hex, and normalising it would merge unrelated defects — while
+    /// still catching <c>4e2a</c> and <c>0HN7GQ1A2B3C4</c>. Purely numeric
+    /// values are already handled by <see cref="NumberPattern"/>.
+    /// </summary>
+    private static readonly Regex OpaqueIdentifierPattern = new(
+        @"\b(?=[A-Za-z0-9]{4,64}\b)(?=[A-Za-z0-9]{0,63}\d)(?=[A-Za-z0-9]{0,63}[A-Za-z])[A-Za-z0-9]{4,64}\b",
+        RegexOptions.CultureInvariant, MatchTimeout);
+
     private static readonly Regex QuotedPattern = new(
         @"'[^'\r\n]{0,512}'|""[^""\r\n]{0,512}""",
         RegexOptions.CultureInvariant, MatchTimeout);
@@ -175,9 +200,10 @@ public static class ErrorFingerprinter
             // A redaction placeholder already stands for variable data; folding
             // it into the same token as a path keeps a report fingerprinted the
             // same whether or not redaction fired.
-            text = text.Replace(ErrorReportRedactor.Placeholder, "<v>", StringComparison.Ordinal);
+            text = PlaceholderPattern.Replace(text, "<v>");
             text = GuidPattern.Replace(text, "<v>");
             text = QuotedPattern.Replace(text, "<v>");
+            text = OpaqueIdentifierPattern.Replace(text, "<v>");
             text = NumberPattern.Replace(text, "<v>");
             text = WhitespacePattern.Replace(text, " ");
 

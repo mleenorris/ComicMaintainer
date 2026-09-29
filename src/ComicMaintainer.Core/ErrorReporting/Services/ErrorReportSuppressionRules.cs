@@ -60,6 +60,7 @@ public static class ErrorReportSuppressionRules
         // SQLite contention. Concurrent writers are expected on a busy library
         // and are handled by retry/backoff, not by a code fix.
         "database is locked",
+        "database is busy",
         "database table is locked",
         "sqlite_busy",
         "sqlite_locked",
@@ -70,8 +71,11 @@ public static class ErrorReportSuppressionRules
         "disk full",
         "disk quota exceeded",
 
-        // Client disconnects surfacing through IO.
+        // Client disconnects surfacing through IO. Both phrasings appear:
+        // Kestrel says "the client has disconnected", application code and
+        // other layers say "client disconnected".
         "the client has disconnected",
+        "client disconnected",
         "broken pipe",
         "connection reset by peer",
         "the response has already started",

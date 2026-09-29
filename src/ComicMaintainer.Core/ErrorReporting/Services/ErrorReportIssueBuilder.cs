@@ -40,8 +40,29 @@ public static class ErrorReportIssueBuilder
     }
 
     /// <summary>Labels to apply, matching the repository's label set.</summary>
-    public static IReadOnlyList<string> BuildLabels(ErrorReport report) =>
-        ["bug", "auto-reported", $"area:{report.Area}"];
+    /// <summary>
+    /// Product areas that may be turned into a label.
+    /// </summary>
+    /// <remarks>
+    /// An allow-list rather than a pass-through. The area is derived from a
+    /// stack frame and then round-trips through the database, so treating it as
+    /// trusted would let a crafted value create arbitrary labels on the
+    /// repository — or, with a leading <c>../</c>, escape into the API path.
+    /// </remarks>
+    private static readonly HashSet<string> KnownAreas = new(StringComparer.Ordinal)
+    {
+        "reader", "metadata", "email", "watcher", "auth", "jobs", "frontend", "core",
+    };
+
+    /// <summary>Labels to apply: <c>bug</c>, <c>auto-reported</c> and the area.</summary>
+    public static IReadOnlyList<string> BuildLabels(ErrorReport report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+
+        return KnownAreas.Contains(report.Area)
+            ? ["bug", "auto-reported", $"area:{report.Area}"]
+            : ["bug", "auto-reported"];
+    }
 
     /// <summary>Renders the full issue body.</summary>
     public static string BuildBody(ErrorReport report)

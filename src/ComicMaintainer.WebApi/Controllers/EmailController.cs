@@ -159,14 +159,28 @@ public class EmailController : ControllerBase
 
         try
         {
-            var result = await _email.QueueFilesAsync(
-                request.Files,
-                request.DeviceId,
-                request.DeliveryFormat,
-                EmailDeliverySource.Manual,
-                request.SkipAlreadyDelivered,
-                subscriptionId: null,
-                cancellationToken);
+            // Normalize first: an unrecognized mode must fail with 400 rather
+            // than quietly falling through to separate per-issue emails.
+            var condenseMode = EmailCondenseMode.NormalizeOrThrow(request.CondenseMode, nameof(request.CondenseMode));
+
+            var result = EmailCondenseMode.IsCondensing(condenseMode)
+                ? await _email.QueueCondensedFilesAsync(
+                    request.Files,
+                    request.DeviceId,
+                    condenseMode,
+                    request.IssuesPerBook,
+                    EmailDeliverySource.Manual,
+                    request.SkipAlreadyDelivered,
+                    preserveIssueOrder: false,
+                    cancellationToken)
+                : await _email.QueueFilesAsync(
+                    request.Files,
+                    request.DeviceId,
+                    request.DeliveryFormat,
+                    EmailDeliverySource.Manual,
+                    request.SkipAlreadyDelivered,
+                    subscriptionId: null,
+                    cancellationToken);
 
             return Ok(new { queued = result.Queued, skipped = result.Skipped });
         }
@@ -221,14 +235,30 @@ public class EmailController : ControllerBase
 
         try
         {
-            var result = await _email.QueueFilesAsync(
-                files,
-                request.DeviceId,
-                request.DeliveryFormat,
-                EmailDeliverySource.Manual,
-                request.SkipAlreadyDelivered,
-                subscriptionId: null,
-                cancellationToken);
+            // Normalize first: an unrecognized mode must fail with 400 rather
+            // than quietly falling through to separate per-issue emails.
+            var condenseMode = EmailCondenseMode.NormalizeOrThrow(request.CondenseMode, nameof(request.CondenseMode));
+
+            var result = EmailCondenseMode.IsCondensing(condenseMode)
+                ? await _email.QueueCondensedFilesAsync(
+                    files,
+                    request.DeviceId,
+                    condenseMode,
+                    request.IssuesPerBook,
+                    EmailDeliverySource.Manual,
+                    request.SkipAlreadyDelivered,
+                    // GetSeriesIssuesAsync already returns one series in issue
+                    // order; re-sorting it by folder would reorder the books.
+                    preserveIssueOrder: true,
+                    cancellationToken)
+                : await _email.QueueFilesAsync(
+                    files,
+                    request.DeviceId,
+                    request.DeliveryFormat,
+                    EmailDeliverySource.Manual,
+                    request.SkipAlreadyDelivered,
+                    subscriptionId: null,
+                    cancellationToken);
 
             return Ok(new
             {
@@ -244,6 +274,195 @@ public class EmailController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Describes what condensing a selection (or a whole series) would produce:
+    /// the books, their estimated size and whether any of them is too large to
+    /// email and has to be downloaded instead.
+    /// </summary>
+    [HttpPost("condense-plan")]
+    public async Task<ActionResult<object>> PlanCondense(
+        [FromBody] CondenseRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { error = "Request body is required" });
+        }
+
+        var (files, error) = await ResolveCondenseFilesAsync(request, cancellationToken);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        try
+        {
+            var plan = await _email.PlanCondensedDeliveryAsync(
+                files!,
+                request.CondenseMode,
+                request.IssuesPerBook,
+                preserveIssueOrder: !string.IsNullOrWhiteSpace(request.SeriesId),
+                request.DeviceId,
+                request.SkipAlreadyDelivered,
+                cancellationToken);
+
+            return Ok(new
+            {
+                mode = plan.Mode,
+                total_issues = plan.TotalIssues,
+                issues_per_book = plan.IssuesPerBook,
+                max_attachment_bytes = plan.MaxAttachmentBytes,
+                can_email = plan.CanEmail,
+                oversized_book_count = plan.OversizedBookCount,
+                books = plan.Books.Select(b => new
+                {
+                    display_name = b.DisplayName,
+                    issue_count = b.Files.Count,
+                    estimated_bytes = b.EstimatedBytes,
+                    exceeds_attachment_limit = b.ExceedsAttachmentLimit
+                }),
+                skipped = plan.Skipped
+            });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Builds one condensed book and streams it back, for books that are too
+    /// large to email.
+    /// </summary>
+    [HttpPost("condense-download")]
+    public async Task<ActionResult> DownloadCondensedBook(
+        [FromBody] CondenseRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { error = "Request body is required" });
+        }
+
+        var (files, error) = await ResolveCondenseFilesAsync(request, cancellationToken);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        CondensedBookFile book;
+        try
+        {
+            book = await _email.CreateCondensedBookAsync(
+                files!,
+                request.CondenseMode,
+                request.IssuesPerBook,
+                request.BookIndex,
+                preserveIssueOrder: !string.IsNullOrWhiteSpace(request.SeriesId),
+                request.DeviceId,
+                request.SkipAlreadyDelivered,
+                cancellationToken);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Failed to build a condensed book for download");
+            return StatusCode(500, new { error = $"Failed to build the condensed book: {ex.Message}" });
+        }
+
+        // The generated book only exists for this response: delete it (and the
+        // work directory it lives in) as soon as it has been streamed.
+        var workDirectory = Path.GetDirectoryName(book.FilePath);
+        var stream = new FileStream(
+            book.FilePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 64 * 1024,
+            FileOptions.Asynchronous | FileOptions.DeleteOnClose);
+
+        Response.OnCompleted(() =>
+        {
+            TryDeleteDirectory(workDirectory);
+            return Task.CompletedTask;
+        });
+
+        return File(stream, "application/epub+zip", book.FileName);
+    }
+
+    /// <summary>
+    /// Resolves the issues a condense request targets: either the explicit file
+    /// list or every issue of the requested series.
+    /// </summary>
+    private async Task<(List<string>? Files, ActionResult? Error)> ResolveCondenseFilesAsync(
+        CondenseRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(request.SeriesId))
+        {
+            var issues = await _seriesLibrary.GetSeriesIssuesAsync(
+                request.SeriesId,
+                filter: null,
+                page: 1,
+                perPage: MaxSeriesIssuesPerSend,
+                cancellationToken);
+
+            if (issues is null)
+            {
+                return (null, NotFound(new { error = "Series not found" }));
+            }
+
+            // Never silently truncate: a series larger than one page would drop
+            // issues from the condensed books without the caller noticing.
+            if (issues.IssueCount > MaxSeriesIssuesPerSend || issues.TotalPages > 1)
+            {
+                return (null, BadRequest(new
+                {
+                    error = $"Series has {issues.IssueCount} issues, which exceeds the {MaxSeriesIssuesPerSend} issue limit for a single send. Select the issues to send instead."
+                }));
+            }
+
+            var seriesFiles = issues.Issues.Select(i => i.FilePath).ToList();
+            return seriesFiles.Count == 0
+                ? (null, BadRequest(new { error = "Series has no issues to send" }))
+                : (seriesFiles, null);
+        }
+
+        if (request.Files is null || request.Files.Count == 0)
+        {
+            return (null, BadRequest(new { error = "At least one file is required" }));
+        }
+
+        return (request.Files, null);
+    }
+
+    private void TryDeleteDirectory(string? directory)
+    {
+        if (string.IsNullOrEmpty(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Failed to clean up the condensed book work directory");
         }
     }
 
@@ -326,6 +545,16 @@ public class EmailController : ControllerBase
         /// delivery for the device are skipped.
         /// </summary>
         public bool SkipAlreadyDelivered { get; set; } = true;
+
+        /// <summary>
+        /// <c>none</c> (default), <c>count</c> to condense every
+        /// <see cref="IssuesPerBook"/> issues into one EPUB, or <c>all</c> to
+        /// condense the whole selection into a single EPUB.
+        /// </summary>
+        public string? CondenseMode { get; set; }
+
+        /// <summary>Issues per condensed book; required when the mode is <c>count</c>.</summary>
+        public int? IssuesPerBook { get; set; }
     }
 
     public class SendSeriesRequest
@@ -337,6 +566,43 @@ public class EmailController : ControllerBase
         /// <summary>
         /// When true (the default), files that already have a pending or sent
         /// delivery for the device are skipped.
+        /// </summary>
+        public bool SkipAlreadyDelivered { get; set; } = true;
+
+        /// <summary><c>none</c> (default), <c>count</c> or <c>all</c>.</summary>
+        public string? CondenseMode { get; set; }
+
+        /// <summary>Issues per condensed book; required when the mode is <c>count</c>.</summary>
+        public int? IssuesPerBook { get; set; }
+    }
+
+    public class CondenseRequest
+    {
+        /// <summary>Files to condense. Ignored when <see cref="SeriesId"/> is set.</summary>
+        public List<string> Files { get; set; } = new();
+
+        /// <summary>Condense every issue of this series instead of <see cref="Files"/>.</summary>
+        public string? SeriesId { get; set; }
+
+        /// <summary><c>count</c> or <c>all</c>.</summary>
+        public string? CondenseMode { get; set; }
+
+        /// <summary>Issues per condensed book; required when the mode is <c>count</c>.</summary>
+        public int? IssuesPerBook { get; set; }
+
+        /// <summary>Zero-based index of the book to download (download endpoint only).</summary>
+        public int BookIndex { get; set; }
+
+        /// <summary>
+        /// Device the books would be sent to. Combined with
+        /// <see cref="SkipAlreadyDelivered"/> it makes the plan describe exactly
+        /// the books the send would queue.
+        /// </summary>
+        public int? DeviceId { get; set; }
+
+        /// <summary>
+        /// When true (the default), issues already pending or sent to
+        /// <see cref="DeviceId"/> are left out of the books, matching the send.
         /// </summary>
         public bool SkipAlreadyDelivered { get; set; } = true;
     }

@@ -299,6 +299,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.Status).IsRequired().HasMaxLength(16);
             entity.Property(e => e.Source).IsRequired().HasMaxLength(16);
             entity.Property(e => e.ErrorMessage).HasMaxLength(1024);
+            entity.Property(e => e.DisplayName).HasMaxLength(512);
             // Auto-send dedupe looks up "was this file already delivered to this device".
             entity.HasIndex(e => new { e.FilePath, e.DeviceId, e.Status });
             entity.HasIndex(e => e.CreatedAt);
@@ -717,6 +718,19 @@ public class ComicEmailDeliveryEntity
     /// the subscription.
     /// </summary>
     public int? SubscriptionId { get; set; }
+
+    /// <summary>
+    /// JSON array with every issue in a condensed (multi-issue) delivery, in
+    /// reading order, including <see cref="FilePath"/> which is the first one.
+    /// Null for an ordinary single-issue delivery.
+    /// </summary>
+    public string? CondensedFilePaths { get; set; }
+
+    /// <summary>
+    /// Name shown in the delivery history and used for the email subject and
+    /// attachment name. Null for single-issue deliveries, which use the file name.
+    /// </summary>
+    public string? DisplayName { get; set; }
 
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

@@ -96,6 +96,51 @@ public class EmailDeliveryUiTests
     }
 
     [Fact]
+    public void IndexHtml_SendModalOffersCondenseOptions()
+    {
+        var html = Read("index.html");
+
+        Assert.Contains("id=\"emailCondenseModeSelect\"", html);
+        Assert.Contains("value=\"count\"", html);
+        Assert.Contains("value=\"all\"", html);
+        Assert.Contains("id=\"emailCondenseCountInput\"", html);
+        // Where the estimated sizes and the "too large to email" warning go.
+        Assert.Contains("id=\"emailCondensePlan\"", html);
+    }
+
+    [Fact]
+    public void MainJs_CondensePlanBlocksSendingOversizedBooks()
+    {
+        var js = Read("js", "main.js");
+
+        // The user must learn before sending that a mass condense cannot be
+        // emailed, and be offered the download instead.
+        Assert.Contains("/api/email/condense-plan", js);
+        Assert.Contains("/api/email/condense-download", js);
+        Assert.Matches(
+            new Regex(@"setEmailSendEnabled\(emailSendAvailable && plan\.can_email === true\)", RegexOptions.Singleline),
+            js);
+        Assert.Contains("function downloadCondensedBook", js);
+    }
+
+    [Fact]
+    public void MainJs_CondensedSendsRequestEpub()
+    {
+        var js = Read("js", "main.js");
+
+        // Only EPUB can hold several issues, so the format picker is pinned
+        // while condensing and the user's own format is restored afterwards.
+        Assert.Matches(
+            new Regex(@"emailFormatBeforeCondense = format\.value;\s*format\.value = 'epub';", RegexOptions.Singleline),
+            js);
+        Assert.Matches(
+            new Regex(@"if \(emailFormatBeforeCondense !== null\) format\.value = emailFormatBeforeCondense;", RegexOptions.Singleline),
+            js);
+        Assert.Contains("condenseMode,", js);
+        Assert.Contains("issuesPerBook", js);
+    }
+
+    [Fact]
     public void MainJs_LoadsDeliveryHistoryFromApi()
     {
         var js = Read("js", "main.js");

@@ -67,7 +67,7 @@ public class DiagnosticsController : ControllerBase
     public async Task<ActionResult<object>> GetDiagnostics(CancellationToken cancellationToken = default)
     {
         var settings = _settings.CurrentValue;
-        var process = Process.GetCurrentProcess();
+        using var process = Process.GetCurrentProcess();
         var now = DateTime.UtcNow;
 
         var health = await GetHealthAsync(cancellationToken);
@@ -262,9 +262,14 @@ public class DiagnosticsController : ControllerBase
     /// permission bits alone do not account for read-only mounts, which is the
     /// common Docker misconfiguration this is meant to catch.
     /// </summary>
+    /// <remarks>
+    /// The probe lands inside the watched directory, so it deliberately uses the
+    /// <c>.tmp</c> extension that <c>FileWatcherService.IsTemporaryFile</c>
+    /// ignores — a diagnostics read must not enqueue work.
+    /// </remarks>
     private static bool IsWritable(string path)
     {
-        var probe = Path.Combine(path, $".cm-write-probe-{Guid.NewGuid():N}");
+        var probe = Path.Combine(path, $".cm-write-probe-{Guid.NewGuid():N}.tmp");
         try
         {
             using (System.IO.File.Create(probe))

@@ -33,6 +33,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<EreaderDeviceEntity> EreaderDevices { get; set; } = null!;
     public DbSet<SeriesEmailSubscriptionEntity> SeriesEmailSubscriptions { get; set; } = null!;
     public DbSet<ComicEmailDeliveryEntity> ComicEmailDeliveries { get; set; } = null!;
+    public DbSet<ErrorReportEntity> ErrorReports { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -303,6 +304,30 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             // Auto-send dedupe looks up "was this file already delivered to this device".
             entity.HasIndex(e => new { e.FilePath, e.DeviceId, e.Status });
             entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // Configure ErrorReportEntity
+        modelBuilder.Entity<ErrorReportEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Fingerprint).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.ExceptionType).IsRequired().HasMaxLength(512);
+            entity.Property(e => e.Message).HasMaxLength(4096);
+            entity.Property(e => e.StackTrace).HasMaxLength(16384);
+            entity.Property(e => e.Origin).HasMaxLength(512);
+            entity.Property(e => e.Area).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.AppVersion).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.Platform).HasMaxLength(256);
+            entity.Property(e => e.CorrelationId).HasMaxLength(64);
+            entity.Property(e => e.LogExcerpt).HasMaxLength(32768);
+            entity.Property(e => e.LastUserAction).HasMaxLength(1024);
+            entity.Property(e => e.ReportedIssueState).HasMaxLength(16);
+            // A fingerprint already encodes the app version, so "same defect,
+            // same release" is one row and recurrences only bump the counter.
+            entity.HasIndex(e => e.Fingerprint).IsUnique();
+            // Listing is newest-first; the daily cap counts rows by LastReportedAt.
+            entity.HasIndex(e => e.LastSeenAt);
+            entity.HasIndex(e => e.LastReportedAt);
         });
     }
 }
@@ -735,4 +760,69 @@ public class ComicEmailDeliveryEntity
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? SentAt { get; set; }
+}
+
+/// <summary>
+/// Local, de-duplicated record of an error captured on this instance.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Every text column here has already been redacted (see
+/// <c>ErrorReportRedactor</c>); the table is safe to inspect and safe to
+/// transmit. One row represents one defect in one app version, identified by
+/// <see cref="Fingerprint"/>, no matter how many times it recurs.
+/// </para>
+/// <para>
+/// The row doubles as the throttle state: <see cref="LastReportedAt"/> drives
+/// the per-fingerprint cooldown and the rolling daily cap, and
+/// <see cref="ReportedIssueNumber"/> links the local record to the GitHub issue
+/// so a fix can close the loop.
+/// </para>
+/// </remarks>
+public class ErrorReportEntity
+{
+    public int Id { get; set; }
+
+    /// <summary>Stable identity of the defect. Unique per row.</summary>
+    public string Fingerprint { get; set; } = string.Empty;
+
+    public string ExceptionType { get; set; } = string.Empty;
+
+    /// <summary>Redacted message.</summary>
+    public string Message { get; set; } = string.Empty;
+
+    /// <summary>Redacted, frame-limited stack trace.</summary>
+    public string? StackTrace { get; set; }
+
+    /// <summary>Route template or hosted-service name.</summary>
+    public string? Origin { get; set; }
+
+    /// <summary>Numeric value of <c>ErrorReportSource</c>.</summary>
+    public int Source { get; set; }
+
+    /// <summary>Coarse product area used as an issue label.</summary>
+    public string Area { get; set; } = "core";
+
+    public string AppVersion { get; set; } = string.Empty;
+    public string? Platform { get; set; }
+
+    public int OccurrenceCount { get; set; } = 1;
+    public DateTime FirstSeenAt { get; set; } = DateTime.UtcNow;
+    public DateTime LastSeenAt { get; set; } = DateTime.UtcNow;
+
+    public string? CorrelationId { get; set; }
+
+    /// <summary>Redacted log lines around the error, newline-separated.</summary>
+    public string? LogExcerpt { get; set; }
+
+    public string? LastUserAction { get; set; }
+
+    /// <summary>When this fingerprint was last handed to a transport.</summary>
+    public DateTime? LastReportedAt { get; set; }
+
+    /// <summary>GitHub issue this fingerprint was filed as, when known.</summary>
+    public int? ReportedIssueNumber { get; set; }
+
+    /// <summary><c>open</c> or <c>closed</c>, refreshed when the loop is closed.</summary>
+    public string? ReportedIssueState { get; set; }
 }

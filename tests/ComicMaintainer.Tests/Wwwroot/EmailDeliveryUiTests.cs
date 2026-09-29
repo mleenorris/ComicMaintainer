@@ -129,9 +129,12 @@ public class EmailDeliveryUiTests
         var js = Read("js", "main.js");
 
         // Only EPUB can hold several issues, so the format picker is pinned
-        // while condensing.
+        // while condensing and the user's own format is restored afterwards.
         Assert.Matches(
-            new Regex(@"if \(mode !== 'none'\) format\.value = 'epub';", RegexOptions.Singleline),
+            new Regex(@"emailFormatBeforeCondense = format\.value;\s*format\.value = 'epub';", RegexOptions.Singleline),
+            js);
+        Assert.Matches(
+            new Regex(@"if \(emailFormatBeforeCondense !== null\) format\.value = emailFormatBeforeCondense;", RegexOptions.Singleline),
             js);
         Assert.Contains("condenseMode,", js);
         Assert.Contains("issuesPerBook", js);

@@ -117,6 +117,10 @@ EPUB, so a device receives "Batman 001-005" rather than five separate books.
 - **Combine all issues into one EPUB** – the whole selection (or the whole series)
   becomes a single book.
 
+A book never mixes series: a selection spanning several series is grouped by series first
+and each group is chunked on its own. A send-series request is condensed in the issue
+order the series returns, even when the series is spread over several folders.
+
 Condensing always delivers EPUB — the original `.cbz`/`.cbr` archives cannot be merged —
 so the format picker is pinned to EPUB while a condense mode is selected. The condensed
 book keeps the series metadata and cover of its first issue, numbers its pages
@@ -134,13 +138,18 @@ archives plus the container overhead is a close approximation.
 
 Books over the limit are flagged, **Send** is disabled, and each book can be downloaded
 instead with `POST /api/email/condense-download`, which builds that one book on demand
-and streams it back (with no size budget, so the pages keep full quality). The temporary
-file is deleted as soon as the response has been streamed. Reducing the issues per book
-is the other way out.
+and streams it back (with no size budget, so the pages keep full quality). The dialog
+lists ten books at a time with a **Show more** control, so every book — including an
+oversized one far down a long plan — has its own Download button. The temporary file is
+deleted as soon as the response has been streamed. Reducing the issues per book is the
+other way out. `POST /api/email/send` and `/send-series` apply the same size check, so an
+oversized book is rejected with an error rather than queued.
 
 Condensed sends honour `skipAlreadyDelivered`, and an issue that already went out *inside
-an earlier condensed book* counts as delivered, so re-sending a series does not duplicate
-issues across books.
+an earlier condensed book* counts as delivered — for ordinary per-issue sends too, so an
+issue is never mailed twice. Pass the same `deviceId` and `skipAlreadyDelivered` to
+`condense-plan` and `condense-download` as to the send, or the plan will describe
+different books than the ones queued.
 
 ## Automatic delivery for a series
 
@@ -250,7 +259,7 @@ queue it:
 ```sh
 curl -X POST http://localhost:5000/api/email/condense-plan \
   -H "Content-Type: application/json" \
-  -d '{"seriesId":"batman","condenseMode":"count","issuesPerBook":5}'
+  -d '{"seriesId":"batman","deviceId":1,"skipAlreadyDelivered":true,"condenseMode":"count","issuesPerBook":5}'
 
 curl -X POST http://localhost:5000/api/email/send-series \
   -H "Content-Type: application/json" \

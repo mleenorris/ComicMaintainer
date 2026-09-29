@@ -159,14 +159,19 @@ public class EmailController : ControllerBase
 
         try
         {
-            var result = EmailCondenseMode.IsCondensing(request.CondenseMode)
+            // Normalize first: an unrecognized mode must fail with 400 rather
+            // than quietly falling through to separate per-issue emails.
+            var condenseMode = EmailCondenseMode.NormalizeOrThrow(request.CondenseMode, nameof(request.CondenseMode));
+
+            var result = EmailCondenseMode.IsCondensing(condenseMode)
                 ? await _email.QueueCondensedFilesAsync(
                     request.Files,
                     request.DeviceId,
-                    request.CondenseMode,
+                    condenseMode,
                     request.IssuesPerBook,
                     EmailDeliverySource.Manual,
                     request.SkipAlreadyDelivered,
+                    preserveIssueOrder: false,
                     cancellationToken)
                 : await _email.QueueFilesAsync(
                     request.Files,
@@ -230,14 +235,21 @@ public class EmailController : ControllerBase
 
         try
         {
-            var result = EmailCondenseMode.IsCondensing(request.CondenseMode)
+            // Normalize first: an unrecognized mode must fail with 400 rather
+            // than quietly falling through to separate per-issue emails.
+            var condenseMode = EmailCondenseMode.NormalizeOrThrow(request.CondenseMode, nameof(request.CondenseMode));
+
+            var result = EmailCondenseMode.IsCondensing(condenseMode)
                 ? await _email.QueueCondensedFilesAsync(
                     files,
                     request.DeviceId,
-                    request.CondenseMode,
+                    condenseMode,
                     request.IssuesPerBook,
                     EmailDeliverySource.Manual,
                     request.SkipAlreadyDelivered,
+                    // GetSeriesIssuesAsync already returns one series in issue
+                    // order; re-sorting it by folder would reorder the books.
+                    preserveIssueOrder: true,
                     cancellationToken)
                 : await _email.QueueFilesAsync(
                     files,
@@ -292,6 +304,9 @@ public class EmailController : ControllerBase
                 files!,
                 request.CondenseMode,
                 request.IssuesPerBook,
+                preserveIssueOrder: !string.IsNullOrWhiteSpace(request.SeriesId),
+                request.DeviceId,
+                request.SkipAlreadyDelivered,
                 cancellationToken);
 
             return Ok(new
@@ -346,6 +361,9 @@ public class EmailController : ControllerBase
                 request.CondenseMode,
                 request.IssuesPerBook,
                 request.BookIndex,
+                preserveIssueOrder: !string.IsNullOrWhiteSpace(request.SeriesId),
+                request.DeviceId,
+                request.SkipAlreadyDelivered,
                 cancellationToken);
         }
         catch (ArgumentException ex)
@@ -574,6 +592,19 @@ public class EmailController : ControllerBase
 
         /// <summary>Zero-based index of the book to download (download endpoint only).</summary>
         public int BookIndex { get; set; }
+
+        /// <summary>
+        /// Device the books would be sent to. Combined with
+        /// <see cref="SkipAlreadyDelivered"/> it makes the plan describe exactly
+        /// the books the send would queue.
+        /// </summary>
+        public int? DeviceId { get; set; }
+
+        /// <summary>
+        /// When true (the default), issues already pending or sent to
+        /// <see cref="DeviceId"/> are left out of the books, matching the send.
+        /// </summary>
+        public bool SkipAlreadyDelivered { get; set; } = true;
     }
 
     public class SubscriptionRequest

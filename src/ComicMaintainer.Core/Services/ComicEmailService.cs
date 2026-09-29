@@ -35,12 +35,29 @@ public class ComicEmailService : IComicEmailService
     private readonly SemaphoreSlim _queueLock = new(1, 1);
 
     /// <summary>
-    /// First issue/chapter number in a comic file name, used to name condensed
-    /// books after the range of issues they contain.
+    /// An explicitly marked chapter/issue number ("Ch 12", "#007", "issue 3").
+    /// Preferred over <see cref="TrailingNumberPattern"/> so a year or volume in
+    /// the name cannot be mistaken for the issue number.
     /// </summary>
-    private static readonly Regex IssueNumberPattern = new(
-        @"(?:ch|chapter|issue|#)?\s*(\d+(?:\.\d+)?)",
+    private static readonly Regex MarkedIssueNumberPattern = new(
+        @"(?:\b(?:ch|chapter|issue)\b\s*\.?\s*|#\s*)(\d+(?:\.\d+)?)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    /// <summary>
+    /// Fallback for unmarked file names: the last number in the name once
+    /// bracketed qualifiers such as "(2016)" or "[HD]" have been removed, which
+    /// is where the issue number sits in "Series 005.cbz".
+    /// </summary>
+    private static readonly Regex TrailingNumberPattern = new(
+        @"(\d+(?:\.\d+)?)(?!.*\d)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+        TimeSpan.FromSeconds(1));
+
+    /// <summary>Bracketed qualifiers stripped before the fallback match.</summary>
+    private static readonly Regex BracketedQualifierPattern = new(
+        @"[\(\[\{][^\)\]\}]*[\)\]\}]",
+        RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(1));
 
     public ComicEmailService(
@@ -155,6 +172,12 @@ public class ComicEmailService : IComicEmailService
     {
         var queued = new List<ComicEmailDeliveryEntity>();
 
+        // Includes the member issues of condensed deliveries, so an issue that
+        // already went out inside a condensed book is not sent again on its own.
+        var delivered = skipAlreadyDelivered
+            ? await GetDeliveredPathsAsync(db, device.Id, cancellationToken)
+            : null;
+
         foreach (var rawPath in filePaths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -182,19 +205,10 @@ public class ComicEmailService : IComicEmailService
                 continue;
             }
 
-            if (skipAlreadyDelivered)
+            if (delivered is not null && delivered.Contains(fullPath))
             {
-                var alreadyHandled = await db.ComicEmailDeliveries.AnyAsync(
-                    d => d.FilePath == fullPath &&
-                         d.DeviceId == device.Id &&
-                         (d.Status == EmailDeliveryStatus.Sent || d.Status == EmailDeliveryStatus.Pending),
-                    cancellationToken);
-
-                if (alreadyHandled)
-                {
-                    skipped[rawPath] = "Already delivered to this device";
-                    continue;
-                }
+                skipped[rawPath] = "Already delivered to this device";
+                continue;
             }
 
             var delivery = new ComicEmailDeliveryEntity
@@ -229,6 +243,7 @@ public class ComicEmailService : IComicEmailService
         int? issuesPerBook,
         string source,
         bool skipAlreadyDelivered,
+        bool preserveIssueOrder = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(filePaths);
@@ -267,24 +282,11 @@ public class ComicEmailService : IComicEmailService
         await _queueLock.WaitAsync(cancellationToken);
         try
         {
-            var candidates = ResolveOrderedIssues(filePaths, skipped);
+            var candidates = ResolveIssues(filePaths, skipped);
 
             if (skipAlreadyDelivered && candidates.Count > 0)
             {
-                var delivered = await GetDeliveredPathsAsync(db, device.Id, cancellationToken);
-                var remaining = new List<string>(candidates.Count);
-                foreach (var path in candidates)
-                {
-                    if (delivered.Contains(path))
-                    {
-                        skipped[path] = "Already delivered to this device";
-                        continue;
-                    }
-
-                    remaining.Add(path);
-                }
-
-                candidates = remaining;
+                candidates = await FilterAlreadyDeliveredAsync(db, device.Id, candidates, skipped, cancellationToken);
             }
 
             var perBook = EmailCondenseMode.NormalizeIssuesPerBookOrThrow(
@@ -293,10 +295,22 @@ public class ComicEmailService : IComicEmailService
                 candidates.Count,
                 nameof(issuesPerBook));
 
+            var maxBytes = GetMaxAttachmentBytes();
             queued = new List<ComicEmailDeliveryEntity>();
-            foreach (var group in Chunk(candidates, perBook))
+            foreach (var group in BuildBooks(candidates, preserveIssueOrder, perBook))
             {
                 var displayName = await BuildCondensedNameAsync(group, cancellationToken);
+
+                // The plan endpoint disables Send for an oversized book, but a
+                // direct API call would otherwise queue it and only fail after
+                // the worker has rebuilt it through every compression tier.
+                var estimated = EstimateCondensedSize(group);
+                if (estimated > maxBytes)
+                {
+                    throw new InvalidOperationException(
+                        $"Condensed book \"{displayName}\" is about {FormatMegabytes(estimated)} which exceeds the {FormatMegabytes(maxBytes)} attachment limit. Download it instead, or condense fewer issues per book.");
+                }
+
                 var delivery = new ComicEmailDeliveryEntity
                 {
                     FilePath = group[0],
@@ -347,6 +361,9 @@ public class ComicEmailService : IComicEmailService
         IEnumerable<string> filePaths,
         string? condenseMode,
         int? issuesPerBook,
+        bool preserveIssueOrder = false,
+        int? deviceId = null,
+        bool skipAlreadyDelivered = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(filePaths);
@@ -360,7 +377,16 @@ public class ComicEmailService : IComicEmailService
         }
 
         var skipped = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var issues = ResolveOrderedIssues(filePaths, skipped);
+        var issues = ResolveIssues(filePaths, skipped);
+
+        // The plan must describe the books the send would actually queue, so it
+        // drops the same already-delivered issues the queueing path does.
+        if (skipAlreadyDelivered && deviceId is int device && issues.Count > 0)
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+            issues = await FilterAlreadyDeliveredAsync(db, device, issues, skipped, cancellationToken);
+        }
+
         var perBook = EmailCondenseMode.NormalizeIssuesPerBookOrThrow(
             mode,
             issuesPerBook,
@@ -369,7 +395,7 @@ public class ComicEmailService : IComicEmailService
 
         var maxBytes = GetMaxAttachmentBytes();
         var books = new List<CondensedBookDto>();
-        foreach (var group in Chunk(issues, perBook))
+        foreach (var group in BuildBooks(issues, preserveIssueOrder, perBook))
         {
             var estimated = EstimateCondensedSize(group);
             books.Add(new CondensedBookDto(
@@ -387,9 +413,20 @@ public class ComicEmailService : IComicEmailService
         string? condenseMode,
         int? issuesPerBook,
         int bookIndex,
+        bool preserveIssueOrder = false,
+        int? deviceId = null,
+        bool skipAlreadyDelivered = false,
         CancellationToken cancellationToken = default)
     {
-        var plan = await PlanCondensedDeliveryAsync(filePaths, condenseMode, issuesPerBook, cancellationToken);
+        var plan = await PlanCondensedDeliveryAsync(
+            filePaths,
+            condenseMode,
+            issuesPerBook,
+            preserveIssueOrder,
+            deviceId,
+            skipAlreadyDelivered,
+            cancellationToken);
+
         if (bookIndex < 0 || bookIndex >= plan.Books.Count)
         {
             throw new ArgumentOutOfRangeException(
@@ -408,16 +445,44 @@ public class ComicEmailService : IComicEmailService
             OutputFileName = book.DisplayName
         };
 
-        var epubPath = await _epubConverter.ConvertToEpubAsync(book.Files, workDirectory, options, cancellationToken);
-        return new CondensedBookFile(epubPath, Path.GetFileName(epubPath));
+        try
+        {
+            var epubPath = await _epubConverter.ConvertToEpubAsync(book.Files, workDirectory, options, cancellationToken);
+            return new CondensedBookFile(epubPath, Path.GetFileName(epubPath));
+        }
+        catch
+        {
+            // Only the caller of a successful conversion registers the cleanup
+            // of this directory, so a failed or cancelled download has to remove
+            // it here or it is left behind for good.
+            TryDeleteDirectory(workDirectory);
+            throw;
+        }
+    }
+
+    private void TryDeleteDirectory(string directory)
+    {
+        try
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Failed to clean up the condensed book work directory {Directory}",
+                LoggingHelper.SanitizePathForLog(directory));
+        }
     }
 
     /// <summary>
-    /// Validates every requested path and returns the issues in reading order.
-    /// Condensing depends on that order: book 1 must be issues 1-5, book 2
-    /// issues 6-10, and so on.
+    /// Validates every requested path and returns the issues that can be
+    /// condensed, in the order they were supplied.
     /// </summary>
-    private List<string> ResolveOrderedIssues(IEnumerable<string> filePaths, Dictionary<string, string> skipped)
+    private List<string> ResolveIssues(IEnumerable<string> filePaths, Dictionary<string, string> skipped)
     {
         var resolved = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -453,11 +518,78 @@ public class ComicEmailService : IComicEmailService
             }
         }
 
+        return resolved;
+    }
+
+    /// <summary>
+    /// Splits the resolved issues into the books a condensed send produces.
+    /// A book never mixes series: an explicit selection is grouped by the
+    /// series folder (and read in natural order inside it) before it is chunked,
+    /// so an EPUB cannot carry pages from one series under another's title.
+    /// When <paramref name="preserveIssueOrder"/> is set the caller has already
+    /// supplied one series in reading order (a send-series request), and that
+    /// order is authoritative even when the series spans several folders.
+    /// </summary>
+    private static List<List<string>> BuildBooks(
+        IReadOnlyList<string> issues,
+        bool preserveIssueOrder,
+        int perBook)
+    {
+        var books = new List<List<string>>();
+        foreach (var series in GroupBySeries(issues, preserveIssueOrder))
+        {
+            books.AddRange(Chunk(series, perBook));
+        }
+
+        return books;
+    }
+
+    private static List<List<string>> GroupBySeries(IReadOnlyList<string> issues, bool preserveIssueOrder)
+    {
+        if (issues.Count == 0)
+        {
+            return new List<List<string>>();
+        }
+
+        if (preserveIssueOrder)
+        {
+            return new List<List<string>> { issues.ToList() };
+        }
+
         var comparer = new NaturalStringComparer();
-        return resolved
-            .OrderBy(p => Path.GetDirectoryName(p) ?? string.Empty, comparer)
-            .ThenBy(Path.GetFileName, comparer)
+        return issues
+            .GroupBy(p => Path.GetDirectoryName(p) ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key, comparer)
+            .Select(g => g.OrderBy(Path.GetFileName, comparer).ToList())
             .ToList();
+    }
+
+    /// <summary>
+    /// Drops the issues already queued or sent to the device, recording why in
+    /// <paramref name="skipped"/>. Used by both the queueing and the planning
+    /// path so a plan describes exactly the books a send would create.
+    /// </summary>
+    private static async Task<List<string>> FilterAlreadyDeliveredAsync(
+        ComicMaintainerDbContext db,
+        int deviceId,
+        IReadOnlyList<string> candidates,
+        Dictionary<string, string> skipped,
+        CancellationToken cancellationToken)
+    {
+        var delivered = await GetDeliveredPathsAsync(db, deviceId, cancellationToken);
+        var remaining = new List<string>(candidates.Count);
+        foreach (var path in candidates)
+        {
+            if (delivered.Contains(path))
+            {
+                skipped[path] = "Already delivered to this device";
+                continue;
+            }
+
+            remaining.Add(path);
+        }
+
+        return remaining;
     }
 
     /// <summary>
@@ -545,6 +677,9 @@ public class ComicEmailService : IComicEmailService
     private long GetMaxAttachmentBytes() =>
         (long)Math.Max(1, _settings.CurrentValue.EmailMaxAttachmentMegabytes) * 1024 * 1024;
 
+    private static string FormatMegabytes(long bytes) =>
+        $"{bytes / (1024d * 1024d):0.#} MB";
+
     /// <summary>
     /// Names a condensed book after the series and the range it covers, e.g.
     /// "Berserk 001-005". Falls back to the first file name when no issue
@@ -576,12 +711,20 @@ public class ComicEmailService : IComicEmailService
 
     /// <summary>
     /// Reads the issue number out of a file name, zero padded so condensed book
-    /// names sort the way the issues do ("001-005" before "006-010").
+    /// names sort the way the issues do ("001-005" before "006-010"). An
+    /// explicitly marked number ("#001", "Ch 12") always wins; otherwise the
+    /// last number outside any bracketed qualifier is used so "Series (2016)
+    /// 005.cbz" yields 005 rather than the year.
     /// </summary>
     private static string? ExtractIssueLabel(string filePath)
     {
         var name = Path.GetFileNameWithoutExtension(filePath);
-        var match = IssueNumberPattern.Match(name);
+        var match = MarkedIssueNumberPattern.Match(name);
+        if (!match.Success)
+        {
+            match = TrailingNumberPattern.Match(BracketedQualifierPattern.Replace(name, " "));
+        }
+
         if (!match.Success)
         {
             return null;

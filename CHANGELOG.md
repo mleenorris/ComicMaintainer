@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   queued the dialog asks the new `POST /api/email/condense-plan` endpoint for each book's
   estimated size: books larger than `EMAIL_MAX_ATTACHMENT_MB` are flagged, **Send** is
   disabled, and they can be downloaded instead through `POST /api/email/condense-download`.
-  Issues already delivered inside an earlier condensed book count as delivered, so
-  re-sending a series does not duplicate them.
+  Issues already delivered inside an earlier condensed book count as delivered — for
+  ordinary per-issue sends too — so re-sending a series does not duplicate them. A book
+  never mixes series, and a send-series request keeps the order the series supplies.
 
 ### Fixed
 - **Webcomic mode now flows straight from one issue into the next.** The following issue was

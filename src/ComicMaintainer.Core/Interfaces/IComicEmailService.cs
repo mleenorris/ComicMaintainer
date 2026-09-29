@@ -35,6 +35,10 @@ public interface IComicEmailService
     /// <paramref name="issuesPerBook"/> issues (or one book for every issue when
     /// the mode is <see cref="EmailCondenseMode.All"/>). Condensed delivery is
     /// always EPUB; the original archives cannot be merged.
+    /// A book never mixes series. Set <paramref name="preserveIssueOrder"/> when
+    /// the caller already supplies a single series in reading order (a
+    /// send-series request); otherwise the issues are grouped by series folder
+    /// and read in natural order within each group.
     /// </summary>
     Task<EmailQueueResult> QueueCondensedFilesAsync(
         IEnumerable<string> filePaths,
@@ -43,17 +47,24 @@ public interface IComicEmailService
         int? issuesPerBook,
         string source,
         bool skipAlreadyDelivered,
+        bool preserveIssueOrder = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Describes the books a condensed send would produce, including the
     /// estimated size of each one, so the caller can warn that an oversized
     /// book has to be downloaded instead of emailed. Nothing is queued.
+    /// Pass the same <paramref name="deviceId"/> and
+    /// <paramref name="skipAlreadyDelivered"/> the send will use so the plan
+    /// describes exactly the books that would be queued.
     /// </summary>
     Task<CondensePlanDto> PlanCondensedDeliveryAsync(
         IEnumerable<string> filePaths,
         string? condenseMode,
         int? issuesPerBook,
+        bool preserveIssueOrder = false,
+        int? deviceId = null,
+        bool skipAlreadyDelivered = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -66,6 +77,9 @@ public interface IComicEmailService
         string? condenseMode,
         int? issuesPerBook,
         int bookIndex,
+        bool preserveIssueOrder = false,
+        int? deviceId = null,
+        bool skipAlreadyDelivered = false,
         CancellationToken cancellationToken = default);
 
     /// <summary>

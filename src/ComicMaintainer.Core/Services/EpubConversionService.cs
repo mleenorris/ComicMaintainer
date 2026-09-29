@@ -114,40 +114,32 @@ public class EpubConversionService : IEpubConversionService
     {
         Directory.CreateDirectory(outputDirectory);
 
-        // Every source archive stays open for the whole conversion: each
-        // compression tier re-reads the page entries from it.
-        var archives = new List<IArchive>(comicFilePaths.Count);
-        try
+        // A condensed book can span hundreds of issues, so no archive is kept
+        // open beyond the issue being read: only the page names are retained
+        // here and each archive is reopened, one at a time, while its pages are
+        // written. Holding one handle per issue would exhaust the process file
+        // descriptor limit on large books.
+        var issues = new List<IssueSource>(comicFilePaths.Count);
+        foreach (var comicFilePath in comicFilePaths)
         {
-            var issues = new List<IssueSource>(comicFilePaths.Count);
-            foreach (var comicFilePath in comicFilePaths)
+            using var archive = OpenArchive(comicFilePath);
+
+            var pages = archive.Entries
+                .Where(e => !e.IsDirectory && IsImageFile(e.Key))
+                .Select(e => e.Key!)
+                .OrderBy(key => key, new NaturalStringComparer())
+                .ToList();
+
+            if (pages.Count == 0)
             {
-                var archive = OpenArchive(comicFilePath);
-                archives.Add(archive);
-
-                var pages = archive.Entries
-                    .Where(e => !e.IsDirectory && IsImageFile(e.Key))
-                    .OrderBy(e => e.Key, new NaturalStringComparer())
-                    .ToList();
-
-                if (pages.Count == 0)
-                {
-                    throw new InvalidOperationException(
-                        $"Archive contains no page images and cannot be converted to EPUB: {Path.GetFileName(comicFilePath)}");
-                }
-
-                issues.Add(new IssueSource(comicFilePath, pages, ReadComicInfo(archive)));
+                throw new InvalidOperationException(
+                    $"Archive contains no page images and cannot be converted to EPUB: {Path.GetFileName(comicFilePath)}");
             }
 
-            return Convert(issues, outputDirectory, options, cancellationToken);
+            issues.Add(new IssueSource(comicFilePath, pages, ReadComicInfo(archive)));
         }
-        finally
-        {
-            foreach (var archive in archives)
-            {
-                archive.Dispose();
-            }
-        }
+
+        return Convert(issues, outputDirectory, options, cancellationToken);
     }
 
     private string Convert(
@@ -310,13 +302,32 @@ public class EpubConversionService : IEpubConversionService
                     issue.Info,
                     issue.FilePath);
 
+                // Reopened per issue (and per compression tier) so only one
+                // source archive is ever held open, however many issues the
+                // condensed book spans.
+                using var archive = OpenArchive(issue.FilePath);
+                var entriesByKey = new Dictionary<string, IArchiveEntry>(StringComparer.Ordinal);
+                foreach (var entry in archive.Entries)
+                {
+                    if (!entry.IsDirectory && entry.Key is { } key)
+                    {
+                        entriesByKey.TryAdd(key, entry);
+                    }
+                }
+
                 var isFirstPageOfIssue = true;
-                foreach (var page in issue.Pages)
+                foreach (var pageKey in issue.Pages)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     index++;
 
-                    var extension = NormalizeImageExtension(Path.GetExtension(page.Key) ?? ".jpg");
+                    if (!entriesByKey.TryGetValue(pageKey, out var page))
+                    {
+                        throw new InvalidOperationException(
+                            $"Page '{pageKey}' is no longer present in {Path.GetFileName(issue.FilePath)}.");
+                    }
+
+                    var extension = NormalizeImageExtension(Path.GetExtension(pageKey) ?? ".jpg");
 
                     byte[] imageBytes;
                     using (var entryStream = page.OpenEntryStream())
@@ -329,7 +340,7 @@ public class EpubConversionService : IEpubConversionService
                     // A page that cannot be decoded (empty, truncated, or not an
                     // image at all) would silently render as a blank page on the
                     // device, so the whole conversion fails instead.
-                    var prepared = PrepareImage(imageBytes, extension, page.Key, tier);
+                    var prepared = PrepareImage(imageBytes, extension, pageKey, tier);
                     var imageName = $"images/page{index:D4}{prepared.Extension}";
 
                     var imageEntry = epub.CreateEntry("OEBPS/" + imageName, CompressionLevel.NoCompression);
@@ -1013,10 +1024,13 @@ public class EpubConversionService : IEpubConversionService
         }
     }
 
-    /// <summary>One source archive and the pages it contributes to the book.</summary>
+    /// <summary>
+    /// One source archive and the pages it contributes to the book, identified
+    /// by their entry names so the archive itself does not have to stay open.
+    /// </summary>
     private sealed record IssueSource(
         string FilePath,
-        IReadOnlyList<IArchiveEntry> Pages,
+        IReadOnlyList<string> Pages,
         ComicInfo? Info);
 
     /// <summary>A table-of-contents entry pointing at the first page of an issue.</summary>

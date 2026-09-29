@@ -364,6 +364,16 @@ public class ErrorReportService : IErrorReportService
     /// the non-transmitting one. The fallback direction matters: an unrecognised
     /// mode must never be interpreted as permission to send data.
     /// </summary>
+    /// <summary>
+    /// Picks the transport named by settings.
+    /// </summary>
+    /// <remarks>
+    /// The fallback chain never ends in a transmitting transport. An
+    /// unrecognised or misspelled mode must be read as "do not send", not as
+    /// permission to send — the failure mode of guessing wrong here is an
+    /// unintended disclosure, which is exactly what the consent design exists
+    /// to prevent.
+    /// </remarks>
     private IErrorReportTransport ResolveTransport(AppSettings settings)
     {
         var mode = settings.ErrorReportingMode?.Trim();
@@ -372,7 +382,27 @@ public class ErrorReportService : IErrorReportService
             t => string.Equals(t.Mode, mode, StringComparison.OrdinalIgnoreCase));
 
         return selected
-            ?? _transports.First(t => !t.TransmitsAutomatically);
+            ?? _transports.FirstOrDefault(t => !t.TransmitsAutomatically)
+            ?? InertTransport.Instance;
+    }
+
+    /// <summary>
+    /// Last-resort transport used when no non-transmitting transport is
+    /// registered. Sends nothing.
+    /// </summary>
+    private sealed class InertTransport : IErrorReportTransport
+    {
+        public static readonly InertTransport Instance = new();
+
+        public string Mode => "none";
+
+        public bool TransmitsAutomatically => false;
+
+        public Task<ErrorReportTransportResult> SendAsync(
+            ErrorReport report,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(new ErrorReportTransportResult(
+                false, null, null, "No error-reporting transport is configured."));
     }
 
     /// <summary>

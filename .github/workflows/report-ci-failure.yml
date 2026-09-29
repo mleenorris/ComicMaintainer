@@ -1,0 +1,141 @@
+name: Report CI Failure
+
+# Files (or updates) a GitHub issue whenever one of the real CI workflows fails
+# on a branch push, a scheduled run, or a manual dispatch.
+#
+# Pull-request failures are deliberately excluded: those already surface as a
+# red check on the PR itself, and filing an issue for them would bury the signal
+# from failures that nobody is actively looking at.
+#
+# `workflow_run` runs in the context of the default branch with the repository's
+# own GITHUB_TOKEN, so no extra credentials are needed to open an issue. Note
+# that issues created with GITHUB_TOKEN do NOT re-trigger other workflows, which
+# is why the Copilot-agent handoff (assign-copilot-agent.yml) is driven by an
+# explicit label applied by a maintainer rather than by issue creation.
+
+on:
+  workflow_run:
+    workflows:
+      - ".NET Tests"
+      - "Build and Push .NET Docker Image"
+      - "Security Vulnerability Scanning"
+      - "CodeQL Advanced Security Scanning"
+    types: [completed]
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  report-failure:
+    name: File or update CI failure issue
+    runs-on: ubuntu-latest
+    # Only non-PR failures. `workflow_run.event` mirrors the event that started
+    # the upstream run, so `pull_request` runs are filtered out here.
+    if: >
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event != 'pull_request' &&
+      github.event.workflow_run.event != 'pull_request_target'
+
+    steps:
+      - name: Find failing jobs and open or update the issue
+        uses: actions/github-script@v9
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const run = context.payload.workflow_run;
+            const { owner, repo } = context.repo;
+
+            // ---------------------------------------------------------------
+            // Collect the failing jobs and a short excerpt of their logs.
+            // ---------------------------------------------------------------
+            const jobs = await github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              { owner, repo, run_id: run.id, per_page: 100 }
+            );
+            const failedJobs = jobs.filter(j => j.conclusion === 'failure');
+            const failedJobNames = failedJobs.map(j => j.name).sort();
+
+            // The job identity is part of the dedupe key so that a different job
+            // failing in the same workflow gets its own issue rather than being
+            // appended to an unrelated one.
+            const jobKey = failedJobNames.length > 0
+              ? failedJobNames.join(', ')
+              : '(no failing job reported)';
+            const marker = `<!-- ci-failure:${run.name}::${jobKey} -->`;
+
+            // Pull a bounded tail of the log for the first failing job. Logs can
+            // be large and may be expired, so this is strictly best-effort.
+            let logExcerpt = '';
+            if (failedJobs.length > 0) {
+              try {
+                const logResponse = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                  owner,
+                  repo,
+                  job_id: failedJobs[0].id,
+                });
+                const text = typeof logResponse.data === 'string'
+                  ? logResponse.data
+                  : Buffer.from(logResponse.data).toString('utf8');
+                const lines = text.split('\n');
+                logExcerpt = lines.slice(-60).join('\n').slice(-6000);
+              } catch (error) {
+                logExcerpt = `(could not download logs: ${error.message})`;
+              }
+            }
+
+            const body = [
+              marker,
+              `## CI failure: ${run.name}`,
+              '',
+              `| | |`,
+              `|---|---|`,
+              `| **Workflow** | ${run.name} |`,
+              `| **Failing job(s)** | ${jobKey} |`,
+              `| **Branch** | \`${run.head_branch}\` |`,
+              `| **Commit** | ${run.head_sha} |`,
+              `| **Trigger** | ${run.event} |`,
+              `| **Run** | ${run.html_url} |`,
+              `| **Detected** | ${new Date().toISOString()} |`,
+              '',
+              '### Log excerpt',
+              '',
+              '```',
+              logExcerpt || '(no log excerpt available)',
+              '```',
+              '',
+              '---',
+              '_Filed automatically by `report-ci-failure.yml`. Per',
+              '[docs/TESTING_POLICY.md](../blob/dotnet/docs/TESTING_POLICY.md), any fix for this',
+              'failure must include a regression test._',
+            ].join('\n');
+
+            // ---------------------------------------------------------------
+            // Dedupe: reuse the open issue carrying the same marker.
+            // ---------------------------------------------------------------
+            const existing = await github.paginate(
+              github.rest.issues.listForRepo,
+              { owner, repo, state: 'open', labels: 'ci-failure', per_page: 100 }
+            );
+            const match = existing.find(issue => (issue.body || '').includes(marker));
+
+            if (match) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: match.number,
+                body: `Still failing as of [run #${run.run_number}](${run.html_url}) on \`${run.head_branch}\` (${run.head_sha.slice(0, 7)}).`,
+              });
+              core.notice(`Commented on existing CI failure issue #${match.number}`);
+              return;
+            }
+
+            const created = await github.rest.issues.create({
+              owner,
+              repo,
+              title: `[CI] ${run.name} failed on ${run.head_branch}: ${jobKey}`,
+              body,
+              labels: ['bug', 'ci-failure', 'auto-reported'],
+            });
+            core.notice(`Opened CI failure issue #${created.data.number}`);

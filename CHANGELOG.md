@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Crashes can now be reported to GitHub as issues, with consent and redaction.** A new
+  opt-in **Settings → Error Reporting** panel captures unhandled request exceptions,
+  background-service failures, any `Error`/`Fatal` log event and browser errors from both
+  the main app and the reader. Each failure is fingerprinted (exception type + normalised
+  message + `ComicMaintainer.*` stack frames + app version), so a recurrence increments a
+  counter instead of filing again, and is subject to a cooldown and a hard daily cap.
+  Environmental noise — cancellations, client aborts, SQLite contention, transient metadata
+  provider failures, permission and disk-full errors — is suppressed, and per-file
+  processing failures are excluded entirely. **Every report is redacted in full before it is
+  stored or shown**: library paths, comic and series names, usernames, e-mail addresses,
+  SMTP credentials, the ComicVine API key, JWT keys, bearer and GitHub tokens, Authelia
+  headers and IP addresses are stripped, and only a bounded window of already-redacted log
+  lines is attached rather than `debug.log` itself. The default delivery mode transmits
+  nothing — it opens a pre-filled issue you submit yourself — and an automatic mode is
+  available with a fine-grained `Issues: write` token. **Preview** shows the exact payload
+  before anything is sent. Disabled by default; see `docs/ERROR_REPORTING.md`.
+- **CI failures now open a GitHub issue.** When a scheduled or push run of a workflow fails,
+  `report-ci-failure.yml` comments on the existing open `ci-failure` issue for that workflow
+  and job, or opens a new one with the run URL, failing job and a log excerpt. Pull-request
+  failures are skipped because they already surface on the PR.
+- **Auto-reported issues can be handed to the coding agent.** Reports use a dedicated
+  `auto_error_report.yml` template and carry an area label derived from the top stack frame,
+  so work starts with scoped context. Only reports from the reporter identity are
+  auto-assigned; user-submitted ones need a maintainer to apply `ready-for-agent` first.
 - **Issues can be condensed into a single EPUB before they are emailed.** The send dialog
   now offers "combine every N issues into one EPUB" (N between 2 and 500) and "combine all
   issues into one EPUB", so a device receives "Batman 001-005" instead of five separate
@@ -22,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never mixes series, and a send-series request keeps the order the series supplies.
 
 ### Fixed
+- **The GitHub token setting is no longer written to the log.** `UpdateGitHubTokenAsync`
+  routed through the ordinary setting path, which logs the new value; it now uses the secret
+  path alongside `SmtpPassword` and `ComicVineApiKey`, so only "value hidden" is recorded.
+- **Two CI workflows that could never run have been retargeted.** `test-dotnet.yml` triggered
+  on `main`/`develop` and `security-scan.yml` on `master`/`main`, neither of which exists;
+  both now run on `dotnet`. `security-scan.yml` also scanned a Python project that no longer
+  exists and has been rewritten for .NET.
 - **Webcomic mode now flows straight from one issue into the next.** The following issue was
   only looked up, fetched and appended once the reader hit the bottom of the current one, so
   every comic boundary paused on a "loading next comic" banner and then jumped the viewport to

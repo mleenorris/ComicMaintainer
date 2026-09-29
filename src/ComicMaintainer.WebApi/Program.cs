@@ -1246,6 +1246,46 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         var emailMaxAttachmentMb = Environment.GetEnvironmentVariable("EMAIL_MAX_ATTACHMENT_MB");
         if (!string.IsNullOrEmpty(emailMaxAttachmentMb) && int.TryParse(emailMaxAttachmentMb, out var maxAttachmentMb) && maxAttachmentMb > 0)
             options.EmailMaxAttachmentMegabytes = maxAttachmentMb;
+
+        // Error reporting. Disabled unless the operator opts in: a report is an
+        // outbound disclosure, so it is never turned on by defaulting.
+        var enableErrorReporting = Environment.GetEnvironmentVariable("ENABLE_ERROR_REPORTING");
+        if (!string.IsNullOrEmpty(enableErrorReporting) && bool.TryParse(enableErrorReporting, out var errorReportingEnabled))
+            options.EnableErrorReporting = errorReportingEnabled;
+
+        var errorReportingMode = Environment.GetEnvironmentVariable("ERROR_REPORTING_MODE");
+        if (!string.IsNullOrEmpty(errorReportingMode))
+        {
+            var normalizedMode = errorReportingMode.Trim().ToLowerInvariant();
+            // An unrecognised value would otherwise select the non-transmitting
+            // transport and silently disable delivery the operator asked for.
+            if (normalizedMode is "manual" or "automatic")
+                options.ErrorReportingMode = normalizedMode;
+        }
+
+        // Namespaced rather than GITHUB_REPOSITORY / GITHUB_TOKEN, which are
+        // GitHub Actions' own well-known variables. Reusing those names would
+        // make a container started inside a workflow silently adopt the
+        // workflow's credential.
+        var gitHubRepository = Environment.GetEnvironmentVariable("ERROR_REPORT_GITHUB_REPOSITORY");
+        if (!string.IsNullOrEmpty(gitHubRepository))
+            options.GitHubRepository = gitHubRepository;
+
+        var gitHubToken = Environment.GetEnvironmentVariable("ERROR_REPORT_GITHUB_TOKEN");
+        if (!string.IsNullOrEmpty(gitHubToken))
+            options.GitHubToken = gitHubToken;
+
+        var errorReportMaxPerDay = Environment.GetEnvironmentVariable("ERROR_REPORT_MAX_PER_DAY");
+        if (!string.IsNullOrEmpty(errorReportMaxPerDay) && int.TryParse(errorReportMaxPerDay, out var maxPerDay) && maxPerDay is >= 1 and <= 100)
+            options.ErrorReportMaxPerDay = maxPerDay;
+
+        var errorReportCooldownHours = Environment.GetEnvironmentVariable("ERROR_REPORT_COOLDOWN_HOURS");
+        if (!string.IsNullOrEmpty(errorReportCooldownHours) && int.TryParse(errorReportCooldownHours, out var cooldownHours) && cooldownHours is >= 1 and <= 720)
+            options.ErrorReportCooldownHours = cooldownHours;
+
+        var errorReportLogContextLines = Environment.GetEnvironmentVariable("ERROR_REPORT_LOG_CONTEXT_LINES");
+        if (!string.IsNullOrEmpty(errorReportLogContextLines) && int.TryParse(errorReportLogContextLines, out var logContextLines) && logContextLines is >= 0 and <= 500)
+            options.ErrorReportLogContextLines = logContextLines;
     }
 }
 

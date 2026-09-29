@@ -778,12 +778,35 @@ See [STABLE_BRANCH_CREATION.md](docs/STABLE_BRANCH_CREATION.md) for details abou
 - **[SWAG Configuration Guide](docs/swag-configs/README.md)** - Ready-to-use SWAG proxy configs
 - **[Performance Tuning Guide](docs/PERFORMANCE_TUNING.md)** - Optimize performance for your system
 - **[Email to E-Reader](docs/EMAIL_DELIVERY.md)** - Send issues, series or selections to a Kindle/Kobo, with optional EPUB conversion
+- **[Error Reporting](docs/ERROR_REPORTING.md)** - Optional, opt-in reporting of crashes as GitHub issues, and what is redacted first
 - **[Automated Versioning](docs/AUTOMATED_VERSIONING.md)** - How automatic version bumping works
 - **[Contributing Guide](CONTRIBUTING.md)** - How to contribute to the project
 - **[Testing Policy](docs/TESTING_POLICY.md)** - Testing requirements and best practices
 - **[Debug Logging Guide](docs/DEBUG_LOGGING_GUIDE.md)** - Debug logging and error reporting
 - **[Security Policy](SECURITY.md)** - Security guidelines and vulnerability reporting
 - **[Changelog](CHANGELOG.md)** - Version history and changes
+
+## Error Reporting (optional)
+
+ComicMaintainer can turn a crash into a GitHub issue so it gets fixed instead of
+sitting unnoticed in your `debug.log`. It is **off by default** and sends nothing
+until you turn it on.
+
+Enable it under **Settings → Error Reporting**. The default delivery mode transmits
+nothing from your instance: it opens a pre-filled GitHub issue that you review and
+submit yourself. A fully automatic mode is available if you supply a fine-grained
+token scoped to **Issues: write** on one repository.
+
+Every report is redacted in full before it is stored, previewed or sent — library
+paths, comic and series names, usernames, e-mail addresses, SMTP credentials, API
+keys, tokens and IP addresses are stripped, and `debug.log` is never attached whole.
+**Preview** shows you the exact payload before anything leaves the machine.
+
+Recurrences are de-duplicated by fingerprint and subject to a cooldown and a hard
+daily cap, so one recurring fault cannot turn into a stream of issues.
+
+See **[docs/ERROR_REPORTING.md](docs/ERROR_REPORTING.md)** for the full list of what
+is captured, what is suppressed, and the redaction guarantees.
 
 ## Quick Start with Docker Compose
 

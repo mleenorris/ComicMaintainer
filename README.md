@@ -217,6 +217,8 @@ The service includes a web-based interface for managing your comic files:
 11. Use the **three-dot menu (⋮)** in the top-right header to access:
     - **Settings**: Configure the filename format for renamed files, theme, watcher, and log rotation
     - **View Logs**: View application logs directly in the browser
+    - **System Diagnostics**: A one-screen snapshot of the instance (administrators only) — see [System Diagnostics](#system-diagnostics)
+    - **Keyboard Shortcuts**: The shortcut reference, also reachable by pressing <kbd>?</kbd>
     - **Toggle Theme**: Switch between light and dark mode
     - **Refresh**: Update the file list
     - **Scan Unmarked**: See a count of processed vs unprocessed files
@@ -231,6 +233,25 @@ The service includes a web-based interface for managing your comic files:
     - ✅ = processed
     - ⚠️ = not processed yet
     - 🔁 = duplicate file
+
+### Keyboard Shortcuts
+
+The library page accepts the following shortcuts. Press <kbd>?</kbd> at any time to see this
+list in the browser. Shortcuts are ignored while you are typing in a field and while a dialog
+is open, and the library-only ones do nothing on the Overview page where the control is hidden.
+
+| Key | Action |
+| --- | --- |
+| <kbd>/</kbd> | Focus the search box (Library) |
+| <kbd>Esc</kbd> | Clear the search box, while it is focused |
+| <kbd>g</kbd> <kbd>h</kbd> | Go to Overview |
+| <kbd>g</kbd> <kbd>l</kbd> | Go to Library |
+| <kbd>r</kbd> | Refresh the file list (Library) |
+| <kbd>f</kbd> | Open the filter menu (Library) |
+| <kbd>?</kbd> | Show the shortcut help |
+| <kbd>Esc</kbd> | Close the open dialog |
+
+The reader has its own, separate set of shortcuts — press <kbd>?</kbd> there to see them.
 
 ### Installing as an App (PWA)
 
@@ -373,6 +394,46 @@ The service now supports asynchronous file processing with persistent job storag
   ```
   
 The version is displayed in the web interface header for easy identification of the running instance.
+
+### System Diagnostics
+
+- **GET** `/api/diagnostics` — one snapshot of the running instance. Requires an administrator.
+  The settings menu entry **🩺 System Diagnostics** renders the same data, with a **Copy report**
+  button that puts a plain-text version on the clipboard for pasting into a bug report.
+
+  The response covers:
+
+  | Section | Contents |
+  | --- | --- |
+  | `application` | Version, environment, start time, uptime |
+  | `runtime` | Framework, OS, architecture, processor count, working set, managed heap, thread count |
+  | `health` | The result of every registered health check (the same data as `/health/ready`) |
+  | `watcher` | Whether the watcher is running, and its rename/normalize/stability settings |
+  | `library` | Total, processed, unprocessed and duplicate file counts |
+  | `jobs` | Total, running, interrupted and failed batch jobs, plus the last start time |
+  | `storage` | For the watched, duplicate and config directories: exists, writable, free/total bytes |
+  | `logs` | The log directory and the name, size and last-write time of each log file |
+
+  Each section is gathered independently: a section that cannot be read reports
+  `{ "error": "..." }` rather than failing the whole request.
+
+### Request Correlation
+
+Every request is assigned a correlation ID, returned in the **`X-Correlation-Id`** response
+header. If the caller (or a reverse proxy) supplies that header the value is reused, so a trace
+can span several hops; supplied values are sanitised and truncated before use.
+
+The id appears in three places, which is what makes a user-visible failure traceable:
+
+- On **every log line** the request produces in the debug log (`[{CorrelationId}]`). Lines not
+  produced by a request show `-`.
+- In the **`correlationId`** field of the RFC 7807 problem document returned for errors. Unhandled
+  exceptions produce a problem document rather than a bare 500; the exception detail itself is
+  only included when running in the Development environment.
+- In the **web interface**, appended to error notifications as `(ref: …)`.
+
+So a report of "it failed, ref `0HN…:0000001`" can be matched to the exact server log lines with
+`grep '0HN…:0000001' /Config/Log/*.log`.
 
 ### External Series Metadata (Manual)
 
@@ -673,6 +734,18 @@ Both log files use automatic rotation:
 - **Configuration**:
   - Via the **Settings** menu in the web interface (changes take effect on restart)
   - Via the `LOG_MAX_BYTES` environment variable (in bytes, e.g., `LOG_MAX_BYTES=10485760` for 10MB)
+
+### Correlating a Failure With Its Log Lines
+Every request is tagged with a correlation ID that appears in the `X-Correlation-Id` response
+header, on every debug-log line the request produces, in the `correlationId` field of error
+responses, and appended to error notifications in the web interface as `(ref: …)`. To find the
+server-side detail behind a reported failure:
+
+```bash
+grep '0HNOU94L3SUDV:00000001' /Config/Log/*.log
+```
+
+See [Request Correlation](#request-correlation) for details.
 
 ### Automatic Error Reporting
 - **GitHub Issue Creation**: Errors can automatically create GitHub issues when configured

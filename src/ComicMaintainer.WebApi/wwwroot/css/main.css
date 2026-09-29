@@ -35,6 +35,11 @@
             --status-renamed-hover: #b3d9ff;
             --status-normalized: #ffcccc;
             --status-normalized-hover: #ffb3b3;
+
+            /* Diagnostics status pill text colours (see .diagnostics-status) */
+            --status-ok-text: #1e8449;
+            --status-warn-text: #b9770e;
+            --status-bad-text: #c0392b;
         }
         
         [data-theme="dark"] {
@@ -74,6 +79,11 @@
             --status-renamed-hover: #203548;
             --status-normalized: #3d1a1a;
             --status-normalized-hover: #4d2020;
+
+            /* Lightened so the pill text keeps AA contrast on a dark surface */
+            --status-ok-text: #6ee7a8;
+            --status-warn-text: #f4c26b;
+            --status-bad-text: #f4a09c;
         }
         
         * {
@@ -199,7 +209,7 @@
         }
         
         .header-search input {
-            padding: 8px 12px;
+            padding: 8px 32px 8px 12px;
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 5px;
             background: rgba(255, 255, 255, 0.1);
@@ -217,6 +227,39 @@
             outline: none;
             background: rgba(255, 255, 255, 0.15);
             border-color: rgba(255, 255, 255, 0.3);
+        }
+        
+        /* Clearing a search previously meant selecting the text and deleting
+           it, which is awkward on a phone. The button only appears once there
+           is something to clear so it never competes with the placeholder. */
+        .header-search-clear {
+            position: absolute;
+            top: 50%;
+            right: 4px;
+            transform: translateY(-50%);
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
+            color: var(--text-header);
+            opacity: 0.7;
+            font-size: 18px;
+            line-height: 1;
+            cursor: pointer;
+        }
+        
+        .header-search-clear:hover {
+            opacity: 1;
+            background: rgba(255, 255, 255, 0.18);
+        }
+        
+        .header-search-clear[hidden] {
+            display: none;
         }
         
         .header-filter-dropdown {
@@ -414,6 +457,12 @@
         
         .settings-dropdown-item:hover {
             background: var(--bg-hover);
+        }
+        
+        /* `display: flex` above beats the UA stylesheet's [hidden] rule, so a
+           menu item hidden by capability gating would otherwise stay visible. */
+        .settings-dropdown-item[hidden] {
+            display: none;
         }
         
         .settings-dropdown-item.user-info-item {
@@ -3145,7 +3194,7 @@
             
             .header-search input {
                 width: 100%;
-                padding: 8px 10px;
+                padding: 8px 30px 8px 10px;
                 font-size: 12px;
             }
             
@@ -4151,6 +4200,111 @@ body.user-read-only [data-requires-write] {
 
 #mainContent:focus {
     outline: none;
+}
+
+/* ---------------------------------------------------------------------------
+   Keyboard shortcuts help
+   ---------------------------------------------------------------------------
+   The reader has had a shortcut overlay for a long time; the library page had
+   none, so its shortcuts were undiscoverable. Presented as a definition-style
+   list so the key and its effect stay associated when the rows wrap.
+--------------------------------------------------------------------------- */
+.shortcut-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.shortcut-list li {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border-primary);
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.shortcut-list li:last-child {
+    border-bottom: none;
+}
+
+.shortcut-list span {
+    flex: 1;
+    color: var(--text-secondary);
+}
+
+kbd {
+    display: inline-block;
+    min-width: 1.6em;
+    padding: 2px 6px;
+    border: 1px solid var(--border-primary);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   System diagnostics panel
+   ---------------------------------------------------------------------------
+   Rendered as label/value rows grouped by subsystem so the snapshot stays
+   readable both on screen and when copied into a bug report.
+--------------------------------------------------------------------------- */
+.diagnostics-section {
+    margin-bottom: 16px;
+}
+
+.diagnostics-section h3 {
+    margin: 0 0 6px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+
+.diagnostics-grid {
+    display: grid;
+    grid-template-columns: minmax(120px, max-content) 1fr;
+    gap: 4px 12px;
+    font-size: 13px;
+}
+
+.diagnostics-grid dt {
+    color: var(--text-secondary);
+}
+
+.diagnostics-grid dd {
+    margin: 0;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.diagnostics-status {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.diagnostics-status.ok {
+    background: rgba(39, 174, 96, 0.15);
+    color: var(--status-ok-text);
+}
+
+.diagnostics-status.warn {
+    background: rgba(243, 156, 18, 0.18);
+    color: var(--status-warn-text);
+}
+
+.diagnostics-status.bad {
+    background: rgba(231, 76, 60, 0.15);
+    color: var(--status-bad-text);
 }
 
 /* ---------------------------------------------------------------------------

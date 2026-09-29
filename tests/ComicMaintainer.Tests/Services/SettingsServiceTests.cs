@@ -193,6 +193,77 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateGitHubToken_NeverWritesTheTokenToTheLog()
+    {
+        // The GitHub token grants issue-write access to the repository. It is
+        // handled like SmtpPassword and ComicVineApiKey: persisted, but never
+        // passed to the logger, because debug.log is routinely attached to
+        // support requests and error reports.
+        var token = "gh" + "p_" + new string('T', 36);
+
+        await _service.UpdateGitHubTokenAsync(token);
+
+        var logged = _loggerMock.Invocations
+            .SelectMany(i => i.Arguments)
+            .Select(a => a?.ToString() ?? string.Empty)
+            .ToList();
+
+        Assert.NotEmpty(logged);
+        Assert.DoesNotContain(logged, entry => entry.Contains(token, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task UpdateErrorReportingMode_RejectsUnknownModes()
+    {
+        // An unrecognised mode would fall through to the non-transmitting
+        // transport, silently disabling delivery the owner thought they had
+        // enabled.
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.UpdateErrorReportingModeAsync("everything"));
+    }
+
+    [Theory]
+    [InlineData("manual")]
+    [InlineData("Automatic")]
+    [InlineData("  AUTOMATIC  ")]
+    public async Task UpdateErrorReportingMode_NormalisesAcceptedModes(string mode)
+    {
+        await _service.UpdateErrorReportingModeAsync(mode);
+
+        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+
+        Assert.Equal(mode.Trim().ToLowerInvariant(), settings["ErrorReportingMode"].GetString());
+    }
+
+    [Fact]
+    public async Task UpdateErrorReportingEnabled_PersistsSettingToFile()
+    {
+        await _service.UpdateErrorReportingEnabledAsync(true);
+
+        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+
+        Assert.True(settings["EnableErrorReporting"].GetBoolean());
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(101)]
+    public async Task UpdateErrorReportMaxPerDay_RejectsValuesOutsideTheSupportedRange(int value)
+    {
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.UpdateErrorReportMaxPerDayAsync(value));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(721)]
+    public async Task UpdateErrorReportCooldownHours_RejectsValuesOutsideTheSupportedRange(int value)
+    {
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.UpdateErrorReportCooldownHoursAsync(value));
+    }
+
+    [Fact]
     public async Task UpdateGitHubRepository_PersistsSettingToFile()
     {
         // Arrange

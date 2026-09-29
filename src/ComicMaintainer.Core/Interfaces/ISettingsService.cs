@@ -87,6 +87,30 @@ public interface ISettingsService
     Task UpdateGitHubIssueAssigneeAsync(string? assignee, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Enable or disable automated error reporting. Disabled by default: an
+    /// error report is an outbound disclosure and must be opted into.
+    /// </summary>
+    Task UpdateErrorReportingEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Select how reports leave the instance: <c>manual</c> (a pre-filled issue
+    /// URL the owner reviews and submits) or <c>automatic</c> (posted with the
+    /// configured GitHub token).
+    /// </summary>
+    Task UpdateErrorReportingModeAsync(string mode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update the hard cap on reports delivered per day in automatic mode.
+    /// </summary>
+    Task UpdateErrorReportMaxPerDayAsync(int maxPerDay, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Update how long the instance waits before re-reporting the same
+    /// fingerprint.
+    /// </summary>
+    Task UpdateErrorReportCooldownHoursAsync(int hours, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Update the database cleanup interval setting (in hours, 0 = only on startup)
     /// </summary>
     Task UpdateDatabaseCleanupIntervalHoursAsync(int hours, CancellationToken cancellationToken = default);

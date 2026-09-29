@@ -7159,6 +7159,254 @@
             loadActiveLibraryView(1, true);
         }
         
+        // ---------------------------------------------------------------
+        // Error reporting settings
+        //
+        // The preview is not a convenience: the owner cannot give meaningful
+        // consent to a disclosure they have not seen, so every report is shown
+        // in full — exactly as it would be filed — before anything is sent.
+        // ---------------------------------------------------------------
+        function applyErrorReportingSettings(settingsData) {
+            const enabled = document.getElementById('enableErrorReporting');
+            if (!enabled) return;
+
+            enabled.checked = !!settingsData.enable_error_reporting;
+
+            const mode = document.getElementById('errorReportingMode');
+            if (mode) mode.value = settingsData.error_reporting_mode === 'automatic' ? 'automatic' : 'manual';
+
+            const repository = document.getElementById('errorReportRepository');
+            if (repository) repository.value = settingsData.github_repository || '';
+
+            const maxPerDay = document.getElementById('errorReportMaxPerDay');
+            if (maxPerDay) maxPerDay.value = settingsData.error_report_max_per_day || 5;
+
+            const cooldown = document.getElementById('errorReportCooldownHours');
+            if (cooldown) cooldown.value = settingsData.error_report_cooldown_hours || 24;
+
+            const token = document.getElementById('errorReportToken');
+            if (token) {
+                token.value = '';
+                token.placeholder = settingsData.github_token_set
+                    ? 'Leave blank to keep the stored token'
+                    : 'No token stored';
+            }
+
+            onErrorReportingToggled();
+        }
+
+        function onErrorReportingToggled() {
+            const enabled = document.getElementById('enableErrorReporting');
+            const options = document.getElementById('errorReportingOptions');
+            if (!enabled || !options) return;
+
+            options.hidden = !enabled.checked;
+            onErrorReportingModeChanged();
+
+            if (enabled.checked) {
+                loadErrorReports();
+            }
+        }
+
+        function onErrorReportingModeChanged() {
+            const mode = document.getElementById('errorReportingMode');
+            const tokenGroup = document.getElementById('errorReportTokenGroup');
+            if (!mode || !tokenGroup) return;
+
+            tokenGroup.hidden = mode.value !== 'automatic';
+        }
+
+        async function saveErrorReportingSettings() {
+            const token = document.getElementById('errorReportToken');
+
+            const payload = {
+                enabled: document.getElementById('enableErrorReporting').checked,
+                mode: document.getElementById('errorReportingMode').value,
+                maxPerDay: parseInt(document.getElementById('errorReportMaxPerDay').value, 10) || 5,
+                cooldownHours: parseInt(document.getElementById('errorReportCooldownHours').value, 10) || 24,
+                githubRepository: document.getElementById('errorReportRepository').value.trim()
+            };
+
+            // Only send the token when the field was actually filled in, so
+            // saving other settings never clears a stored token.
+            if (token && token.value) {
+                payload.githubToken = token.value;
+            }
+
+            try {
+                const response = await fetch(apiUrl('/api/settings/error-reporting'), {
+                    method: 'PUT',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify(payload)
+                });
+
+                if (handleAuthError(response)) return;
+
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    showMessage(data.error || 'Failed to save error reporting settings', 'error');
+                    return;
+                }
+
+                if (token) token.value = '';
+                showMessage('Error reporting settings saved', 'success');
+                loadErrorReports();
+            } catch (error) {
+                showMessage(`Failed to save error reporting settings: ${error.message}`, 'error');
+            }
+        }
+
+        async function loadErrorReports() {
+            const container = document.getElementById('errorReportList');
+            if (!container) return;
+
+            try {
+                const response = await fetch(apiUrl('/api/errorreports'), { headers: getAuthHeaders() });
+                if (handleAuthError(response)) return;
+
+                if (!response.ok) {
+                    renderHtml(container, html`<p class="text-muted">Could not load captured errors.</p>`);
+                    return;
+                }
+
+                const data = await response.json();
+                renderErrorReports(data.reports || [], data.mode);
+            } catch (error) {
+                renderHtml(container, html`<p class="text-muted">Could not load captured errors: ${error.message}</p>`);
+            }
+        }
+
+        function renderErrorReports(reports, mode) {
+            const container = document.getElementById('errorReportList');
+            if (!container) return;
+
+            if (!reports.length) {
+                renderHtml(container, html`<p style="color: var(--text-muted); font-size: 13px;">No errors captured.</p>`);
+                return;
+            }
+
+            const rows = reports.map(report => html`
+                <div style="border: 1px solid var(--border-input); border-radius: 6px; padding: 10px; margin-bottom: 8px;">
+                    <div style="font-weight: 600;">${report.exceptionType}</div>
+                    <div style="color: var(--text-muted); font-size: 12px;">
+                        ${report.occurrenceCount}&times; · last seen ${new Date(report.lastSeenUtc).toLocaleString()}
+                        · <code>${report.fingerprint}</code>
+                        ${report.issueUrl ? html` · <a href="${report.issueUrl}" target="_blank" rel="noopener noreferrer">issue</a>` : ''}
+                    </div>
+                    <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button type="button" class="btn" data-error-report-action="preview" data-fingerprint="${report.fingerprint}">Preview</button>
+                        <button type="button" class="btn" data-error-report-action="dismiss" data-fingerprint="${report.fingerprint}">Dismiss</button>
+                    </div>
+                    <pre data-error-report-preview="${report.fingerprint}" hidden style="white-space: pre-wrap; word-break: break-word; max-height: 260px; overflow: auto; margin-top: 8px; padding: 8px; background: var(--bg-hover); border-radius: 4px; font-size: 12px;"></pre>
+                </div>
+            `);
+
+            renderHtml(container, html`
+                <p style="color: var(--text-muted); font-size: 12px;">
+                    ${mode === 'automatic'
+                        ? 'Reports are filed automatically. Preview shows exactly what is sent.'
+                        : 'Preview a report, then choose Send to open a pre-filled GitHub issue you submit yourself.'}
+                </p>
+                ${rows}
+            `);
+
+            container.querySelectorAll('[data-error-report-action]').forEach(button => {
+                button.addEventListener('click', () => {
+                    const fingerprint = button.getAttribute('data-fingerprint');
+                    if (button.getAttribute('data-error-report-action') === 'preview') {
+                        previewErrorReport(fingerprint);
+                    } else {
+                        dismissErrorReport(fingerprint);
+                    }
+                });
+            });
+        }
+
+        async function previewErrorReport(fingerprint) {
+            const target = document.querySelector(`[data-error-report-preview="${CSS.escape(fingerprint)}"]`);
+            if (!target) return;
+
+            if (!target.hidden) {
+                target.hidden = true;
+                return;
+            }
+
+            try {
+                const response = await fetch(apiUrl(`/api/errorreports/${encodeURIComponent(fingerprint)}/preview`), {
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
+
+                if (!response.ok) {
+                    showMessage('Could not load the report preview', 'error');
+                    return;
+                }
+
+                const data = await response.json();
+                target.textContent = data.body || '';
+                target.hidden = false;
+
+                // The Send button only appears once the payload is on screen,
+                // so nothing can be transmitted unreviewed.
+                if (!target.nextElementSibling || !target.nextElementSibling.dataset.errorReportSend) {
+                    const send = document.createElement('button');
+                    send.type = 'button';
+                    send.className = 'btn btn-primary';
+                    send.dataset.errorReportSend = fingerprint;
+                    send.style.marginTop = '8px';
+                    send.textContent = 'Send this report';
+                    send.addEventListener('click', () => submitErrorReport(fingerprint));
+                    target.insertAdjacentElement('afterend', send);
+                }
+            } catch (error) {
+                showMessage(`Could not load the report preview: ${error.message}`, 'error');
+            }
+        }
+
+        async function submitErrorReport(fingerprint) {
+            try {
+                const response = await fetch(apiUrl(`/api/errorreports/${encodeURIComponent(fingerprint)}/submit`), {
+                    method: 'POST',
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
+
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    showMessage(data.error || data.message || 'Could not send the report', 'error');
+                    return;
+                }
+
+                if (!data.delivered && data.issueUrl) {
+                    // Consent mode: the instance transmits nothing. Opening the
+                    // pre-filled form lets the user make the final call on
+                    // GitHub, where they can still edit or abandon it.
+                    window.open(data.issueUrl, '_blank', 'noopener');
+                    showMessage('Opened a pre-filled GitHub issue for you to review and submit', 'info');
+                } else {
+                    showMessage(data.message || 'Report sent', 'success');
+                }
+
+                loadErrorReports();
+            } catch (error) {
+                showMessage(`Could not send the report: ${error.message}`, 'error');
+            }
+        }
+
+        async function dismissErrorReport(fingerprint) {
+            try {
+                const response = await fetch(apiUrl(`/api/errorreports/${encodeURIComponent(fingerprint)}`), {
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
+
+                loadErrorReports();
+            } catch (error) {
+                showMessage(`Could not dismiss the report: ${error.message}`, 'error');
+            }
+        }
+
         function showMessage(message, type = 'info', options = {}) {
             const container = document.getElementById('messageContainer');
             const messageEl = document.createElement('div');
@@ -7284,6 +7532,9 @@
                 document.getElementById('mangaDexBaseUrl').value = settingsData.mangadex_base_url || 'https://api.mangadex.org';
                 document.getElementById('enableAniListMetadata').checked = !!settingsData.enable_anilist_metadata;
                 document.getElementById('aniListBaseUrl').value = settingsData.anilist_base_url || 'https://graphql.anilist.co';
+
+                // Load error reporting settings
+                applyErrorReportingSettings(settingsData);
 
                 // Load default library view
                 const defaultLibraryViewSelect = document.getElementById('defaultLibraryViewSelect');

@@ -1088,6 +1088,55 @@
                     <input type="text" id="aniListBaseUrl" name="aniListBaseUrl" placeholder="https://graphql.anilist.co" autocomplete="off">
                 </div>
                 
+                <h3 style="margin-bottom: 10px; margin-top: 35px; color: var(--text-secondary);">Error Reporting</h3>
+                <p style="margin: 0 0 12px; color: var(--text-muted); font-size: 13px; line-height: 1.6;">
+                    Turns crashes into a GitHub issue so they can be fixed. Off by default.
+                    Reports are redacted before they leave this instance — library paths, comic and series names,
+                    usernames, e-mail addresses, API keys and tokens are stripped. Preview any report before sending it.
+                </p>
+                <div class="form-group">
+                    <label for="enableErrorReporting" style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="enableErrorReporting" name="enableErrorReporting" onchange="onErrorReportingToggled()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <span>Enable error reporting</span>
+                    </label>
+                </div>
+                <div id="errorReportingOptions" hidden>
+                    <div class="form-group">
+                        <label for="errorReportingMode">Delivery</label>
+                        <select id="errorReportingMode" name="errorReportingMode" onchange="onErrorReportingModeChanged()" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                            <option value="manual">Ask me each time (opens a pre-filled issue)</option>
+                            <option value="automatic">Send automatically (needs a GitHub token)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="errorReportRepository">GitHub repository</label>
+                        <input type="text" id="errorReportRepository" name="errorReportRepository" placeholder="mleenorris/ComicMaintainer" autocomplete="off">
+                    </div>
+                    <div class="form-group" id="errorReportTokenGroup" hidden>
+                        <label for="errorReportToken">GitHub token</label>
+                        <input type="password" id="errorReportToken" name="errorReportToken" placeholder="Leave blank to keep the stored token" autocomplete="new-password">
+                        <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                            Use a fine-grained token scoped to this repository with <strong>Issues: write</strong> and nothing else.
+                            It is stored on this instance only and is never written to the log.
+                        </small>
+                    </div>
+                    <div class="form-group" style="display: flex; gap: 12px;">
+                        <div style="flex: 1;">
+                            <label for="errorReportMaxPerDay">Max reports per day</label>
+                            <input type="number" id="errorReportMaxPerDay" name="errorReportMaxPerDay" min="1" max="100" value="5">
+                        </div>
+                        <div style="flex: 1;">
+                            <label for="errorReportCooldownHours">Cooldown (hours)</label>
+                            <input type="number" id="errorReportCooldownHours" name="errorReportCooldownHours" min="1" max="720" value="24">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <button type="button" class="btn btn-primary" onclick="saveErrorReportingSettings()">Save error reporting settings</button>
+                        <button type="button" class="btn" onclick="loadErrorReports()">Refresh captured errors</button>
+                    </div>
+                    <div id="errorReportList" style="margin-top: 10px;"></div>
+                </div>
+
                 <h3 style="margin-bottom: 10px; margin-top: 35px; color: #e74c3c; border-bottom: 2px solid #e74c3c; padding-bottom: 8px;">⚠️ Danger Zone</h3>
                 <div class="form-group" style="border: 2px solid #e74c3c; border-radius: 8px; padding: 20px; background: var(--bg-hover);">
                     <label style="font-weight: 600; color: #e74c3c; font-size: 15px;">Reset Database</label>

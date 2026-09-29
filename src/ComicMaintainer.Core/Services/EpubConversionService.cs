@@ -53,7 +53,7 @@ public class EpubConversionService : IEpubConversionService
         CancellationToken cancellationToken)
         => ConvertToEpubAsync(comicFilePath, outputDirectory, options: null, cancellationToken);
 
-    public async Task<string> ConvertToEpubAsync(
+    public Task<string> ConvertToEpubAsync(
         string comicFilePath,
         string outputDirectory,
         EpubConversionOptions? options = null,
@@ -64,53 +64,113 @@ public class EpubConversionService : IEpubConversionService
             throw new ArgumentException("Comic file path is required", nameof(comicFilePath));
         }
 
+        return ConvertToEpubAsync(new[] { comicFilePath }, outputDirectory, options, cancellationToken);
+    }
+
+    public async Task<string> ConvertToEpubAsync(
+        IReadOnlyList<string> comicFilePaths,
+        string outputDirectory,
+        EpubConversionOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(comicFilePaths);
+
+        if (comicFilePaths.Count == 0)
+        {
+            throw new ArgumentException("At least one comic file path is required", nameof(comicFilePaths));
+        }
+
         if (string.IsNullOrWhiteSpace(outputDirectory))
         {
             throw new ArgumentException("Output directory is required", nameof(outputDirectory));
         }
 
-        if (!File.Exists(comicFilePath))
+        foreach (var comicFilePath in comicFilePaths)
         {
-            throw new FileNotFoundException($"Comic file not found: {comicFilePath}", comicFilePath);
+            if (string.IsNullOrWhiteSpace(comicFilePath))
+            {
+                throw new ArgumentException("Comic file path is required", nameof(comicFilePaths));
+            }
+
+            if (!File.Exists(comicFilePath))
+            {
+                throw new FileNotFoundException($"Comic file not found: {comicFilePath}", comicFilePath);
+            }
+
+            if (!ComicFileExtensions.IsComicArchive(comicFilePath))
+            {
+                throw new NotSupportedException($"Unsupported comic format: {Path.GetExtension(comicFilePath)}");
+            }
         }
 
-        if (!ComicFileExtensions.IsComicArchive(comicFilePath))
-        {
-            throw new NotSupportedException($"Unsupported comic format: {Path.GetExtension(comicFilePath)}");
-        }
-
-        return await Task.Run(() => Convert(comicFilePath, outputDirectory, options, cancellationToken), cancellationToken);
+        return await Task.Run(() => Convert(comicFilePaths, outputDirectory, options, cancellationToken), cancellationToken);
     }
 
     private string Convert(
-        string comicFilePath,
+        IReadOnlyList<string> comicFilePaths,
         string outputDirectory,
         EpubConversionOptions? options,
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(outputDirectory);
 
-        using var archive = OpenArchive(comicFilePath);
-
-        var pages = archive.Entries
-            .Where(e => !e.IsDirectory && IsImageFile(e.Key))
-            .OrderBy(e => e.Key, new NaturalStringComparer())
-            .ToList();
-
-        if (pages.Count == 0)
+        // Every source archive stays open for the whole conversion: each
+        // compression tier re-reads the page entries from it.
+        var archives = new List<IArchive>(comicFilePaths.Count);
+        try
         {
-            throw new InvalidOperationException(
-                $"Archive contains no page images and cannot be converted to EPUB: {Path.GetFileName(comicFilePath)}");
-        }
+            var issues = new List<IssueSource>(comicFilePaths.Count);
+            foreach (var comicFilePath in comicFilePaths)
+            {
+                var archive = OpenArchive(comicFilePath);
+                archives.Add(archive);
 
-        var comicInfo = ReadComicInfo(archive);
+                var pages = archive.Entries
+                    .Where(e => !e.IsDirectory && IsImageFile(e.Key))
+                    .OrderBy(e => e.Key, new NaturalStringComparer())
+                    .ToList();
+
+                if (pages.Count == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Archive contains no page images and cannot be converted to EPUB: {Path.GetFileName(comicFilePath)}");
+                }
+
+                issues.Add(new IssueSource(comicFilePath, pages, ReadComicInfo(archive)));
+            }
+
+            return Convert(issues, outputDirectory, options, cancellationToken);
+        }
+        finally
+        {
+            foreach (var archive in archives)
+            {
+                archive.Dispose();
+            }
+        }
+    }
+
+    private string Convert(
+        IReadOnlyList<IssueSource> issues,
+        string outputDirectory,
+        EpubConversionOptions? options,
+        CancellationToken cancellationToken)
+    {
+        // The first issue supplies the metadata (series, creator, publisher) for
+        // a condensed book: it is the one the range starts at.
+        var primary = issues[0];
+        var comicInfo = primary.Info;
         var seriesName = FirstNonEmpty(options?.SeriesTitle, comicInfo?.Series);
-        var title = BuildTitle(seriesName, comicInfo, comicFilePath);
+        var title = FirstNonEmpty(options?.Title) ?? BuildTitle(seriesName, comicInfo, primary.FilePath);
         var bookId = "urn:uuid:" + Guid.NewGuid().ToString("D");
         var seriesCover = LoadSeriesCover(options?.SeriesImagePath);
+        var pageCount = issues.Sum(i => i.Pages.Count);
 
-        var epubPath = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(comicFilePath) + ".epub");
+        var fileName = SanitizeFileName(options?.OutputFileName)
+            ?? Path.GetFileNameWithoutExtension(primary.FilePath);
+        var epubPath = Path.Combine(outputDirectory, fileName + ".epub");
         var tempPath = epubPath + ".tmp";
+        var label = issues.Count == 1 ? Path.GetFileName(primary.FilePath) : fileName;
 
         // Ereader mailboxes cap attachment size, so an oversized book is rebuilt
         // with progressively stronger page compression instead of failing.
@@ -125,7 +185,7 @@ public class EpubConversionService : IEpubConversionService
                 var tier = tiers[tierIndex];
                 var expectedEntries = WriteEpub(
                     tempPath,
-                    pages,
+                    issues,
                     comicInfo,
                     seriesName,
                     title,
@@ -136,7 +196,7 @@ public class EpubConversionService : IEpubConversionService
 
                 // The archive is complete only after the ZipArchive is disposed;
                 // re-read it so a structurally broken book is never handed to callers.
-                ValidateEpub(tempPath, expectedEntries, comicFilePath);
+                ValidateEpub(tempPath, expectedEntries, label);
 
                 var length = new FileInfo(tempPath).Length;
                 var isLastTier = tierIndex == tiers.Count - 1;
@@ -144,7 +204,7 @@ public class EpubConversionService : IEpubConversionService
                 {
                     _logger.LogInformation(
                         "EPUB for {FilePath} is {Bytes} bytes which exceeds the {Budget} byte budget; retrying with stronger page compression",
-                        LoggingHelper.SanitizePathForLog(comicFilePath),
+                        LoggingHelper.SanitizePathForLog(primary.FilePath),
                         length,
                         budget);
                     TryDelete(tempPath);
@@ -153,9 +213,10 @@ public class EpubConversionService : IEpubConversionService
 
                 File.Move(tempPath, epubPath, overwrite: true);
                 _logger.LogInformation(
-                    "Converted {FilePath} to EPUB with {PageCount} page(s) ({Bytes} bytes, compression tier {Tier})",
-                    LoggingHelper.SanitizePathForLog(comicFilePath),
-                    pages.Count,
+                    "Converted {IssueCount} issue(s) starting at {FilePath} to EPUB with {PageCount} page(s) ({Bytes} bytes, compression tier {Tier})",
+                    issues.Count,
+                    LoggingHelper.SanitizePathForLog(primary.FilePath),
+                    pageCount,
                     length,
                     tierIndex);
 
@@ -163,8 +224,7 @@ public class EpubConversionService : IEpubConversionService
             }
 
             // BuildCompressionTiers always yields at least one tier.
-            throw new InvalidOperationException(
-                $"No EPUB could be produced for {Path.GetFileName(comicFilePath)}.");
+            throw new InvalidOperationException($"No EPUB could be produced for {label}.");
         }
         catch
         {
@@ -174,11 +234,37 @@ public class EpubConversionService : IEpubConversionService
     }
 
     /// <summary>
+    /// Makes a caller-supplied book name safe to use as a file name. Returns
+    /// null when nothing usable is left so the caller can fall back to the
+    /// source archive name.
+    /// </summary>
+    private static string? SanitizeFileName(string? fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return null;
+        }
+
+        var sanitized = new string(fileName
+            .Trim()
+            .Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)
+            .ToArray())
+            .Trim('.', ' ');
+
+        if (sanitized.Length == 0)
+        {
+            return null;
+        }
+
+        return sanitized.Length > 120 ? sanitized[..120].TrimEnd('.', ' ') : sanitized;
+    }
+
+    /// <summary>
     /// Writes one complete EPUB variant and returns the entries it must contain.
     /// </summary>
     private List<string> WriteEpub(
         string tempPath,
-        IReadOnlyList<IArchiveEntry> pages,
+        IReadOnlyList<IssueSource> issues,
         ComicInfo? comicInfo,
         string? seriesName,
         string title,
@@ -188,6 +274,7 @@ public class EpubConversionService : IEpubConversionService
         CancellationToken cancellationToken)
     {
         var requiredEntries = new List<string> { "META-INF/container.xml" };
+        var chapters = new List<EpubChapter>(issues.Count);
 
         using (var fileStream = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
         using (var epub = new SystemZipArchive(fileStream, ZipArchiveMode.Create))
@@ -213,52 +300,67 @@ public class EpubConversionService : IEpubConversionService
                 requiredEntries.Add("OEBPS/" + seriesCover.XhtmlPath);
             }
 
-            var manifestPages = new List<EpubPage>(pages.Count);
+            var manifestPages = new List<EpubPage>(issues.Sum(i => i.Pages.Count));
             var index = 0;
-            foreach (var page in pages)
+            foreach (var issue in issues)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                index++;
+                var chapterTitle = BuildTitle(
+                    FirstNonEmpty(issue.Info?.Series, seriesName),
+                    issue.Info,
+                    issue.FilePath);
 
-                var extension = NormalizeImageExtension(Path.GetExtension(page.Key) ?? ".jpg");
-
-                byte[] imageBytes;
-                using (var entryStream = page.OpenEntryStream())
-                using (var buffer = new MemoryStream())
+                var isFirstPageOfIssue = true;
+                foreach (var page in issue.Pages)
                 {
-                    entryStream.CopyTo(buffer);
-                    imageBytes = buffer.ToArray();
+                    cancellationToken.ThrowIfCancellationRequested();
+                    index++;
+
+                    var extension = NormalizeImageExtension(Path.GetExtension(page.Key) ?? ".jpg");
+
+                    byte[] imageBytes;
+                    using (var entryStream = page.OpenEntryStream())
+                    using (var buffer = new MemoryStream())
+                    {
+                        entryStream.CopyTo(buffer);
+                        imageBytes = buffer.ToArray();
+                    }
+
+                    // A page that cannot be decoded (empty, truncated, or not an
+                    // image at all) would silently render as a blank page on the
+                    // device, so the whole conversion fails instead.
+                    var prepared = PrepareImage(imageBytes, extension, page.Key, tier);
+                    var imageName = $"images/page{index:D4}{prepared.Extension}";
+
+                    var imageEntry = epub.CreateEntry("OEBPS/" + imageName, CompressionLevel.NoCompression);
+                    using (var imageStream = imageEntry.Open())
+                    {
+                        imageStream.Write(prepared.Bytes, 0, prepared.Bytes.Length);
+                    }
+
+                    var pageName = $"page{index:D4}.xhtml";
+                    WriteEntry(epub, "OEBPS/" + pageName, BuildPageXhtml(index, imageName, prepared.Width, prepared.Height));
+
+                    requiredEntries.Add("OEBPS/" + imageName);
+                    requiredEntries.Add("OEBPS/" + pageName);
+
+                    if (isFirstPageOfIssue)
+                    {
+                        chapters.Add(new EpubChapter(chapterTitle, pageName));
+                        isFirstPageOfIssue = false;
+                    }
+
+                    manifestPages.Add(new EpubPage(
+                        Id: $"page{index:D4}",
+                        XhtmlPath: pageName,
+                        ImagePath: imageName,
+                        MediaType: prepared.MediaType,
+                        Width: prepared.Width,
+                        Height: prepared.Height));
                 }
-
-                // A page that cannot be decoded (empty, truncated, or not an
-                // image at all) would silently render as a blank page on the
-                // device, so the whole conversion fails instead.
-                var prepared = PrepareImage(imageBytes, extension, page.Key, tier);
-                var imageName = $"images/page{index:D4}{prepared.Extension}";
-
-                var imageEntry = epub.CreateEntry("OEBPS/" + imageName, CompressionLevel.NoCompression);
-                using (var imageStream = imageEntry.Open())
-                {
-                    imageStream.Write(prepared.Bytes, 0, prepared.Bytes.Length);
-                }
-
-                var pageName = $"page{index:D4}.xhtml";
-                WriteEntry(epub, "OEBPS/" + pageName, BuildPageXhtml(index, imageName, prepared.Width, prepared.Height));
-
-                requiredEntries.Add("OEBPS/" + imageName);
-                requiredEntries.Add("OEBPS/" + pageName);
-
-                manifestPages.Add(new EpubPage(
-                    Id: $"page{index:D4}",
-                    XhtmlPath: pageName,
-                    ImagePath: imageName,
-                    MediaType: prepared.MediaType,
-                    Width: prepared.Width,
-                    Height: prepared.Height));
             }
 
-            WriteEntry(epub, "OEBPS/content.opf", BuildOpf(bookId, title, seriesName, comicInfo, seriesCover, manifestPages));
-            WriteEntry(epub, "OEBPS/nav.xhtml", BuildNav(title, seriesCover, manifestPages));
+            WriteEntry(epub, "OEBPS/content.opf", BuildOpf(bookId, title, seriesName, comicInfo, seriesCover, manifestPages, issues.Count > 1));
+            WriteEntry(epub, "OEBPS/nav.xhtml", BuildNav(title, seriesCover, manifestPages, chapters));
             requiredEntries.Add("OEBPS/content.opf");
             requiredEntries.Add("OEBPS/nav.xhtml");
         }
@@ -596,9 +698,8 @@ public class EpubConversionService : IEpubConversionService
     /// whose declared resources all exist and are non-empty. Callers (email
     /// delivery in particular) must never ship a book that fails this check.
     /// </summary>
-    private static void ValidateEpub(string epubPath, IReadOnlyList<string> expectedEntries, string comicFilePath)
+    private static void ValidateEpub(string epubPath, IReadOnlyList<string> expectedEntries, string name)
     {
-        var name = Path.GetFileName(comicFilePath);
 
         try
         {
@@ -688,7 +789,8 @@ public class EpubConversionService : IEpubConversionService
         string? seriesName,
         ComicInfo? info,
         SeriesCover? cover,
-        IReadOnlyList<EpubPage> pages)
+        IReadOnlyList<EpubPage> pages,
+        bool isCondensed)
     {
         var builder = new StringBuilder();
         builder.AppendLine("""<?xml version="1.0" encoding="UTF-8"?>""");
@@ -719,7 +821,9 @@ public class EpubConversionService : IEpubConversionService
             builder.AppendLine($"""    <dc:description>{Escape(info.Summary.Trim())}</dc:description>""");
         }
 
-        var issueNumber = TryParseIssueNumber(info?.Number);
+        // A condensed book spans a range of issues, so the single issue number
+        // from the first issue's metadata would misfile it in the series.
+        var issueNumber = isCondensed ? null : TryParseIssueNumber(info?.Number);
 
         if (!string.IsNullOrWhiteSpace(seriesName))
         {
@@ -785,7 +889,11 @@ public class EpubConversionService : IEpubConversionService
 
     private static string FormatNumber(decimal value) => value.ToString("0.###", CultureInfo.InvariantCulture);
 
-    private static string BuildNav(string title, SeriesCover? cover, IReadOnlyList<EpubPage> pages)
+    private static string BuildNav(
+        string title,
+        SeriesCover? cover,
+        IReadOnlyList<EpubPage> pages,
+        IReadOnlyList<EpubChapter> chapters)
     {
         var builder = new StringBuilder();
         builder.AppendLine("""<?xml version="1.0" encoding="UTF-8"?>""");
@@ -797,9 +905,21 @@ public class EpubConversionService : IEpubConversionService
         {
             builder.AppendLine($"""<li><a href="{Escape(cover.XhtmlPath)}">Cover</a></li>""");
         }
-        for (var i = 0; i < pages.Count; i++)
+        if (chapters.Count > 1)
         {
-            builder.AppendLine($"""<li><a href="{Escape(pages[i].XhtmlPath)}">Page {(i + 1).ToString(CultureInfo.InvariantCulture)}</a></li>""");
+            // A condensed book lists its issues; a per-page contents list of a
+            // dozen issues would be unusable on an ereader.
+            foreach (var chapter in chapters)
+            {
+                builder.AppendLine($"""<li><a href="{Escape(chapter.XhtmlPath)}">{Escape(chapter.Title)}</a></li>""");
+            }
+        }
+        else
+        {
+            for (var i = 0; i < pages.Count; i++)
+            {
+                builder.AppendLine($"""<li><a href="{Escape(pages[i].XhtmlPath)}">Page {(i + 1).ToString(CultureInfo.InvariantCulture)}</a></li>""");
+            }
         }
         builder.AppendLine("""</ol></nav>""");
         if (cover is not null)
@@ -891,6 +1011,15 @@ public class EpubConversionService : IEpubConversionService
             // Best-effort cleanup only.
         }
     }
+
+    /// <summary>One source archive and the pages it contributes to the book.</summary>
+    private sealed record IssueSource(
+        string FilePath,
+        IReadOnlyList<IArchiveEntry> Pages,
+        ComicInfo? Info);
+
+    /// <summary>A table-of-contents entry pointing at the first page of an issue.</summary>
+    private sealed record EpubChapter(string Title, string XhtmlPath);
 
     private sealed record EpubPage(
         string Id,

@@ -20,10 +20,20 @@ namespace ComicMaintainer.Core.Interfaces;
 /// if even the smallest variant is over it, that variant is returned and the
 /// caller decides what to do.
 /// </param>
+/// <param name="Title">
+/// Overrides the title derived from the archive metadata. Used by condensed
+/// (multi-issue) books, whose title spans a range of issues.
+/// </param>
+/// <param name="OutputFileName">
+/// File name (without extension) for the generated book. Defaults to the name
+/// of the first source archive. Invalid file name characters are replaced.
+/// </param>
 public record EpubConversionOptions(
     string? SeriesImagePath = null,
     string? SeriesTitle = null,
-    long? MaxSizeBytes = null);
+    long? MaxSizeBytes = null,
+    string? Title = null,
+    string? OutputFileName = null);
 
 /// <summary>
 /// Converts comic archives (CBZ/CBR) into fixed-layout EPUB3 files suitable for
@@ -55,6 +65,22 @@ public interface IEpubConversionService
     /// <exception cref="InvalidOperationException">The archive contains no images.</exception>
     Task<string> ConvertToEpubAsync(
         string comicFilePath,
+        string outputDirectory,
+        EpubConversionOptions? options = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Condenses several comic archives into a single EPUB written inside
+    /// <paramref name="outputDirectory"/>. Pages are appended in the order the
+    /// paths are supplied and the table of contents gets one entry per issue.
+    /// </summary>
+    /// <returns>The absolute path of the generated .epub file.</returns>
+    /// <exception cref="ArgumentException">No source path was supplied.</exception>
+    /// <exception cref="FileNotFoundException">A source comic does not exist.</exception>
+    /// <exception cref="NotSupportedException">A source file is not a supported comic archive.</exception>
+    /// <exception cref="InvalidOperationException">A source archive contains no images.</exception>
+    Task<string> ConvertToEpubAsync(
+        IReadOnlyList<string> comicFilePaths,
         string outputDirectory,
         EpubConversionOptions? options = null,
         CancellationToken cancellationToken = default);

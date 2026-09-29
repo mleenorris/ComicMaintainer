@@ -30,6 +30,45 @@ public interface IComicEmailService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Queues <paramref name="filePaths"/> as condensed EPUB books: the issues
+    /// are put in reading order and grouped into books of
+    /// <paramref name="issuesPerBook"/> issues (or one book for every issue when
+    /// the mode is <see cref="EmailCondenseMode.All"/>). Condensed delivery is
+    /// always EPUB; the original archives cannot be merged.
+    /// </summary>
+    Task<EmailQueueResult> QueueCondensedFilesAsync(
+        IEnumerable<string> filePaths,
+        int deviceId,
+        string? condenseMode,
+        int? issuesPerBook,
+        string source,
+        bool skipAlreadyDelivered,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Describes the books a condensed send would produce, including the
+    /// estimated size of each one, so the caller can warn that an oversized
+    /// book has to be downloaded instead of emailed. Nothing is queued.
+    /// </summary>
+    Task<CondensePlanDto> PlanCondensedDeliveryAsync(
+        IEnumerable<string> filePaths,
+        string? condenseMode,
+        int? issuesPerBook,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Builds one condensed book (the <paramref name="bookIndex"/>-th book of the
+    /// plan for the same inputs) as a temporary file for the caller to stream
+    /// back as a download. The caller must delete the file when finished.
+    /// </summary>
+    Task<CondensedBookFile> CreateCondensedBookAsync(
+        IEnumerable<string> filePaths,
+        string? condenseMode,
+        int? issuesPerBook,
+        int bookIndex,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Queues a newly processed issue for every enabled subscription of its
     /// series. Matches subscriptions created from either the metadata series
     /// name or the containing folder name. Returns the number of deliveries queued.

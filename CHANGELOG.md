@@ -12,8 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tagged with an `X-Correlation-Id` (echoed on the response, honoured if the caller supplies
   one) and that id is stamped on every log line the request produces in `debug*.log`. An
   unhandled exception is turned into an RFC 7807 problem document that carries the same id
-  instead of a bare 500, and the browser appends `(ref: …)` to failure toasts, so a user can
-  report "it failed, ref abc123" and the matching server log line can be found directly.
+  instead of a bare 500, and the browser appends `(ref: …)` to toasts reporting a failed API
+  call, so a user can report "it failed, ref abc123" and the matching server log line can be
+  found directly.
 - **System Diagnostics panel.** A new admin-only `GET /api/diagnostics` returns one snapshot
   of the instance — version, environment, uptime, health check results, runtime and memory,
   watcher state, library totals, job counts, per-directory storage (present/writable/free) and

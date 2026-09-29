@@ -115,7 +115,7 @@ full operational picture in one call.
     { "name": "Watched", "path": "/watched", "exists": true, "writable": true, "freeBytes": 89380139008, "totalBytes": 154894188544 }
   ],
   "logs": {
-    "directory": "/Config/Log",
+    "directory": "/Config",
     "files": [
       { "name": "debug20260929.log", "sizeBytes": 126002, "lastWriteUtc": "2026-09-29T16:46:45.154Z" }
     ]
@@ -535,7 +535,7 @@ log; non-request lines show `-`) and is returned in the `correlationId` field of
 so a failure reported by a user can be matched to the exact server log lines:
 
 ```bash
-grep '0HNOU94L3SUDV:00000001' /Config/Log/*.log
+grep '0HNOU94L3SUDV:00000001' /Config/*.log
 ```
 
 ## Error Responses
@@ -563,7 +563,7 @@ An unhandled server error returns an [RFC 7807](https://datatracker.ietf.org/doc
 problem document (`application/problem+json`) carrying the correlation id:
 ```json
 {
-  "type": "https://tools.ietf.org/html/rfc9110#section-15.6.1",
+  "type": "https://datatracker.ietf.org/doc/html/rfc9110#section-15.6.1",
   "title": "An unexpected error occurred.",
   "status": 500,
   "correlationId": "0HNOU94L3SUDV:00000001"

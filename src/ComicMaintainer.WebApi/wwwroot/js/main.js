@@ -15,9 +15,13 @@
         // lock.
         //
         // Rather than thread the id through the hundreds of individual fetch call
-        // sites, the most recent failing API response is remembered here and
-        // showMessage() appends it to error notifications. Wrapping fetch once is
-        // what keeps this to a handful of lines instead of a sweeping refactor.
+        // sites, the most recent failing API response is remembered here.
+        // Decoration is opt-in per message — a caller passes
+        // `{ reference: true }` to showMessage() — because only the caller knows
+        // whether the failure it is reporting is the API call that produced the
+        // id: a clipboard denial, a validation message or a JavaScript error that
+        // merely happens to follow an API failure would otherwise be stamped with
+        // an unrelated id and send an operator to the wrong log line.
 
         const API_FAILURE_REFERENCE_WINDOW_MS = 15000;
         let lastApiFailure = null;
@@ -38,15 +42,27 @@
         }
 
         /**
-         * Append the reference of a *recent* API failure to an error message.
-         * The time window matters: a stale id pointing at an unrelated request
-         * is worse than no id at all.
+         * The reference of a *recent* API failure, or null. The time window
+         * matters: a stale id pointing at an unrelated request is worse than no
+         * id at all.
          */
-        function withApiFailureReference(message) {
-            if (!lastApiFailure) return message;
-            if (Date.now() - lastApiFailure.at > API_FAILURE_REFERENCE_WINDOW_MS) return message;
-            if (String(message).includes(lastApiFailure.reference)) return message;
-            return `${message} (ref: ${lastApiFailure.reference})`;
+        function recentApiFailureReference() {
+            if (!lastApiFailure) return null;
+            if (Date.now() - lastApiFailure.at > API_FAILURE_REFERENCE_WINDOW_MS) return null;
+            return lastApiFailure.reference;
+        }
+
+        /**
+         * Append a correlation reference to an error message. `reference` is
+         * either an explicit id or `true`, meaning "the API call that just
+         * failed" — callers only pass it when the message they are reporting
+         * came from a failed API request.
+         */
+        function withApiFailureReference(message, reference) {
+            const ref = reference === true ? recentApiFailureReference() : reference;
+            if (!ref) return message;
+            if (String(message).includes(ref)) return message;
+            return `${message} (ref: ${ref})`;
         }
 
         (function instrumentApiFailures() {
@@ -2651,7 +2667,7 @@
                     loadLibraryHealth();
                 }
             } catch (error) {
-                showMessage('Failed to load series: ' + error.message, 'error');
+                showMessage('Failed to load series: ' + error.message, 'error', { reference: true });
             } finally {
                 seriesLoading = false;
                 if (seriesReloadPending) {
@@ -2752,7 +2768,7 @@
                     loadLibraryHealth();
                 }
             } catch (error) {
-                showMessage('Failed to load files: ' + error.message, 'error');
+                showMessage('Failed to load files: ' + error.message, 'error', { reference: true });
             } finally {
                 folderLoading = false;
                 if (folderReloadPending) {
@@ -7205,9 +7221,12 @@
                 messageEl.setAttribute('role', 'alert');
             }
             // An error the user may have to report is only actionable if it can
-            // be tied back to the server log, so errors carry the correlation id
-            // of the API call that just failed.
-            messageEl.textContent = type === 'error' ? withApiFailureReference(message) : message;
+            // be tied back to the server log, so a caller reporting a failed API
+            // call passes `reference: true` (or an explicit id) to have the
+            // correlation id of that call appended.
+            messageEl.textContent = options.reference
+                ? withApiFailureReference(message, options.reference)
+                : message;
             
             container.appendChild(messageEl);
             
@@ -7684,7 +7703,7 @@
                 // Rendered inline rather than as a toast: the panel is the only
                 // thing on screen the user is looking at. It still carries the
                 // correlation reference so a failed snapshot is itself traceable.
-                renderHtml(container, html`<p class="empty-state">${withApiFailureReference('Could not load diagnostics: ' + error.message)}</p>`);
+                renderHtml(container, html`<p class="empty-state">${withApiFailureReference('Could not load diagnostics: ' + error.message, true)}</p>`);
             }
         }
 
@@ -7747,11 +7766,13 @@
                     ['Processors', runtime.processorCount ?? 'Unknown'],
                     ['Memory in use', typeof runtime.workingSetBytes === 'number' ? formatFileSize(runtime.workingSetBytes) : 'Unknown']
                 ])}
-                ${diagnosticsSection('Watcher', [
-                    ['Running', watcher.error ? watcher.error : (watcher.running ? 'Yes' : 'No')],
-                    ['Rename on arrival', watcher.renameEnabled ? 'Enabled' : 'Disabled'],
-                    ['Normalize on arrival', watcher.normalizeEnabled ? 'Enabled' : 'Disabled']
-                ])}
+                ${diagnosticsSection('Watcher', watcher.error
+                    ? [['Status', watcher.error]]
+                    : [
+                        ['Running', watcher.running ? 'Yes' : 'No'],
+                        ['Rename on arrival', watcher.renameEnabled ? 'Enabled' : 'Disabled'],
+                        ['Normalize on arrival', watcher.normalizeEnabled ? 'Enabled' : 'Disabled']
+                    ])}
                 ${diagnosticsSection('Library', library.error
                     ? [['Status', library.error]]
                     : [
@@ -7791,6 +7812,8 @@
             const library = data.library || {};
             const jobs = data.jobs || {};
             const storage = Array.isArray(data.storage) ? data.storage : [];
+            const logs = data.logs || {};
+            const logFiles = Array.isArray(logs.files) ? logs.files : [];
 
             const lines = [
                 'ComicMaintainer diagnostics',
@@ -7799,16 +7822,39 @@
                 '',
                 `Version: ${app.version || 'unknown'} (${app.environment || 'unknown'})`,
                 `Uptime: ${formatUptime(app.uptimeSeconds)}`,
-                `Health: ${health.status || 'unknown'}`,
-                `Runtime: ${runtime.framework || 'unknown'} on ${runtime.operatingSystem || 'unknown'} (${runtime.architecture || 'unknown'}, ${runtime.processorCount ?? '?'} cpu)`,
-                `Memory: ${typeof runtime.workingSetBytes === 'number' ? formatFileSize(runtime.workingSetBytes) : 'unknown'}`,
-                `Watcher: ${watcher.running ? 'running' : 'stopped'} (rename ${watcher.renameEnabled ? 'on' : 'off'}, normalize ${watcher.normalizeEnabled ? 'on' : 'off'})`,
-                `Library: ${library.total ?? '?'} files, ${library.unprocessed ?? '?'} unprocessed, ${library.duplicates ?? '?'} duplicates`,
-                `Jobs: ${jobs.running ?? '?'} active, ${jobs.interrupted ?? '?'} interrupted, ${jobs.failed ?? '?'} failed`
+                `Health: ${health.status || 'unknown'}`
             ];
 
+            // The failing health check is usually the answer to "why is it
+            // broken", so it has to survive the copy.
+            (Array.isArray(health.entries) ? health.entries : []).forEach(entry => {
+                lines.push(`  ${entry.name}: ${entry.status}${entry.description ? ' — ' + entry.description : ''}`);
+            });
+
+            lines.push(
+                `Runtime: ${runtime.framework || 'unknown'} on ${runtime.operatingSystem || 'unknown'} (${runtime.architecture || 'unknown'}, ${runtime.processorCount ?? '?'} cpu)`,
+                `Memory: ${typeof runtime.workingSetBytes === 'number' ? formatFileSize(runtime.workingSetBytes) : 'unknown'}`,
+                watcher.error
+                    ? `Watcher: ${watcher.error}`
+                    : `Watcher: ${watcher.running ? 'running' : 'stopped'} (rename ${watcher.renameEnabled ? 'on' : 'off'}, normalize ${watcher.normalizeEnabled ? 'on' : 'off'})`,
+                library.error
+                    ? `Library: ${library.error}`
+                    : `Library: ${library.total ?? '?'} files, ${library.processed ?? '?'} processed, ${library.unprocessed ?? '?'} unprocessed, ${library.duplicates ?? '?'} duplicates`,
+                jobs.error
+                    ? `Jobs: ${jobs.error}`
+                    : `Jobs: ${jobs.total ?? '?'} total, ${jobs.running ?? '?'} active, ${jobs.interrupted ?? '?'} interrupted, ${jobs.failed ?? '?'} failed, last started ${jobs.lastStartedUtc || 'never'}`
+            );
+
             storage.forEach(entry => {
-                lines.push(`Storage/${entry.name}: ${entry.path || 'not configured'} — ${entry.exists ? 'present' : 'missing'}, ${entry.writable ? 'writable' : 'not writable'}${typeof entry.freeBytes === 'number' ? ', ' + formatFileSize(entry.freeBytes) + ' free' : ''}`);
+                lines.push(`Storage/${entry.name}: ${entry.path || 'not configured'} — ${entry.exists ? 'present' : 'missing'}, ${entry.writable ? 'writable' : 'not writable'}${typeof entry.freeBytes === 'number' ? ', ' + formatFileSize(entry.freeBytes) + ' free' : ''}${entry.error ? ', ' + entry.error : ''}`);
+            });
+
+            // Log recency tells an operator whether logging stopped before or
+            // after the failure being reported, so the listing is part of the
+            // snapshot rather than something they have to go and read.
+            lines.push(`Logs: ${logs.error || logs.directory || 'unknown'}`);
+            logFiles.forEach(file => {
+                lines.push(`  ${file.name}: ${typeof file.sizeBytes === 'number' ? formatFileSize(file.sizeBytes) : '?'}, last written ${file.lastWriteUtc || 'unknown'}`);
             });
 
             return lines.join('\n');

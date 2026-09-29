@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Middleware;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
@@ -46,8 +47,8 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         {
             _logger.LogDebug(
                 "Request {Method} {Path} was aborted by the client",
-                httpContext.Request.Method,
-                httpContext.Request.Path);
+                LoggingHelper.SanitizeForLog(httpContext.Request.Method),
+                LoggingHelper.SanitizeForLog(httpContext.Request.Path.Value));
             return true;
         }
 
@@ -56,8 +57,8 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         _logger.LogError(
             exception,
             "Unhandled exception for {Method} {Path} (correlation id {CorrelationId})",
-            httpContext.Request.Method,
-            httpContext.Request.Path,
+            LoggingHelper.SanitizeForLog(httpContext.Request.Method),
+            LoggingHelper.SanitizeForLog(httpContext.Request.Path.Value),
             correlationId);
 
         // If the response has already begun there is no way to replace it with

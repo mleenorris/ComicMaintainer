@@ -104,40 +104,35 @@ public class RequestCorrelationMiddlewareTests
     public async Task PushesTheCorrelationIdIntoTheSerilogLogContext()
     {
         var sink = new CapturingSink();
-        var previous = Log.Logger;
-        Log.Logger = new LoggerConfiguration()
+        // A private logger rather than Serilog's process-wide Log.Logger: xUnit
+        // runs test classes in parallel, so swapping the static logger would let
+        // another test's events reach this sink and would close that test's
+        // logger when this one restored the previous instance.
+        using var logger = new LoggerConfiguration()
             .MinimumLevel.Debug()
             .Enrich.FromLogContext()
             .WriteTo.Sink(sink)
             .CreateLogger();
 
-        try
+        var ctx = CreateContext();
+        ctx.Request.Headers[RequestCorrelationMiddleware.HeaderName] = "trace-me";
+
+        var middleware = new RequestCorrelationMiddleware(_ =>
         {
-            var ctx = CreateContext();
-            ctx.Request.Headers[RequestCorrelationMiddleware.HeaderName] = "trace-me";
+            logger.Information("inside the request");
+            return Task.CompletedTask;
+        });
 
-            var middleware = new RequestCorrelationMiddleware(_ =>
-            {
-                Log.Information("inside the request");
-                return Task.CompletedTask;
-            });
+        await middleware.InvokeAsync(ctx);
 
-            await middleware.InvokeAsync(ctx);
+        var logEvent = Assert.Single(sink.Events);
+        Assert.True(logEvent.Properties.TryGetValue("CorrelationId", out var value));
+        Assert.Equal("\"trace-me\"", value!.ToString());
 
-            var logEvent = Assert.Single(sink.Events);
-            Assert.True(logEvent.Properties.TryGetValue("CorrelationId", out var value));
-            Assert.Equal("\"trace-me\"", value!.ToString());
-
-            // The property must not leak past the request.
-            sink.Events.Clear();
-            Log.Information("outside the request");
-            Assert.False(Assert.Single(sink.Events).Properties.ContainsKey("CorrelationId"));
-        }
-        finally
-        {
-            Log.CloseAndFlush();
-            Log.Logger = previous;
-        }
+        // The property must not leak past the request.
+        sink.Events.Clear();
+        logger.Information("outside the request");
+        Assert.False(Assert.Single(sink.Events).Properties.ContainsKey("CorrelationId"));
     }
 
     [Fact]

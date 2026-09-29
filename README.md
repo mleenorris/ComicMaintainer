@@ -430,10 +430,11 @@ The id appears in three places, which is what makes a user-visible failure trace
 - In the **`correlationId`** field of the RFC 7807 problem document returned for errors. Unhandled
   exceptions produce a problem document rather than a bare 500; the exception detail itself is
   only included when running in the Development environment.
-- In the **web interface**, appended to error notifications as `(ref: …)`.
+- In the **web interface**, appended as `(ref: …)` to the error notification for a failed
+  API call.
 
 So a report of "it failed, ref `0HN…:0000001`" can be matched to the exact server log lines with
-`grep '0HN…:0000001' /Config/Log/*.log`.
+`grep '0HN…:0000001' /Config/*.log`.
 
 ### External Series Metadata (Manual)
 
@@ -738,11 +739,11 @@ Both log files use automatic rotation:
 ### Correlating a Failure With Its Log Lines
 Every request is tagged with a correlation ID that appears in the `X-Correlation-Id` response
 header, on every debug-log line the request produces, in the `correlationId` field of error
-responses, and appended to error notifications in the web interface as `(ref: …)`. To find the
-server-side detail behind a reported failure:
+responses, and appended as `(ref: …)` to web interface notifications reporting a failed API call.
+To find the server-side detail behind a reported failure:
 
 ```bash
-grep '0HNOU94L3SUDV:00000001' /Config/Log/*.log
+grep '0HNOU94L3SUDV:00000001' /Config/*.log
 ```
 
 See [Request Correlation](#request-correlation) for details.

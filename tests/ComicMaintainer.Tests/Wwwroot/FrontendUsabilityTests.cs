@@ -128,10 +128,14 @@ public class FrontendUsabilityTests
         var js = Read("js", "main.js");
 
         // An error a user has to report is only actionable if it can be tied
-        // back to a server log line, so errors go through the helper that
-        // appends the correlation id of the call that just failed.
-        Assert.Contains("type === 'error' ? withApiFailureReference(message) : message", js);
-        Assert.Contains("function withApiFailureReference(", js);
+        // back to a server log line, so a caller reporting a failed API call
+        // opts in and the correlation id of that call is appended. Decoration
+        // must stay opt-in: a clipboard or validation message that merely
+        // follows an API failure would otherwise carry an unrelated id.
+        Assert.Contains("options.reference", js);
+        Assert.Contains("withApiFailureReference(message, options.reference)", js);
+        Assert.Contains("function withApiFailureReference(message, reference)", js);
+        Assert.Contains("showMessage('Failed to load files: ' + error.message, 'error', { reference: true });", js);
         Assert.Contains("function recordApiFailure(", js);
 
         // Expired references would be worse than none: they would point the

@@ -228,7 +228,16 @@ public class DiagnosticsController : ControllerBase
             {
                 try
                 {
-                    var drive = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(path)) ?? path);
+                    // The full directory path is used deliberately on Unix: the
+                    // path root of every absolute directory there is "/", which
+                    // would report the container root filesystem instead of the
+                    // bind mount that actually holds the directory. Windows only
+                    // accepts a drive root, so it keeps the root form.
+                    var fullPath = Path.GetFullPath(path);
+                    var driveName = OperatingSystem.IsWindows()
+                        ? Path.GetPathRoot(fullPath) ?? fullPath
+                        : fullPath;
+                    var drive = new DriveInfo(driveName);
                     freeBytes = drive.AvailableFreeSpace;
                     totalBytes = drive.TotalSize;
                 }
@@ -265,18 +274,26 @@ public class DiagnosticsController : ControllerBase
     /// <remarks>
     /// The probe lands inside the watched directory, so it deliberately uses the
     /// <c>.tmp</c> extension that <c>FileWatcherService.IsTemporaryFile</c>
-    /// ignores — a diagnostics read must not enqueue work.
+    /// ignores — a diagnostics read must not enqueue work. It is opened with
+    /// <see cref="FileOptions.DeleteOnClose"/> so the file is removed by the
+    /// operating system when the handle closes: a directory that allows creation
+    /// but not deletion cannot accumulate one probe file per diagnostics request.
     /// </remarks>
     private static bool IsWritable(string path)
     {
         var probe = Path.Combine(path, $".cm-write-probe-{Guid.NewGuid():N}.tmp");
         try
         {
-            using (System.IO.File.Create(probe))
+            using (new FileStream(
+                probe,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 1,
+                FileOptions.DeleteOnClose))
             {
             }
 
-            System.IO.File.Delete(probe);
             return true;
         }
         catch

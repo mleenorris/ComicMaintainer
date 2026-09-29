@@ -428,6 +428,65 @@ public class EpubConversionServiceTests : IDisposable
         Assert.Equal(source.GetEntry("001.jpg")!.Length, page!.Length);
     }
 
+    [Fact]
+    public async Task ConvertToEpubAsync_CondensesSeveralIssuesIntoOneBook()
+    {
+        var first = CreateCbz("Series Name - Chapter 0001.cbz", pageCount: 2, includeComicInfo: true, number: "1");
+        var second = CreateCbz("Series Name - Chapter 0002.cbz", pageCount: 3, includeComicInfo: true, number: "2");
+        var outputDir = Path.Combine(_workDir, "condensed");
+
+        var epubPath = await _service.ConvertToEpubAsync(
+            new[] { first, second },
+            outputDir,
+            new EpubConversionOptions(Title: "Series Name 001-002", OutputFileName: "Series Name 001-002"));
+
+        Assert.Equal("Series Name 001-002.epub", Path.GetFileName(epubPath));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        var names = archive.Entries.Select(e => e.FullName).ToList();
+
+        // Pages are numbered continuously across the issues, in the order the
+        // issues were supplied.
+        for (var i = 1; i <= 5; i++)
+        {
+            Assert.Contains($"OEBPS/page{i:D4}.xhtml", names);
+        }
+        Assert.DoesNotContain("OEBPS/page0006.xhtml", names);
+
+        var opf = ReadEntry(archive, "OEBPS/content.opf");
+        Assert.Contains("""<dc:title id="title">Series Name 001-002</dc:title>""", opf);
+        // The book spans a range of issues, so it must not be filed under a
+        // single issue number.
+        Assert.DoesNotContain("calibre:series_index", opf);
+
+        var nav = ReadEntry(archive, "OEBPS/nav.xhtml");
+        Assert.Contains("""<a href="page0001.xhtml">Series Name #001</a>""", nav);
+        Assert.Contains("""<a href="page0003.xhtml">Series Name #002</a>""", nav);
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_RejectsAnEmptyFileList()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _service.ConvertToEpubAsync(Array.Empty<string>(), Path.Combine(_workDir, "none")));
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_SanitizesTheRequestedFileName()
+    {
+        var cbz = CreateCbz("Series Name - Chapter 0001.cbz", pageCount: 1, includeComicInfo: false);
+
+        var epubPath = await _service.ConvertToEpubAsync(
+            new[] { cbz },
+            Path.Combine(_workDir, "sanitized"),
+            new EpubConversionOptions(OutputFileName: "../../escape/Series 001-005"));
+
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(_workDir, "sanitized")),
+            Path.GetFullPath(Path.GetDirectoryName(epubPath)!));
+        Assert.DoesNotContain("..", Path.GetFileName(epubPath));
+    }
+
     private string CreateCbz(
         string fileName,
         int pageCount,

@@ -7996,6 +7996,12 @@
         let emailDevicesCache = [];
         let emailStatusCache = null;
         let currentEmailSend = null;
+        // Set while the send modal is usable (SMTP configured and a device saved);
+        // the condense plan may still block sending on top of it.
+        let emailSendAvailable = false;
+        let currentEmailCondensePlan = null;
+        // Guards against an out-of-order plan response overwriting a newer one.
+        let emailCondensePlanToken = 0;
         let currentEmailSubscriptionSeriesTitle = '';
 
         async function fetchEmailJson(path, options = {}) {
@@ -8223,6 +8229,8 @@
             renderHtml(deviceSelect, html`<option value="">Loading devices...</option>`);
             setEmailSendHint('');
             setEmailSendNoDevicesVisible(false);
+            emailSendAvailable = false;
+            resetEmailCondenseControls();
             modal.classList.add('active');
             try {
                 // Both requests are needed before the modal is usable: an
@@ -8248,6 +8256,7 @@
                     return;
                 }
 
+                emailSendAvailable = true;
                 setEmailSendEnabled(true);
             } catch (error) {
                 renderHtml(deviceSelect, html`<option value="">Failed to load devices</option>`);
@@ -8278,6 +8287,177 @@
         function closeEmailSendModal() {
             document.getElementById('emailSendModal')?.classList.remove('active');
             currentEmailSend = null;
+            currentEmailCondensePlan = null;
+            emailSendAvailable = false;
+        }
+
+        function resetEmailCondenseControls() {
+            currentEmailCondensePlan = null;
+            emailCondensePlanToken++;
+            const mode = document.getElementById('emailCondenseModeSelect');
+            if (mode) mode.value = 'none';
+            const countGroup = document.getElementById('emailCondenseCountGroup');
+            if (countGroup) countGroup.hidden = true;
+            const format = document.getElementById('emailSendFormatSelect');
+            if (format) format.disabled = false;
+            const panel = document.getElementById('emailCondensePlan');
+            if (panel) {
+                clearChildren(panel);
+                panel.hidden = true;
+            }
+        }
+
+        function getEmailCondenseSettings() {
+            const mode = document.getElementById('emailCondenseModeSelect')?.value || 'none';
+            const raw = parseInt(document.getElementById('emailCondenseCountInput')?.value, 10);
+            const issuesPerBook = Number.isFinite(raw) ? Math.min(500, Math.max(2, raw)) : 5;
+            return { mode, issuesPerBook };
+        }
+
+        function onEmailCondenseChange() {
+            const { mode } = getEmailCondenseSettings();
+            const countGroup = document.getElementById('emailCondenseCountGroup');
+            if (countGroup) countGroup.hidden = mode !== 'count';
+
+            // Several issues can only be merged into an EPUB; the original
+            // archives cannot be combined.
+            const format = document.getElementById('emailSendFormatSelect');
+            if (format) {
+                format.disabled = mode !== 'none';
+                if (mode !== 'none') format.value = 'epub';
+            }
+
+            refreshEmailCondensePlan();
+        }
+
+        function buildEmailCondenseRequest(extra = {}) {
+            const { mode, issuesPerBook } = getEmailCondenseSettings();
+            return {
+                ...(currentEmailSend?.mode === 'series'
+                    ? { seriesId: currentEmailSend.seriesId }
+                    : { files: currentEmailSend?.files || [] }),
+                condenseMode: mode,
+                issuesPerBook,
+                ...extra
+            };
+        }
+
+        /**
+         * Asks the server what the current condense settings would produce so
+         * the user sees, before sending, how many books they get, how large
+         * each one is, and which ones have to be downloaded instead of emailed.
+         */
+        async function refreshEmailCondensePlan() {
+            const panel = document.getElementById('emailCondensePlan');
+            if (!panel || !currentEmailSend) return;
+
+            const { mode } = getEmailCondenseSettings();
+            const token = ++emailCondensePlanToken;
+            currentEmailCondensePlan = null;
+
+            if (mode === 'none') {
+                clearChildren(panel);
+                panel.hidden = true;
+                setEmailSendEnabled(emailSendAvailable);
+                return;
+            }
+
+            panel.hidden = false;
+            renderHtml(panel, html`<div>Calculating condensed books...</div>`);
+            setEmailSendEnabled(false);
+
+            try {
+                const plan = await fetchEmailJson('/api/email/condense-plan', {
+                    method: 'POST',
+                    body: JSON.stringify(buildEmailCondenseRequest())
+                });
+                if (token !== emailCondensePlanToken) return;
+                currentEmailCondensePlan = plan;
+                renderEmailCondensePlan(plan);
+                setEmailSendEnabled(emailSendAvailable && plan.can_email === true);
+            } catch (error) {
+                if (token !== emailCondensePlanToken) return;
+                renderHtml(panel, html`<div>Could not calculate the condensed books: ${error.message}</div>`);
+                setEmailSendEnabled(false);
+            }
+        }
+
+        function renderEmailCondensePlan(plan) {
+            const panel = document.getElementById('emailCondensePlan');
+            if (!panel) return;
+
+            const books = Array.isArray(plan.books) ? plan.books : [];
+            if (!books.length) {
+                renderHtml(panel, html`<div>Nothing to condense in this selection.</div>`);
+                return;
+            }
+
+            const limit = formatFileSize(plan.max_attachment_bytes || 0);
+            const oversized = plan.oversized_book_count || 0;
+            const heading = `${books.length} EPUB${books.length === 1 ? '' : 's'} from ${plan.total_issues} issue${plan.total_issues === 1 ? '' : 's'} (attachment limit ${limit}).`;
+
+            renderHtml(panel, html`
+                <div style="margin-bottom: 8px;">${heading}</div>
+                ${oversized
+                    ? html`<div style="margin-bottom: 8px; color: var(--text-warning, #d9822b);">
+                        ⚠️ ${oversized} of these book${oversized === 1 ? '' : 's'} ${oversized === 1 ? 'is' : 'are'} larger than the ${limit} attachment limit and cannot be emailed. Download ${oversized === 1 ? 'it' : 'them'} instead, or condense fewer issues per book.
+                      </div>`
+                    : ''}
+                <div id="emailCondenseBookList"></div>
+                ${books.length > 10 ? html`<div style="margin-top: 6px;">Showing the first 10 of ${books.length} books.</div>` : ''}
+            `);
+
+            const list = document.getElementById('emailCondenseBookList');
+            if (!list) return;
+
+            books.slice(0, 10).forEach((book, index) => {
+                appendHtml(list, html`
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0;">
+                        <span>${book.display_name} · ${book.issue_count} issue${book.issue_count === 1 ? '' : 's'} · ~${formatFileSize(book.estimated_bytes || 0)}${book.exceeds_attachment_limit ? ' · too large to email' : ''}</span>
+                        <button class="btn btn-small" type="button" onclick="downloadCondensedBook(${jsArg(index)})">Download</button>
+                    </div>
+                `);
+            });
+        }
+
+        /**
+         * Builds one condensed book on the server and saves it locally. This is
+         * the fallback for books that are too large to email.
+         */
+        async function downloadCondensedBook(index) {
+            if (!currentEmailSend) return;
+            showMessage('Building the condensed EPUB; this can take a while for large books...', 'info');
+            try {
+                const response = await fetch(apiUrl('/api/email/condense-download'), {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify(buildEmailCondenseRequest({ bookIndex: index }))
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    let message = `HTTP error! status: ${response.status}`;
+                    try {
+                        const body = await response.json();
+                        if (body && (body.error || body.message)) message = body.error || body.message;
+                    } catch (_) {}
+                    throw new Error(message);
+                }
+
+                const blob = await response.blob();
+                const name = currentEmailCondensePlan?.books?.[index]?.display_name || 'condensed';
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `${name}.epub`;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(url);
+                showMessage('Condensed EPUB downloaded.', 'success');
+            } catch (error) {
+                showMessage('Failed to download the condensed EPUB: ' + error.message, 'error');
+            }
         }
 
         async function openEmailDeliveryHistoryModal() {
@@ -8322,7 +8502,7 @@
                 <div class="combine-folder-row" style="padding: 8px 0; border-bottom: 1px solid var(--border-primary);">
                     <div style="font-weight: 500;">${delivery.fileName || delivery.filePath}</div>
                     <div class="combine-folders-meta">
-                        ${formatEmailDeliveryStatus(delivery.status)} · ${delivery.deviceName} (${delivery.deviceEmail}) · ${formatEmailDeliveryFormat(delivery.deliveryFormat)} · ${formatEmailDate(delivery.sentAt || delivery.createdAt)}
+                        ${formatEmailDeliveryStatus(delivery.status)} · ${delivery.deviceName} (${delivery.deviceEmail}) · ${formatEmailDeliveryFormat(delivery.deliveryFormat)}${delivery.issueCount > 1 ? ` · condensed ${delivery.issueCount} issues` : ''} · ${formatEmailDate(delivery.sentAt || delivery.createdAt)}
                     </div>
                     ${delivery.errorMessage
                         ? html`<div class="combine-folders-meta" style="color: var(--text-error, #d9534f);">${delivery.errorMessage}</div>`
@@ -8336,6 +8516,7 @@
             const deviceId = document.getElementById('emailSendDeviceSelect').value;
             const format = document.getElementById('emailSendFormatSelect').value;
             const skipAlreadyDelivered = document.getElementById('emailSkipAlreadyDeliveredCheckbox').checked;
+            const { mode: condenseMode, issuesPerBook } = getEmailCondenseSettings();
             if (!deviceId) {
                 showMessage('Choose an ereader device.', 'error');
                 return;
@@ -8350,7 +8531,9 @@
                             seriesId: currentEmailSend.seriesId,
                             deviceId,
                             deliveryFormat: format,
-                            skipAlreadyDelivered
+                            skipAlreadyDelivered,
+                            condenseMode,
+                            issuesPerBook
                         })
                     })
                     : await fetchEmailJson('/api/email/send', {
@@ -8359,7 +8542,9 @@
                             files: currentEmailSend.files,
                             deviceId,
                             deliveryFormat: format === 'device' ? undefined : format,
-                            skipAlreadyDelivered
+                            skipAlreadyDelivered,
+                            condenseMode,
+                            issuesPerBook
                         })
                     });
                 closeEmailSendModal();

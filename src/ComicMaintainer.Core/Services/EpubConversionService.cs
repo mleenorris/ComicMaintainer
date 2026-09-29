@@ -249,6 +249,7 @@ public class EpubConversionService : IEpubConversionService
             .Trim()
             .Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)
             .ToArray())
+            .Replace("..", "_")
             .Trim('.', ' ');
 
         if (sanitized.Length == 0)

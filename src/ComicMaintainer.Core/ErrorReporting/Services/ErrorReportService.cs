@@ -48,6 +48,21 @@ public class ErrorReportService : IErrorReportService
     private readonly string _appVersion;
     private readonly string _platform;
 
+    /// <summary>
+    /// Serialises the read-then-insert of a fingerprint. The service is scoped
+    /// and capture runs concurrently from request handlers, the browser
+    /// endpoint and the sink dispatcher, so without this two scopes can both
+    /// miss an existing row and race the unique index.
+    /// </summary>
+    private static readonly SemaphoreSlim CaptureGate = new(1, 1);
+
+    /// <summary>
+    /// Serialises the cooldown/quota check and the reservation that follows it.
+    /// Two submitters that both passed the check before either recorded a
+    /// delivery would file the same issue twice and overshoot the daily cap.
+    /// </summary>
+    private static readonly SemaphoreSlim DeliveryGate = new(1, 1);
+
     public ErrorReportService(
         IDbContextFactory<ComicMaintainerDbContext> dbContextFactory,
         IOptionsMonitor<AppSettings> settings,
@@ -55,7 +70,8 @@ public class ErrorReportService : IErrorReportService
         IEnumerable<IErrorReportTransport> transports,
         IErrorReportLogBuffer logBuffer,
         ILogger<ErrorReportService> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        string? appVersion = null)
     {
         _dbContextFactory = dbContextFactory;
         _settings = settings;
@@ -65,9 +81,28 @@ public class ErrorReportService : IErrorReportService
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
 
-        _appVersion = typeof(ErrorReportService).Assembly.GetName().Version?.ToString() ?? "0.0.0";
+        _appVersion = appVersion ?? ResolveApplicationVersion();
         _platform = $"{System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription} / " +
                     $"{System.Runtime.InteropServices.RuntimeInformation.OSDescription}";
+    }
+
+    /// <summary>
+    /// Version of the running application, which is what the fingerprint must
+    /// be keyed on.
+    /// </summary>
+    /// <remarks>
+    /// The release version is declared and bumped in
+    /// <c>ComicMaintainer.WebApi.csproj</c>, not in Core. Reading Core's
+    /// assembly version would give the same value across WebApi releases, so
+    /// the same trace in a later release would collapse onto the earlier
+    /// release's fingerprint instead of being reported as a regression.
+    /// </remarks>
+    private static string ResolveApplicationVersion()
+    {
+        var assembly = System.Reflection.Assembly.GetEntryAssembly()
+                       ?? typeof(ErrorReportService).Assembly;
+
+        return assembly.GetName().Version?.ToString() ?? "0.0.0";
     }
 
     /// <inheritdoc />
@@ -162,12 +197,9 @@ public class ErrorReportService : IErrorReportService
 
             await using var db = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
 
-            var entity = await db.ErrorReports
-                .FirstOrDefaultAsync(e => e.Fingerprint == fingerprint, cancellationToken);
-
-            if (entity is null)
-            {
-                entity = new ErrorReportEntity
+            var entity = await UpsertAsync(
+                db,
+                new ErrorReportEntity
                 {
                     Fingerprint = fingerprint,
                     ExceptionType = safeType,
@@ -184,29 +216,23 @@ public class ErrorReportService : IErrorReportService
                     CorrelationId = safeCorrelation,
                     LogExcerpt = string.Join("\n", excerpt),
                     LastUserAction = safeAction,
-                };
-                db.ErrorReports.Add(entity);
-            }
-            else
-            {
-                // A recurrence only advances the counter and the timestamps. The
-                // original trace is kept: the first occurrence is the one whose
-                // log excerpt has not yet been overwritten by later noise.
-                entity.OccurrenceCount++;
-                entity.LastSeenAt = now;
-                if (!string.IsNullOrEmpty(safeCorrelation))
-                {
-                    entity.CorrelationId = safeCorrelation;
-                }
-            }
-
-            await db.SaveChangesAsync(cancellationToken);
+                },
+                now,
+                safeCorrelation,
+                cancellationToken);
 
             var report = ToReport(entity);
 
             // In automatic mode the report is delivered immediately, subject to
             // the cooldown and the daily cap enforced by SubmitAsync.
-            if (IsAutomatic(settings))
+            //
+            // Frontend reports are excluded: their text comes from any
+            // signed-in user's browser, including a read-only user's, and
+            // publishing it under the administrator's token without review
+            // would hand attacker-authored content to the public issue tracker
+            // and to the agent workflow. They stay local until an
+            // administrator submits them explicitly.
+            if (source != ErrorReportSource.Frontend && IsAutomatic(settings))
             {
                 await SubmitAsync(fingerprint, cancellationToken);
             }
@@ -219,6 +245,72 @@ public class ErrorReportService : IErrorReportService
             // sink and fed straight back into this method.
             _logger.LogDebug(ex, "Error reporting pipeline failed while capturing an error");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Inserts a new fingerprint or records a recurrence against the existing
+    /// row.
+    /// </summary>
+    /// <remarks>
+    /// Serialised in-process by <see cref="CaptureGate"/>, and guarded against
+    /// a concurrent writer outside this process by catching the unique-index
+    /// violation and folding the capture into the row the other writer created.
+    /// Dropping the write on conflict would silently lose an occurrence.
+    /// </remarks>
+    private static async Task<ErrorReportEntity> UpsertAsync(
+        ComicMaintainerDbContext db,
+        ErrorReportEntity candidate,
+        DateTime now,
+        string safeCorrelation,
+        CancellationToken cancellationToken)
+    {
+        await CaptureGate.WaitAsync(cancellationToken);
+        try
+        {
+            var entity = await db.ErrorReports
+                .FirstOrDefaultAsync(e => e.Fingerprint == candidate.Fingerprint, cancellationToken);
+
+            if (entity is null)
+            {
+                db.ErrorReports.Add(candidate);
+
+                try
+                {
+                    await db.SaveChangesAsync(cancellationToken);
+                    return candidate;
+                }
+                catch (DbUpdateException)
+                {
+                    // Another process inserted the same fingerprint first.
+                    db.Entry(candidate).State = EntityState.Detached;
+
+                    entity = await db.ErrorReports
+                        .FirstOrDefaultAsync(e => e.Fingerprint == candidate.Fingerprint, cancellationToken);
+
+                    if (entity is null)
+                    {
+                        throw;
+                    }
+                }
+            }
+
+            // A recurrence only advances the counter and the timestamps. The
+            // original trace is kept: the first occurrence is the one whose
+            // log excerpt has not yet been overwritten by later noise.
+            entity.OccurrenceCount++;
+            entity.LastSeenAt = now;
+            if (!string.IsNullOrEmpty(safeCorrelation))
+            {
+                entity.CorrelationId = safeCorrelation;
+            }
+
+            await db.SaveChangesAsync(cancellationToken);
+            return entity;
+        }
+        finally
+        {
+            CaptureGate.Release();
         }
     }
 
@@ -288,33 +380,62 @@ public class ErrorReportService : IErrorReportService
 
             var transport = ResolveTransport(settings);
             var now = _timeProvider.GetUtcNow().UtcDateTime;
+            var previousLastReportedAt = entity.LastReportedAt;
+            ErrorReportDeliveryEntity? reservation = null;
 
             // Throttles apply only to transports that actually transmit. The
             // consent-first transport just builds a link, so rate-limiting it
             // would only stop the user from seeing their own report.
             if (transport.TransmitsAutomatically)
             {
-                var cooldown = TimeSpan.FromHours(Math.Max(0, settings.ErrorReportCooldownHours));
-                if (entity.LastReportedAt is { } last && now - last < cooldown)
+                // The check and the reservation that follows it are one
+                // critical section: two submitters that both passed the check
+                // before either recorded anything would both transmit.
+                await DeliveryGate.WaitAsync(cancellationToken);
+                try
                 {
-                    return new ErrorReportTransportResult(
-                        false,
-                        entity.ReportedIssueNumber,
-                        null,
-                        $"Already reported at {last:u}; cooling down for {settings.ErrorReportCooldownHours}h.");
+                    var cooldown = TimeSpan.FromHours(Math.Max(0, settings.ErrorReportCooldownHours));
+                    if (entity.LastReportedAt is { } last && now - last < cooldown)
+                    {
+                        return new ErrorReportTransportResult(
+                            false,
+                            entity.ReportedIssueNumber,
+                            null,
+                            $"Already reported at {last:u}; cooling down for {settings.ErrorReportCooldownHours}h.");
+                    }
+
+                    var since = now - TimeSpan.FromDays(1);
+
+                    // Deliveries, not fingerprints: a recurrence comment costs
+                    // a slot too, so shortening the cooldown cannot smuggle
+                    // extra traffic past the cap.
+                    var deliveredToday = await db.ErrorReportDeliveries
+                        .CountAsync(d => d.DeliveredAt >= since, cancellationToken);
+
+                    if (deliveredToday >= Math.Max(1, settings.ErrorReportMaxPerDay))
+                    {
+                        return new ErrorReportTransportResult(
+                            false,
+                            null,
+                            null,
+                            $"Daily report cap of {settings.ErrorReportMaxPerDay} reached.");
+                    }
+
+                    // Claim the slot and start the cooldown before sending.
+                    // Both are released again below if delivery fails.
+                    reservation = new ErrorReportDeliveryEntity
+                    {
+                        Fingerprint = entity.Fingerprint,
+                        DeliveredAt = now,
+                    };
+                    db.ErrorReportDeliveries.Add(reservation);
+                    entity.LastReportedAt = now;
+
+                    await db.SaveChangesAsync(cancellationToken);
                 }
-
-                var since = now - TimeSpan.FromDays(1);
-                var reportedToday = await db.ErrorReports
-                    .CountAsync(e => e.LastReportedAt != null && e.LastReportedAt >= since, cancellationToken);
-
-                if (reportedToday >= Math.Max(1, settings.ErrorReportMaxPerDay))
+                finally
                 {
-                    return new ErrorReportTransportResult(
-                        false,
-                        null,
-                        null,
-                        $"Daily report cap of {settings.ErrorReportMaxPerDay} reached.");
+                    DeliveryGate.Release();
                 }
             }
 
@@ -325,6 +446,29 @@ public class ErrorReportService : IErrorReportService
                 entity.LastReportedAt = now;
                 entity.ReportedIssueNumber = result.IssueNumber;
                 entity.ReportedIssueState = "open";
+
+                if (reservation is not null)
+                {
+                    reservation.IssueNumber = result.IssueNumber;
+                }
+                else
+                {
+                    db.ErrorReportDeliveries.Add(new ErrorReportDeliveryEntity
+                    {
+                        Fingerprint = entity.Fingerprint,
+                        DeliveredAt = now,
+                        IssueNumber = result.IssueNumber,
+                    });
+                }
+
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            else if (reservation is not null)
+            {
+                // Nothing left the instance, so the slot and the cooldown go
+                // back: a failed send must not cost the user a report.
+                db.ErrorReportDeliveries.Remove(reservation);
+                entity.LastReportedAt = previousLastReportedAt;
                 await db.SaveChangesAsync(cancellationToken);
             }
 

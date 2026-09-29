@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
@@ -350,7 +351,16 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "ProcessFileAsync: Error processing file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            // Per-file failures are overwhelmingly damaged or unreadable input
+            // rather than defects in this application, and they are already
+            // recorded in the processing history below. The scope marks this
+            // event so the error-reporting sink skips it, without excluding
+            // genuine failures logged elsewhere in this service.
+            using (_logger.BeginScope(ErrorReportLogProperties.Exclude("per-file-processing")))
+            {
+                _logger.LogError(ex, "ProcessFileAsync: Error processing file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            }
+
             await LogHistoryAsync(filePath, "Process", false, ex.Message, cancellationToken);
             return false;
         }

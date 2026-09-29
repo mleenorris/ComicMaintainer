@@ -48,94 +48,86 @@ jobs:
             const { owner, repo } = context.repo;
 
             // ---------------------------------------------------------------
-            // Collect the failing jobs and a short excerpt of their logs.
+            // Collect the failing jobs. Each workflow/job pair is reported
+            // independently so that the dedupe marker is stable: if job A fails
+            // alone and later A and B fail together, A keeps its own issue and
+            // B gets a new one, instead of every combination of failures
+            // opening a fresh issue.
             // ---------------------------------------------------------------
             const jobs = await github.paginate(
               github.rest.actions.listJobsForWorkflowRun,
               { owner, repo, run_id: run.id, per_page: 100 }
             );
-            const failedJobs = jobs.filter(j => j.conclusion === 'failure');
-            const failedJobNames = failedJobs.map(j => j.name).sort();
+            const failedJobNames = jobs
+              .filter(j => j.conclusion === 'failure')
+              .map(j => j.name)
+              .sort();
 
-            // The job identity is part of the dedupe key so that a different job
-            // failing in the same workflow gets its own issue rather than being
-            // appended to an unrelated one.
-            const jobKey = failedJobNames.length > 0
-              ? failedJobNames.join(', ')
-              : '(no failing job reported)';
-            const marker = `<!-- ci-failure:${run.name}::${jobKey} -->`;
+            // A run can fail without any job being marked failed (a cancelled
+            // or infrastructure-level failure). Report it once under a stable
+            // fallback key rather than dropping it.
+            const jobKeys = failedJobNames.length > 0
+              ? [...new Set(failedJobNames)]
+              : ['(no failing job reported)'];
 
-            // Pull a bounded tail of the log for the first failing job. Logs can
-            // be large and may be expired, so this is strictly best-effort.
-            let logExcerpt = '';
-            if (failedJobs.length > 0) {
-              try {
-                const logResponse = await github.rest.actions.downloadJobLogsForWorkflowRun({
-                  owner,
-                  repo,
-                  job_id: failedJobs[0].id,
-                });
-                const text = typeof logResponse.data === 'string'
-                  ? logResponse.data
-                  : Buffer.from(logResponse.data).toString('utf8');
-                const lines = text.split('\n');
-                logExcerpt = lines.slice(-60).join('\n').slice(-6000);
-              } catch (error) {
-                logExcerpt = `(could not download logs: ${error.message})`;
-              }
-            }
-
-            const body = [
-              marker,
-              `## CI failure: ${run.name}`,
-              '',
-              `| | |`,
-              `|---|---|`,
-              `| **Workflow** | ${run.name} |`,
-              `| **Failing job(s)** | ${jobKey} |`,
-              `| **Branch** | \`${run.head_branch}\` |`,
-              `| **Commit** | ${run.head_sha} |`,
-              `| **Trigger** | ${run.event} |`,
-              `| **Run** | ${run.html_url} |`,
-              `| **Detected** | ${new Date().toISOString()} |`,
-              '',
-              '### Log excerpt',
-              '',
-              '```',
-              logExcerpt || '(no log excerpt available)',
-              '```',
-              '',
-              '---',
-              '_Filed automatically by `report-ci-failure.yml`. Per',
-              '[docs/TESTING_POLICY.md](../blob/dotnet/docs/TESTING_POLICY.md), any fix for this',
-              'failure must include a regression test._',
-            ].join('\n');
-
-            // ---------------------------------------------------------------
-            // Dedupe: reuse the open issue carrying the same marker.
-            // ---------------------------------------------------------------
+            // Fetch the open CI-failure issues once and match each marker
+            // against them.
             const existing = await github.paginate(
               github.rest.issues.listForRepo,
               { owner, repo, state: 'open', labels: 'ci-failure', per_page: 100 }
             );
-            const match = existing.find(issue => (issue.body || '').includes(marker));
 
-            if (match) {
-              await github.rest.issues.createComment({
+            for (const jobKey of jobKeys) {
+              const marker = `<!-- ci-failure:${run.name}::${jobKey} -->`;
+
+              // Deliberately no log excerpt. Raw CI output can contain private
+              // paths, unmasked credentials and attacker-controlled Markdown
+              // that breaks out of a code fence, and none of it passes through
+              // the runtime reporter's redaction. The run link below gives a
+              // maintainer the full log with no such exposure.
+              const body = [
+                marker,
+                `## CI failure: ${run.name}`,
+                '',
+                `| | |`,
+                `|---|---|`,
+                `| **Workflow** | ${run.name} |`,
+                `| **Failing job** | ${jobKey} |`,
+                `| **Branch** | \`${run.head_branch}\` |`,
+                `| **Commit** | ${run.head_sha} |`,
+                `| **Trigger** | ${run.event} |`,
+                `| **Run** | ${run.html_url} |`,
+                `| **Detected** | ${new Date().toISOString()} |`,
+                '',
+                'Open the run above for the job logs. They are not copied here: CI output is',
+                'unredacted and can carry credentials, private paths or content that escapes a',
+                'Markdown code fence.',
+                '',
+                '---',
+                '_Filed automatically by `report-ci-failure.yml`. Per',
+                '[docs/TESTING_POLICY.md](../blob/dotnet/docs/TESTING_POLICY.md), any fix for this',
+                'failure must include a regression test._',
+              ].join('\n');
+
+              const match = existing.find(issue => (issue.body || '').includes(marker));
+
+              if (match) {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: match.number,
+                  body: `Still failing as of [run #${run.run_number}](${run.html_url}) on \`${run.head_branch}\` (${run.head_sha.slice(0, 7)}).`,
+                });
+                core.notice(`Commented on existing CI failure issue #${match.number} for job '${jobKey}'`);
+                continue;
+              }
+
+              const created = await github.rest.issues.create({
                 owner,
                 repo,
-                issue_number: match.number,
-                body: `Still failing as of [run #${run.run_number}](${run.html_url}) on \`${run.head_branch}\` (${run.head_sha.slice(0, 7)}).`,
+                title: `[CI] ${run.name} failed on ${run.head_branch}: ${jobKey}`,
+                body,
+                labels: ['bug', 'ci-failure', 'auto-reported'],
               });
-              core.notice(`Commented on existing CI failure issue #${match.number}`);
-              return;
+              core.notice(`Opened CI failure issue #${created.data.number} for job '${jobKey}'`);
             }
-
-            const created = await github.rest.issues.create({
-              owner,
-              repo,
-              title: `[CI] ${run.name} failed on ${run.head_branch}: ${jobKey}`,
-              body,
-              labels: ['bug', 'ci-failure', 'auto-reported'],
-            });
-            core.notice(`Opened CI failure issue #${created.data.number}`);

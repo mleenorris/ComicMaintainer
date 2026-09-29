@@ -4,15 +4,23 @@ using ComicMaintainer.Core.ErrorReporting.Models;
 namespace ComicMaintainer.WebApi.Logging;
 
 /// <summary>
-/// A single error awaiting capture, handed from the logging pipeline to the
-/// background dispatcher.
+/// A single error awaiting capture, handed from the logging pipeline — or from
+/// the global exception handler — to the background dispatcher.
 /// </summary>
+/// <remarks>
+/// <paramref name="Exception"/> is carried when the originating call site has
+/// the exception object, so the dispatcher can capture the whole chain rather
+/// than a pre-flattened copy of it. The queue never leaves the process, so
+/// holding the instance costs nothing beyond the bounded queue itself.
+/// </remarks>
 public sealed record PendingErrorCapture(
     string ExceptionType,
     string? Message,
     string? StackTrace,
     ErrorReportSource Source,
-    string? Origin);
+    string? Origin,
+    string? CorrelationId = null,
+    Exception? Exception = null);
 
 /// <summary>
 /// Bounded hand-off between the Serilog sink and the dispatcher.

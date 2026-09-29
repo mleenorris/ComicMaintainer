@@ -37,7 +37,7 @@ jobs:
       - name: Scan for vulnerable NuGet packages
         id: nuget_audit
         run: |
-          set -o pipefail
+          set -e -o pipefail
           : > nuget-audit-report.txt
           for proj in \
             src/ComicMaintainer.Core/ComicMaintainer.Core.csproj \
@@ -45,14 +45,20 @@ jobs:
             tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
           do
             echo "=== $proj ===" >> nuget-audit-report.txt
+            # No `|| true`: a command failure here (an unreachable feed, a
+            # restore error) means no audit was performed. Swallowing it would
+            # leave the grep below with an empty report and turn "the scan did
+            # not run" into a green "no known vulnerabilities". The report is
+            # still uploaded by the `if: always()` step that follows.
             dotnet list "$proj" package --vulnerable --include-transitive \
-              >> nuget-audit-report.txt 2>&1 || true
+              >> nuget-audit-report.txt 2>&1
             echo "" >> nuget-audit-report.txt
           done
           cat nuget-audit-report.txt
 
-          # `dotnet list package --vulnerable` always exits 0, so detect findings
-          # from the report body instead. Critical/High fail the job; Moderate/Low
+          # `dotnet list package --vulnerable` exits 0 even when it finds
+          # advisories, so findings are detected from the report body instead.
+          # Critical/High fail the job; Moderate/Low
           # are reported but tolerated so the scheduled run stays actionable
           # (SharpCompress currently carries a known moderate advisory and is
           # pinned for API-compatibility reasons).

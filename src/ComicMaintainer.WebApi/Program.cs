@@ -785,6 +785,15 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// Unhandled exceptions become a ProblemDetails response and an error report.
+//
+// This must be the outermost application middleware. Everything registered
+// after it — CORS, request timeouts, response compression, output caching and
+// the security-header middleware — raises exceptions that would otherwise
+// escape past the handler, producing a bare 500 with no ProblemDetails body
+// and no error report.
+app.UseExceptionHandler();
+
 app.UseCors();
 
 // Use request timeouts
@@ -869,11 +878,6 @@ app.Use(async (context, next) =>
     
     await next();
 });
-
-// Unhandled exceptions become a ProblemDetails response and an error report.
-// Registered before any other middleware so it also covers failures raised
-// inside the rest of the pipeline, not just inside endpoints.
-app.UseExceptionHandler();
 
 // Add path validation middleware for security
 app.UseMiddleware<PathValidationMiddleware>();

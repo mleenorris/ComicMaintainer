@@ -34,6 +34,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<SeriesEmailSubscriptionEntity> SeriesEmailSubscriptions { get; set; } = null!;
     public DbSet<ComicEmailDeliveryEntity> ComicEmailDeliveries { get; set; } = null!;
     public DbSet<ErrorReportEntity> ErrorReports { get; set; } = null!;
+    public DbSet<ErrorReportDeliveryEntity> ErrorReportDeliveries { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -325,9 +326,19 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             // A fingerprint already encodes the app version, so "same defect,
             // same release" is one row and recurrences only bump the counter.
             entity.HasIndex(e => e.Fingerprint).IsUnique();
-            // Listing is newest-first; the daily cap counts rows by LastReportedAt.
+            // Listing is newest-first.
             entity.HasIndex(e => e.LastSeenAt);
             entity.HasIndex(e => e.LastReportedAt);
+        });
+
+        // Configure ErrorReportDeliveryEntity
+        modelBuilder.Entity<ErrorReportDeliveryEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Fingerprint).IsRequired().HasMaxLength(64);
+            // The rolling daily cap counts rows in this table by DeliveredAt.
+            entity.HasIndex(e => e.DeliveredAt);
+            entity.HasIndex(e => e.Fingerprint);
         });
     }
 }
@@ -774,9 +785,10 @@ public class ComicEmailDeliveryEntity
 /// </para>
 /// <para>
 /// The row doubles as the throttle state: <see cref="LastReportedAt"/> drives
-/// the per-fingerprint cooldown and the rolling daily cap, and
-/// <see cref="ReportedIssueNumber"/> links the local record to the GitHub issue
-/// so a fix can close the loop.
+/// the per-fingerprint cooldown, and <see cref="ReportedIssueNumber"/> links
+/// the local record to the GitHub issue so a fix can close the loop. The
+/// rolling daily cap is counted from <c>ErrorReportDeliveries</c> instead,
+/// because it limits transmissions rather than distinct defects.
 /// </para>
 /// </remarks>
 public class ErrorReportEntity
@@ -825,4 +837,35 @@ public class ErrorReportEntity
 
     /// <summary><c>open</c> or <c>closed</c>, refreshed when the loop is closed.</summary>
     public string? ReportedIssueState { get; set; }
+}
+
+/// <summary>
+/// One successful transmission of an error report.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The rolling daily cap is a limit on <em>deliveries</em>, not on distinct
+/// fingerprints. Counting <c>ErrorReports.LastReportedAt</c> instead would
+/// collapse every recurrence comment for one fingerprint into a single unit, so
+/// a short cooldown could push far more traffic at the issue tracker than the
+/// configured cap allows.
+/// </para>
+/// <para>
+/// A row is inserted <em>before</em> the send as a reservation and removed
+/// again if the send fails, so two concurrent submitters cannot both observe a
+/// count below the cap and both transmit.
+/// </para>
+/// </remarks>
+public class ErrorReportDeliveryEntity
+{
+    public int Id { get; set; }
+
+    /// <summary>Fingerprint of the report that was delivered.</summary>
+    public string Fingerprint { get; set; } = string.Empty;
+
+    /// <summary>When the delivery slot was taken (UTC).</summary>
+    public DateTime DeliveredAt { get; set; }
+
+    /// <summary>Issue the delivery created or commented on, when known.</summary>
+    public int? IssueNumber { get; set; }
 }

@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.ErrorReporting.Interfaces;
 using ComicMaintainer.Core.ErrorReporting.Models;
+using ComicMaintainer.Core.ErrorReporting.Services;
 using ComicMaintainer.WebApi.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -62,7 +63,10 @@ public class ErrorReportsController : ControllerBase
     /// <remarks>
     /// Showing the payload before anything leaves the instance is a hard
     /// requirement of this feature, not a convenience: the user cannot give
-    /// meaningful consent to a disclosure they have not seen.
+    /// meaningful consent to a disclosure they have not seen. In the default
+    /// consent mode the payload that actually leaves is the bounded prefill
+    /// body, so that exact text is returned alongside the full one rather than
+    /// letting the user approve a longer version of it.
     /// </remarks>
     [HttpGet("{fingerprint}/preview")]
     [Authorize(AuthorizationPolicies.CanAdminister)]
@@ -77,8 +81,18 @@ public class ErrorReportsController : ControllerBase
         }
 
         var report = await _errorReports.GetReportAsync(fingerprint, cancellationToken);
+        var prefillBody = report is null
+            ? null
+            : ConsentUrlErrorReportTransport.BuildPrefilledBody(report);
 
-        return Ok(new { fingerprint, body, report });
+        return Ok(new
+        {
+            fingerprint,
+            body,
+            prefillBody,
+            mode = _settings.CurrentValue.ErrorReportingMode,
+            report,
+        });
     }
 
     /// <summary>

@@ -56,12 +56,25 @@ public sealed class ErrorReportDispatchHostedService : BackgroundService
             using var scope = _scopeFactory.CreateScope();
             var service = scope.ServiceProvider.GetRequiredService<IErrorReportService>();
 
+            if (pending.Exception is { } exception)
+            {
+                await service.CaptureAsync(
+                    exception,
+                    pending.Source,
+                    pending.Origin,
+                    pending.CorrelationId,
+                    cancellationToken);
+
+                return;
+            }
+
             await service.CaptureAsync(
                 pending.ExceptionType,
                 pending.Message,
                 pending.StackTrace,
                 pending.Source,
                 pending.Origin,
+                pending.CorrelationId,
                 cancellationToken: cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

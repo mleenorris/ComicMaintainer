@@ -7343,7 +7343,10 @@
                 }
 
                 const data = await response.json();
-                target.textContent = data.body || '';
+                // In consent mode the text that actually leaves the instance is
+                // the bounded prefill body, so that is what has to be approved.
+                const isAutomatic = (data.mode || '').toLowerCase() === 'automatic';
+                target.textContent = (isAutomatic ? data.body : (data.prefillBody || data.body)) || '';
                 target.hidden = false;
 
                 // The Send button only appears once the payload is on screen,

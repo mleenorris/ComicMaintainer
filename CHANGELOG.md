@@ -26,12 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before anything is sent. Disabled by default; see `docs/ERROR_REPORTING.md`.
 - **CI failures now open a GitHub issue.** When a scheduled or push run of a workflow fails,
   `report-ci-failure.yml` comments on the existing open `ci-failure` issue for that workflow
-  and job, or opens a new one with the run URL, failing job and a log excerpt. Pull-request
+  and job, or opens a new one naming the failing job and linking the run. No log excerpt is
+  included: job logs are unredacted and the issue is public and permanent. Pull-request
   failures are skipped because they already surface on the PR.
 - **Auto-reported issues can be handed to the coding agent.** Reports use a dedicated
   `auto_error_report.yml` template and carry an area label derived from the top stack frame,
   so work starts with scoped context. Only reports from the reporter identity are
   auto-assigned; user-submitted ones need a maintainer to apply `ready-for-agent` first.
+  Reports that arrive once the daily agent quota is reached are labelled `agent-deferred`
+  and picked up by an hourly backlog sweep instead of being dropped.
 - **Issues can be condensed into a single EPUB before they are emailed.** The send dialog
   now offers "combine every N issues into one EPUB" (N between 2 and 500) and "combine all
   issues into one EPUB", so a device receives "Batman 001-005" instead of five separate

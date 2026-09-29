@@ -13,10 +13,11 @@ public class ErrorReportIssueBuilderTests
     private static ErrorReport Report(
         string? message = "Object reference not set to an instance of an object.",
         string area = "reader",
-        string? lastUserAction = null) => new()
+        string? lastUserAction = null,
+        string exceptionType = "System.NullReferenceException") => new()
         {
             Fingerprint = "a1b2c3d4e5f60718",
-            ExceptionType = "System.NullReferenceException",
+            ExceptionType = exceptionType,
             Message = message ?? string.Empty,
             StackTrace = "   at ComicMaintainer.Core.Reader.Services.PageService.Render()",
             Origin = "GET /api/comicreader/page/{filePath}",
@@ -115,6 +116,44 @@ public class ErrorReportIssueBuilderTests
         var title = ErrorReportIssueBuilder.BuildTitle(Report(message: new string('x', 5000)));
 
         Assert.True(title.Length <= 256, $"Title was {title.Length} characters.");
+    }
+
+    [Fact]
+    public void BuildTitle_StaysWithinGitHubsLimitForLongExceptionTypes()
+    {
+        // Deeply nested generic or closure-generated type names run to
+        // hundreds of characters on their own, so the budget has to cover the
+        // exception type as well as the message.
+        var title = ErrorReportIssueBuilder.BuildTitle(Report(
+            message: new string('x', 5000),
+            exceptionType: "ComicMaintainer.Core." + new string('T', 4000) + "Exception"));
+
+        Assert.True(title.Length <= 256, $"Title was {title.Length} characters.");
+        Assert.Contains("a1b2c3d4e5f60718", title, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BuildBody_StaysWithinTheRequestedBudget()
+    {
+        var body = ErrorReportIssueBuilder.BuildBody(
+            Report(message: new string('x', 20_000)), maxLength: 4000);
+
+        Assert.True(body.Length <= 4000, $"Body was {body.Length} characters.");
+    }
+
+    [Fact]
+    public void BuildBody_TruncatesInsideTheFenceSoTheIssueStaysStructured()
+    {
+        // A naive character cut through a bounded body can end inside a code
+        // fence, which leaves the rest of the issue rendered as code and the
+        // marker unreadable.
+        var body = ErrorReportIssueBuilder.BuildBody(
+            Report(message: new string('x', 20_000)), maxLength: 4000);
+
+        var fenceCount = body.Split("```").Length - 1;
+        Assert.True(fenceCount % 2 == 0, $"Body ended inside a code fence ({fenceCount} fences).");
+        Assert.Contains("a1b2c3d4e5f60718", body, StringComparison.Ordinal);
+        Assert.Contains("truncated", body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

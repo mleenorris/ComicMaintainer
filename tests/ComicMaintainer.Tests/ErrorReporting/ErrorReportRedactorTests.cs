@@ -1,4 +1,7 @@
+using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.ErrorReporting.Services;
+using Microsoft.Extensions.Options;
+using Moq;
 
 namespace ComicMaintainer.Tests.ErrorReporting;
 
@@ -91,6 +94,12 @@ public class ErrorReportRedactorTests
         { "pass" + "word=hunter2000", "hunter2000" },
         { "api_key: 8badf00dcafebabe", "8badf00dcafebabe" },
         { "ConnectionString=\"Data Source=/Config/comics.db\"", "comics.db" },
+        // Quoted values: stopping at the opening quote would leave the
+        // credential in the text. Both quote styles, with values chosen so that
+        // no other rule (token shape, path, e-mail) would catch them.
+        { "to" + "ken=\"zqxjklmnbvfghdsa\"", "zqxjklmnbvfghdsa" },
+        { "to" + "ken='qzwxecrvtbynumip'", "qzwxecrvtbynumip" },
+        { "client_secret: \"plough rhythm crypt\"", "plough rhythm crypt" },
     };
 
     [Theory]
@@ -159,6 +168,31 @@ public class ErrorReportRedactorTests
     }
 
     [Fact]
+    public void Redact_DropsDataFileNamesOutsideTheSourceTree()
+    {
+        // A `.json`, `.js` or `.cs` basename is not evidence of a repository
+        // source file. Only a path that also names this application's source
+        // tree may keep its file name; anything else is user data.
+        var result = Redactor.Redact(
+            "Could not read /home/alice/private-library.json or /srv/alice-notes.cs");
+
+        Assert.DoesNotContain("private-library", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("alice", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    // Comic paths routinely contain spaces, and the path pattern stops at
+    // whitespace; every fragment must still be redacted rather than the tail
+    // surviving as plain text.
+    [InlineData("/home/alice/My Comics/Batman Year One 001.cbz", "alice")]
+    [InlineData("/home/alice/My Comics/Batman Year One 001.cbz", "Batman")]
+    [InlineData(@"C:\Users\alice\My Documents\Saga Volume 3.cbr", "Saga")]
+    public void Redact_RemovesPathsContainingSpaces(string input, string secret)
+    {
+        Assert.DoesNotContain(secret, Redactor.Redact(input), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Redact_RemovesConfiguredSecretValues()
     {
         // Values configured in AppSettings (SMTP password, ComicVine key, the
@@ -170,6 +204,28 @@ public class ErrorReportRedactorTests
 
         Assert.DoesNotContain("super-secret-smtp-password", result, StringComparison.Ordinal);
         Assert.DoesNotContain("comicvine-api-key-value", result, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Redact_RemovesShortConfiguredCredentials()
+    {
+        // A short password is a weak password, not a public one. Skipping it
+        // because of its length would publish it verbatim whenever an exception
+        // message quoted it back and no shape-based rule matched.
+        var settings = new AppSettings
+        {
+            SmtpPassword = "pw42",
+            ComicVineApiKey = "k9",
+        };
+
+        var monitor = new Mock<IOptionsMonitor<AppSettings>>();
+        monitor.SetupGet(m => m.CurrentValue).Returns(settings);
+
+        var result = new ErrorReportRedactor(monitor.Object)
+            .Redact("SMTP rejected credentials pw42 and provider key k9");
+
+        Assert.DoesNotContain("pw42", result, StringComparison.Ordinal);
+        Assert.DoesNotContain("k9", result, StringComparison.Ordinal);
     }
 
     [Fact]

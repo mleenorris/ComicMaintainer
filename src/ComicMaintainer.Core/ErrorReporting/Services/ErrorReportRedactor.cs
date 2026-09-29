@@ -44,14 +44,28 @@ public sealed class ErrorReportRedactor : IErrorReportRedactor
     private static readonly TimeSpan MatchTimeout = TimeSpan.FromMilliseconds(250);
 
     /// <summary>
-    /// Extensions that identify a file in this repository rather than in the
-    /// user's library. Their names are public information and are the most
-    /// useful part of a stack frame, so they survive path redaction.
+    /// Extensions that can identify a file in this repository rather than in
+    /// the user's library. Their names are public information and are the most
+    /// useful part of a stack frame, so they survive path redaction — but only
+    /// when the surrounding path is also recognised as an application source
+    /// path (see <see cref="IsApplicationSourcePath"/>).
     /// </summary>
+    /// <remarks>
+    /// Data and configuration extensions (<c>.json</c>, <c>.yml</c>) are
+    /// deliberately absent: a name such as <c>private-library.json</c> is user
+    /// data, and it never appears in a stack frame.
+    /// </remarks>
     private static readonly HashSet<string> SourceExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".cs", ".js", ".html", ".css", ".razor", ".cshtml", ".ts", ".json", ".yml", ".yaml"
+        ".cs", ".js", ".html", ".css", ".razor", ".cshtml", ".ts"
     };
+
+    /// <summary>
+    /// Directory-name prefix that marks a path as belonging to this
+    /// application's own source tree, e.g.
+    /// <c>.../src/ComicMaintainer.Core/Services/Foo.cs</c>.
+    /// </summary>
+    private const string SourceTreeMarker = "ComicMaintainer";
 
     /// <summary>
     /// Library-content extensions. A bare file name ending in one of these is
@@ -67,8 +81,10 @@ public sealed class ErrorReportRedactor : IErrorReportRedactor
         // 1. Headers carrying identity or credentials, including the Authelia
         //    forwarded-identity headers and anything cookie-shaped.
         @"(?<header>(?i:authorization|proxy-authorization|www-authenticate|set-cookie|cookie|x-api-key|api-key|remote-user|remote-groups|remote-email|remote-name|x-forwarded-user)\s{0,4}[:=]\s{0,4})[^\r\n]{1,4096}" +
-        // 2. key=value / key: value pairs whose key names a credential.
-        @"|(?<kv>(?i:passwords?|passwd|pwd|secrets?|tokens?|api[_\-]?keys?|access[_\-]?key|client[_\-]?secret|connectionstring|bearer)\s{0,4}[:=]\s{0,4})[^\s,;&""'\r\n]{1,4096}" +
+        // 2. key=value / key: value pairs whose key names a credential. The
+        //    value may be bare, single-quoted or double-quoted; stopping at the
+        //    opening quote would leave the credential itself in the text.
+        @"|(?<kv>(?i:passwords?|passwd|pwd|secrets?|tokens?|api[_\-]?keys?|access[_\-]?key|client[_\-]?secret|connectionstring|bearer)\s{0,4}[:=]\s{0,4})(?:""[^""\r\n]{0,4096}""|'[^'\r\n]{0,4096}'|[^\s,;&""'\r\n]{1,4096})" +
         // 3. Well-known opaque credential shapes: GitHub tokens and JWTs.
         @"|(?<drop>\b(?:gh[pousr]_[A-Za-z0-9]{16,255}|github_pat_[A-Za-z0-9_]{20,255})\b" +
         @"|\beyJ[A-Za-z0-9_\-]{8,4096}\.[A-Za-z0-9_\-]{8,4096}\.[A-Za-z0-9_\-]{4,4096}" +
@@ -229,10 +245,10 @@ public sealed class ErrorReportRedactor : IErrorReportRedactor
     }
 
     /// <summary>
-    /// Replaces a path with a placeholder. Files belonging to this repository
-    /// keep their bare name, because a stack frame is near-useless without it
-    /// and those names are already public; everything else keeps at most its
-    /// extension.
+    /// Replaces a path with a placeholder. A file that can be shown to belong
+    /// to this repository's own source tree keeps its bare name, because a
+    /// stack frame is near-useless without it and those names are already
+    /// public; every other path keeps at most its extension.
     /// </summary>
     private static string RedactPath(string path)
     {
@@ -249,7 +265,11 @@ public sealed class ErrorReportRedactor : IErrorReportRedactor
         var dot = fileName.LastIndexOf('.');
         var extension = dot > 0 && dot < fileName.Length - 1 ? fileName[dot..] : string.Empty;
 
-        if (SourceExtensions.Contains(extension))
+        // The extension alone is not evidence of a source file: a user's
+        // library can hold `private-library.json` just as easily as the
+        // repository holds `Program.cs`. The name survives only when the
+        // directory part identifies this application's source tree.
+        if (SourceExtensions.Contains(extension) && IsApplicationSourcePath(path[..(separator + 1)]))
         {
             return fileName;
         }
@@ -258,10 +278,34 @@ public sealed class ErrorReportRedactor : IErrorReportRedactor
     }
 
     /// <summary>
-    /// Snapshots the literal secrets configured on this instance. Values shorter
-    /// than eight characters are skipped: they are too short to be a real
-    /// credential and redacting them would corrupt unrelated text.
+    /// True when a directory part contains a component belonging to this
+    /// application's source tree, such as <c>src/ComicMaintainer.Core/</c>.
     /// </summary>
+    private static bool IsApplicationSourcePath(string directory)
+    {
+        foreach (var segment in directory.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segment.StartsWith(SourceTreeMarker, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Snapshots the literal values configured on this instance that must never
+    /// appear in a report.
+    /// </summary>
+    /// <remarks>
+    /// Credentials are removed at any length. A four-character SMTP password is
+    /// a poor password but it is still the user's password, and an exception
+    /// message that happens to quote it back matches no shape-based rule.
+    /// Non-credential context values (directories, the sender address) keep a
+    /// minimum length, because redacting a one-character directory would
+    /// shred unrelated text without protecting anything.
+    /// </remarks>
     private IReadOnlyCollection<string> CollectConfiguredSecrets()
     {
         if (_settings is null)
@@ -270,20 +314,26 @@ public sealed class ErrorReportRedactor : IErrorReportRedactor
         }
 
         var current = _settings.CurrentValue;
-        var candidates = new[]
-        {
+
+        string?[] credentials =
+        [
             current.SmtpPassword,
             current.SmtpUsername,
             current.ComicVineApiKey,
             current.GitHubToken,
+            Environment.GetEnvironmentVariable("JWT_SECRET"),
+        ];
+
+        string?[] contextValues =
+        [
             current.EmailFromAddress,
             current.WatchedDirectory,
             current.DuplicateDirectory,
-            Environment.GetEnvironmentVariable("JWT_SECRET"),
-        };
+        ];
 
-        return candidates
-            .Where(value => !string.IsNullOrWhiteSpace(value) && value!.Trim().Length >= 8)
+        return credentials
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Concat(contextValues.Where(value => !string.IsNullOrWhiteSpace(value) && value!.Trim().Length >= 8))
             .Select(value => value!.Trim())
             .Distinct(StringComparer.Ordinal)
             .ToList();

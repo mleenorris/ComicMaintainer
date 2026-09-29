@@ -78,8 +78,23 @@ public sealed class GitHubIssueErrorReportTransport : IErrorReportTransport
         {
             using var client = CreateClient(token);
 
-            var existing = await FindExistingIssueAsync(client, repository, report.Fingerprint, cancellationToken);
-            if (existing is { } issueNumber)
+            var lookup = await FindExistingIssueAsync(client, repository, report.Fingerprint, cancellationToken);
+
+            // A failed lookup is not "no existing issue". Creating on a 403,
+            // 429 or 5xx would open a duplicate of an issue that is already
+            // open; keeping the report local lets the next attempt retry.
+            if (!lookup.Succeeded)
+            {
+                _logger.LogWarning(
+                    "Automatic error reporting deferred: GitHub issue search failed ({Status}).",
+                    lookup.StatusCode);
+
+                return new ErrorReportTransportResult(
+                    false, null, null,
+                    "Could not check GitHub for an existing issue; the report was kept locally.");
+            }
+
+            if (lookup.IssueNumber is { } issueNumber)
             {
                 await CommentOnIssueAsync(client, repository, issueNumber, report, cancellationToken);
                 return new ErrorReportTransportResult(
@@ -109,6 +124,13 @@ public sealed class GitHubIssueErrorReportTransport : IErrorReportTransport
     }
 
     /// <summary>
+    /// Outcome of the deduplication lookup. <c>Succeeded</c> is false when the
+    /// search itself could not be completed, which is deliberately distinct
+    /// from a successful search that found nothing.
+    /// </summary>
+    private readonly record struct IssueLookup(bool Succeeded, int? IssueNumber, int StatusCode);
+
+    /// <summary>
     /// Finds an open issue whose body carries this fingerprint's marker.
     /// </summary>
     /// <remarks>
@@ -117,7 +139,7 @@ public sealed class GitHubIssueErrorReportTransport : IErrorReportTransport
     /// than trusted from the search index, which is eventually consistent and
     /// tokenises punctuation unpredictably.
     /// </remarks>
-    private static async Task<int?> FindExistingIssueAsync(
+    private static async Task<IssueLookup> FindExistingIssueAsync(
         HttpClient client,
         string repository,
         string fingerprint,
@@ -131,15 +153,23 @@ public sealed class GitHubIssueErrorReportTransport : IErrorReportTransport
 
         if (!response.IsSuccessStatusCode)
         {
-            return null;
+            return new IssueLookup(false, null, (int)response.StatusCode);
         }
 
         var payload = await response.Content.ReadFromJsonAsync<SearchResponse>(JsonOptions, cancellationToken);
+
+        if (payload is null)
+        {
+            return new IssueLookup(false, null, (int)response.StatusCode);
+        }
+
         var marker = ErrorReportIssueBuilder.Marker(fingerprint);
 
-        return payload?.Items?
+        var match = payload.Items?
             .FirstOrDefault(item => item.Body?.Contains(marker, StringComparison.Ordinal) == true)?
             .Number;
+
+        return new IssueLookup(true, match, (int)response.StatusCode);
     }
 
     private static async Task CommentOnIssueAsync(

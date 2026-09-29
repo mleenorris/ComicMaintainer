@@ -118,7 +118,8 @@ few `ComicMaintainer.*` stack frames, and the app version.
 - **Cooldown** (`ERROR_REPORT_COOLDOWN_HOURS`, default 24) — how long before the same
   fingerprint may be reported again.
 - **Daily cap** (`ERROR_REPORT_MAX_PER_DAY`, default 5) — a hard ceiling on deliveries
-  per instance per day.
+  per instance per day. It counts every transmission, including the comments added to
+  an existing issue when a known fault recurs, not just the distinct faults reported.
 - Browser hooks additionally cap themselves at 10 reports per page load and report each
   distinct signature only once, so a fault inside a render loop cannot flood the API.
 
@@ -207,7 +208,9 @@ stack frame (`area:reader`, `area:metadata`, `area:email`, `area:watcher`, `area
 Because the report body is untrusted input, only reports originating from the
 reporter identity are auto-assigned to the coding agent. Anything user-submitted needs
 a maintainer to apply the `ready-for-agent` label first, and there is a cap on how many
-agent sessions can be started per day.
+agent sessions can be started per day. Reports that arrive while the cap is reached are
+labelled `agent-deferred` rather than dropped: an hourly sweep re-examines the backlog
+and assigns them once the following day's quota frees up.
 
 ---
 
@@ -216,8 +219,14 @@ agent sessions can be started per day.
 The same idea covers the build. When a scheduled or push run of a workflow concludes
 in failure, `report-ci-failure.yml` searches for an open issue labelled `ci-failure`
 for the same workflow and job, comments on it if found, and otherwise opens a new one
-with the run URL, the failing job and a log excerpt. Pull-request failures are skipped
-because they already surface on the pull request.
+naming the failing job and linking the run. Each failing job gets its own issue, so a
+matrix leg does not hide behind another leg's report.
+
+The issue deliberately carries **no log excerpt**. Job logs are unredacted and can
+contain file paths, hostnames and values echoed by a failing step, and an issue is
+public and permanent. The run URL is included instead, which is visible only to people
+who can already read the logs. Pull-request failures are skipped because they already
+surface on the pull request.
 
 ---
 

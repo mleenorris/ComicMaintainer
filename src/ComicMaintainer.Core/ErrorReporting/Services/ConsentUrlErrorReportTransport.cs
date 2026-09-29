@@ -13,14 +13,18 @@ namespace ComicMaintainer.Core.ErrorReporting.Services;
 /// <para>
 /// This is the only mode that works for every self-hosted install, because it
 /// needs no credential and gives the owner an explicit, per-report consent
-/// point. The report body is identical to the one the automatic transport would
-/// post, so what the user sees in the preview is exactly what GitHub receives.
+/// point. The preview surface shows both the full stored report and the exact
+/// shortened body this transport puts in the URL, so the user consents to what
+/// GitHub actually receives rather than to a longer version of it.
 /// </para>
 /// <para>
 /// GitHub's query-string prefill is subject to a URL length limit (roughly 8 KB
-/// in practice, lower in some browsers). The body is therefore truncated to
-/// <see cref="MaxPrefilledBodyLength"/> before encoding, with a note telling the
-/// user the full text is available in the app.
+/// in practice, lower in some browsers). The body is therefore built to a
+/// bounded, structurally complete form of at most
+/// <see cref="MaxPrefilledBodyLength"/> characters — whole sections in priority
+/// order rather than a character-offset cut that could land inside a code fence
+/// — and the administrator is shown that exact shortened body before opening
+/// the link.
 /// </para>
 /// </remarks>
 public sealed class ConsentUrlErrorReportTransport : IErrorReportTransport
@@ -63,17 +67,19 @@ public sealed class ConsentUrlErrorReportTransport : IErrorReportTransport
     }
 
     /// <summary>
+    /// Builds the exact issue body that the prefill URL will carry. Exposed so
+    /// the administrator can be shown what will actually be submitted rather
+    /// than the unbounded body.
+    /// </summary>
+    public static string BuildPrefilledBody(ErrorReport report) =>
+        ErrorReportIssueBuilder.BuildBody(report, MaxPrefilledBodyLength);
+
+    /// <summary>
     /// Builds the pre-filled issue URL for <paramref name="report"/>.
     /// </summary>
     public static string BuildIssueUrl(string repository, ErrorReport report)
     {
-        var body = ErrorReportIssueBuilder.BuildBody(report);
-        if (body.Length > MaxPrefilledBodyLength)
-        {
-            body = body[..MaxPrefilledBodyLength]
-                   + "\n\n_(truncated — open Settings → Error reporting on your instance for the full report)_\n";
-        }
-
+        var body = BuildPrefilledBody(report);
         var query = string.Join("&",
             "template=auto_error_report.yml",
             "labels=" + Uri.EscapeDataString(string.Join(",", ErrorReportIssueBuilder.BuildLabels(report))),

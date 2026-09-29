@@ -1,6 +1,7 @@
 using System.Diagnostics;
-using ComicMaintainer.Core.ErrorReporting.Interfaces;
 using ComicMaintainer.Core.ErrorReporting.Models;
+using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Logging;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
@@ -22,19 +23,26 @@ namespace ComicMaintainer.WebApi.Middleware;
 /// report, so a user who says "I got error 4f2a1c" can be matched to the exact
 /// captured trace without them having to send any logs.
 /// </para>
+/// <para>
+/// Capture is handed to <see cref="ErrorReportQueue"/> rather than awaited. In
+/// automatic mode capture talks to GitHub, and the client's 500 response must
+/// not wait on telemetry; the queue is bounded and never blocks.
+/// </para>
 /// </remarks>
 public sealed class GlobalExceptionHandler : IExceptionHandler
 {
-    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ErrorReportQueue _queue;
     private readonly ILogger<GlobalExceptionHandler> _logger;
 
     public GlobalExceptionHandler(
-        IServiceScopeFactory scopeFactory,
+        ErrorReportQueue queue,
         ILogger<GlobalExceptionHandler> logger)
     {
-        // The handler is a singleton but the reporter is scoped (it owns a
-        // DbContext), so the scope is created per failure rather than injected.
-        _scopeFactory = scopeFactory;
+        // Capture is queued rather than awaited: in automatic mode it performs
+        // a GitHub search and a POST, each with a 30-second timeout, and making
+        // the 500 response wait on telemetry turns a handled failure into a
+        // minute-long hang.
+        _queue = queue;
         _logger = logger;
     }
 
@@ -53,28 +61,24 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         var correlationId = Activity.Current?.Id ?? httpContext.TraceIdentifier;
         var origin = DescribeOrigin(httpContext);
 
+        // Both values reach the log from the request: the origin comes from the
+        // matched endpoint and the correlation id from a client-influenced
+        // trace header, so neither is trusted to be free of newlines or control
+        // characters that would forge log entries.
         _logger.LogError(
             exception,
             "Unhandled exception while handling {Origin} (correlation {CorrelationId})",
-            origin,
-            correlationId);
+            LoggingHelper.SanitizeForLog(origin),
+            LoggingHelper.SanitizeForLog(correlationId));
 
-        try
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var errorReports = scope.ServiceProvider.GetRequiredService<IErrorReportService>();
-
-            await errorReports.CaptureAsync(
-                exception,
-                ErrorReportSource.Api,
-                origin,
-                correlationId,
-                cancellationToken);
-        }
-        catch (Exception captureFailure)
-        {
-            _logger.LogDebug("Could not capture error report: {Reason}", captureFailure.GetType().Name);
-        }
+        _queue.TryEnqueue(new PendingErrorCapture(
+            ExceptionType: exception.GetType().FullName ?? exception.GetType().Name,
+            Message: exception.Message,
+            StackTrace: exception.ToString(),
+            Source: ErrorReportSource.Api,
+            Origin: origin,
+            CorrelationId: correlationId,
+            Exception: exception));
 
         if (httpContext.Response.HasStarted)
         {

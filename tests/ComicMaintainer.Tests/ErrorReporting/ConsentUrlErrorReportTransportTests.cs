@@ -121,6 +121,21 @@ public class ConsentUrlErrorReportTransportTests
     }
 
     [Fact]
+    public void BuildPrefilledBody_KeepsTheIssueStructuredWhenTruncated()
+    {
+        // Cutting the rendered body at a fixed character count can end inside
+        // a code fence, so the fingerprint marker and the facts below it are
+        // swallowed by the fence and the maintainer sees a broken issue.
+        var body = ConsentUrlErrorReportTransport.BuildPrefilledBody(Report(
+            message: new string('x', 20_000),
+            stackFrames: 400));
+
+        var fenceCount = body.Split("```").Length - 1;
+        Assert.True(fenceCount % 2 == 0, $"Body ended inside a code fence ({fenceCount} fences).");
+        Assert.Contains("a1b2c3d4e5f60718", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BuildIssueUrl_IsAWellFormedAbsoluteUri()
     {
         var url = ConsentUrlErrorReportTransport.BuildIssueUrl("mleenorris/ComicMaintainer", Report());

@@ -1,4 +1,5 @@
 using System.Text;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.ErrorReporting.Interfaces;
 using ComicMaintainer.Core.ErrorReporting.Models;
 using Serilog.Core;
@@ -28,14 +29,23 @@ namespace ComicMaintainer.WebApi.Logging;
 public sealed class ErrorReportingSink : ILogEventSink
 {
     /// <summary>
-    /// Source contexts whose errors are ignored to prevent a feedback loop: if
-    /// reporting an error itself logs an error, the sink would re-enter and
-    /// report that too, indefinitely.
+    /// Source contexts whose errors are ignored.
     /// </summary>
+    /// <remarks>
+    /// The first two prevent a feedback loop: if reporting an error itself logs
+    /// an error, the sink would re-enter and report that too, indefinitely.
+    /// <c>GlobalExceptionHandler</c> is excluded for a different reason — it
+    /// captures the unhandled exception itself, with the correlation id and the
+    /// route template the sink cannot see. Letting the sink also queue its log
+    /// line would count one request failure twice, or fingerprint it twice when
+    /// the two messages differ. Its log line is still written, and its direct
+    /// capture still happens.
+    /// </remarks>
     private static readonly string[] ExcludedSourceContexts =
     [
         "ComicMaintainer.Core.ErrorReporting",
         "ComicMaintainer.WebApi.Logging",
+        "ComicMaintainer.WebApi.Middleware.GlobalExceptionHandler",
     ];
 
     private readonly IErrorReportLogBuffer _buffer;
@@ -59,7 +69,9 @@ public sealed class ErrorReportingSink : ILogEventSink
 
         _buffer.Add(Format(logEvent, sourceContext));
 
-        if (logEvent.Level < LogEventLevel.Error || IsExcluded(sourceContext))
+        if (logEvent.Level < LogEventLevel.Error
+            || IsExcluded(sourceContext)
+            || IsMarkedExcluded(logEvent))
         {
             return;
         }
@@ -78,6 +90,15 @@ public sealed class ErrorReportingSink : ILogEventSink
         sourceContext is not null
         && ExcludedSourceContexts.Any(excluded =>
             sourceContext.Contains(excluded, StringComparison.Ordinal));
+
+    /// <summary>
+    /// Honours a per-event opt-out. Call sites that know a failure is bad input
+    /// rather than a defect — per-file comic processing, for example — mark the
+    /// event instead of the sink excluding their whole source context, which
+    /// would also hide genuine defects from the same service.
+    /// </summary>
+    private static bool IsMarkedExcluded(LogEvent logEvent) =>
+        logEvent.Properties.ContainsKey(ErrorReportLogProperties.ExclusionPropertyName);
 
     private static string? ReadSourceContext(LogEvent logEvent) =>
         logEvent.Properties.TryGetValue("SourceContext", out var value)

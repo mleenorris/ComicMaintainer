@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Issues can be condensed into a single EPUB before they are emailed.** The send dialog
+  now offers "combine every N issues into one EPUB" (N between 2 and 500) and "combine all
+  issues into one EPUB", so a device receives "Batman 001-005" instead of five separate
+  books. The issues are ordered first, then grouped, so the books are 1-5, 6-10, and so on.
+  A condensed book keeps the series metadata and cover of its first issue, numbers its
+  pages continuously and gets one table-of-contents entry per issue. Before anything is
+  queued the dialog asks the new `POST /api/email/condense-plan` endpoint for each book's
+  estimated size: books larger than `EMAIL_MAX_ATTACHMENT_MB` are flagged, **Send** is
+  disabled, and they can be downloaded instead through `POST /api/email/condense-download`.
+  Issues already delivered inside an earlier condensed book count as delivered, so
+  re-sending a series does not duplicate them.
+
 ### Fixed
 - **Webcomic mode now flows straight from one issue into the next.** The following issue was
   only looked up, fetched and appended once the reader hit the bottom of the current one, so

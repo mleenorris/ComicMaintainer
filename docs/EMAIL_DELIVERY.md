@@ -4,13 +4,15 @@ ComicMaintainer can email comics to saved e-reader addresses (Kindle "Send to Ki
 Kobo, PocketBook, or any mailbox that accepts attachments). Issues can be sent one at a
 time, as a whole series, or as an arbitrary selection, and a series can be subscribed so
 that every newly processed issue is delivered automatically. Each delivery can be sent as
-the original `.cbz`/`.cbr` archive or converted to EPUB first.
+the original `.cbz`/`.cbr` archive or converted to EPUB first, and consecutive issues can
+be condensed into a single EPUB.
 
 ## Contents
 
 - [Configuring SMTP](#configuring-smtp)
 - [E-reader devices](#e-reader-devices)
 - [Sending comics](#sending-comics)
+- [Condensing issues into one EPUB](#condensing-issues-into-one-epub)
 - [Automatic delivery for a series](#automatic-delivery-for-a-series)
 - [EPUB conversion](#epub-conversion)
 - [Delivery pipeline](#delivery-pipeline)
@@ -104,6 +106,42 @@ sent; any other path is rejected. Symlinks and junctions are resolved first — 
 and on every parent directory — so a link inside the library cannot point at a file
 outside it.
 
+## Condensing issues into one EPUB
+
+Instead of one book per issue, a send can *condense* consecutive issues into a single
+EPUB, so a device receives "Batman 001-005" rather than five separate books.
+
+- **Send each issue separately** – the default, unchanged behaviour.
+- **Combine every N issues into one EPUB** – the issues are put in reading order and
+  grouped into books of N: issues 1-5, then 6-10, and so on. N is between 2 and 500.
+- **Combine all issues into one EPUB** – the whole selection (or the whole series)
+  becomes a single book.
+
+Condensing always delivers EPUB — the original `.cbz`/`.cbr` archives cannot be merged —
+so the format picker is pinned to EPUB while a condense mode is selected. The condensed
+book keeps the series metadata and cover of its first issue, numbers its pages
+continuously, and gets one table-of-contents entry per issue so the device can still jump
+between them. Because it spans a range, no single issue number is written to the series
+position metadata.
+
+### Size check and the download fallback
+
+Mailboxes cap attachment size (`EMAIL_MAX_ATTACHMENT_MB`, 25 MB by default), and a book
+made of dozens of issues will not fit. Before anything is queued the send dialog asks
+`POST /api/email/condense-plan`, which reports each book, how many issues it holds and
+its estimated size — the pages keep their original compression, so the sum of the source
+archives plus the container overhead is a close approximation.
+
+Books over the limit are flagged, **Send** is disabled, and each book can be downloaded
+instead with `POST /api/email/condense-download`, which builds that one book on demand
+and streams it back (with no size budget, so the pages keep full quality). The temporary
+file is deleted as soon as the response has been streamed. Reducing the issues per book
+is the other way out.
+
+Condensed sends honour `skipAlreadyDelivered`, and an issue that already went out *inside
+an earlier condensed book* counts as delivered, so re-sending a series does not duplicate
+issues across books.
+
 ## Automatic delivery for a series
 
 A series can be subscribed to a device. After the watcher finishes processing a file —
@@ -186,6 +224,8 @@ policy; the SMTP settings endpoint requires `CanAdminister`.
 | `POST` | `/api/email/devices/{id}/test` | Send a test message. |
 | `POST` | `/api/email/send` | Queue specific files. |
 | `POST` | `/api/email/send-series` | Queue every issue of a series. |
+| `POST` | `/api/email/condense-plan` | Describe the condensed books a selection or series would produce, with size estimates. |
+| `POST` | `/api/email/condense-download` | Build and download one condensed book instead of emailing it. |
 | `GET` | `/api/email/subscriptions` | List subscriptions, optionally filtered by series. |
 | `PUT` | `/api/email/subscriptions` | Create or update a series subscription. |
 | `DELETE` | `/api/email/subscriptions/{id}` | Remove a subscription. |
@@ -204,6 +244,19 @@ curl -X POST http://localhost:5000/api/email/send \
   -d '{"files":["/comics/Batman/Batman - Chapter 0001.cbz"],"deviceId":1,"deliveryFormat":"epub"}'
 ```
 
+Example — check what condensing a series into books of five issues would produce, then
+queue it:
+
+```sh
+curl -X POST http://localhost:5000/api/email/condense-plan \
+  -H "Content-Type: application/json" \
+  -d '{"seriesId":"batman","condenseMode":"count","issuesPerBook":5}'
+
+curl -X POST http://localhost:5000/api/email/send-series \
+  -H "Content-Type: application/json" \
+  -d '{"seriesId":"batman","deviceId":1,"condenseMode":"count","issuesPerBook":5}'
+```
+
 ## Troubleshooting
 
 | Symptom | Cause |
@@ -215,3 +268,4 @@ curl -X POST http://localhost:5000/api/email/send \
 | Authentication errors | Providers with 2FA usually require an app-specific password rather than the account password. |
 | "The SMTP server does not support the STARTTLS extension" | The server offers no TLS. Use implicit TLS (`SMTP_USE_SSL=true`, port 465) or, for a trusted local relay only, set `SMTP_ALLOW_INSECURE=true`. |
 | "Series has N issues, which exceeds the ... limit" | A whole-series send is capped at 1000 issues; select the issues to send instead. |
+| Send is disabled with "larger than the ... attachment limit" | The condensed book(s) exceed `EMAIL_MAX_ATTACHMENT_MB`. Download them instead, or condense fewer issues per book. |

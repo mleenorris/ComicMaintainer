@@ -393,7 +393,73 @@
             }
             return headers;
         }
-        
+
+        // ---------------------------------------------------------------
+        // Frontend error reporting
+        //
+        // Posts uncaught errors and unhandled promise rejections to the local
+        // API so they can be fingerprinted, redacted and (with the owner's
+        // consent) filed as a GitHub issue. The same hooks are duplicated in
+        // reader.html, which is standalone and never loads this file.
+        //
+        // Nothing here may throw: an error raised inside the handler would be
+        // caught by the handler again.
+        // ---------------------------------------------------------------
+        const REPORTED_ERROR_SIGNATURES = new Set();
+        const MAX_CLIENT_ERROR_REPORTS = 10;
+        let clientErrorReportCount = 0;
+        // Set by UI actions so a report can say what the user was doing.
+        let lastUserAction = null;
+
+        function recordUserAction(action) {
+            lastUserAction = typeof action === 'string' ? action.slice(0, 200) : null;
+        }
+
+        function reportClientError(name, message, stack) {
+            try {
+                if (clientErrorReportCount >= MAX_CLIENT_ERROR_REPORTS) return;
+
+                // A render loop can fire the same error thousands of times.
+                // Report each distinct signature once per page load.
+                const signature = `${name}|${message}`;
+                if (REPORTED_ERROR_SIGNATURES.has(signature)) return;
+                REPORTED_ERROR_SIGNATURES.add(signature);
+                clientErrorReportCount++;
+
+                fetch(apiUrl('/api/errorreports/client'), {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                        name: String(name || 'Error').slice(0, 200),
+                        message: String(message || '').slice(0, 2000),
+                        stack: String(stack || '').slice(0, 8000),
+                        page: window.location.pathname,
+                        lastUserAction: lastUserAction
+                    })
+                }).catch(() => { /* reporting must never surface to the user */ });
+            } catch (e) {
+                /* ignore */
+            }
+        }
+
+        window.addEventListener('error', function (event) {
+            const error = event && event.error;
+            reportClientError(
+                error && error.name,
+                (error && error.message) || (event && event.message),
+                error && error.stack
+            );
+        });
+
+        window.addEventListener('unhandledrejection', function (event) {
+            const reason = event && event.reason;
+            if (reason instanceof Error) {
+                reportClientError(reason.name, reason.message, reason.stack);
+            } else {
+                reportClientError('UnhandledRejection', String(reason), null);
+            }
+        });
+
         // Helper function to handle auth errors
         function handleAuthError(response) {
             if (response.status === 401) {

@@ -40,6 +40,7 @@ public class WriteOperationAuthorizationConvention : IActionModelConvention
         ["ScheduledJobs"] = AuthorizationPolicies.CanModifyLibrary,
         ["Watcher"] = AuthorizationPolicies.CanModifyLibrary,
         ["Email"] = AuthorizationPolicies.CanModifyLibrary,
+        ["ErrorReports"] = AuthorizationPolicies.CanAdminister,
         ["Settings"] = AuthorizationPolicies.CanAdminister
     };
 

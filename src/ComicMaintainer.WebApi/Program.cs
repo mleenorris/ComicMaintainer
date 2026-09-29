@@ -3,6 +3,8 @@ using System.Text;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.ErrorReporting.Interfaces;
+using ComicMaintainer.Core.ErrorReporting.Services;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Reader.Interfaces;
@@ -12,6 +14,7 @@ using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.HealthChecks;
 using ComicMaintainer.WebApi.Hubs;
+using ComicMaintainer.WebApi.Logging;
 using ComicMaintainer.WebApi.Middleware;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -688,6 +691,31 @@ builder.Services.AddSingleton<IScheduledJobService>(sp => sp.GetRequiredService<
 builder.Services.AddSingleton<ScheduledJobsHostedService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ScheduledJobsHostedService>());
 
+// Error reporting: capture -> redact -> fingerprint -> store -> (optionally) file a GitHub issue.
+// The sink is picked up by `ReadFrom.Services` in the Serilog configuration above, which is what
+// lets a single registration observe every Error/Fatal event in the application.
+builder.Services.AddSingleton<IErrorReportLogBuffer>(_ => new ErrorReportLogBuffer());
+builder.Services.AddSingleton<ErrorReportQueue>();
+builder.Services.AddSingleton<Serilog.Core.ILogEventSink, ErrorReportingSink>();
+builder.Services.AddHostedService<ErrorReportDispatchHostedService>();
+builder.Services.AddSingleton<IErrorReportRedactor, ErrorReportRedactor>();
+builder.Services.AddSingleton<IErrorReportTransport, ConsentUrlErrorReportTransport>();
+builder.Services.AddSingleton<IErrorReportTransport, GitHubIssueErrorReportTransport>();
+builder.Services.AddScoped<IErrorReportService, ErrorReportService>();
+builder.Services.AddHttpClient(GitHubIssueErrorReportTransport.HttpClientName, client =>
+{
+    client.BaseAddress = new Uri("https://api.github.com/");
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
+    client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+    client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
+});
+
+// Turn unhandled request exceptions into a consistent ProblemDetails response and
+// route them into the error reporter with the route template and correlation id.
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+
 var app = builder.Build();
 
 // Print startup banner
@@ -841,6 +869,11 @@ app.Use(async (context, next) =>
     
     await next();
 });
+
+// Unhandled exceptions become a ProblemDetails response and an error report.
+// Registered before any other middleware so it also covers failures raised
+// inside the rest of the pipeline, not just inside endpoints.
+app.UseExceptionHandler();
 
 // Add path validation middleware for security
 app.UseMiddleware<PathValidationMiddleware>();

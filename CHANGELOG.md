@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Every API response now carries a correlation ID, and errors show it.** Each request is
+  tagged with an `X-Correlation-Id` (echoed on the response, honoured if the caller supplies
+  one) and that id is stamped on every log line the request produces in `debug*.log`. An
+  unhandled exception is turned into an RFC 7807 problem document that carries the same id
+  instead of a bare 500, and the browser appends `(ref: …)` to toasts reporting a failed API
+  call, so a user can report "it failed, ref abc123" and the matching server log line can be
+  found directly.
+- **System Diagnostics panel.** A new admin-only `GET /api/diagnostics` returns one snapshot
+  of the instance — version, environment, uptime, health check results, runtime and memory,
+  watcher state, library totals, job counts, per-directory storage (present/writable/free) and
+  the log files on disk — and the settings menu gains **🩺 System Diagnostics** to display it.
+  **Copy report** puts the whole snapshot on the clipboard as plain text for a bug report.
+  Every section is gathered independently, so one failing probe degrades to an error note
+  rather than emptying the panel.
+- **Keyboard shortcuts on the library page.** <kbd>/</kbd> focuses the search box,
+  <kbd>Esc</kbd> clears it, <kbd>g</kbd> <kbd>h</kbd> / <kbd>g</kbd> <kbd>l</kbd> jump to
+  Overview and Library, <kbd>r</kbd> refreshes the file list, <kbd>f</kbd> opens the filter
+  menu, and <kbd>?</kbd> shows a help overlay listing them all (also reachable from the
+  settings menu). Shortcuts never fire while a field has focus or a dialog is open, and the
+  library-only ones stay inert on Overview where their control is hidden.
+- **Clear button in the header search.** The search box gains a "×" that appears once it has
+  text and both empties the box and re-runs the filter, instead of requiring a manual select
+  and delete.
+
 - **Issues can be condensed into a single EPUB before they are emailed.** The send dialog
   now offers "combine every N issues into one EPUB" (N between 2 and 500) and "combine all
   issues into one EPUB", so a device receives "Batman 001-005" instead of five separate
@@ -20,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Issues already delivered inside an earlier condensed book count as delivered — for
   ordinary per-issue sends too — so re-sending a series does not duplicate them. A book
   never mixes series, and a send-series request keeps the order the series supplies.
+
+### Changed
+- **File sizes above 1 GB are shown in GB/TB.** They were previously reported in megabytes,
+  so free disk space read as "84258.8 MB".
 
 ### Fixed
 - **Webcomic mode now flows straight from one issue into the next.** The following issue was

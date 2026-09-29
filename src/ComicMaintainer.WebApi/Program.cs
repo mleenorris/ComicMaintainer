@@ -12,6 +12,7 @@ using ComicMaintainer.WebApi.Authentication;
 using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.HealthChecks;
 using ComicMaintainer.WebApi.Hubs;
+using ComicMaintainer.WebApi.Infrastructure;
 using ComicMaintainer.WebApi.Middleware;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -104,6 +105,12 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
     .ReadFrom.Services(services)
     .Enrich.FromLogContext()
+    // Every debug.log line carries the correlation id of the request that
+    // produced it (pushed by RequestCorrelationMiddleware). Work that is not
+    // part of a request — the watcher, scheduled jobs, startup — has no id, so
+    // it gets a literal "-" rather than an empty bracket pair. AddPropertyIfAbsent
+    // semantics mean the real id always wins when one is in scope.
+    .Enrich.WithProperty("CorrelationId", "-")
     .MinimumLevel.Debug()
     // Console sink - only show Information and above, clean formatting
     .WriteTo.Console(
@@ -126,7 +133,7 @@ builder.Host.UseSerilog((context, services, configuration) => configuration
         rollingInterval: RollingInterval.Day,
         retainedFileCountLimit: 3,
         fileSizeLimitBytes: logMaxBytes,
-        outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
+        outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] [{Level:u3}] [{SourceContext}] [{CorrelationId}] {Message:lj}{NewLine}{Exception}")
     // Watcher-specific log file - capture all watcher-related logs
     .WriteTo.Logger(lc => lc
         .Filter.ByIncludingOnly(e => isWatcherSource(e))
@@ -529,6 +536,19 @@ builder.Services.AddMemoryCache();
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>("database", tags: new[] { "ready" });
 
+// Turn unhandled exceptions into RFC 7807 problem documents that carry the
+// request's correlation id, instead of an empty 500 nobody can trace.
+builder.Services.AddProblemDetails(options =>
+{
+    options.CustomizeProblemDetails = ctx =>
+    {
+        // Applies to the framework-generated problem documents too (400 model
+        // validation, 404, 415, ...) so *every* problem response is traceable.
+        ctx.ProblemDetails.Extensions.TryAdd("correlationId", ctx.HttpContext.GetCorrelationId());
+    };
+});
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
 // Add CORS with security-conscious configuration
 builder.Services.AddCors(options =>
 {
@@ -751,6 +771,16 @@ using (var scope = app.Services.CreateScope())
 }
 
 // Configure the HTTP request pipeline
+//
+// The correlation middleware runs first so that *everything* downstream —
+// including the exception handler, the security headers and every log line —
+// shares one request id.
+app.UseMiddleware<RequestCorrelationMiddleware>();
+
+// Catch anything a controller lets escape and turn it into a traceable problem
+// document (see GlobalExceptionHandler). Must wrap the rest of the pipeline.
+app.UseExceptionHandler();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();

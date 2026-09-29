@@ -8,10 +8,12 @@ This document provides detailed information about the ComicMaintainer REST API e
 - [Base URL](#base-url)
 - [Authentication](#authentication)
 - [Health Check](#health-check)
+- [Diagnostics](#diagnostics)
 - [File Management](#file-management)
 - [Job Management](#job-management)
 - [Settings](#settings)
 - [Events](#events)
+- [Request Correlation](#request-correlation)
 - [Error Responses](#error-responses)
 
 ## Overview
@@ -63,6 +65,67 @@ Health check endpoint for container orchestration.
   }
 }
 ```
+
+## Diagnostics
+
+### GET /api/diagnostics
+
+A single snapshot of the running instance, intended for troubleshooting and bug reports.
+Unlike `/health`, which is a liveness probe for container orchestration, this returns the
+full operational picture in one call.
+
+**Authorization:** administrator (`CanAdminister`). Non-administrators receive `403`.
+
+**Response (200 OK):**
+```json
+{
+  "generatedAtUtc": "2026-09-29T16:46:45.126Z",
+  "correlationId": "0HNOU94L3SUEB:00000001",
+  "application": {
+    "version": "2.0.310.0",
+    "environment": "Production",
+    "startedAtUtc": "2026-09-29T16:45:20.625Z",
+    "uptimeSeconds": 84
+  },
+  "runtime": {
+    "framework": ".NET 10.0.12",
+    "operatingSystem": "Ubuntu 24.04.5 LTS",
+    "architecture": "X64",
+    "processorCount": 4,
+    "workingSetBytes": 221270016,
+    "managedHeapBytes": 36993696,
+    "threadCount": 24
+  },
+  "health": {
+    "status": "Healthy",
+    "totalDurationMs": 16,
+    "entries": [
+      { "name": "database", "status": "Healthy", "description": "Database is reachable.", "durationMs": 8 }
+    ]
+  },
+  "watcher": {
+    "running": true,
+    "renameEnabled": true,
+    "normalizeEnabled": true,
+    "fileStabilityDelaySeconds": 30
+  },
+  "library": { "total": 1234, "processed": 1200, "unprocessed": 34, "duplicates": 2 },
+  "jobs": { "total": 12, "running": 0, "interrupted": 1, "failed": 0, "lastStartedUtc": "2026-09-29T15:02:11.000Z" },
+  "storage": [
+    { "name": "Watched", "path": "/watched", "exists": true, "writable": true, "freeBytes": 89380139008, "totalBytes": 154894188544 }
+  ],
+  "logs": {
+    "directory": "/Config",
+    "files": [
+      { "name": "debug20260929.log", "sizeBytes": 126002, "lastWriteUtc": "2026-09-29T16:46:45.154Z" }
+    ]
+  }
+}
+```
+
+Each section is gathered independently. A section that cannot be read is replaced by
+`{ "error": "..." }` rather than failing the whole request, so a broken probe (for example an
+unmounted storage path) never hides the rest of the snapshot.
 
 ## File Management
 
@@ -453,22 +516,62 @@ Get application version.
 }
 ```
 
+## Request Correlation
+
+Every request is assigned a correlation ID and it is returned in the **`X-Correlation-Id`**
+response header:
+
+```bash
+curl -i http://localhost:5000/api/version | grep -i x-correlation-id
+# X-Correlation-Id: 0HNOU94L3SUDV:00000001
+```
+
+If the request already carries an `X-Correlation-Id` header, that value is reused so a trace can
+span a reverse proxy or a calling service. Supplied values are sanitised (only `A-Z a-z 0-9 - _ :`
+survive, so header injection is not possible) and truncated to 64 characters.
+
+The same id is written to every log line the request produces (`[{CorrelationId}]` in the debug
+log; non-request lines show `-`) and is returned in the `correlationId` field of error responses,
+so a failure reported by a user can be matched to the exact server log lines:
+
+```bash
+grep '0HNOU94L3SUDV:00000001' /Config/*.log
+```
+
 ## Error Responses
 
 The API uses standard HTTP response codes:
 
 - **200 OK** - Request succeeded
 - **400 Bad Request** - Invalid request parameters
+- **401 Unauthorized** - Authentication required or the token has expired
+- **403 Forbidden** - Authenticated, but the account lacks the required capability
 - **404 Not Found** - Resource not found
 - **500 Internal Server Error** - Server error
 - **503 Service Unavailable** - Service is unhealthy
 
 **Error Response Format:**
+
+Most endpoints return a simple object:
 ```json
 {
   "error": "Description of the error"
 }
 ```
+
+An unhandled server error returns an [RFC 7807](https://datatracker.ietf.org/doc/html/rfc7807)
+problem document (`application/problem+json`) carrying the correlation id:
+```json
+{
+  "type": "https://datatracker.ietf.org/doc/html/rfc9110#section-15.6.1",
+  "title": "An unexpected error occurred.",
+  "status": 500,
+  "correlationId": "0HNOU94L3SUDV:00000001"
+}
+```
+
+The exception message and stack trace are only included when the server runs in the Development
+environment; in production the correlation id is the link to the full detail in the log.
 
 ## Rate Limiting
 

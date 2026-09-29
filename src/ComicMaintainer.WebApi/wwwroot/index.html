@@ -163,6 +163,9 @@
                         <button class="settings-dropdown-item" onclick="openExternalProvidersModal(); closeSettingsMenu();">
                             🌐 External Providers Status
                         </button>
+                        <button class="settings-dropdown-item" id="diagnosticsMenuItem" onclick="openDiagnosticsModal(); closeSettingsMenu();">
+                            🩺 System Diagnostics
+                        </button>
                         <button class="settings-dropdown-item" onclick="openEmailDevicesModal(); closeSettingsMenu();">
                             📧 Ereader Devices
                         </button>
@@ -190,6 +193,9 @@
                             🚪 Logout
                         </button>
                         <div class="settings-dropdown-section-label">About</div>
+                        <button class="settings-dropdown-item" onclick="openKeyboardShortcutsModal(); closeSettingsMenu();">
+                            ⌨️ Keyboard Shortcuts
+                        </button>
                         <button class="settings-dropdown-item" onclick="openAboutModal(); closeSettingsMenu();">
                             ℹ️ About
                         </button>
@@ -207,6 +213,7 @@
                     <div class="header-search">
                         <label for="headerSearchInput" class="visually-hidden">Search files</label>
                         <input type="text" id="headerSearchInput" name="headerSearch" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
+                        <button type="button" class="header-search-clear" id="headerSearchClear" onclick="clearHeaderSearch()" aria-label="Clear search" title="Clear search (Esc)" hidden>&times;</button>
                     </div>
                     <div class="header-filter-dropdown">
                         <button type="button" class="header-filter-toggle" onclick="toggleHeaderFilterDropdown(event)" id="headerFilterToggle" aria-label="Filter files" aria-haspopup="true" aria-expanded="false" aria-controls="headerFilterMenu">
@@ -1214,6 +1221,63 @@
             <div class="modal-footer">
                 <button class="btn" onclick="loadProviderHealth()">↻ Refresh</button>
                 <button class="btn" onclick="closeExternalProvidersModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- System Diagnostics Modal -->
+    <div class="modal" id="diagnosticsModal" role="dialog" aria-modal="true" aria-labelledby="diagnosticsModalTitle" aria-hidden="true">
+        <div class="modal-content" style="max-width: 760px;">
+            <div class="modal-header">
+                <h2 id="diagnosticsModalTitle">System Diagnostics</h2>
+                <button class="close-btn" onclick="closeDiagnosticsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 12px;">
+                    A snapshot of this instance: uptime, health checks, watcher state,
+                    library totals, storage and logs. Use <strong>Copy report</strong>
+                    to paste the whole thing into a bug report.
+                </p>
+                <div id="diagnosticsContent" aria-live="polite">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading diagnostics...</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="loadDiagnostics()">↻ Refresh</button>
+                <button class="btn" id="copyDiagnosticsBtn" onclick="copyDiagnosticsReport()">📋 Copy report</button>
+                <button class="btn" onclick="closeDiagnosticsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Keyboard Shortcuts Modal -->
+    <div class="modal" id="keyboardShortcutsModal" role="dialog" aria-modal="true" aria-labelledby="keyboardShortcutsModalTitle" aria-hidden="true">
+        <div class="modal-content" style="max-width: 560px;">
+            <div class="modal-header">
+                <h2 id="keyboardShortcutsModalTitle">Keyboard Shortcuts</h2>
+                <button class="close-btn" onclick="closeKeyboardShortcutsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <ul class="shortcut-list">
+                    <li><kbd>/</kbd><span>Focus the search box <em>(Library)</em></span></li>
+                    <li><kbd>Esc</kbd><span>Clear the search box (while it is focused)</span></li>
+                    <li><kbd>g</kbd> <kbd>h</kbd><span>Go to Overview</span></li>
+                    <li><kbd>g</kbd> <kbd>l</kbd><span>Go to Library</span></li>
+                    <li><kbd>r</kbd><span>Refresh the file list <em>(Library)</em></span></li>
+                    <li><kbd>f</kbd><span>Open the filter menu <em>(Library)</em></span></li>
+                    <li><kbd>?</kbd><span>Show this help</span></li>
+                    <li><kbd>Esc</kbd><span>Close the open dialog</span></li>
+                </ul>
+                <p style="color: var(--text-muted); font-size: 12px; margin-top: 14px;">
+                    Shortcuts are ignored while you are typing in a field. The reader
+                    has its own set — press <kbd>?</kbd> there to see them.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="closeKeyboardShortcutsModal()">Close</button>
             </div>
         </div>
     </div>

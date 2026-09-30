@@ -3,6 +3,80 @@
         // They are available globally when this script executes.
         
         // =================================================================
+        // API failure references
+        // =================================================================
+        //
+        // Every request the server handles is tagged with a correlation id and
+        // echoes it back in `X-Correlation-Id` (see RequestCorrelationMiddleware);
+        // every log line written while that request is in flight carries the same
+        // id. Without surfacing it, a user reporting "it said 'Failed to load
+        // series'" gives an operator nothing to search for — the message is
+        // identical for a permissions problem, a corrupt archive and a database
+        // lock.
+        //
+        // Rather than thread the id through the hundreds of individual fetch call
+        // sites, the most recent failing API response is remembered here.
+        // Decoration is opt-in per message — a caller passes
+        // `{ reference: true }` to showMessage() — because only the caller knows
+        // whether the failure it is reporting is the API call that produced the
+        // id: a clipboard denial, a validation message or a JavaScript error that
+        // merely happens to follow an API failure would otherwise be stamped with
+        // an unrelated id and send an operator to the wrong log line.
+
+        const API_FAILURE_REFERENCE_WINDOW_MS = 15000;
+        let lastApiFailure = null;
+
+        function recordApiFailure(response) {
+            try {
+                // 401/403 are routine — an expired session or a read-only user —
+                // and are already explained by their own handling, so a support
+                // reference would be noise.
+                if (response.status === 401 || response.status === 403) return;
+                const reference = response.headers.get('X-Correlation-Id');
+                if (!reference) return;
+                lastApiFailure = { reference, at: Date.now() };
+            } catch {
+                // Opaque (cross-origin) responses disallow header access; there
+                // is nothing to record and nothing to report.
+            }
+        }
+
+        /**
+         * The reference of a *recent* API failure, or null. The time window
+         * matters: a stale id pointing at an unrelated request is worse than no
+         * id at all.
+         */
+        function recentApiFailureReference() {
+            if (!lastApiFailure) return null;
+            if (Date.now() - lastApiFailure.at > API_FAILURE_REFERENCE_WINDOW_MS) return null;
+            return lastApiFailure.reference;
+        }
+
+        /**
+         * Append a correlation reference to an error message. `reference` is
+         * either an explicit id or `true`, meaning "the API call that just
+         * failed" — callers only pass it when the message they are reporting
+         * came from a failed API request.
+         */
+        function withApiFailureReference(message, reference) {
+            const ref = reference === true ? recentApiFailureReference() : reference;
+            if (!ref) return message;
+            if (String(message).includes(ref)) return message;
+            return `${message} (ref: ${ref})`;
+        }
+
+        (function instrumentApiFailures() {
+            if (typeof window.fetch !== 'function') return;
+            const nativeFetch = window.fetch.bind(window);
+            window.fetch = function (input, init) {
+                return nativeFetch(input, init).then(response => {
+                    if (response && !response.ok) recordApiFailure(response);
+                    return response;
+                });
+            };
+        })();
+
+        // =================================================================
         // HTML templating helpers
         // =================================================================
         //
@@ -1391,6 +1465,8 @@
         
         // Debounce function for search input
         function debouncedFilterFiles() {
+            syncHeaderSearchClear();
+
             // Clear existing timer
             if (searchDebounceTimer) {
                 clearTimeout(searchDebounceTimer);
@@ -1400,6 +1476,37 @@
             searchDebounceTimer = setTimeout(() => {
                 filterFiles();
             }, 300);
+        }
+
+        // Show the "×" affordance only when there is something to clear, so it
+        // never sits on top of the placeholder text.
+        function syncHeaderSearchClear() {
+            const input = document.getElementById('headerSearchInput');
+            const clearBtn = document.getElementById('headerSearchClear');
+            if (!input || !clearBtn) return;
+            clearBtn.hidden = input.value.length === 0;
+        }
+
+        // Empty the search box and re-run the query. Bound to the "×" button
+        // and to Escape while the search box has focus; both are no-ops when
+        // the box is already empty so Escape can still fall through to
+        // whatever else wants it.
+        function clearHeaderSearch() {
+            const input = document.getElementById('headerSearchInput');
+            if (!input) return false;
+            if (input.value === '') {
+                syncHeaderSearchClear();
+                return false;
+            }
+            input.value = '';
+            syncHeaderSearchClear();
+            if (searchDebounceTimer) {
+                clearTimeout(searchDebounceTimer);
+                searchDebounceTimer = null;
+            }
+            filterFiles();
+            input.focus();
+            return true;
         }
         
         // Theme management
@@ -1719,6 +1826,12 @@
             // they stay hidden even if other code later toggles their `hidden`
             // attribute (e.g. the duplicate-review / combine-folders buttons).
             document.body.classList.toggle('user-read-only', !userCapabilities.canModifyLibrary);
+
+            // /api/diagnostics reports host paths, disk space and process
+            // memory, so it is administrator-only. Hide the entry point rather
+            // than let it open a panel that can only say "403".
+            const diagnosticsItem = document.getElementById('diagnosticsMenuItem');
+            if (diagnosticsItem) diagnosticsItem.hidden = !userCapabilities.canAdminister;
 
             // Server-wide settings are administrator-only; the personal
             // appearance preference stays editable for everyone.
@@ -2311,6 +2424,7 @@
                     const input = document.getElementById('headerSearchInput');
                     if (input) input.value = snap.searchQuery;
                     searchQuery = snap.searchQuery;
+                    syncHeaderSearchClear();
                     // Trigger a fresh load with the search applied. Tests for
                     // emptiness avoid an unnecessary reload when nothing
                     // changed.
@@ -2619,7 +2733,7 @@
                     loadLibraryHealth();
                 }
             } catch (error) {
-                showMessage('Failed to load series: ' + error.message, 'error');
+                showMessage('Failed to load series: ' + error.message, 'error', { reference: true });
             } finally {
                 seriesLoading = false;
                 if (seriesReloadPending) {
@@ -2720,7 +2834,7 @@
                     loadLibraryHealth();
                 }
             } catch (error) {
-                showMessage('Failed to load files: ' + error.message, 'error');
+                showMessage('Failed to load files: ' + error.message, 'error', { reference: true });
             } finally {
                 folderLoading = false;
                 if (folderReloadPending) {
@@ -4576,7 +4690,9 @@
         function formatFileSize(bytes) {
             if (bytes < 1024) return bytes + ' B';
             if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            if (bytes < 1024 * 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+            return (bytes / (1024 * 1024 * 1024 * 1024)).toFixed(1) + ' TB';
         }
         
         function formatModifiedDate(timestamp) {
@@ -7421,7 +7537,13 @@
             if (type === 'error') {
                 messageEl.setAttribute('role', 'alert');
             }
-            messageEl.textContent = message;
+            // An error the user may have to report is only actionable if it can
+            // be tied back to the server log, so a caller reporting a failed API
+            // call passes `reference: true` (or an explicit id) to have the
+            // correlation id of that call appended.
+            messageEl.textContent = options.reference
+                ? withApiFailureReference(message, options.reference)
+                : message;
             
             container.appendChild(messageEl);
             
@@ -7851,6 +7973,231 @@
         
         function closeAboutModal() {
             document.getElementById('aboutModal').classList.remove('active');
+        }
+
+        // =================================================================
+        // System diagnostics
+        // =================================================================
+        //
+        // Triaging "it stopped working" used to mean opening four separate
+        // panels (watcher pill, providers, logs, about) and still not being
+        // able to see uptime, free disk space, health-check results or whether
+        // a mount had gone read-only. /api/diagnostics returns all of it at
+        // once; this renders it and can copy the whole snapshot as text for a
+        // bug report.
+
+        let lastDiagnostics = null;
+
+        async function openDiagnosticsModal() {
+            const modal = document.getElementById('diagnosticsModal');
+            if (!modal) return;
+            modal.classList.add('active');
+            await loadDiagnostics();
+        }
+
+        function closeDiagnosticsModal() {
+            const modal = document.getElementById('diagnosticsModal');
+            if (modal) modal.classList.remove('active');
+        }
+
+        async function loadDiagnostics() {
+            const container = document.getElementById('diagnosticsContent');
+            if (!container) return;
+            renderHtml(container, html`<div class="loading"><div class="spinner"></div><p>Loading diagnostics...</p></div>`);
+
+            try {
+                const response = await fetch(apiUrl('/api/diagnostics'), { headers: getAuthHeaders() });
+                if (handleAuthError(response)) return;
+                if (response.status === 403) {
+                    lastDiagnostics = null;
+                    renderHtml(container, html`<p class="empty-state">System diagnostics are available to administrators only.</p>`);
+                    return;
+                }
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                lastDiagnostics = await response.json();
+                renderDiagnostics(lastDiagnostics);
+            } catch (error) {
+                lastDiagnostics = null;
+                // Rendered inline rather than as a toast: the panel is the only
+                // thing on screen the user is looking at. It still carries the
+                // correlation reference so a failed snapshot is itself traceable.
+                renderHtml(container, html`<p class="empty-state">${withApiFailureReference('Could not load diagnostics: ' + error.message, true)}</p>`);
+            }
+        }
+
+        function formatUptime(totalSeconds) {
+            if (typeof totalSeconds !== 'number' || !isFinite(totalSeconds) || totalSeconds < 0) return 'Unknown';
+            const days = Math.floor(totalSeconds / 86400);
+            const hours = Math.floor((totalSeconds % 86400) / 3600);
+            const minutes = Math.floor((totalSeconds % 3600) / 60);
+            if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+            if (hours > 0) return `${hours}h ${minutes}m`;
+            return `${minutes}m`;
+        }
+
+        function diagnosticsStatusClass(status) {
+            if (status === 'Healthy') return 'ok';
+            if (status === 'Degraded') return 'warn';
+            return 'bad';
+        }
+
+        function diagnosticsSection(title, rows) {
+            return html`
+                <div class="diagnostics-section">
+                    <h3>${title}</h3>
+                    <dl class="diagnostics-grid">
+                        ${rows.map(([label, value]) => html`<dt>${label}</dt><dd>${value}</dd>`)}
+                    </dl>
+                </div>`;
+        }
+
+        function renderDiagnostics(data) {
+            const container = document.getElementById('diagnosticsContent');
+            if (!container) return;
+
+            const app = data.application || {};
+            const runtime = data.runtime || {};
+            const health = data.health || {};
+            const watcher = data.watcher || {};
+            const library = data.library || {};
+            const jobs = data.jobs || {};
+            const storage = Array.isArray(data.storage) ? data.storage : [];
+            const logs = data.logs || {};
+            const logFiles = Array.isArray(logs.files) ? logs.files : [];
+
+            const healthPill = html`<span class="diagnostics-status ${diagnosticsStatusClass(health.status)}">${health.status || 'Unknown'}</span>`;
+
+            renderHtml(container, html`
+                ${diagnosticsSection('Application', [
+                    ['Version', app.version || 'Unknown'],
+                    ['Environment', app.environment || 'Unknown'],
+                    ['Uptime', formatUptime(app.uptimeSeconds)],
+                    ['Health', healthPill]
+                ])}
+                ${health.entries && health.entries.length
+                    ? diagnosticsSection('Health checks', health.entries.map(e => [e.name, `${e.status}${e.description ? ' — ' + e.description : ''}`]))
+                    : ''}
+                ${diagnosticsSection('Runtime', [
+                    ['Framework', runtime.framework || 'Unknown'],
+                    ['Operating system', runtime.operatingSystem || 'Unknown'],
+                    ['Architecture', runtime.architecture || 'Unknown'],
+                    ['Processors', runtime.processorCount ?? 'Unknown'],
+                    ['Memory in use', typeof runtime.workingSetBytes === 'number' ? formatFileSize(runtime.workingSetBytes) : 'Unknown']
+                ])}
+                ${diagnosticsSection('Watcher', watcher.error
+                    ? [['Status', watcher.error]]
+                    : [
+                        ['Running', watcher.running ? 'Yes' : 'No'],
+                        ['Rename on arrival', watcher.renameEnabled ? 'Enabled' : 'Disabled'],
+                        ['Normalize on arrival', watcher.normalizeEnabled ? 'Enabled' : 'Disabled']
+                    ])}
+                ${diagnosticsSection('Library', library.error
+                    ? [['Status', library.error]]
+                    : [
+                        ['Files tracked', library.total ?? 0],
+                        ['Processed', library.processed ?? 0],
+                        ['Unprocessed', library.unprocessed ?? 0],
+                        ['Duplicates', library.duplicates ?? 0]
+                    ])}
+                ${diagnosticsSection('Jobs', jobs.error
+                    ? [['Status', jobs.error]]
+                    : [
+                        ['Running or queued', jobs.running ?? 0],
+                        ['Interrupted', jobs.interrupted ?? 0],
+                        ['Failed', jobs.failed ?? 0]
+                    ])}
+                ${diagnosticsSection('Storage', storage.map(entry => [
+                    entry.name,
+                    `${entry.path || 'not configured'} — ${entry.exists ? 'present' : 'missing'}, ${entry.writable ? 'writable' : 'not writable'}${typeof entry.freeBytes === 'number' ? ', ' + formatFileSize(entry.freeBytes) + ' free' : ''}`
+                ]))}
+                ${diagnosticsSection('Logs', logFiles.length
+                    ? logFiles.map(f => [f.name, formatFileSize(f.sizeBytes)])
+                    : [['Directory', logs.directory || 'Unknown']])}
+            `);
+        }
+
+        /**
+         * Flatten the snapshot into plain text. Copying a rendered table out of
+         * the browser loses the labels, so the report is rebuilt from the data
+         * rather than scraped from the DOM.
+         */
+        function buildDiagnosticsReport(data) {
+            if (!data) return '';
+            const app = data.application || {};
+            const runtime = data.runtime || {};
+            const health = data.health || {};
+            const watcher = data.watcher || {};
+            const library = data.library || {};
+            const jobs = data.jobs || {};
+            const storage = Array.isArray(data.storage) ? data.storage : [];
+            const logs = data.logs || {};
+            const logFiles = Array.isArray(logs.files) ? logs.files : [];
+
+            const lines = [
+                'ComicMaintainer diagnostics',
+                `Generated: ${data.generatedAtUtc || 'unknown'}`,
+                `Reference: ${data.correlationId || 'unknown'}`,
+                '',
+                `Version: ${app.version || 'unknown'} (${app.environment || 'unknown'})`,
+                `Uptime: ${formatUptime(app.uptimeSeconds)}`,
+                `Health: ${health.status || 'unknown'}`
+            ];
+
+            // The failing health check is usually the answer to "why is it
+            // broken", so it has to survive the copy.
+            (Array.isArray(health.entries) ? health.entries : []).forEach(entry => {
+                lines.push(`  ${entry.name}: ${entry.status}${entry.description ? ' — ' + entry.description : ''}`);
+            });
+
+            lines.push(
+                `Runtime: ${runtime.framework || 'unknown'} on ${runtime.operatingSystem || 'unknown'} (${runtime.architecture || 'unknown'}, ${runtime.processorCount ?? '?'} cpu)`,
+                `Memory: ${typeof runtime.workingSetBytes === 'number' ? formatFileSize(runtime.workingSetBytes) : 'unknown'}`,
+                watcher.error
+                    ? `Watcher: ${watcher.error}`
+                    : `Watcher: ${watcher.running ? 'running' : 'stopped'} (rename ${watcher.renameEnabled ? 'on' : 'off'}, normalize ${watcher.normalizeEnabled ? 'on' : 'off'})`,
+                library.error
+                    ? `Library: ${library.error}`
+                    : `Library: ${library.total ?? '?'} files, ${library.processed ?? '?'} processed, ${library.unprocessed ?? '?'} unprocessed, ${library.duplicates ?? '?'} duplicates`,
+                jobs.error
+                    ? `Jobs: ${jobs.error}`
+                    : `Jobs: ${jobs.total ?? '?'} total, ${jobs.running ?? '?'} active, ${jobs.interrupted ?? '?'} interrupted, ${jobs.failed ?? '?'} failed, last started ${jobs.lastStartedUtc || 'never'}`
+            );
+
+            storage.forEach(entry => {
+                lines.push(`Storage/${entry.name}: ${entry.path || 'not configured'} — ${entry.exists ? 'present' : 'missing'}, ${entry.writable ? 'writable' : 'not writable'}${typeof entry.freeBytes === 'number' ? ', ' + formatFileSize(entry.freeBytes) + ' free' : ''}${entry.error ? ', ' + entry.error : ''}`);
+            });
+
+            // Log recency tells an operator whether logging stopped before or
+            // after the failure being reported, so the listing is part of the
+            // snapshot rather than something they have to go and read.
+            lines.push(`Logs: ${logs.error || logs.directory || 'unknown'}`);
+            logFiles.forEach(file => {
+                lines.push(`  ${file.name}: ${typeof file.sizeBytes === 'number' ? formatFileSize(file.sizeBytes) : '?'}, last written ${file.lastWriteUtc || 'unknown'}`);
+            });
+
+            return lines.join('\n');
+        }
+
+        async function copyDiagnosticsReport() {
+            if (!lastDiagnostics) {
+                showMessage('Diagnostics have not loaded yet.', 'error');
+                return;
+            }
+
+            const report = buildDiagnosticsReport(lastDiagnostics);
+            try {
+                // navigator.clipboard is unavailable on insecure origins, which
+                // is a supported way to run this app on a LAN.
+                if (!navigator.clipboard || !navigator.clipboard.writeText) {
+                    throw new Error('Clipboard access is not available');
+                }
+                await navigator.clipboard.writeText(report);
+                showMessage('Diagnostics report copied to the clipboard.', 'success');
+            } catch {
+                showMessage('Could not copy automatically — select the text in the panel and copy it manually.', 'error');
+            }
         }
         
         function openChangePasswordModal() {
@@ -11095,6 +11442,153 @@
             document.addEventListener('DOMContentLoaded', initConnectivityAwareness);
         } else {
             initConnectivityAwareness();
+        }
+
+        // =================================================================
+        // Library keyboard shortcuts
+        // =================================================================
+        //
+        // The reader has had shortcuts and a "?" overlay for a long time; the
+        // library page had neither, so every action needed the mouse and there
+        // was nothing to discover. The bindings below mirror the conventions
+        // users already expect from other library apps ("/" to search, "g"
+        // then a letter to navigate, "?" for help).
+        //
+        // Two rules keep them out of the way: they never fire while the user
+        // is typing, and they never fire while a dialog is open (the modal
+        // handler owns the keyboard then, including Escape).
+
+        const KEYBOARD_SEQUENCE_TIMEOUT_MS = 1200;
+        let pendingShortcutPrefix = null;
+        let pendingShortcutPrefixTimer = null;
+
+        function openKeyboardShortcutsModal() {
+            const modal = document.getElementById('keyboardShortcutsModal');
+            if (modal) modal.classList.add('active');
+        }
+
+        function closeKeyboardShortcutsModal() {
+            const modal = document.getElementById('keyboardShortcutsModal');
+            if (modal) modal.classList.remove('active');
+        }
+
+        /**
+         * True when the keystroke belongs to something the user is editing, in
+         * which case a bare letter must be typed rather than interpreted.
+         */
+        function isTypingTarget(target) {
+            if (!(target instanceof HTMLElement)) return false;
+            if (target.isContentEditable) return true;
+            const tag = target.tagName;
+            return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+        }
+
+        /**
+         * The header search/filter controls are hidden on the Overview route
+         * (see applyRouteVisibility), so their shortcuts must stay inert there
+         * rather than swallowing the keystroke and focusing nothing.
+         */
+        function isShortcutControlAvailable(element) {
+            return !!element && element.offsetParent !== null;
+        }
+
+        function clearShortcutPrefix() {
+            pendingShortcutPrefix = null;
+            if (pendingShortcutPrefixTimer) {
+                clearTimeout(pendingShortcutPrefixTimer);
+                pendingShortcutPrefixTimer = null;
+            }
+        }
+
+        function startShortcutPrefix(key) {
+            clearShortcutPrefix();
+            pendingShortcutPrefix = key;
+            // A half-finished sequence must not silently capture a keystroke
+            // made a minute later.
+            pendingShortcutPrefixTimer = setTimeout(clearShortcutPrefix, KEYBOARD_SEQUENCE_TIMEOUT_MS);
+        }
+
+        function handleLibraryShortcut(event) {
+            // Never intercept a browser/OS chord (Ctrl+F, Cmd+R, ...).
+            if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+            const searchInput = document.getElementById('headerSearchInput');
+
+            // Escape inside the search box clears it. Handled before the
+            // typing guard because this is the one shortcut that is *about*
+            // the field the user is typing in.
+            if (event.key === 'Escape' && document.activeElement === searchInput) {
+                if (clearHeaderSearch()) event.preventDefault();
+                return;
+            }
+
+            if (isTypingTarget(event.target)) return;
+
+            // A visible dialog owns the keyboard (see handleModalKeydown).
+            if (typeof getTopmostVisibleModal === 'function' && getTopmostVisibleModal()) return;
+
+            if (pendingShortcutPrefix === 'g') {
+                const key = event.key.toLowerCase();
+                clearShortcutPrefix();
+                if (key === 'h') {
+                    event.preventDefault();
+                    navigate('#/home');
+                } else if (key === 'l') {
+                    event.preventDefault();
+                    navigate('#/library');
+                }
+                return;
+            }
+
+            switch (event.key) {
+                case '/':
+                    if (isShortcutControlAvailable(searchInput)) {
+                        event.preventDefault();
+                        searchInput.focus();
+                        searchInput.select();
+                    }
+                    break;
+                case '?':
+                    event.preventDefault();
+                    openKeyboardShortcutsModal();
+                    break;
+                case 'g':
+                case 'G':
+                    startShortcutPrefix('g');
+                    break;
+                case 'r':
+                case 'R':
+                    if (isShortcutControlAvailable(searchInput)) {
+                        event.preventDefault();
+                        refreshFiles();
+                    }
+                    break;
+                case 'f':
+                case 'F': {
+                    const toggle = document.getElementById('headerFilterToggle');
+                    if (isShortcutControlAvailable(toggle)) {
+                        event.preventDefault();
+                        toggle.click();
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+
+        function initLibraryKeyboardShortcuts() {
+            // Only the library page has these controls; main.js is not loaded
+            // anywhere else today, but the guard keeps that assumption cheap.
+            if (!document.getElementById('headerSearchInput')) return;
+            syncHeaderSearchClear();
+            document.addEventListener('keydown', handleLibraryShortcut);
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initLibraryKeyboardShortcuts);
+        } else {
+            initLibraryKeyboardShortcuts();
         }
 
         // =================================================================

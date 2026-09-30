@@ -45,7 +45,7 @@ public sealed class ErrorReportingSink : ILogEventSink
     [
         "ComicMaintainer.Core.ErrorReporting",
         "ComicMaintainer.WebApi.Logging",
-        "ComicMaintainer.WebApi.Middleware.GlobalExceptionHandler",
+        "ComicMaintainer.WebApi.Infrastructure.GlobalExceptionHandler",
     ];
 
     private readonly IErrorReportLogBuffer _buffer;

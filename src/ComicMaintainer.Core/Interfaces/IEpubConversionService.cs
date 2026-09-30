@@ -28,12 +28,66 @@ namespace ComicMaintainer.Core.Interfaces;
 /// File name (without extension) for the generated book. Defaults to the name
 /// of the first source archive. Invalid file name characters are replaced.
 /// </param>
+/// <param name="Progress">
+/// Optional sink notified as the conversion advances. A book condensed from a
+/// large selection takes minutes to build, so callers that surface a status to
+/// the user need to observe it while it runs. Reports are frequent (one per
+/// page), synchronous and best-effort: an implementation must be cheap and must
+/// not throw.
+/// </param>
 public record EpubConversionOptions(
     string? SeriesImagePath = null,
     string? SeriesTitle = null,
     long? MaxSizeBytes = null,
     string? Title = null,
-    string? OutputFileName = null);
+    string? OutputFileName = null,
+    IProgress<EpubConversionProgress>? Progress = null);
+
+/// <summary>Stage a conversion is currently in.</summary>
+public enum EpubConversionPhase
+{
+    /// <summary>Opening the source archives to index their pages and metadata.</summary>
+    Reading,
+
+    /// <summary>Writing pages into the book.</summary>
+    Writing,
+
+    /// <summary>Re-reading the finished archive to verify it is complete.</summary>
+    Validating,
+
+    /// <summary>
+    /// The book is over its size budget and is being rebuilt with stronger page
+    /// compression. <see cref="EpubConversionProgress.Pass"/> increases and the
+    /// page counter restarts.
+    /// </summary>
+    Recompressing
+}
+
+/// <summary>
+/// A snapshot of an in-flight conversion.
+/// </summary>
+/// <param name="Phase">What the converter is currently doing.</param>
+/// <param name="CompletedPages">Pages written so far in the current pass.</param>
+/// <param name="TotalPages">
+/// Pages the book will contain, or 0 while the sources are still being indexed.
+/// </param>
+/// <param name="CompletedIssues">Issues fully handled so far in the current pass.</param>
+/// <param name="TotalIssues">Issues the book spans.</param>
+/// <param name="CurrentIssue">File name of the issue being read, if any.</param>
+/// <param name="Pass">1-based index of the compression pass being built.</param>
+/// <param name="TotalPasses">
+/// Passes that may be attempted. Greater than 1 only when a size budget is set,
+/// and later passes only run when the book is still too large.
+/// </param>
+public record EpubConversionProgress(
+    EpubConversionPhase Phase,
+    int CompletedPages,
+    int TotalPages,
+    int CompletedIssues,
+    int TotalIssues,
+    string? CurrentIssue,
+    int Pass,
+    int TotalPasses);
 
 /// <summary>
 /// Converts comic archives (CBZ/CBR) into fixed-layout EPUB3 files suitable for

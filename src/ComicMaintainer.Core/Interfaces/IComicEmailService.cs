@@ -72,6 +72,10 @@ public interface IComicEmailService
     /// plan for the same inputs) as a temporary file for the caller to stream
     /// back as a download. The caller must delete the file when finished.
     /// </summary>
+    /// <param name="progress">
+    /// Optional sink notified while the book is built. A book condensed from a
+    /// whole series takes minutes, so a caller that shows a status needs it.
+    /// </param>
     Task<CondensedBookFile> CreateCondensedBookAsync(
         IEnumerable<string> filePaths,
         string? condenseMode,
@@ -80,6 +84,7 @@ public interface IComicEmailService
         bool preserveIssueOrder = false,
         int? deviceId = null,
         bool skipAlreadyDelivered = false,
+        IProgress<EpubConversionProgress>? progress = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

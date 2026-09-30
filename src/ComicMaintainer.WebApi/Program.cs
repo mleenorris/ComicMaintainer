@@ -679,6 +679,10 @@ builder.Services.AddSingleton<ComicEmailQueue>(sp => new ComicEmailQueue(
     sp.GetRequiredService<ILogger<ComicEmailQueue>>()));
 builder.Services.AddSingleton<IComicEmailQueue>(sp => sp.GetRequiredService<ComicEmailQueue>());
 builder.Services.AddSingleton<IComicEmailService, ComicEmailService>();
+// Condensed EPUB downloads run detached from the request that asked for them so
+// a book that takes minutes can be polled for progress instead of being built
+// behind a request that a browser or proxy will time out.
+builder.Services.AddSingleton<ICondensedBookBuildTracker, CondensedBookBuildTracker>();
 
 
 // Add hosted service for file watcher

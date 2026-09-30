@@ -60,7 +60,7 @@ public static class ErrorReportRedactor
     };
 
     private static readonly Regex SecretAssignment = new(
-        @"\b(?<key>" + string.Join("|", SecretKeyNames) + @")\b\s*(?<sep>[:=]|=>)\s*(?<quote>[""'])?(?<value>[^""'\s,;)\]}]+)(?<close>[""'])?",
+        @"\b(?<key>" + string.Join("|", SecretKeyNames) + @")\b[""']?\s*(?<sep>[:=]|=>)\s*(?<quote>[""'])?(?<value>[^""'\s,;)\]}]+)(?<close>[""'])?",
         Opts,
         RegexTimeout);
 

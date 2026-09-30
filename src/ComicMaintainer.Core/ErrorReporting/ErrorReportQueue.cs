@@ -51,7 +51,10 @@ public sealed class ErrorReportQueue : IErrorReportQueue
         {
             SingleReader = true,
             SingleWriter = false,
-            FullMode = BoundedChannelFullMode.DropWrite
+            // Wait (rather than DropWrite) so that TryWrite reports the drop
+            // instead of silently discarding: the count is the only signal an
+            // operator has that reports went missing during a storm.
+            FullMode = BoundedChannelFullMode.Wait
         });
     }
 

@@ -1299,6 +1299,14 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         var errorReportingMaxPerDay = Environment.GetEnvironmentVariable("ERROR_REPORTING_MAX_ISSUES_PER_DAY");
         if (!string.IsNullOrEmpty(errorReportingMaxPerDay) && int.TryParse(errorReportingMaxPerDay, out var maxIssuesPerDay) && maxIssuesPerDay >= 0)
             options.ErrorReportingMaxIssuesPerDay = maxIssuesPerDay;
+
+        var errorReportingDedupeHours = Environment.GetEnvironmentVariable("ERROR_REPORTING_DEDUPE_WINDOW_HOURS");
+        if (!string.IsNullOrEmpty(errorReportingDedupeHours) && int.TryParse(errorReportingDedupeHours, out var dedupeWindowHours) && dedupeWindowHours > 0)
+            options.ErrorReportingDedupeWindowHours = dedupeWindowHours;
+
+        var errorReportingComment = Environment.GetEnvironmentVariable("ERROR_REPORTING_COMMENT_ON_RECURRENCE");
+        if (!string.IsNullOrEmpty(errorReportingComment))
+            options.ErrorReportingCommentOnRecurrence = errorReportingComment.Equals("true", StringComparison.OrdinalIgnoreCase);
     }
 }
 

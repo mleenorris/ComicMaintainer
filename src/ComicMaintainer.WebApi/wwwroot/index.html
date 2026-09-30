@@ -913,6 +913,66 @@
                    <input type="number" id="emailMaxAttachmentMb" name="emailMaxAttachmentMb" min="1" step="1" autocomplete="off" placeholder="25">
                 </div>
                  
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Automated Error Reporting</h3>
+                <div class="form-group">
+                   <small style="display: block; margin-bottom: 15px; color: var(--text-muted);">
+                       When enabled, errors logged by this instance are deduplicated and filed as issues on a GitHub repository you nominate, so a coding agent can start on them. Paths, email addresses and credentials are redacted before anything is sent. This is off by default and should normally point at <strong>your own</strong> repository.
+                   </small>
+                   <label for="errorReportingEnabledCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                       <input type="checkbox" id="errorReportingEnabledCheckbox" name="errorReportingEnabled" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                       <span>File GitHub issues for errors</span>
+                   </label>
+                </div>
+                <div class="form-group">
+                   <label for="errorReportingOwner">GitHub Owner</label>
+                   <input type="text" id="errorReportingOwner" name="errorReportingOwner" autocomplete="off" placeholder="your-github-username">
+                </div>
+                <div class="form-group">
+                   <label for="errorReportingRepo">GitHub Repository</label>
+                   <input type="text" id="errorReportingRepo" name="errorReportingRepo" autocomplete="off" placeholder="your-fork">
+                </div>
+                <div class="form-group">
+                   <label for="errorReportingToken">GitHub Token</label>
+                   <input type="password" id="errorReportingToken" name="errorReportingToken" autocomplete="new-password">
+                   <small id="errorReportingTokenHint" style="display: block; margin-top: 5px; color: var(--text-muted);">
+                       Use a fine-grained token with <code>issues: write</code> on that repository only.
+                   </small>
+                   <label for="errorReportingClearTokenCheckbox" style="display: flex; align-items: center; cursor: pointer; margin-top: 8px; font-weight: 400;">
+                       <input type="checkbox" id="errorReportingClearTokenCheckbox" name="errorReportingClearToken" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                       <span>Clear stored token on save</span>
+                   </label>
+                </div>
+                <div class="form-group">
+                   <label for="errorReportingAssignee">Assign Issues To (optional)</label>
+                   <input type="text" id="errorReportingAssignee" name="errorReportingAssignee" autocomplete="off" placeholder="copilot-swe-agent">
+                   <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                       GitHub login to assign new issues to. Set this to the coding agent's login to have it start work automatically. If the login cannot be assigned, the issue is still created unassigned.
+                   </small>
+                </div>
+                <div class="form-group">
+                   <label for="errorReportingMaxPerDay">Maximum Issues Per Day</label>
+                   <input type="number" id="errorReportingMaxPerDay" name="errorReportingMaxPerDay" min="0" max="100" step="1" autocomplete="off" placeholder="10">
+                </div>
+                <div class="form-group">
+                   <label for="errorReportingDedupeHours">Recurrence Comment Interval (Hours)</label>
+                   <input type="number" id="errorReportingDedupeHours" name="errorReportingDedupeHours" min="1" max="720" step="1" autocomplete="off" placeholder="24">
+                   <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                       An already-filed failure never gets a second issue. This is how long to wait before adding a "still happening" comment to the existing one.
+                   </small>
+                </div>
+                <div class="form-group">
+                   <label for="errorReportingCommentCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                       <input type="checkbox" id="errorReportingCommentCheckbox" name="errorReportingComment" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                       <span>Comment on existing issues when a failure recurs</span>
+                   </label>
+                </div>
+                <div class="form-group">
+                   <button class="btn btn-small" type="button" data-requires-write onclick="sendErrorReportingTest()">Send Test Report</button>
+                   <small id="errorReportingTestHint" style="display: block; margin-top: 5px; color: var(--text-muted);">
+                       Save your settings first, then send a harmless test report to confirm the token and repository work.
+                   </small>
+                </div>
+
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Log Rotation</h3>
                 <div class="form-group">
                     <label for="logMaxSize">

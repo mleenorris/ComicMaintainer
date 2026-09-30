@@ -399,4 +399,113 @@ public class SettingsServiceTests : IDisposable
         Assert.Equal(System.Text.Json.JsonValueKind.Object, appSettings.ValueKind);
         Assert.True(appSettings.TryGetProperty("FilenameFormat", out _));
     }
+
+    [Fact]
+    public async Task UpdateErrorReportingSettingsAsync_PersistsDestinationAndSecretSeparately()
+    {
+        await _service.UpdateErrorReportingSettingsAsync(
+            enabled: true,
+            gitHubOwner: "someone",
+            gitHubRepo: "their-fork",
+            gitHubToken: "a-token-value",
+            assignee: "copilot-swe-agent",
+            maxIssuesPerDay: 5,
+            dedupeWindowHours: 12,
+            commentOnRecurrence: false);
+
+        var settingsFilePath = Path.Combine(_testConfigDir, "user-settings.json");
+        var settings = ReadAppSettingsSection(settingsFilePath);
+
+        Assert.True(settings["ErrorReportingEnabled"].GetBoolean());
+        Assert.Equal("someone", settings["ErrorReportingGitHubOwner"].GetString());
+        Assert.Equal("their-fork", settings["ErrorReportingGitHubRepo"].GetString());
+        Assert.Equal("a-token-value", settings["ErrorReportingGitHubToken"].GetString());
+        Assert.Equal(5, settings["ErrorReportingMaxIssuesPerDay"].GetInt32());
+        Assert.Equal(12, settings["ErrorReportingDedupeWindowHours"].GetInt32());
+        Assert.False(settings["ErrorReportingCommentOnRecurrence"].GetBoolean());
+    }
+
+    [Fact]
+    public async Task UpdateErrorReportingSettingsAsync_NeverLogsTheToken()
+    {
+        await _service.UpdateErrorReportingSettingsAsync(
+            enabled: true,
+            gitHubOwner: "someone",
+            gitHubRepo: "their-fork",
+            gitHubToken: "a-token-value",
+            assignee: null,
+            maxIssuesPerDay: 5,
+            dedupeWindowHours: 12,
+            commentOnRecurrence: true);
+
+        _loggerMock.Verify(
+            l => l.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains("a-token-value")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateErrorReportingSettingsAsync_LeavesTheStoredTokenAloneWhenOmitted()
+    {
+        await _service.UpdateErrorReportingSettingsAsync(
+            true, "someone", "their-fork", "a-token-value", null, 5, 12, true);
+
+        await _service.UpdateErrorReportingSettingsAsync(
+            true, "someone", "their-fork", null, null, 5, 12, true);
+
+        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+        Assert.Equal("a-token-value", settings["ErrorReportingGitHubToken"].GetString());
+    }
+
+    [Fact]
+    public async Task UpdateErrorReportingSettingsAsync_ClearsTheTokenOnEmptyString()
+    {
+        await _service.UpdateErrorReportingSettingsAsync(
+            true, "someone", "their-fork", "a-token-value", null, 5, 12, true);
+
+        await _service.UpdateErrorReportingSettingsAsync(
+            true, "someone", "their-fork", string.Empty, null, 5, 12, true);
+
+        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+        Assert.Equal(JsonValueKind.Null, settings["ErrorReportingGitHubToken"].ValueKind);
+    }
+
+    [Fact]
+    public async Task UpdateErrorReportingSettingsAsync_RefusesToEnableWithoutADestination()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
+            enabled: true,
+            gitHubOwner: null,
+            gitHubRepo: null,
+            gitHubToken: "a-token-value",
+            assignee: null,
+            maxIssuesPerDay: 5,
+            dedupeWindowHours: 12,
+            commentOnRecurrence: true));
+    }
+
+    [Theory]
+    [InlineData("../../etc", "repo")]
+    [InlineData("owner", "../other")]
+    [InlineData("owner with spaces", "repo")]
+    public async Task UpdateErrorReportingSettingsAsync_RejectsNamesThatWouldEscapeTheApiPath(string owner, string repo)
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
+            true, owner, repo, "a-token-value", null, 5, 12, true));
+    }
+
+    [Theory]
+    [InlineData(-1, 24)]
+    [InlineData(1000, 24)]
+    [InlineData(5, 0)]
+    [InlineData(5, 100000)]
+    public async Task UpdateErrorReportingSettingsAsync_RejectsOutOfRangeLimits(int maxPerDay, int windowHours)
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
+            true, "someone", "their-fork", "a-token-value", null, maxPerDay, windowHours, true));
+    }
 }

@@ -487,6 +487,64 @@ public class EpubConversionServiceTests : IDisposable
         Assert.DoesNotContain("..", Path.GetFileName(epubPath));
     }
 
+    [Fact]
+    public async Task ConvertToEpubAsync_ReportsProgressForEveryPage()
+    {
+        var first = CreateCbz("Progress - Chapter 0001.cbz", pageCount: 2, includeComicInfo: true, number: "1");
+        var second = CreateCbz("Progress - Chapter 0002.cbz", pageCount: 3, includeComicInfo: true, number: "2");
+        var reports = new List<EpubConversionProgress>();
+
+        await _service.ConvertToEpubAsync(
+            new[] { first, second },
+            Path.Combine(_workDir, "progress"),
+            new EpubConversionOptions(
+                Title: "Progress 001-002",
+                Progress: new CollectingProgress(reports)));
+
+        // Indexing the sources comes first, and the page total is only known
+        // once every archive has been opened.
+        Assert.Contains(reports, r => r.Phase == EpubConversionPhase.Reading);
+
+        var written = reports.Where(r => r.Phase == EpubConversionPhase.Writing).ToList();
+        Assert.Equal(5, written.Count);
+        Assert.Equal(Enumerable.Range(1, 5), written.Select(r => r.CompletedPages));
+        Assert.All(written, r => Assert.Equal(5, r.TotalPages));
+        Assert.All(written, r => Assert.Equal(2, r.TotalIssues));
+        Assert.Equal(Path.GetFileName(second), written[^1].CurrentIssue);
+
+        // Without a size budget there is exactly one compression pass, and the
+        // book is verified before it is handed back.
+        Assert.All(reports, r => Assert.Equal(1, r.TotalPasses));
+        Assert.Equal(EpubConversionPhase.Validating, reports[^1].Phase);
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_ProgressCallbackFailureDoesNotFailTheConversion()
+    {
+        var cbz = CreateCbz("Throwing.cbz", pageCount: 2, includeComicInfo: false);
+
+        var epubPath = await _service.ConvertToEpubAsync(
+            new[] { cbz },
+            Path.Combine(_workDir, "throwing-progress"),
+            new EpubConversionOptions(Progress: new ThrowingProgress()));
+
+        Assert.True(File.Exists(epubPath));
+    }
+
+    private sealed class CollectingProgress : IProgress<EpubConversionProgress>
+    {
+        private readonly List<EpubConversionProgress> _reports;
+
+        public CollectingProgress(List<EpubConversionProgress> reports) => _reports = reports;
+
+        public void Report(EpubConversionProgress value) => _reports.Add(value);
+    }
+
+    private sealed class ThrowingProgress : IProgress<EpubConversionProgress>
+    {
+        public void Report(EpubConversionProgress value) => throw new InvalidOperationException("boom");
+    }
+
     private string CreateCbz(
         string fileName,
         int pageCount,

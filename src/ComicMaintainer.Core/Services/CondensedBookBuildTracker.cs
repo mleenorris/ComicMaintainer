@@ -50,7 +50,12 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
     {
     }
 
-    internal CondensedBookBuildTracker(
+    /// <summary>
+    /// Test-only constructor that allows overriding the clock and how long a
+    /// finished build is kept. Production callers should use the simpler
+    /// overload.
+    /// </summary>
+    public CondensedBookBuildTracker(
         IComicEmailService email,
         ILogger<CondensedBookBuildTracker> logger,
         TimeProvider timeProvider,

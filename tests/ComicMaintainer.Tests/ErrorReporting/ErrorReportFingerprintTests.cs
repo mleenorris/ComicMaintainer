@@ -106,12 +106,49 @@ public class ErrorReportFingerprintTests
     }
 
     [Fact]
-    public void NormalizeFrames_StripsAsyncStateMachineDecoration()
+    public void NormalizeFrames_StripsAsyncStateMachineDecorationButKeepsTheMethodName()
     {
         var withDecoration = "   at ComicMaintainer.Core.Services.Svc+<ProcessAsync>d__12.MoveNext()";
         var frames = ErrorReportFingerprint.NormalizeFrames(withDecoration);
 
-        Assert.Equal("at ComicMaintainer.Core.Services.Svc.MoveNext()", frames.Single());
+        Assert.Equal("at ComicMaintainer.Core.Services.Svc.ProcessAsync()", frames.Single());
+    }
+
+    [Fact]
+    public void NormalizeFrames_KeepsDistinctAsyncMethodsOnTheSameTypeApart()
+    {
+        // Dropping the captured name would collapse every async method on a
+        // type to "Svc.MoveNext" and merge unrelated defects into one issue.
+        var process = ErrorReportFingerprint.NormalizeFrames("at Ns.Svc+<ProcessAsync>d__12.MoveNext()").Single();
+        var normalize = ErrorReportFingerprint.NormalizeFrames("at Ns.Svc+<NormalizeAsync>d__13.MoveNext()").Single();
+
+        Assert.NotEqual(process, normalize);
+    }
+
+    [Fact]
+    public void NormalizeFrames_IgnoresTheStateMachineOrdinal()
+    {
+        // Adding an unrelated async member shifts d__12 to d__13 without
+        // changing the defect, so the fingerprint must not move with it.
+        Assert.Equal(
+            ErrorReportFingerprint.NormalizeFrames("at Ns.Svc+<ProcessAsync>d__12.MoveNext()").Single(),
+            ErrorReportFingerprint.NormalizeFrames("at Ns.Svc+<ProcessAsync>d__31.MoveNext()").Single());
+    }
+
+    [Fact]
+    public void NormalizeFrames_KeepsLambdaMethodNames()
+    {
+        var frame = ErrorReportFingerprint.NormalizeFrames("at Ns.Svc+<>c.<Handle>b__3_0()").Single();
+
+        Assert.Equal("at Ns.Svc.Handle()", frame);
+    }
+
+    [Fact]
+    public void Compute_DiffersByAsyncMethodOnTheSameType()
+    {
+        Assert.NotEqual(
+            ErrorReportFingerprint.Compute("System.IO.IOException", "at Ns.Svc+<ProcessAsync>d__12.MoveNext()", "Failed", "Svc"),
+            ErrorReportFingerprint.Compute("System.IO.IOException", "at Ns.Svc+<NormalizeAsync>d__13.MoveNext()", "Failed", "Svc"));
     }
 
     [Fact]

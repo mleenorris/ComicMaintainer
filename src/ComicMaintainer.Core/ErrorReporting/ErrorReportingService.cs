@@ -4,6 +4,8 @@ using ComicMaintainer.Core.Utilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ComicMaintainer.Core.ErrorReporting;
 
@@ -64,11 +66,26 @@ public sealed class ErrorReportingService : IErrorReportingService
     /// <summary>How long the breaker stays open once tripped.</summary>
     private static readonly TimeSpan CircuitBreakerDuration = TimeSpan.FromMinutes(15);
 
+    /// <summary>
+    /// Backoff between delivery attempts for a transient failure. The report
+    /// only exists in memory at this point — the dispatcher has already taken
+    /// it off the queue — so a one-off timeout would otherwise lose it
+    /// entirely. Deliberately short and bounded: this runs on the single
+    /// background dispatcher, and a longer pause would stall every report
+    /// behind it.
+    /// </summary>
+    private static readonly TimeSpan[] DefaultRetryDelays =
+    {
+        TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(10)
+    };
+
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly IGitHubIssueClient _gitHubClient;
     private readonly ILogger<ErrorReportingService> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly IReadOnlyList<TimeSpan> _retryDelays;
 
     private int _consecutiveTransientFailures;
     private DateTimeOffset _circuitOpenUntil = DateTimeOffset.MinValue;
@@ -78,13 +95,15 @@ public sealed class ErrorReportingService : IErrorReportingService
         IOptionsMonitor<AppSettings> appSettings,
         IGitHubIssueClient gitHubClient,
         ILogger<ErrorReportingService> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IReadOnlyList<TimeSpan>? retryDelays = null)
     {
         _dbContextFactory = dbContextFactory;
         _appSettings = appSettings;
         _gitHubClient = gitHubClient;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _retryDelays = retryDelays ?? DefaultRetryDelays;
     }
 
     public async Task<ErrorReportOutcome> ProcessAsync(ErrorReport report, CancellationToken cancellationToken = default)
@@ -144,6 +163,39 @@ public sealed class ErrorReportingService : IErrorReportingService
             return ErrorReportOutcome.NotConfigured;
         }
 
+        // The destination is an operator setting and can change at any time. An
+        // issue number is only meaningful on the repository it was filed
+        // against, so linkage to a different destination is dropped rather than
+        // reused — otherwise a recurrence would comment on whatever unrelated
+        // issue happens to hold that number in the new repository, and the
+        // defect would never be filed in the new one.
+        if (HasStaleIssueLinkage(entity, target))
+        {
+            _logger.LogInformation(
+                "The error reporting destination changed; clearing the GitHub issue linkage for fingerprint {Fingerprint}",
+                LoggingHelper.SanitizeForLog(entity.Fingerprint));
+
+            entity.GitHubIssueNumber = null;
+            entity.GitHubIssueUrl = null;
+            entity.GitHubOwner = null;
+            entity.GitHubRepo = null;
+            entity.IssueCreatedAt = null;
+            entity.LastReportedAt = null;
+            entity.PermanentFailureSignature = null;
+            entity.State = ErrorReportState.New;
+            await SaveAsync(db, cancellationToken);
+        }
+
+        // A permanent rejection is a configuration problem. Retrying it on
+        // every occurrence would send one doomed GitHub request per logged
+        // error, so the row stays parked until the configuration changes.
+        var configurationSignature = ComputeConfigurationSignature(target, settings.ErrorReportingAssignee);
+        if (entity.State == ErrorReportState.Failed
+            && string.Equals(entity.PermanentFailureSignature, configurationSignature, StringComparison.Ordinal))
+        {
+            return ErrorReportOutcome.Recorded;
+        }
+
         if (IsCircuitOpen(now))
         {
             return ErrorReportOutcome.Recorded;
@@ -160,7 +212,7 @@ public sealed class ErrorReportingService : IErrorReportingService
                 return ErrorReportOutcome.RateLimited;
             }
 
-            return await CreateIssueAsync(db, entity, report, target, settings, now, isNew, cancellationToken);
+            return await CreateIssueAsync(db, entity, report, target, settings, now, isNew, configurationSignature, cancellationToken);
         }
 
         if (!settings.ErrorReportingCommentOnRecurrence)
@@ -174,7 +226,7 @@ public sealed class ErrorReportingService : IErrorReportingService
             return ErrorReportOutcome.Recorded;
         }
 
-        return await AddRecurrenceCommentAsync(db, entity, report, target, now, cancellationToken);
+        return await AddRecurrenceCommentAsync(db, entity, report, target, now, configurationSignature, cancellationToken);
     }
 
     private async Task<ErrorReportOutcome> CreateIssueAsync(
@@ -185,6 +237,7 @@ public sealed class ErrorReportingService : IErrorReportingService
         AppSettings settings,
         DateTime now,
         bool isNew,
+        string configurationSignature,
         CancellationToken cancellationToken)
     {
         var title = ErrorReportIssueFormatter.BuildTitle(report);
@@ -199,26 +252,35 @@ public sealed class ErrorReportingService : IErrorReportingService
             GitHubIssueReference issue;
             try
             {
-                issue = await _gitHubClient.CreateIssueAsync(target, title, body, labels, assignee, cancellationToken);
+                issue = await WithTransientRetriesAsync(
+                    ct => _gitHubClient.CreateIssueAsync(target, title, body, labels, assignee, ct),
+                    cancellationToken);
             }
-            catch (GitHubIssuePermanentException) when (assignee is not null)
+            catch (GitHubIssuePermanentException ex) when (assignee is not null && ex.IsAssigneeRejection)
             {
                 // GitHub rejects the whole request when an assignee cannot be
                 // assigned (not a collaborator, coding agent not enabled). An
                 // unassigned issue is far better than no issue, so retry once
-                // without the assignee before giving up.
+                // without the assignee. Every other permanent rejection — bad
+                // token, missing repository — would fail identically and is
+                // left to propagate.
                 _logger.LogWarning(
-                    "GitHub rejected the issue with assignee {Assignee}; retrying unassigned",
+                    "GitHub rejected the assignee {Assignee}; retrying unassigned",
                     LoggingHelper.SanitizeForLog(assignee));
-                issue = await _gitHubClient.CreateIssueAsync(target, title, body, labels, null, cancellationToken);
+                issue = await WithTransientRetriesAsync(
+                    ct => _gitHubClient.CreateIssueAsync(target, title, body, labels, null, ct),
+                    cancellationToken);
             }
 
             entity.GitHubIssueNumber = issue.Number;
             entity.GitHubIssueUrl = issue.HtmlUrl;
+            entity.GitHubOwner = target.Owner;
+            entity.GitHubRepo = target.Repo;
             entity.IssueCreatedAt = now;
             entity.LastReportedAt = now;
             entity.State = ErrorReportState.Reported;
             entity.LastError = null;
+            entity.PermanentFailureSignature = null;
             await SaveAsync(db, cancellationToken);
 
             OnReportingSucceeded();
@@ -233,7 +295,7 @@ public sealed class ErrorReportingService : IErrorReportingService
         }
         catch (Exception ex) when (ex is GitHubIssueTransientException or GitHubIssuePermanentException)
         {
-            await RecordFailureAsync(db, entity, ex, cancellationToken);
+            await RecordFailureAsync(db, entity, ex, configurationSignature, cancellationToken);
             return ErrorReportOutcome.Failed;
         }
     }
@@ -244,19 +306,27 @@ public sealed class ErrorReportingService : IErrorReportingService
         ErrorReport report,
         GitHubIssueTarget target,
         DateTime now,
+        string configurationSignature,
         CancellationToken cancellationToken)
     {
         try
         {
-            await _gitHubClient.AddCommentAsync(
-                target,
-                entity.GitHubIssueNumber!.Value,
-                ErrorReportIssueFormatter.BuildRecurrenceComment(report, entity),
+            await WithTransientRetriesAsync(
+                async ct =>
+                {
+                    await _gitHubClient.AddCommentAsync(
+                        target,
+                        entity.GitHubIssueNumber!.Value,
+                        ErrorReportIssueFormatter.BuildRecurrenceComment(report, entity),
+                        ct);
+                    return true;
+                },
                 cancellationToken);
 
             entity.LastReportedAt = now;
             entity.LastError = null;
             entity.State = ErrorReportState.Reported;
+            entity.PermanentFailureSignature = null;
             await SaveAsync(db, cancellationToken);
 
             OnReportingSucceeded();
@@ -264,8 +334,39 @@ public sealed class ErrorReportingService : IErrorReportingService
         }
         catch (Exception ex) when (ex is GitHubIssueTransientException or GitHubIssuePermanentException)
         {
-            await RecordFailureAsync(db, entity, ex, cancellationToken);
+            await RecordFailureAsync(db, entity, ex, configurationSignature, cancellationToken);
             return ErrorReportOutcome.Failed;
+        }
+    }
+
+    /// <summary>
+    /// Runs a delivery attempt, retrying transient failures with backoff.
+    /// </summary>
+    /// <remarks>
+    /// By the time this runs the report exists only in memory — the dispatcher
+    /// has already taken it off the queue — so without an in-place retry a
+    /// single timeout silently discards it. Retries are bounded and honour
+    /// cancellation so shutdown is never delayed, and permanent rejections are
+    /// not retried at all.
+    /// </remarks>
+    private async Task<T> WithTransientRetriesAsync<T>(
+        Func<CancellationToken, Task<T>> attempt,
+        CancellationToken cancellationToken)
+    {
+        for (var i = 0; ; i++)
+        {
+            try
+            {
+                return await attempt(cancellationToken);
+            }
+            catch (GitHubIssueTransientException) when (i < _retryDelays.Count && !cancellationToken.IsCancellationRequested)
+            {
+                var delay = _retryDelays[i];
+                if (delay > TimeSpan.Zero)
+                {
+                    await Task.Delay(delay, _timeProvider, cancellationToken);
+                }
+            }
         }
     }
 
@@ -273,14 +374,20 @@ public sealed class ErrorReportingService : IErrorReportingService
         ComicMaintainerDbContext db,
         ErrorReportEntity entity,
         Exception exception,
+        string configurationSignature,
         CancellationToken cancellationToken)
     {
         entity.LastError = ErrorReportRedactor.Truncate(exception.Message, 1024);
 
-        // A permanent failure is a configuration problem the operator must fix;
-        // leaving the row "new" would make the dispatcher retry the same
-        // rejected request for every subsequent occurrence.
+        // A permanent failure is a configuration problem the operator must fix.
+        // Recording which configuration was rejected parks the row until that
+        // configuration changes, so a bad token cannot produce one GitHub
+        // request per occurrence indefinitely. Transient failures leave the
+        // signature clear and are retried on the next occurrence.
         entity.State = ErrorReportState.Failed;
+        entity.PermanentFailureSignature = exception is GitHubIssuePermanentException
+            ? configurationSignature
+            : null;
         await SaveAsync(db, cancellationToken);
 
         if (exception is GitHubIssueTransientException)
@@ -330,6 +437,35 @@ public sealed class ErrorReportingService : IErrorReportingService
             .CountAsync(e => e.IssueCreatedAt != null && e.IssueCreatedAt >= cutoff, cancellationToken);
 
         return created >= cap;
+    }
+
+    /// <summary>
+    /// True when the row is linked to an issue on a repository other than the
+    /// one currently configured. Rows filed before the destination was recorded
+    /// are treated as stale too: reusing their number against an unknown
+    /// repository is exactly the mistake this guards against.
+    /// </summary>
+    private static bool HasStaleIssueLinkage(ErrorReportEntity entity, GitHubIssueTarget target)
+        => entity.GitHubIssueNumber is not null
+            && !(string.Equals(entity.GitHubOwner, target.Owner, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(entity.GitHubRepo, target.Repo, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Identity of the reporting configuration, used to park a row that was
+    /// permanently rejected until something the operator controls changes. The
+    /// token is hashed with everything else and never stored in readable form.
+    /// </summary>
+    private static string ComputeConfigurationSignature(GitHubIssueTarget target, string? assignee)
+    {
+        var material = string.Join(
+            '\n',
+            target.Owner,
+            target.Repo,
+            target.Token,
+            assignee ?? string.Empty);
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(material));
+        return Convert.ToHexString(hash).ToLowerInvariant()[..32];
     }
 
     private static GitHubIssueTarget? BuildTarget(AppSettings settings)

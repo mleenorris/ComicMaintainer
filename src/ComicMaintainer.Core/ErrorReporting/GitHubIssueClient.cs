@@ -18,6 +18,18 @@ public sealed class GitHubIssuePermanentException : Exception
     public GitHubIssuePermanentException(string message) : base(message)
     {
     }
+
+    public GitHubIssuePermanentException(string message, bool isAssigneeRejection) : base(message)
+    {
+        IsAssigneeRejection = isAssigneeRejection;
+    }
+
+    /// <summary>
+    /// True when GitHub rejected the request specifically because the requested
+    /// assignee could not be assigned. Only then is retrying the same request
+    /// unassigned worthwhile; every other rejection would fail identically.
+    /// </summary>
+    public bool IsAssigneeRejection { get; }
 }
 
 /// <summary>
@@ -187,12 +199,18 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
         }
 
         var status = response.StatusCode;
+        var isRateLimited = IsRateLimited(response);
+        var isAssigneeRejection = status == HttpStatusCode.UnprocessableEntity
+            && await IsAssigneeValidationFailureAsync(response, cancellationToken);
         response.Dispose();
 
         // A rate-limited or unavailable GitHub is a "come back later"; anything
         // else is a misconfiguration that retrying would only turn into an
-        // endless loop of rejected requests.
-        if (status is HttpStatusCode.TooManyRequests
+        // endless loop of rejected requests. Secondary rate limits arrive as a
+        // 403 rather than a 429, so the rate-limit headers decide rather than
+        // the status code alone — a permissions 403 stays permanent.
+        if (isRateLimited
+            || status is HttpStatusCode.TooManyRequests
             or HttpStatusCode.RequestTimeout
             or HttpStatusCode.InternalServerError
             or HttpStatusCode.BadGateway
@@ -206,7 +224,55 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
         // content, which is the very error text we are trying not to duplicate
         // into local logs in unredacted form.
         throw new GitHubIssuePermanentException(
-            $"GitHub rejected the request with {(int)status} ({status}). Check the repository name and that the token grants issues:write.");
+            $"GitHub rejected the request with {(int)status} ({status}). Check the repository name and that the token grants issues:write.",
+            isAssigneeRejection);
+    }
+
+    /// <summary>
+    /// Recognizes a rate-limited response, including the secondary rate limit
+    /// that GitHub reports as <c>403</c> rather than <c>429</c>.
+    /// </summary>
+    private static bool IsRateLimited(HttpResponseMessage response)
+    {
+        if (response.StatusCode is not (HttpStatusCode.Forbidden or HttpStatusCode.TooManyRequests))
+        {
+            return false;
+        }
+
+        if (response.Headers.RetryAfter is not null)
+        {
+            return true;
+        }
+
+        if (response.Headers.TryGetValues("x-ratelimit-remaining", out var remaining)
+            && int.TryParse(remaining.FirstOrDefault(), out var value))
+        {
+            return value <= 0;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Detects the specific validation failure that says the assignee could not
+    /// be assigned. Only the <c>field</c>/<c>resource</c> markers are inspected;
+    /// the rest of the body (which echoes the reported error text) is discarded.
+    /// </summary>
+    private static async Task<bool> IsAssigneeValidationFailureAsync(
+        HttpResponseMessage response,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var body = await response.Content.ReadFromJsonAsync<ValidationErrorResponse>(JsonOptions, cancellationToken);
+            return body?.Errors?.Any(e =>
+                string.Equals(e.Field, "assignees", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(e.Field, "assignee", StringComparison.OrdinalIgnoreCase)) == true;
+        }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException or HttpRequestException)
+        {
+            return false;
+        }
     }
 
     private sealed record IssueResponse
@@ -215,5 +281,19 @@ public sealed class GitHubIssueClient : IGitHubIssueClient
 
         [JsonPropertyName("html_url")]
         public string? HtmlUrl { get; init; }
+    }
+
+    private sealed record ValidationErrorResponse
+    {
+        public IReadOnlyList<ValidationError>? Errors { get; init; }
+    }
+
+    private sealed record ValidationError
+    {
+        public string? Resource { get; init; }
+
+        public string? Field { get; init; }
+
+        public string? Code { get; init; }
     }
 }

@@ -239,13 +239,87 @@ public class ErrorReportingServiceTests
         Assert.Null(created.Assignee);
     }
 
+    [Fact]
+    public async Task ProcessAsync_DoesNotRetryUnassignedForUnrelatedRejections()
+    {
+        // A bad token or missing repository fails identically without the
+        // assignee, so a second request would only double the noise.
+        var client = new ThrowingGitHubIssueClient(() => new GitHubIssuePermanentException("bad credentials"));
+        var service = CreateService(EnabledSettings(), client);
+
+        Assert.Equal(ErrorReportOutcome.Failed, await service.ProcessAsync(CreateReport()));
+        Assert.Equal(1, client.Attempts);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_RetriesATransientFailureBeforeGivingUp()
+    {
+        var client = new RecordingGitHubIssueClient { TransientFailuresBeforeSuccess = 2 };
+        var service = CreateService(EnabledSettings(), client);
+
+        var outcome = await service.ProcessAsync(CreateReport());
+
+        Assert.Equal(ErrorReportOutcome.IssueCreated, outcome);
+        Assert.Single(client.CreatedIssues);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_StopsCallingGitHubAfterAPermanentRejectionUntilConfigurationChanges()
+    {
+        var client = new ThrowingGitHubIssueClient(() => new GitHubIssuePermanentException("nonexistent repository"));
+        var settings = EnabledSettings();
+        var service = CreateService(settings, client);
+
+        Assert.Equal(ErrorReportOutcome.Failed, await service.ProcessAsync(CreateReport()));
+        var attemptsAfterFirstRejection = client.Attempts;
+
+        // Recurrences of a rejected fingerprint must not generate a request each.
+        Assert.Equal(ErrorReportOutcome.Recorded, await service.ProcessAsync(CreateReport()));
+        Assert.Equal(attemptsAfterFirstRejection, client.Attempts);
+
+        // Fixing the configuration un-parks the row.
+        settings.ErrorReportingGitHubToken = "a-corrected-token";
+        Assert.Equal(ErrorReportOutcome.Failed, await service.ProcessAsync(CreateReport()));
+        Assert.True(client.Attempts > attemptsAfterFirstRejection);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_FilesAFreshIssueWhenTheDestinationRepositoryChanges()
+    {
+        var client = new RecordingGitHubIssueClient();
+        var settings = EnabledSettings();
+        var service = CreateService(settings, client);
+
+        await service.ProcessAsync(CreateReport());
+
+        settings.ErrorReportingGitHubRepo = "a-different-repo";
+        _timeProvider.Advance(TimeSpan.FromHours(25));
+
+        var outcome = await service.ProcessAsync(CreateReport());
+
+        // Commenting would have landed on whatever unrelated issue holds that
+        // number in the new repository.
+        Assert.Equal(ErrorReportOutcome.IssueCreated, outcome);
+        Assert.Empty(client.Comments);
+        Assert.Equal(2, client.CreatedIssues.Count);
+        Assert.Equal("a-different-repo", client.CreatedIssues[1].Repo);
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync();
+        var entity = await db.ErrorReports.SingleAsync();
+        Assert.Equal("a-different-repo", entity.GitHubRepo);
+    }
+
     private ErrorReportingService CreateService(AppSettings settings, IGitHubIssueClient client)
         => new(
             _dbContextFactory,
             new TestOptionsMonitor<AppSettings>(settings),
             client,
             NullLogger<ErrorReportingService>.Instance,
-            _timeProvider);
+            _timeProvider,
+            // Retry immediately: the backoff is exercised by its own test and
+            // a fake clock would otherwise have to be advanced from inside the
+            // service call.
+            new[] { TimeSpan.Zero, TimeSpan.Zero });
 
     private static AppSettings EnabledSettings() => new()
     {
@@ -272,7 +346,7 @@ public class ErrorReportingServiceTests
         TimestampUtc = _timeProvider.GetUtcNow().UtcDateTime
     };
 
-    private sealed record CreatedIssue(string Title, string Body, IReadOnlyCollection<string> Labels, string? Assignee);
+    private sealed record CreatedIssue(string Repo, string Title, string Body, IReadOnlyCollection<string> Labels, string? Assignee);
 
     private sealed class RecordingGitHubIssueClient : IGitHubIssueClient
     {
@@ -284,6 +358,9 @@ public class ErrorReportingServiceTests
         /// <summary>Simulates GitHub refusing an assignee that is not a collaborator.</summary>
         public bool RejectAssignee { get; set; }
 
+        /// <summary>Number of leading attempts that fail transiently.</summary>
+        public int TransientFailuresBeforeSuccess { get; set; }
+
         public Task<GitHubIssueReference> CreateIssueAsync(
             GitHubIssueTarget target,
             string title,
@@ -292,12 +369,18 @@ public class ErrorReportingServiceTests
             string? assignee,
             CancellationToken cancellationToken)
         {
-            if (RejectAssignee && assignee is not null)
+            if (TransientFailuresBeforeSuccess > 0)
             {
-                throw new GitHubIssuePermanentException("assignee not permitted");
+                TransientFailuresBeforeSuccess--;
+                throw new GitHubIssueTransientException("temporarily unreachable");
             }
 
-            CreatedIssues.Add(new CreatedIssue(title, body, labels, assignee));
+            if (RejectAssignee && assignee is not null)
+            {
+                throw new GitHubIssuePermanentException("assignee not permitted", isAssigneeRejection: true);
+            }
+
+            CreatedIssues.Add(new CreatedIssue(target.Repo, title, body, labels, assignee));
             var number = _nextIssueNumber++;
             return Task.FromResult(new GitHubIssueReference(number, $"https://github.com/o/r/issues/{number}"));
         }

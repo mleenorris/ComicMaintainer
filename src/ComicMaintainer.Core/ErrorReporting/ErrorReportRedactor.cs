@@ -88,18 +88,29 @@ public static class ErrorReportRedactor
         RegexTimeout);
 
     /// <summary>
+    /// A single path segment. Spaces are allowed <em>inside</em> a segment
+    /// (comic libraries are full of "My Comics/Private Series") but never at
+    /// its edges, so matching still stops at the whitespace that ends the path
+    /// rather than at the first space inside a directory name — which would
+    /// otherwise leave the rest of the hierarchy unredacted.
+    /// </summary>
+    private const string UnixSegment = @"[^/\s""'<>|:*?]+(?:[ ][^/\s""'<>|:*?]+)*";
+
+    private const string WindowsSegment = @"[^\\/\s""'<>|:*?]+(?:[ ][^\\/\s""'<>|:*?]+)*";
+
+    /// <summary>
     /// Unix absolute paths and Windows drive/UNC paths. Only the final segment
-    /// survives, so <c>/home/alice/comics/Series/Issue 1.cbz</c> becomes
+    /// survives, so <c>/home/alice/My Comics/Series/Issue 1.cbz</c> becomes
     /// <c>&lt;path&gt;/Issue 1.cbz</c> — enough to see it was a CBZ without
     /// revealing the user's name or library layout.
     /// </summary>
     private static readonly Regex UnixPath = new(
-        @"(?<!\w)/(?:[^/\s""'<>|:*?]+/)+(?<leaf>[^/\s""'<>|:*?]*)",
+        @"(?<!\w)/(?:" + UnixSegment + @"/)+(?<leaf>(?:" + UnixSegment + @")?)",
         RegexOptions.CultureInvariant,
         RegexTimeout);
 
     private static readonly Regex WindowsPath = new(
-        @"(?<![\w:])(?:[A-Z]:\\|\\\\)(?:[^\\/\s""'<>|:*?]+\\)*(?<leaf>[^\\/\s""'<>|:*?]*)",
+        @"(?<![\w:])(?:[A-Z]:\\|\\\\)(?:" + WindowsSegment + @"\\)*(?<leaf>(?:" + WindowsSegment + @")?)",
         Opts,
         RegexTimeout);
 

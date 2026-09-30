@@ -181,7 +181,7 @@ public class ErrorReportsController : ControllerBase
             ErrorReportOutcome.Muted =>
                 BadRequest(new { error = "The test report fingerprint is muted" }),
             _ =>
-                StatusCode(502, new { error = "GitHub rejected the test report; check the repository name and token permissions" })
+                StatusCode(502, new { error = "The test report could not be delivered to GitHub; check connectivity, the repository name and token permissions", outcome = outcome.ToString() })
         };
     }
 

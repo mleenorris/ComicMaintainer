@@ -337,25 +337,47 @@ public class SettingsService : ISettingsService
             throw new ArgumentException("Dedupe window must be between 1 and 720 hours", nameof(dedupeWindowHours));
         }
 
-        await UpdateSettingAsync("ErrorReportingGitHubOwner", owner, cancellationToken);
-        await UpdateSettingAsync("ErrorReportingGitHubRepo", repo, cancellationToken);
-        await UpdateSettingAsync("ErrorReportingAssignee", normalizedAssignee, cancellationToken);
-        await UpdateSettingAsync("ErrorReportingMaxIssuesPerDay", maxIssuesPerDay, cancellationToken);
-        await UpdateSettingAsync("ErrorReportingDedupeWindowHours", dedupeWindowHours, cancellationToken);
-        await UpdateSettingAsync("ErrorReportingCommentOnRecurrence", commentOnRecurrence, cancellationToken);
+        // The whole reporting block is written in a single atomic file
+        // replacement. Writing the settings one at a time would let the
+        // live-reloading sink observe a new owner beside the previous repo and
+        // token — and a failure partway through would leave that mixed
+        // destination active.
+        var values = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["ErrorReportingGitHubOwner"] = owner,
+            ["ErrorReportingGitHubRepo"] = repo,
+            ["ErrorReportingAssignee"] = normalizedAssignee,
+            ["ErrorReportingMaxIssuesPerDay"] = maxIssuesPerDay,
+            ["ErrorReportingDedupeWindowHours"] = dedupeWindowHours,
+            ["ErrorReportingCommentOnRecurrence"] = commentOnRecurrence,
+            ["ErrorReportingEnabled"] = enabled
+        };
 
         // A null token means "keep the stored secret"; an empty string clears it.
         if (gitHubToken is not null)
         {
-            await UpdateSecretSettingAsync(
-                "ErrorReportingGitHubToken",
-                gitHubToken.Length == 0 ? null : gitHubToken.Trim(),
-                cancellationToken);
+            values["ErrorReportingGitHubToken"] = gitHubToken.Length == 0 ? null : gitHubToken.Trim();
         }
 
-        // Enabled is written last so reporting is never switched on against a
-        // half-written destination.
-        await UpdateSettingAsync("ErrorReportingEnabled", enabled, cancellationToken);
+        await PersistSettingsAsync(values, cancellationToken);
+
+        foreach (var name in values.Keys)
+        {
+            if (SecretSettingNames.Contains(name))
+            {
+                _logger.LogInformation(
+                    "Updated setting {SettingName} ({State})",
+                    name,
+                    values[name] is null ? "cleared" : "value hidden");
+                continue;
+            }
+
+            var value = values[name];
+            var sanitizedValue = value is string strValue
+                ? LoggingHelper.SanitizeForLog(strValue)
+                : value?.ToString() ?? "null";
+            _logger.LogInformation("Updated setting {SettingName} to {Value}", name, sanitizedValue);
+        }
     }
 
     private static string? Normalize(string? value)
@@ -392,7 +414,17 @@ public class SettingsService : ISettingsService
             cleared ? "cleared" : "value hidden");
     }
 
-    private async Task PersistSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
+    private Task PersistSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
+        => PersistSettingsAsync(
+            new Dictionary<string, object?>(StringComparer.Ordinal) { [settingName] = value },
+            cancellationToken);
+
+    /// <summary>
+    /// Writes one or more settings in a single atomic replacement of
+    /// user-settings.json, so a reader that reloads on change never observes a
+    /// partially applied group of related settings.
+    /// </summary>
+    private async Task PersistSettingsAsync(IReadOnlyDictionary<string, object?> values, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);
         try
@@ -411,8 +443,11 @@ public class SettingsService : ISettingsService
                 appSettingsSection = new Dictionary<string, object?>(StringComparer.Ordinal);
             }
 
-            // Update the setting
-            appSettingsSection[settingName] = value;
+            // Update the settings
+            foreach (var (settingName, value) in values)
+            {
+                appSettingsSection[settingName] = value;
+            }
 
             // Serialize and write atomically (temp file + move) so the configuration provider's
             // file watcher does not observe a half-written file.
@@ -428,7 +463,7 @@ public class SettingsService : ISettingsService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to persist setting {SettingName}", settingName);
+            _logger.LogError(ex, "Failed to persist settings {SettingNames}", string.Join(", ", values.Keys));
             throw;
         }
         finally

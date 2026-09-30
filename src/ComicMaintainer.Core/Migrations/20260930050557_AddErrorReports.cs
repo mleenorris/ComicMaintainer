@@ -31,10 +31,13 @@ namespace ComicMaintainer.Core.Migrations
                     OccurrenceCount = table.Column<int>(type: "INTEGER", nullable: false),
                     GitHubIssueNumber = table.Column<int>(type: "INTEGER", nullable: true),
                     GitHubIssueUrl = table.Column<string>(type: "TEXT", nullable: true),
+                    GitHubOwner = table.Column<string>(type: "TEXT", maxLength: 128, nullable: true),
+                    GitHubRepo = table.Column<string>(type: "TEXT", maxLength: 128, nullable: true),
                     LastReportedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
                     IssueCreatedAt = table.Column<DateTime>(type: "TEXT", nullable: true),
                     State = table.Column<string>(type: "TEXT", maxLength: 16, nullable: false),
-                    LastError = table.Column<string>(type: "TEXT", maxLength: 1024, nullable: true)
+                    LastError = table.Column<string>(type: "TEXT", maxLength: 1024, nullable: true),
+                    PermanentFailureSignature = table.Column<string>(type: "TEXT", maxLength: 64, nullable: true)
                 },
                 constraints: table =>
                 {

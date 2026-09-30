@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
@@ -350,7 +351,14 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "ProcessFileAsync: Error processing file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            // A single unprocessable archive is field noise, not a defect: the
+            // file is recorded in history and the operator sees the log line,
+            // but it must not file a GitHub issue per bad comic in a library.
+            using (_logger.BeginScope(ErrorReportLogProperties.Exclude("per-file processing failure")))
+            {
+                _logger.LogError(ex, "ProcessFileAsync: Error processing file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+            }
+
             await LogHistoryAsync(filePath, "Process", false, ex.Message, cancellationToken);
             return false;
         }
@@ -1841,7 +1849,12 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error parsing ComicInfo.xml");
+            // Malformed ComicInfo.xml comes from the archive, not from us.
+            using (_logger.BeginScope(ErrorReportLogProperties.Exclude("malformed ComicInfo.xml in a user file")))
+            {
+                _logger.LogError(ex, "Error parsing ComicInfo.xml");
+            }
+
             return null;
         }
     }

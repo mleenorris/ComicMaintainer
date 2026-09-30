@@ -321,6 +321,9 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             entity.Property(e => e.AppVersion).HasMaxLength(64);
             entity.Property(e => e.CorrelationId).HasMaxLength(128);
             entity.Property(e => e.LastError).HasMaxLength(1024);
+            entity.Property(e => e.GitHubOwner).HasMaxLength(128);
+            entity.Property(e => e.GitHubRepo).HasMaxLength(128);
+            entity.Property(e => e.PermanentFailureSignature).HasMaxLength(64);
             // The dedupe lookup is "have I seen this fingerprint before"; it runs
             // on every captured error so it must be an index, and uniqueness is
             // what guarantees two concurrent captures cannot file two issues.
@@ -810,6 +813,17 @@ public class ErrorReportEntity
     /// <summary>Issue number on the target repository, once one has been filed.</summary>
     public int? GitHubIssueNumber { get; set; }
 
+    /// <summary>
+    /// Owner the linked issue belongs to. The destination repository is an
+    /// operator setting and can be changed at any time; without recording it,
+    /// a recurrence would reuse an issue number from the previous repository
+    /// against the new one, commenting on an unrelated issue.
+    /// </summary>
+    public string? GitHubOwner { get; set; }
+
+    /// <summary>Repository the linked issue belongs to; see <see cref="GitHubOwner"/>.</summary>
+    public string? GitHubRepo { get; set; }
+
     /// <summary>Web URL of the filed issue, shown in the admin UI.</summary>
     public string? GitHubIssueUrl { get; set; }
 
@@ -828,6 +842,15 @@ public class ErrorReportEntity
 
     /// <summary>Why the last reporting attempt failed, when it did.</summary>
     public string? LastError { get; set; }
+
+    /// <summary>
+    /// Fingerprint of the reporting configuration that produced a permanent
+    /// rejection (bad token, missing repository, rejected labels). While it
+    /// matches the current configuration the row is not retried, so one
+    /// misconfiguration cannot generate a GitHub request per occurrence
+    /// forever; changing any part of the configuration clears the block.
+    /// </summary>
+    public string? PermanentFailureSignature { get; set; }
 }
 
 /// <summary>

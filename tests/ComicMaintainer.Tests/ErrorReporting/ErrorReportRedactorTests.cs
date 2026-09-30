@@ -29,6 +29,31 @@ public class ErrorReportRedactorTests
     }
 
     [Fact]
+    public void Redact_ReplacesDirectoriesThatContainSpaces()
+    {
+        // Stopping at the first space would leave "My Comics/Private Series"
+        // — the whole library hierarchy — in a public issue.
+        var result = ErrorReportRedactor.Redact("Could not open /home/alice/My Comics/Private Series/Issue 1.cbz");
+
+        Assert.DoesNotContain("alice", result);
+        Assert.DoesNotContain("My Comics", result);
+        Assert.DoesNotContain("Private Series", result);
+        Assert.Contains("Issue 1.cbz", result);
+        Assert.Contains(ErrorReportRedactor.PathMask, result);
+    }
+
+    [Fact]
+    public void Redact_ReplacesWindowsDirectoriesThatContainSpaces()
+    {
+        var result = ErrorReportRedactor.Redact(@"Access denied: C:\Users\alice\My Comics\Private Series\Issue 1.cbz");
+
+        Assert.DoesNotContain("alice", result);
+        Assert.DoesNotContain("My Comics", result);
+        Assert.DoesNotContain("Private Series", result);
+        Assert.Contains("Issue 1.cbz", result);
+    }
+
+    [Fact]
     public void Redact_MasksEmailAddresses()
     {
         var result = ErrorReportRedactor.Redact("Delivery to alice@example.com was rejected");

@@ -40,12 +40,26 @@ public static class ErrorReportFingerprint
         RegexTimeout);
 
     /// <summary>
-    /// Matches the generic/lambda/async state-machine decoration the compiler
-    /// adds (<c>+&lt;MoveNext&gt;d__12</c>), which changes when unrelated
-    /// members are added to the same type.
+    /// Matches the async state-machine frame the compiler generates
+    /// (<c>Svc+&lt;ProcessAsync&gt;d__12.MoveNext()</c>) and keeps the method
+    /// name: without it every async method on a type would normalize to the
+    /// same <c>Svc.MoveNext</c> frame and distinct defects would share a
+    /// fingerprint.
+    /// </summary>
+    private static readonly Regex AsyncStateMachineFrame = new(
+        @"[+.]<(?<name>[A-Za-z0-9_]+)>[A-Za-z0-9_]*(?:__\d+)?\.MoveNext\b",
+        RegexOptions.CultureInvariant,
+        RegexTimeout);
+
+    /// <summary>
+    /// Matches the remaining compiler decoration (lambda and local-function
+    /// frames such as <c>&lt;Handle&gt;b__3_0</c>, display classes such as
+    /// <c>+&lt;&gt;c</c>). The captured member name is preserved for the same
+    /// reason; only the ordinal suffix, which changes when unrelated members
+    /// are added to the type, is dropped.
     /// </summary>
     private static readonly Regex CompilerDecoration = new(
-        @"[+.]<[^>]*>[A-Za-z0-9_]*(__\d+)?",
+        @"[+.]<(?<name>[A-Za-z0-9_]*)>[A-Za-z0-9_]*(__\d+)?",
         RegexOptions.CultureInvariant,
         RegexTimeout);
 
@@ -110,7 +124,12 @@ public static class ErrorReportFingerprint
             try
             {
                 line = FrameSourceLocation.Replace(line, string.Empty);
-                line = CompilerDecoration.Replace(line, string.Empty);
+                line = AsyncStateMachineFrame.Replace(line, m => "." + m.Groups["name"].Value);
+                line = CompilerDecoration.Replace(line, m =>
+                {
+                    var name = m.Groups["name"].Value;
+                    return name.Length == 0 ? string.Empty : "." + name;
+                });
             }
             catch (RegexMatchTimeoutException)
             {

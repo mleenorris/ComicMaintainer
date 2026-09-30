@@ -254,6 +254,14 @@ namespace ComicMaintainer.Core.Migrations
                     b.Property<string>("GitHubIssueUrl")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("GitHubOwner")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GitHubRepo")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("IssueCreatedAt")
                         .HasColumnType("TEXT");
 
@@ -278,6 +286,10 @@ namespace ComicMaintainer.Core.Migrations
 
                     b.Property<int>("OccurrenceCount")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("PermanentFailureSignature")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("RenderedMessage")
                         .HasMaxLength(4096)

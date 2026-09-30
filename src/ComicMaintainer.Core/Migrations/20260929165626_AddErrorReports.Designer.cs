@@ -3,6 +3,7 @@ using System;
 using ComicMaintainer.Core.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ComicMaintainer.Core.Migrations
 {
     [DbContext(typeof(ComicMaintainerDbContext))]
-    partial class ComicMaintainerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260929165626_AddErrorReports")]
+    partial class AddErrorReports
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
@@ -220,32 +223,6 @@ namespace ComicMaintainer.Core.Migrations
                         .IsUnique();
 
                     b.ToTable("EreaderDevices");
-                });
-
-            modelBuilder.Entity("ComicMaintainer.Core.Data.ErrorReportDeliveryEntity", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTime>("DeliveredAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Fingerprint")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("IssueNumber")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DeliveredAt");
-
-                    b.HasIndex("Fingerprint");
-
-                    b.ToTable("ErrorReportDeliveries");
                 });
 
             modelBuilder.Entity("ComicMaintainer.Core.Data.ErrorReportEntity", b =>

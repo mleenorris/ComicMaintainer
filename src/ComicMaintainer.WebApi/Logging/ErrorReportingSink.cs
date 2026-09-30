@@ -1,0 +1,129 @@
+using System.Text;
+using ComicMaintainer.Core.ErrorReporting;
+using ComicMaintainer.Core.ErrorReporting.Interfaces;
+using ComicMaintainer.Core.ErrorReporting.Models;
+using Serilog.Core;
+using Serilog.Events;
+
+namespace ComicMaintainer.WebApi.Logging;
+
+/// <summary>
+/// Observes the Serilog pipeline: keeps a rolling window of recent lines and
+/// forwards <see cref="LogEventLevel.Error"/> and
+/// <see cref="LogEventLevel.Fatal"/> events to the error-reporting queue.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Hooking the logging pipeline rather than individual call sites means every
+/// controller, service and hosted service is covered without edits, including
+/// code added later. The trade-off is that the sink sees log events, not
+/// exceptions, so <see cref="LogEvent.Exception"/> may be null for errors that
+/// were logged as plain messages; those are still captured, using the rendered
+/// message as the identity.
+/// </para>
+/// <para>
+/// The sink performs no I/O. Everything it does is in-memory and bounded, so a
+/// slow database or an unreachable GitHub can never stall logging.
+/// </para>
+/// </remarks>
+public sealed class ErrorReportingSink : ILogEventSink
+{
+    /// <summary>
+    /// Source contexts whose errors are ignored.
+    /// </summary>
+    /// <remarks>
+    /// The first two prevent a feedback loop: if reporting an error itself logs
+    /// an error, the sink would re-enter and report that too, indefinitely.
+    /// <c>GlobalExceptionHandler</c> is excluded for a different reason — it
+    /// captures the unhandled exception itself, with the correlation id and the
+    /// route template the sink cannot see. Letting the sink also queue its log
+    /// line would count one request failure twice, or fingerprint it twice when
+    /// the two messages differ. Its log line is still written, and its direct
+    /// capture still happens.
+    /// </remarks>
+    private static readonly string[] ExcludedSourceContexts =
+    [
+        "ComicMaintainer.Core.ErrorReporting",
+        "ComicMaintainer.WebApi.Logging",
+        "ComicMaintainer.WebApi.Infrastructure.GlobalExceptionHandler",
+    ];
+
+    private readonly IErrorReportLogBuffer _buffer;
+    private readonly ErrorReportQueue _queue;
+
+    public ErrorReportingSink(IErrorReportLogBuffer buffer, ErrorReportQueue queue)
+    {
+        _buffer = buffer;
+        _queue = queue;
+    }
+
+    /// <inheritdoc />
+    public void Emit(LogEvent logEvent)
+    {
+        if (logEvent is null)
+        {
+            return;
+        }
+
+        var sourceContext = ReadSourceContext(logEvent);
+
+        _buffer.Add(Format(logEvent, sourceContext));
+
+        if (logEvent.Level < LogEventLevel.Error
+            || IsExcluded(sourceContext)
+            || IsMarkedExcluded(logEvent))
+        {
+            return;
+        }
+
+        var exception = logEvent.Exception;
+
+        _queue.TryEnqueue(new PendingErrorCapture(
+            ExceptionType: exception?.GetType().FullName ?? "LoggedError",
+            Message: exception?.Message ?? logEvent.RenderMessage(),
+            StackTrace: exception?.ToString(),
+            Source: ErrorReportSource.Log,
+            Origin: sourceContext));
+    }
+
+    private static bool IsExcluded(string? sourceContext) =>
+        sourceContext is not null
+        && ExcludedSourceContexts.Any(excluded =>
+            sourceContext.Contains(excluded, StringComparison.Ordinal));
+
+    /// <summary>
+    /// Honours a per-event opt-out. Call sites that know a failure is bad input
+    /// rather than a defect — per-file comic processing, for example — mark the
+    /// event instead of the sink excluding their whole source context, which
+    /// would also hide genuine defects from the same service.
+    /// </summary>
+    private static bool IsMarkedExcluded(LogEvent logEvent) =>
+        logEvent.Properties.ContainsKey(ErrorReportLogProperties.ExclusionPropertyName);
+
+    private static string? ReadSourceContext(LogEvent logEvent) =>
+        logEvent.Properties.TryGetValue("SourceContext", out var value)
+            ? value.ToString().Trim('"')
+            : null;
+
+    private static string Format(LogEvent logEvent, string? sourceContext)
+    {
+        var builder = new StringBuilder(256)
+            .Append('[').Append(logEvent.Timestamp.UtcDateTime.ToString("HH:mm:ss.fff")).Append("] [")
+            .Append(logEvent.Level.ToString().ToUpperInvariant()).Append("] ");
+
+        if (!string.IsNullOrEmpty(sourceContext))
+        {
+            builder.Append('[').Append(sourceContext).Append("] ");
+        }
+
+        builder.Append(logEvent.RenderMessage());
+
+        if (logEvent.Exception is not null)
+        {
+            builder.Append(" | ").Append(logEvent.Exception.GetType().Name)
+                   .Append(": ").Append(logEvent.Exception.Message);
+        }
+
+        return builder.ToString();
+    }
+}

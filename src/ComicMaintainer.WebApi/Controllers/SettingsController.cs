@@ -88,7 +88,15 @@ public class SettingsController : ControllerBase
             smtp_allow_insecure = _appSettings.CurrentValue.SmtpAllowInsecure,
             email_from_address = _appSettings.CurrentValue.EmailFromAddress,
             email_from_name = _appSettings.CurrentValue.EmailFromName,
-            email_max_attachment_mb = _appSettings.CurrentValue.EmailMaxAttachmentMegabytes
+            email_max_attachment_mb = _appSettings.CurrentValue.EmailMaxAttachmentMegabytes,
+            enable_error_reporting = _appSettings.CurrentValue.EnableErrorReporting,
+            error_reporting_mode = _appSettings.CurrentValue.ErrorReportingMode,
+            error_report_max_per_day = _appSettings.CurrentValue.ErrorReportMaxPerDay,
+            error_report_cooldown_hours = _appSettings.CurrentValue.ErrorReportCooldownHours,
+            github_repository = _appSettings.CurrentValue.GitHubRepository,
+            // Like the SMTP password, the token is never returned. Automatic
+            // mode only needs the UI to know whether one is stored.
+            github_token_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.GitHubToken)
         };
         
         _logger.LogDebug("Returning settings: FilenameFormat={FilenameFormat}, IssueNumberPadding={IssueNumberPadding}, WatcherEnableRename={WatcherEnableRename}, WatcherEnableNormalize={WatcherEnableNormalize}, LogMaxBytes={LogMaxBytes}, DatabaseCleanupIntervalHours={DatabaseCleanupIntervalHours}",
@@ -823,6 +831,106 @@ public class SettingsController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Updates the error-reporting configuration.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Switching to <c>automatic</c> without a stored token is rejected rather
+    /// than accepted-and-silently-inert, so the owner is not left believing
+    /// reports are being delivered when nothing can be sent.
+    /// </para>
+    /// <para>
+    /// Every field, including the token that this request would install, is
+    /// validated before anything is written. The settings store reloads on
+    /// change, so validating against <c>_appSettings.CurrentValue</c> after
+    /// writing the token would both read a stale value and, on rejection,
+    /// leave the new token persisted against the old mode.
+    /// </para>
+    /// </remarks>
+    [HttpPut("error-reporting")]
+    public async Task<ActionResult> UpdateErrorReporting(
+        [FromBody] ErrorReportingSettingsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { error = "Request body is required" });
+        }
+
+        try
+        {
+            var mode = (request.Mode ?? "manual").Trim().ToLowerInvariant();
+
+            if (mode is not ("manual" or "automatic"))
+            {
+                return BadRequest(new { error = "Mode must be either 'manual' or 'automatic'." });
+            }
+
+            if (request.MaxPerDay is < 1 or > 100)
+            {
+                return BadRequest(new { error = "Maximum reports per day must be between 1 and 100." });
+            }
+
+            if (request.CooldownHours is < 1 or > 720)
+            {
+                return BadRequest(new { error = "Cooldown hours must be between 1 and 720." });
+            }
+
+            // A null token property means "leave the stored token alone"; an
+            // empty one means "clear it". The effective token is what the
+            // instance would be left with, which is what the automatic mode
+            // requirement has to be checked against.
+            var tokenProvided = request.GitHubToken is not null;
+            var requestedToken = string.IsNullOrWhiteSpace(request.GitHubToken)
+                ? null
+                : request.GitHubToken!.Trim();
+
+            var effectiveToken = tokenProvided
+                ? requestedToken
+                : _appSettings.CurrentValue.GitHubToken;
+
+            if (mode == "automatic" && request.Enabled && string.IsNullOrEmpty(effectiveToken))
+            {
+                return BadRequest(new
+                {
+                    error = "Automatic reporting needs a GitHub token with issues:write on the target repository."
+                });
+            }
+
+            // Validation is complete: persist.
+            if (tokenProvided)
+            {
+                await _settingsService.UpdateGitHubTokenAsync(requestedToken, cancellationToken);
+            }
+
+            if (request.GitHubRepository is not null)
+            {
+                await _settingsService.UpdateGitHubRepositoryAsync(
+                    string.IsNullOrWhiteSpace(request.GitHubRepository) ? null : request.GitHubRepository.Trim(),
+                    cancellationToken);
+            }
+
+            await _settingsService.UpdateErrorReportingModeAsync(mode, cancellationToken);
+            await _settingsService.UpdateErrorReportMaxPerDayAsync(request.MaxPerDay, cancellationToken);
+            await _settingsService.UpdateErrorReportCooldownHoursAsync(request.CooldownHours, cancellationToken);
+            await _settingsService.UpdateErrorReportingEnabledAsync(request.Enabled, cancellationToken);
+
+            return Ok(new { message = "Error reporting settings updated" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            // The token must not reach the log, so only the exception type is
+            // recorded here rather than the request.
+            _logger.LogError(ex, "Failed to update error reporting settings");
+            return StatusCode(500, new { error = "Failed to update error reporting settings" });
+        }
+    }
+
     public class EmailSettingsRequest
     {
         public string? SmtpHost { get; set; }
@@ -855,5 +963,30 @@ public class SettingsController : ControllerBase
         public string? MangaDexBaseUrl { get; set; }
         public bool EnableAniList { get; set; }
         public string? AniListBaseUrl { get; set; }
+    }
+
+    public class ErrorReportingSettingsRequest
+    {
+        /// <summary>
+        /// Master switch. Off by default: capturing is harmless, but any
+        /// outbound report is a disclosure the owner has to opt into.
+        /// </summary>
+        public bool Enabled { get; set; }
+
+        /// <summary><c>manual</c> or <c>automatic</c>.</summary>
+        public string Mode { get; set; } = "manual";
+
+        public int MaxPerDay { get; set; } = 5;
+
+        public int CooldownHours { get; set; } = 24;
+
+        /// <summary>Target repository as <c>owner/repo</c>.</summary>
+        public string? GitHubRepository { get; set; }
+
+        /// <summary>
+        /// Null keeps the stored token; empty string clears it. Only used in
+        /// automatic mode.
+        /// </summary>
+        public string? GitHubToken { get; set; }
     }
 }

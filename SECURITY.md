@@ -177,6 +177,70 @@ When deploying ComicMaintainer:
    - Access is limited to configured directories (WATCHED_DIR, DUPLICATE_DIR)
    - Consider using read-only mounts where processing is not required
 
+## Error Report Redaction
+
+Automated error reporting (`docs/ERROR_REPORTING.md`) is the only feature that can
+send data from a self-hosted instance to a third party. It is disabled by default and
+transmits nothing until an administrator explicitly enables it.
+
+### Redaction is a hard gate
+
+Every outbound report is redacted **in its entirety** — the whole payload, not only
+the log lines — before it is stored, previewed or delivered. The following are
+replaced with `[redacted]`:
+
+- Absolute paths and library folder structure
+- Comic and series filenames
+- Usernames and e-mail addresses
+- SMTP credentials
+- ComicVine API keys
+- JWT signing keys and bearer tokens
+- GitHub tokens (`ghp_*`, `github_pat_*` and related prefixes)
+- Authelia forwarded-auth headers
+- IPv4 and IPv6 addresses
+
+Two things are kept deliberately, because a report is worthless without them: source
+filenames in stack frames (public repository files that identify the faulting code)
+and the host of an outbound URL (which identifies the external provider that failed).
+URL paths and queries are removed, and IP-literal hosts are dropped entirely.
+
+### Fail-closed behaviour
+
+The redactor performs a single left-to-right pass over one ordered pattern so no
+character is classified twice and a placeholder cannot be re-parsed. All quantifiers
+are bounded and a match timeout is enforced; if the timeout fires, the redactor
+returns `[redacted]` for the whole value rather than risking an unredacted leak.
+
+`debug.log` is never attached wholesale — only a bounded window of already-redacted
+lines around the error.
+
+### Consent
+
+The default mode transmits nothing: the instance builds a pre-filled issue URL that
+the administrator reviews and submits themselves. The exact payload is shown in the UI
+before anything is sent or any URL is opened.
+
+Automatic mode is opt-in and requires a credential the operator supplies. Use a
+fine-grained token scoped to the single target repository with **Issues: write** and
+no other permission. The token is stored in `user-settings.json`, is never returned by
+the API, and is never written to the log.
+
+### Untrusted report content
+
+`POST /api/errorreports/client` accepts browser-supplied content, so its payload is
+attacker-controlled by any signed-in user. Every field is length-capped at the model
+level, redacted like any other report, and never auto-transmitted.
+
+Because a report body is read by an automated agent, only reports originating from the
+reporter identity are auto-assigned. User-submitted reports require a maintainer to
+apply `ready-for-agent` first, and agent sessions are capped per day.
+
+### Reporting a redaction failure
+
+If a preview or a filed issue contains data that should have been stripped, report it
+through the process in [Where to Report](#where-to-report) rather than opening a
+public issue.
+
 ## Security Features
 
 This project implements several security features:

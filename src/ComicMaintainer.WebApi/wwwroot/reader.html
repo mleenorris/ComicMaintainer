@@ -931,6 +931,72 @@
             return opts;
         }
 
+        // ---------------------------------------------------------------
+        // Frontend error reporting
+        //
+        // Duplicated from js/main.js on purpose: reader.html is standalone and
+        // never loads that file, so the reader would otherwise be the one page
+        // whose failures are invisible — and it is the page users spend most
+        // of their time on.
+        //
+        // Nothing here may throw: an error raised inside the handler would be
+        // caught by the handler again.
+        // ---------------------------------------------------------------
+        const REPORTED_ERROR_SIGNATURES = new Set();
+        const MAX_CLIENT_ERROR_REPORTS = 10;
+        let clientErrorReportCount = 0;
+        // Set by reader actions so a report can say what the user was doing.
+        let lastUserAction = null;
+
+        function recordUserAction(action) {
+            lastUserAction = typeof action === 'string' ? action.slice(0, 200) : null;
+        }
+
+        function reportClientError(name, message, stack) {
+            try {
+                if (clientErrorReportCount >= MAX_CLIENT_ERROR_REPORTS) return;
+
+                // Page turns can fire the same error repeatedly; report each
+                // distinct signature once per page load.
+                const signature = `${name}|${message}`;
+                if (REPORTED_ERROR_SIGNATURES.has(signature)) return;
+                REPORTED_ERROR_SIGNATURES.add(signature);
+                clientErrorReportCount++;
+
+                fetch('/api/errorreports/client', buildFetchOptions({
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: String(name || 'Error').slice(0, 200),
+                        message: String(message || '').slice(0, 2000),
+                        stack: String(stack || '').slice(0, 8000),
+                        page: window.location.pathname,
+                        lastUserAction: lastUserAction
+                    })
+                })).catch(() => { /* reporting must never surface to the user */ });
+            } catch (e) {
+                /* ignore */
+            }
+        }
+
+        window.addEventListener('error', function (event) {
+            const error = event && event.error;
+            reportClientError(
+                error && error.name,
+                (error && error.message) || (event && event.message),
+                error && error.stack
+            );
+        });
+
+        window.addEventListener('unhandledrejection', function (event) {
+            const reason = event && event.reason;
+            if (reason instanceof Error) {
+                reportClientError(reason.name, reason.message, reason.stack);
+            } else {
+                reportClientError('UnhandledRejection', String(reason), null);
+            }
+        });
+
         // Initialize reader
         async function initReader() {
             comicFilePath = getQueryParam('file');

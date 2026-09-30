@@ -29,7 +29,8 @@ public class SettingsService : ISettingsService
     private static readonly HashSet<string> SecretSettingNames = new(StringComparer.Ordinal)
     {
         "SmtpPassword",
-        "ComicVineApiKey"
+        "ComicVineApiKey",
+        "GitHubToken"
     };
 
     public SettingsService(
@@ -149,7 +150,7 @@ public class SettingsService : ISettingsService
 
     public async Task UpdateGitHubTokenAsync(string? token, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("GitHubToken", token, cancellationToken);
+        await UpdateSecretSettingAsync("GitHubToken", token, cancellationToken);
     }
 
     public async Task UpdateGitHubRepositoryAsync(string? repository, CancellationToken cancellationToken = default)
@@ -160,6 +161,47 @@ public class SettingsService : ISettingsService
     public async Task UpdateGitHubIssueAssigneeAsync(string? assignee, CancellationToken cancellationToken = default)
     {
         await UpdateSettingAsync("GitHubIssueAssignee", assignee, cancellationToken);
+    }
+
+    public async Task UpdateErrorReportingEnabledAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        await UpdateSettingAsync("EnableErrorReporting", enabled, cancellationToken);
+    }
+
+    public async Task UpdateErrorReportingModeAsync(string mode, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(mode))
+        {
+            throw new ArgumentException("Mode cannot be null or whitespace", nameof(mode));
+        }
+
+        var normalized = mode.Trim().ToLowerInvariant();
+        if (normalized is not ("manual" or "automatic"))
+        {
+            throw new ArgumentException("Mode must be either 'manual' or 'automatic'", nameof(mode));
+        }
+
+        await UpdateSettingAsync("ErrorReportingMode", normalized, cancellationToken);
+    }
+
+    public async Task UpdateErrorReportMaxPerDayAsync(int maxPerDay, CancellationToken cancellationToken = default)
+    {
+        if (maxPerDay is < 1 or > 100)
+        {
+            throw new ArgumentException("Maximum reports per day must be between 1 and 100", nameof(maxPerDay));
+        }
+
+        await UpdateSettingAsync("ErrorReportMaxPerDay", maxPerDay, cancellationToken);
+    }
+
+    public async Task UpdateErrorReportCooldownHoursAsync(int hours, CancellationToken cancellationToken = default)
+    {
+        if (hours is < 1 or > 720)
+        {
+            throw new ArgumentException("Cooldown hours must be between 1 and 720", nameof(hours));
+        }
+
+        await UpdateSettingAsync("ErrorReportCooldownHours", hours, cancellationToken);
     }
 
     public async Task UpdateDatabaseCleanupIntervalHoursAsync(int hours, CancellationToken cancellationToken = default)

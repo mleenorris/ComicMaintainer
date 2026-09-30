@@ -1,4 +1,6 @@
+using ComicMaintainer.Core.ErrorReporting.Models;
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Logging;
 using ComicMaintainer.WebApi.Middleware;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
@@ -18,21 +20,32 @@ namespace ComicMaintainer.WebApi.Infrastructure;
 ///
 /// The exception message itself is deliberately not returned outside
 /// Development: it can contain file-system paths, connection strings and SQL.
+///
+/// The handler is also the single capture point for unhandled request failures
+/// in the error reporter. It knows the correlation id and the route template,
+/// neither of which the Serilog sink can see, so the sink excludes this source
+/// context to avoid fingerprinting the same failure twice. Capture is queued
+/// rather than awaited: in automatic mode it performs a GitHub search and a
+/// POST, each with a 30-second timeout, and making the 500 response wait on
+/// telemetry turns a handled failure into a minute-long hang.
 /// </summary>
 public sealed class GlobalExceptionHandler : IExceptionHandler
 {
     private readonly IProblemDetailsService _problemDetailsService;
     private readonly IHostEnvironment _environment;
     private readonly ILogger<GlobalExceptionHandler> _logger;
+    private readonly ErrorReportQueue? _errorReportQueue;
 
     public GlobalExceptionHandler(
         IProblemDetailsService problemDetailsService,
         IHostEnvironment environment,
-        ILogger<GlobalExceptionHandler> logger)
+        ILogger<GlobalExceptionHandler> logger,
+        ErrorReportQueue? errorReportQueue = null)
     {
         _problemDetailsService = problemDetailsService;
         _environment = environment;
         _logger = logger;
+        _errorReportQueue = errorReportQueue;
     }
 
     public async ValueTask<bool> TryHandleAsync(
@@ -53,13 +66,27 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
         }
 
         var correlationId = httpContext.GetCorrelationId();
+        var origin = DescribeOrigin(httpContext);
 
+        // Both values reach the log from the request: the path comes from the
+        // client and the correlation id from a client-supplied header, so
+        // neither is trusted to be free of the newlines or control characters
+        // that would forge log entries.
         _logger.LogError(
             exception,
             "Unhandled exception for {Method} {Path} (correlation id {CorrelationId})",
             LoggingHelper.SanitizeForLog(httpContext.Request.Method),
             LoggingHelper.SanitizeForLog(httpContext.Request.Path.Value),
-            correlationId);
+            LoggingHelper.SanitizeForLog(correlationId));
+
+        _errorReportQueue?.TryEnqueue(new PendingErrorCapture(
+            ExceptionType: exception.GetType().FullName ?? exception.GetType().Name,
+            Message: exception.Message,
+            StackTrace: exception.ToString(),
+            Source: ErrorReportSource.Api,
+            Origin: origin,
+            CorrelationId: correlationId,
+            Exception: exception));
 
         // If the response has already begun there is no way to replace it with
         // a problem document; let the server tear the connection down instead
@@ -94,5 +121,25 @@ public sealed class GlobalExceptionHandler : IExceptionHandler
             ProblemDetails = problemDetails,
             Exception = exception
         });
+    }
+
+    /// <summary>
+    /// Describes the endpoint using its route <em>template</em> for the error report.
+    /// </summary>
+    /// <remarks>
+    /// The resolved path is not used: routes such as
+    /// <c>/api/comicreader/page/{filePath}</c> would otherwise carry the user's
+    /// library path into the report and, from there, into a public issue. The
+    /// problem document returned to the caller still uses the real path, which
+    /// only that caller sees.
+    /// </remarks>
+    private static string DescribeOrigin(HttpContext httpContext)
+    {
+        var endpoint = httpContext.GetEndpoint();
+        var template = (endpoint as RouteEndpoint)?.RoutePattern.RawText;
+
+        return template is null
+            ? httpContext.Request.Method
+            : $"{httpContext.Request.Method} /{template.TrimStart('/')}";
     }
 }

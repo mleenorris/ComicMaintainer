@@ -8,6 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Crashes can now be reported to GitHub as issues, with consent and redaction.** A new
+  opt-in **Settings → Error Reporting** panel captures unhandled request exceptions,
+  background-service failures, any `Error`/`Fatal` log event and browser errors from both
+  the main app and the reader. Each failure is fingerprinted (exception type + normalised
+  message + `ComicMaintainer.*` stack frames + app version), so a recurrence increments a
+  counter instead of filing again, and is subject to a cooldown and a hard daily cap.
+  Environmental noise — cancellations, client aborts, SQLite contention, transient metadata
+  provider failures, permission and disk-full errors — is suppressed, and per-file
+  processing failures are excluded entirely. **Every report is redacted in full before it is
+  stored or shown**: library paths, comic and series names, usernames, e-mail addresses,
+  SMTP credentials, the ComicVine API key, JWT keys, bearer and GitHub tokens, Authelia
+  headers and IP addresses are stripped, and only a bounded window of already-redacted log
+  lines is attached rather than `debug.log` itself. The default delivery mode transmits
+  nothing — it opens a pre-filled issue you submit yourself — and an automatic mode is
+  available with a fine-grained `Issues: write` token. **Preview** shows the exact payload
+  before anything is sent. Disabled by default; see `docs/ERROR_REPORTING.md`.
+- **CI failures now open a GitHub issue.** When a scheduled or push run of a workflow fails,
+  `report-ci-failure.yml` comments on the existing open `ci-failure` issue for that workflow
+  and job, or opens a new one naming the failing job and linking the run. No log excerpt is
+  included: job logs are unredacted and the issue is public and permanent. Pull-request
+  failures are skipped because they already surface on the PR.
+- **Auto-reported issues can be handed to the coding agent.** Reports use a dedicated
+  `auto_error_report.yml` template and carry an area label derived from the top stack frame,
+  so work starts with scoped context. Only reports from the reporter identity are
+  auto-assigned; user-submitted ones need a maintainer to apply `ready-for-agent` first.
+  Reports that arrive once the daily agent quota is reached are labelled `agent-deferred`
+  and picked up by an hourly backlog sweep instead of being dropped.
 - **Every API response now carries a correlation ID, and errors show it.** Each request is
   tagged with an `X-Correlation-Id` (echoed on the response, honoured if the caller supplies
   one) and that id is stamped on every log line the request produces in `debug*.log`. An
@@ -50,6 +77,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so free disk space read as "84258.8 MB".
 
 ### Fixed
+- **The GitHub token setting is no longer written to the log.** `UpdateGitHubTokenAsync`
+  routed through the ordinary setting path, which logs the new value; it now uses the secret
+  path alongside `SmtpPassword` and `ComicVineApiKey`, so only "value hidden" is recorded.
+- **Two CI workflows that could never run have been retargeted.** `test-dotnet.yml` triggered
+  on `main`/`develop` and `security-scan.yml` on `master`/`main`, neither of which exists;
+  both now run on `dotnet`. `security-scan.yml` also scanned a Python project that no longer
+  exists and has been rewritten for .NET.
 - **Webcomic mode now flows straight from one issue into the next.** The following issue was
   only looked up, fetched and appended once the reader hit the bottom of the current one, so
   every comic boundary paused on a "loading next comic" banner and then jumped the viewport to

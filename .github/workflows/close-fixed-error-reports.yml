@@ -1,0 +1,129 @@
+name: Close Fixed Error Reports
+
+# Closes the loop on automatically-filed error reports.
+#
+# When a release is published, every `auto-reported` issue that was resolved
+# since the previous release is told which version carries the fix. Instances
+# poll their own filed issues and, once an issue is closed in a version at or
+# below the one they are running, drop the local suppression entry — so a
+# genuine regression files a fresh report instead of being silently swallowed
+# by the "already reported this" check.
+#
+# Without this step suppression is permanent: an instance that reported a
+# defect once would never report it again, even after a later release
+# reintroduced it.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version that contains the fix, e.g. 2.0.311"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  close-reports:
+    name: Annotate resolved reports
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Comment fixing version on resolved reports
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const version = (context.payload.release?.tag_name
+              || core.getInput('version')
+              || '${{ inputs.version }}' || '').replace(/^v/, '');
+
+            if (!version) {
+              core.setFailed('Could not determine the released version.');
+              return;
+            }
+
+            const publishedAt = context.payload.release?.published_at
+              ? new Date(context.payload.release.published_at)
+              : new Date();
+
+            // Establish the *previous* release boundary. An issue belongs to
+            // this release only if it was actually closed between the previous
+            // release and this one. The list endpoint's `since` filter is
+            // `updated_at`-based, so it can only be used to narrow the request:
+            // any older issue that merely received a comment in the window
+            // would otherwise be annotated as fixed in a release that did not
+            // fix it.
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 100,
+            });
+
+            const previousPublishedAt = releases
+              .filter(r => !r.draft && r.published_at)
+              .map(r => new Date(r.published_at))
+              .filter(d => d.getTime() < publishedAt.getTime())
+              .sort((a, b) => b.getTime() - a.getTime())[0] || null;
+
+            // First release ever: fall back to a bounded look-back rather than
+            // annotating the entire history.
+            const windowStart = previousPublishedAt
+              || new Date(publishedAt.getTime() - 90 * 24 * 60 * 60 * 1000);
+
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'auto-reported',
+              state: 'closed',
+              since: windowStart.toISOString(),
+              per_page: 100,
+            });
+
+            const marker = `<!-- fixed-in:`;
+            let annotated = 0;
+
+            for (const issue of issues) {
+              if (issue.pull_request) continue;
+
+              // The decisive check: when was it actually closed? `since` only
+              // narrowed the request, it did not establish resolution.
+              if (!issue.closed_at) continue;
+              const closedAt = new Date(issue.closed_at);
+              if (closedAt.getTime() <= windowStart.getTime()) continue;
+              if (closedAt.getTime() > publishedAt.getTime()) continue;
+
+              // Only annotate issues resolved by a change, not ones closed as
+              // not-planned: telling a user a duplicate was "fixed in 2.0.311"
+              // would make their instance clear suppression for a live defect.
+              if (issue.state_reason === 'not_planned') continue;
+
+              // Skip anything already annotated, so re-running the workflow or
+              // publishing a patch release does not spam the thread.
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                per_page: 100,
+              });
+
+              if (comments.some(c => c.body?.includes(marker))) continue;
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body:
+                  `Fixed in **v${version}**.\n\n` +
+                  `Instances running v${version} or later will clear their local suppression ` +
+                  `entry for this fingerprint, so a recurrence will be reported as a new issue.\n\n` +
+                  `${marker}${version} -->`,
+              });
+
+              annotated++;
+            }
+
+            core.notice(`Annotated ${annotated} resolved error report(s) with v${version}.`);

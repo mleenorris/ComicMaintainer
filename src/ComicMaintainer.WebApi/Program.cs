@@ -3,6 +3,8 @@ using System.Text;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.ErrorReporting.Interfaces;
+using ComicMaintainer.Core.ErrorReporting.Services;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Reader.Interfaces;
@@ -13,6 +15,7 @@ using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.HealthChecks;
 using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Infrastructure;
+using ComicMaintainer.WebApi.Logging;
 using ComicMaintainer.WebApi.Middleware;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -708,6 +711,26 @@ builder.Services.AddSingleton<IScheduledJobService>(sp => sp.GetRequiredService<
 builder.Services.AddSingleton<ScheduledJobsHostedService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ScheduledJobsHostedService>());
 
+// Error reporting: capture -> redact -> fingerprint -> store -> (optionally) file a GitHub issue.
+// The sink is picked up by `ReadFrom.Services` in the Serilog configuration above, which is what
+// lets a single registration observe every Error/Fatal event in the application.
+builder.Services.AddSingleton<IErrorReportLogBuffer>(_ => new ErrorReportLogBuffer());
+builder.Services.AddSingleton<ErrorReportQueue>();
+builder.Services.AddSingleton<Serilog.Core.ILogEventSink, ErrorReportingSink>();
+builder.Services.AddHostedService<ErrorReportDispatchHostedService>();
+builder.Services.AddSingleton<IErrorReportRedactor, ErrorReportRedactor>();
+builder.Services.AddSingleton<IErrorReportTransport, ConsentUrlErrorReportTransport>();
+builder.Services.AddSingleton<IErrorReportTransport, GitHubIssueErrorReportTransport>();
+builder.Services.AddScoped<IErrorReportService, ErrorReportService>();
+builder.Services.AddHttpClient(GitHubIssueErrorReportTransport.HttpClientName, client =>
+{
+    client.BaseAddress = new Uri("https://api.github.com/");
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
+    client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+    client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
+});
+
 var app = builder.Build();
 
 // Print startup banner
@@ -778,7 +801,13 @@ using (var scope = app.Services.CreateScope())
 app.UseMiddleware<RequestCorrelationMiddleware>();
 
 // Catch anything a controller lets escape and turn it into a traceable problem
-// document (see GlobalExceptionHandler). Must wrap the rest of the pipeline.
+// document, and an error report (see GlobalExceptionHandler).
+//
+// This must be the outermost application middleware. Everything registered
+// after it — CORS, request timeouts, response compression, output caching and
+// the security-header middleware — raises exceptions that would otherwise
+// escape past the handler, producing a bare 500 with no ProblemDetails body
+// and no error report.
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
@@ -1243,6 +1272,46 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         var emailMaxAttachmentMb = Environment.GetEnvironmentVariable("EMAIL_MAX_ATTACHMENT_MB");
         if (!string.IsNullOrEmpty(emailMaxAttachmentMb) && int.TryParse(emailMaxAttachmentMb, out var maxAttachmentMb) && maxAttachmentMb > 0)
             options.EmailMaxAttachmentMegabytes = maxAttachmentMb;
+
+        // Error reporting. Disabled unless the operator opts in: a report is an
+        // outbound disclosure, so it is never turned on by defaulting.
+        var enableErrorReporting = Environment.GetEnvironmentVariable("ENABLE_ERROR_REPORTING");
+        if (!string.IsNullOrEmpty(enableErrorReporting) && bool.TryParse(enableErrorReporting, out var errorReportingEnabled))
+            options.EnableErrorReporting = errorReportingEnabled;
+
+        var errorReportingMode = Environment.GetEnvironmentVariable("ERROR_REPORTING_MODE");
+        if (!string.IsNullOrEmpty(errorReportingMode))
+        {
+            var normalizedMode = errorReportingMode.Trim().ToLowerInvariant();
+            // An unrecognised value would otherwise select the non-transmitting
+            // transport and silently disable delivery the operator asked for.
+            if (normalizedMode is "manual" or "automatic")
+                options.ErrorReportingMode = normalizedMode;
+        }
+
+        // Namespaced rather than GITHUB_REPOSITORY / GITHUB_TOKEN, which are
+        // GitHub Actions' own well-known variables. Reusing those names would
+        // make a container started inside a workflow silently adopt the
+        // workflow's credential.
+        var gitHubRepository = Environment.GetEnvironmentVariable("ERROR_REPORT_GITHUB_REPOSITORY");
+        if (!string.IsNullOrEmpty(gitHubRepository))
+            options.GitHubRepository = gitHubRepository;
+
+        var gitHubToken = Environment.GetEnvironmentVariable("ERROR_REPORT_GITHUB_TOKEN");
+        if (!string.IsNullOrEmpty(gitHubToken))
+            options.GitHubToken = gitHubToken;
+
+        var errorReportMaxPerDay = Environment.GetEnvironmentVariable("ERROR_REPORT_MAX_PER_DAY");
+        if (!string.IsNullOrEmpty(errorReportMaxPerDay) && int.TryParse(errorReportMaxPerDay, out var maxPerDay) && maxPerDay is >= 1 and <= 100)
+            options.ErrorReportMaxPerDay = maxPerDay;
+
+        var errorReportCooldownHours = Environment.GetEnvironmentVariable("ERROR_REPORT_COOLDOWN_HOURS");
+        if (!string.IsNullOrEmpty(errorReportCooldownHours) && int.TryParse(errorReportCooldownHours, out var cooldownHours) && cooldownHours is >= 1 and <= 720)
+            options.ErrorReportCooldownHours = cooldownHours;
+
+        var errorReportLogContextLines = Environment.GetEnvironmentVariable("ERROR_REPORT_LOG_CONTEXT_LINES");
+        if (!string.IsNullOrEmpty(errorReportLogContextLines) && int.TryParse(errorReportLogContextLines, out var logContextLines) && logContextLines is >= 0 and <= 500)
+            options.ErrorReportLogContextLines = logContextLines;
     }
 }
 

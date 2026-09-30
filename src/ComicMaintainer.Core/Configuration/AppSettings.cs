@@ -259,4 +259,65 @@ public class AppSettings
     /// </summary>
     public int EmailMaxAttachmentMegabytes { get; set; } = 25;
 
+    // ---------------------------------------------------------------------
+    // Automated error reporting (see docs/ERROR_REPORTING.md)
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Master switch for capturing unhandled errors into the local error-report
+    /// store. Defaults to <c>false</c>: capture writes redacted diagnostics to
+    /// the database, and a self-hosted owner must opt in before that happens.
+    /// Nothing leaves the instance on capture alone — transport is controlled
+    /// separately by <see cref="ErrorReportingMode"/>.
+    /// </summary>
+    public bool EnableErrorReporting { get; set; }
+
+    /// <summary>
+    /// How captured reports reach GitHub.
+    /// <list type="bullet">
+    /// <item><c>manual</c> (default) — nothing is transmitted. The UI offers a
+    /// pre-filled "issues/new" link that the user must review and submit.</item>
+    /// <item><c>automatic</c> — the instance posts the report itself using
+    /// <see cref="GitHubToken"/>. Requires an explicit opt-in.</item>
+    /// </list>
+    /// </summary>
+    public string ErrorReportingMode { get; set; } = "manual";
+
+    /// <summary>
+    /// Fine-grained personal access token used only by <c>automatic</c> mode.
+    /// It needs nothing beyond <c>issues: write</c> on
+    /// <see cref="GitHubRepository"/>. Stored in <c>user-settings.json</c> like
+    /// the other secrets, never returned by the settings API and never logged.
+    /// </summary>
+    public string? GitHubToken { get; set; }
+
+    /// <summary>
+    /// <c>owner/repo</c> that automatically filed issues are opened against.
+    /// </summary>
+    public string GitHubRepository { get; set; } = "mleenorris/ComicMaintainer";
+
+    /// <summary>
+    /// Optional GitHub login assigned to automatically filed issues.
+    /// </summary>
+    public string? GitHubIssueAssignee { get; set; }
+
+    /// <summary>
+    /// Hard ceiling on automatically transmitted reports per rolling 24 hours.
+    /// Protects the issue tracker from a crash loop on a single instance.
+    /// </summary>
+    public int ErrorReportMaxPerDay { get; set; } = 5;
+
+    /// <summary>
+    /// Minimum time, in hours, before an already-reported fingerprint may be
+    /// reported again. Recurrences inside the window still increment the local
+    /// occurrence counter.
+    /// </summary>
+    public int ErrorReportCooldownHours { get; set; } = 24;
+
+    /// <summary>
+    /// Number of redacted log lines captured either side of an error and
+    /// attached to the report. The full <c>debug.log</c> is never attached.
+    /// </summary>
+    public int ErrorReportLogContextLines { get; set; } = 40;
+
 }

@@ -240,6 +240,14 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         finally
         {
             _buildSlot.Release();
+
+            // A build discarded while it was still running is no longer tracked,
+            // so if it nevertheless produced a file just before it noticed the
+            // cancellation, nothing else would ever delete it.
+            if (!_builds.ContainsKey(entry.BuildId))
+            {
+                Release(entry);
+            }
         }
     }
 

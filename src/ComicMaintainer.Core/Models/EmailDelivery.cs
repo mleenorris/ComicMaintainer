@@ -11,16 +11,21 @@ public static class EmailDeliveryFormat
     /// <summary>Convert the comic to EPUB before sending.</summary>
     public const string Epub = "epub";
 
+    /// <summary>Convert the comic to AZW3 (Kindle Format 8) before sending.</summary>
+    public const string Azw3 = "azw3";
+
     /// <summary>Series subscriptions only: inherit the device's default format.</summary>
     public const string Device = "device";
 
     public static bool IsConcreteFormat(string? value) =>
         string.Equals(value, Original, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(value, Epub, StringComparison.OrdinalIgnoreCase);
+        string.Equals(value, Epub, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(value, Azw3, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Normalizes a user-supplied format to <see cref="Original"/> or
-    /// <see cref="Epub"/>, throwing when the value is not recognized.
+    /// Normalizes a user-supplied format to <see cref="Original"/>,
+    /// <see cref="Epub"/> or <see cref="Azw3"/>, throwing when the value is not
+    /// recognized.
     /// Null/empty falls back to <paramref name="fallback"/>.
     /// </summary>
     public static string NormalizeOrThrow(string? value, string fallback, string paramName)
@@ -43,7 +48,12 @@ public static class EmailDeliveryFormat
             return Epub;
         }
 
-        throw new ArgumentException($"Unsupported delivery format '{value}'. Expected 'original' or 'epub'.", paramName);
+        if (trimmed == Azw3)
+        {
+            return Azw3;
+        }
+
+        throw new ArgumentException($"Unsupported delivery format '{value}'. Expected 'original', 'epub' or 'azw3'.", paramName);
     }
 
     /// <summary>
@@ -73,7 +83,12 @@ public static class EmailDeliveryFormat
             return Epub;
         }
 
-        throw new ArgumentException($"Unsupported delivery format '{value}'. Expected 'original', 'epub' or 'device'.", paramName);
+        if (trimmed == Azw3)
+        {
+            return Azw3;
+        }
+
+        throw new ArgumentException($"Unsupported delivery format '{value}'. Expected 'original', 'epub', 'azw3' or 'device'.", paramName);
     }
 }
 

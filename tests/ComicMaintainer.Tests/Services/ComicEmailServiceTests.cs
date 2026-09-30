@@ -17,6 +17,7 @@ public class ComicEmailServiceTests : IDisposable
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbFactory;
     private readonly Mock<IComicEmailSender> _sender = new();
     private readonly Mock<IEpubConversionService> _epub = new();
+    private readonly Mock<IAzw3ConversionService> _azw3 = new();
     private readonly Mock<IComicEmailQueue> _queue = new();
     private readonly ComicEmailService _service;
     private readonly EreaderDeviceService _devices;
@@ -59,6 +60,7 @@ public class ComicEmailServiceTests : IDisposable
             _dbFactory,
             _sender.Object,
             _epub.Object,
+            _azw3.Object,
             _queue.Object,
             seriesCache.Object,
             new Mock<ISeriesImageStore>().Object,

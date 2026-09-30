@@ -7384,8 +7384,7 @@
                 loadEmailStatus();
 
                 const errorReportingEnabled = document.getElementById('errorReportingEnabledCheckbox');
-                const errorReportingOwner = document.getElementById('errorReportingOwner');
-                const errorReportingRepo = document.getElementById('errorReportingRepo');
+                const errorReportingDestination = document.getElementById('errorReportingDestination');
                 const errorReportingToken = document.getElementById('errorReportingToken');
                 const errorReportingTokenHint = document.getElementById('errorReportingTokenHint');
                 const errorReportingClearToken = document.getElementById('errorReportingClearTokenCheckbox');
@@ -7394,8 +7393,14 @@
                 const errorReportingDedupeHours = document.getElementById('errorReportingDedupeHours');
                 const errorReportingComment = document.getElementById('errorReportingCommentCheckbox');
                 if (errorReportingEnabled) errorReportingEnabled.checked = !!settingsData.error_reporting_enabled;
-                if (errorReportingOwner) errorReportingOwner.value = settingsData.error_reporting_github_owner || '';
-                if (errorReportingRepo) errorReportingRepo.value = settingsData.error_reporting_github_repo || '';
+                // The destination is fixed server-side; it is shown, never edited.
+                if (errorReportingDestination) {
+                    const destinationOwner = settingsData.error_reporting_github_owner || '';
+                    const destinationRepo = settingsData.error_reporting_github_repo || '';
+                    errorReportingDestination.textContent = destinationOwner && destinationRepo
+                        ? `${destinationOwner}/${destinationRepo}`
+                        : 'the ComicMaintainer project repository';
+                }
                 // The token is never returned by the API; only whether one is stored.
                 if (errorReportingToken) errorReportingToken.value = '';
                 if (errorReportingTokenHint) {
@@ -9335,8 +9340,6 @@
                     const errorReportingClearTokenChecked = document.getElementById('errorReportingClearTokenCheckbox').checked;
                     const errorReportingBody = {
                         enabled: errorReportingEnabledEl.checked,
-                        gitHubOwner: document.getElementById('errorReportingOwner').value.trim() || null,
-                        gitHubRepo: document.getElementById('errorReportingRepo').value.trim() || null,
                         // null keeps the stored token; '' clears it.
                         gitHubToken: errorReportingClearTokenChecked ? '' : (errorReportingTokenInput || null),
                         assignee: document.getElementById('errorReportingAssignee').value.trim() || null,

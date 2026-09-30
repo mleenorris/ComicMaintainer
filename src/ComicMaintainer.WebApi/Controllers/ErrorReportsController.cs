@@ -147,8 +147,8 @@ public class ErrorReportsController : ControllerBase
 
     /// <summary>
     /// Files a deliberately harmless report so an operator can confirm the
-    /// token, repository and labels actually work — without waiting for a real
-    /// failure, which is exactly when a misconfiguration is most costly.
+    /// token and labels actually work — without waiting for a real failure,
+    /// which is exactly when a misconfiguration is most costly.
     /// </summary>
     [HttpPost("test")]
     public async Task<ActionResult> SendTestReport(CancellationToken cancellationToken = default)
@@ -175,13 +175,13 @@ public class ErrorReportsController : ControllerBase
             ErrorReportOutcome.Disabled =>
                 BadRequest(new { error = "Error reporting is disabled" }),
             ErrorReportOutcome.NotConfigured =>
-                BadRequest(new { error = "A GitHub owner, repository and token must be configured" }),
+                BadRequest(new { error = "A GitHub token must be configured" }),
             ErrorReportOutcome.RateLimited =>
                 BadRequest(new { error = "The daily issue cap has been reached" }),
             ErrorReportOutcome.Muted =>
                 BadRequest(new { error = "The test report fingerprint is muted" }),
             _ =>
-                StatusCode(502, new { error = "The test report could not be delivered to GitHub; check connectivity, the repository name and token permissions", outcome = outcome.ToString() })
+                StatusCode(502, new { error = $"The test report could not be delivered to GitHub; check connectivity and that the token grants issues:write on {ErrorReportingDestination.Slug}", outcome = outcome.ToString() })
         };
     }
 

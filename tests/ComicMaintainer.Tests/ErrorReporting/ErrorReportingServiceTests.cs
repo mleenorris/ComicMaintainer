@@ -284,29 +284,62 @@ public class ErrorReportingServiceTests
     }
 
     [Fact]
-    public async Task ProcessAsync_FilesAFreshIssueWhenTheDestinationRepositoryChanges()
+    public async Task ProcessAsync_FilesEveryIssueOnTheProjectRepository()
     {
         var client = new RecordingGitHubIssueClient();
-        var settings = EnabledSettings();
-        var service = CreateService(settings, client);
 
-        await service.ProcessAsync(CreateReport());
+        await CreateService(EnabledSettings(), client).ProcessAsync(CreateReport());
 
-        settings.ErrorReportingGitHubRepo = "a-different-repo";
-        _timeProvider.Advance(TimeSpan.FromHours(25));
-
-        var outcome = await service.ProcessAsync(CreateReport());
-
-        // Commenting would have landed on whatever unrelated issue holds that
-        // number in the new repository.
-        Assert.Equal(ErrorReportOutcome.IssueCreated, outcome);
-        Assert.Empty(client.Comments);
-        Assert.Equal(2, client.CreatedIssues.Count);
-        Assert.Equal("a-different-repo", client.CreatedIssues[1].Repo);
+        var created = Assert.Single(client.CreatedIssues);
+        Assert.Equal(ErrorReportingDestination.Owner, created.Owner);
+        Assert.Equal(ErrorReportingDestination.Repo, created.Repo);
 
         await using var db = await _dbContextFactory.CreateDbContextAsync();
         var entity = await db.ErrorReports.SingleAsync();
-        Assert.Equal("a-different-repo", entity.GitHubRepo);
+        Assert.Equal(ErrorReportingDestination.Owner, entity.GitHubOwner);
+        Assert.Equal(ErrorReportingDestination.Repo, entity.GitHubRepo);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_FilesAFreshIssueWhenTheLinkedIssueBelongsToAnotherRepository()
+    {
+        // A row carried over from the release where the destination was an
+        // operator setting. Commenting would have landed on whatever unrelated
+        // issue holds that number on the project repository.
+        await using (var seed = await _dbContextFactory.CreateDbContextAsync())
+        {
+            seed.ErrorReports.Add(new ErrorReportEntity
+            {
+                Fingerprint = "fingerprint-1",
+                Level = "Error",
+                MessageTemplate = "Failed to process {File}",
+                FirstSeenAt = _timeProvider.GetUtcNow().UtcDateTime,
+                LastSeenAt = _timeProvider.GetUtcNow().UtcDateTime,
+                OccurrenceCount = 1,
+                State = ErrorReportState.Reported,
+                GitHubIssueNumber = 42,
+                GitHubOwner = "someone",
+                GitHubRepo = "their-fork",
+                IssueCreatedAt = _timeProvider.GetUtcNow().UtcDateTime,
+                LastReportedAt = _timeProvider.GetUtcNow().UtcDateTime
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var client = new RecordingGitHubIssueClient();
+
+        var outcome = await CreateService(EnabledSettings(), client).ProcessAsync(CreateReport());
+
+        Assert.Equal(ErrorReportOutcome.IssueCreated, outcome);
+        Assert.Empty(client.Comments);
+        var created = Assert.Single(client.CreatedIssues);
+        Assert.Equal(ErrorReportingDestination.Repo, created.Repo);
+
+        await using var db = await _dbContextFactory.CreateDbContextAsync();
+        var entity = await db.ErrorReports.SingleAsync();
+        Assert.Equal(ErrorReportingDestination.Owner, entity.GitHubOwner);
+        Assert.Equal(ErrorReportingDestination.Repo, entity.GitHubRepo);
+        Assert.NotEqual(42, entity.GitHubIssueNumber);
     }
 
     private ErrorReportingService CreateService(AppSettings settings, IGitHubIssueClient client)
@@ -324,8 +357,6 @@ public class ErrorReportingServiceTests
     private static AppSettings EnabledSettings() => new()
     {
         ErrorReportingEnabled = true,
-        ErrorReportingGitHubOwner = "someone",
-        ErrorReportingGitHubRepo = "their-fork",
         ErrorReportingGitHubToken = "a-token-value",
         ErrorReportingAssignee = "copilot-swe-agent",
         ErrorReportingMaxIssuesPerDay = 10,
@@ -346,7 +377,7 @@ public class ErrorReportingServiceTests
         TimestampUtc = _timeProvider.GetUtcNow().UtcDateTime
     };
 
-    private sealed record CreatedIssue(string Repo, string Title, string Body, IReadOnlyCollection<string> Labels, string? Assignee);
+    private sealed record CreatedIssue(string Owner, string Repo, string Title, string Body, IReadOnlyCollection<string> Labels, string? Assignee);
 
     private sealed class RecordingGitHubIssueClient : IGitHubIssueClient
     {
@@ -380,7 +411,7 @@ public class ErrorReportingServiceTests
                 throw new GitHubIssuePermanentException("assignee not permitted", isAssigneeRejection: true);
             }
 
-            CreatedIssues.Add(new CreatedIssue(target.Repo, title, body, labels, assignee));
+            CreatedIssues.Add(new CreatedIssue(target.Owner, target.Repo, title, body, labels, assignee));
             var number = _nextIssueNumber++;
             return Task.FromResult(new GitHubIssueReference(number, $"https://github.com/o/r/issues/{number}"));
         }

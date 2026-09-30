@@ -15,7 +15,7 @@ public enum ErrorReportOutcome
     /// <summary>Reporting is switched off.</summary>
     Disabled,
 
-    /// <summary>Reporting is on but the target repository or token is missing.</summary>
+    /// <summary>Reporting is on but no GitHub token is configured.</summary>
     NotConfigured,
 
     /// <summary>Counted locally; no issue action taken (duplicate inside the dedupe window).</summary>
@@ -158,21 +158,21 @@ public sealed class ErrorReportingService : IErrorReportingService
         if (target is null)
         {
             _logger.LogWarning(
-                "Error reporting is enabled but no GitHub owner/repository/token is configured; report {Fingerprint} was recorded locally only",
+                "Error reporting is enabled but no GitHub token is configured; report {Fingerprint} was recorded locally only",
                 LoggingHelper.SanitizeForLog(report.Fingerprint));
             return ErrorReportOutcome.NotConfigured;
         }
 
-        // The destination is an operator setting and can change at any time. An
-        // issue number is only meaningful on the repository it was filed
-        // against, so linkage to a different destination is dropped rather than
-        // reused — otherwise a recurrence would comment on whatever unrelated
-        // issue happens to hold that number in the new repository, and the
-        // defect would never be filed in the new one.
+        // An issue number is only meaningful on the repository it was filed
+        // against. Rows carried over from a release where the destination was
+        // an operator setting can be linked to some other repository, so that
+        // linkage is dropped rather than reused — otherwise a recurrence would
+        // comment on whatever unrelated issue happens to hold that number here,
+        // and the defect would never be filed on the project repository.
         if (HasStaleIssueLinkage(entity, target))
         {
             _logger.LogInformation(
-                "The error reporting destination changed; clearing the GitHub issue linkage for fingerprint {Fingerprint}",
+                "The linked GitHub issue belongs to another repository; clearing the issue linkage for fingerprint {Fingerprint}",
                 LoggingHelper.SanitizeForLog(entity.Fingerprint));
 
             entity.GitHubIssueNumber = null;
@@ -441,9 +441,10 @@ public sealed class ErrorReportingService : IErrorReportingService
 
     /// <summary>
     /// True when the row is linked to an issue on a repository other than the
-    /// one currently configured. Rows filed before the destination was recorded
-    /// are treated as stale too: reusing their number against an unknown
-    /// repository is exactly the mistake this guards against.
+    /// project repository — either a row from a release where the destination
+    /// was configurable, or one filed before the destination was recorded at
+    /// all. Reusing such a number here is exactly the mistake this guards
+    /// against.
     /// </summary>
     private static bool HasStaleIssueLinkage(ErrorReportEntity entity, GitHubIssueTarget target)
         => entity.GitHubIssueNumber is not null
@@ -470,16 +471,14 @@ public sealed class ErrorReportingService : IErrorReportingService
 
     private static GitHubIssueTarget? BuildTarget(AppSettings settings)
     {
-        var owner = settings.ErrorReportingGitHubOwner?.Trim();
-        var repo = settings.ErrorReportingGitHubRepo?.Trim();
         var token = settings.ErrorReportingGitHubToken?.Trim();
 
-        if (string.IsNullOrEmpty(owner) || string.IsNullOrEmpty(repo) || string.IsNullOrEmpty(token))
+        if (string.IsNullOrEmpty(token))
         {
             return null;
         }
 
-        return new GitHubIssueTarget(owner, repo, token);
+        return new GitHubIssueTarget(ErrorReportingDestination.Owner, ErrorReportingDestination.Repo, token);
     }
 
     private static async Task SaveAsync(ComicMaintainerDbContext db, CancellationToken cancellationToken)

@@ -916,7 +916,7 @@
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Automated Error Reporting</h3>
                 <div class="form-group">
                    <small style="display: block; margin-bottom: 15px; color: var(--text-muted);">
-                       When enabled, errors logged by this instance are deduplicated and filed as issues on a GitHub repository you nominate, so a coding agent can start on them. Paths, email addresses and credentials are redacted before anything is sent. This is off by default and should normally point at <strong>your own</strong> repository.
+                       When enabled, errors logged by this instance are deduplicated and filed as issues on the ComicMaintainer project repository, where they reach the people who develop it. Paths, email addresses and credentials are redacted before anything is sent. This is off by default; nothing leaves this machine until you turn it on and supply a token.
                    </small>
                    <label for="errorReportingEnabledCheckbox" style="display: flex; align-items: center; cursor: pointer;">
                        <input type="checkbox" id="errorReportingEnabledCheckbox" name="errorReportingEnabled" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
@@ -924,12 +924,11 @@
                    </label>
                 </div>
                 <div class="form-group">
-                   <label for="errorReportingOwner">GitHub Owner</label>
-                   <input type="text" id="errorReportingOwner" name="errorReportingOwner" autocomplete="off" placeholder="your-github-username">
-                </div>
-                <div class="form-group">
-                   <label for="errorReportingRepo">GitHub Repository</label>
-                   <input type="text" id="errorReportingRepo" name="errorReportingRepo" autocomplete="off" placeholder="your-fork">
+                   <label>Destination Repository</label>
+                   <div id="errorReportingDestination" style="color: var(--text-secondary);"></div>
+                   <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                       Fixed: reports go to the project's own repository, which is the only place anyone can act on them.
+                   </small>
                 </div>
                 <div class="form-group">
                    <label for="errorReportingToken">GitHub Token</label>
@@ -969,7 +968,7 @@
                 <div class="form-group">
                    <button class="btn btn-small" type="button" data-requires-write onclick="sendErrorReportingTest()">Send Test Report</button>
                    <small id="errorReportingTestHint" style="display: block; margin-top: 5px; color: var(--text-muted);">
-                       Save your settings first, then send a harmless test report to confirm the token and repository work.
+                       Save your settings first, then send a harmless test report to confirm the token works.
                    </small>
                 </div>
 

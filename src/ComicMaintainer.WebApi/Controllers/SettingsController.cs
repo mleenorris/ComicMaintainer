@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.Authorization;
@@ -90,8 +91,11 @@ public class SettingsController : ControllerBase
             email_from_name = _appSettings.CurrentValue.EmailFromName,
             email_max_attachment_mb = _appSettings.CurrentValue.EmailMaxAttachmentMegabytes,
             error_reporting_enabled = _appSettings.CurrentValue.ErrorReportingEnabled,
-            error_reporting_github_owner = _appSettings.CurrentValue.ErrorReportingGitHubOwner,
-            error_reporting_github_repo = _appSettings.CurrentValue.ErrorReportingGitHubRepo,
+            // The destination is fixed, not a setting. It is still returned so
+            // the UI can name the repository it files issues in without
+            // duplicating it client-side.
+            error_reporting_github_owner = ErrorReportingDestination.Owner,
+            error_reporting_github_repo = ErrorReportingDestination.Repo,
             // As with the SMTP password, the token itself is never returned; the
             // UI only needs to know whether one is stored.
             error_reporting_github_token_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.ErrorReportingGitHubToken),
@@ -858,7 +862,8 @@ public class SettingsController : ControllerBase
 
     /// <summary>
     /// Updates the automated error-reporting settings. Omit <c>gitHubToken</c>
-    /// to keep the stored token; send an empty string to clear it.
+    /// to keep the stored token; send an empty string to clear it. The
+    /// destination repository is fixed and cannot be changed here.
     /// </summary>
     [HttpPut("error-reporting")]
     public async Task<ActionResult> UpdateErrorReportingSettings([FromBody] ErrorReportingSettingsRequest request, CancellationToken cancellationToken = default)
@@ -872,8 +877,6 @@ public class SettingsController : ControllerBase
         {
             await _settingsService.UpdateErrorReportingSettingsAsync(
                 request.Enabled,
-                request.GitHubOwner,
-                request.GitHubRepo,
                 request.GitHubToken,
                 request.Assignee,
                 request.MaxIssuesPerDay,
@@ -897,12 +900,6 @@ public class SettingsController : ControllerBase
     public class ErrorReportingSettingsRequest
     {
         public bool Enabled { get; set; }
-
-        /// <summary>Owner of the repository issues are filed in.</summary>
-        public string? GitHubOwner { get; set; }
-
-        /// <summary>Repository issues are filed in.</summary>
-        public string? GitHubRepo { get; set; }
 
         /// <summary>Null keeps the stored token; empty string clears it.</summary>
         public string? GitHubToken { get; set; }

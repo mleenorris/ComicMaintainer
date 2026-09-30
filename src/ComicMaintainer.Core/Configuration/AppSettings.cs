@@ -269,22 +269,18 @@ public class AppSettings
     /// explicitly.
     /// <para>ComicMaintainer is self-hosted: error text originates on someone
     /// else's machine and describes their library. Shipping that anywhere by
-    /// default — least of all to the upstream repository — would be a privacy
-    /// violation, so the operator has to opt in and nominate the repository
-    /// that receives the issues.</para>
+    /// default would be a privacy violation, so the operator has to opt in and
+    /// supply a token. The destination is not a setting — reports always go to
+    /// the project's own repository
+    /// (<see cref="ErrorReporting.ErrorReportingDestination"/>), which is the
+    /// only place anyone can act on them.</para>
     /// </summary>
     public bool ErrorReportingEnabled { get; set; }
 
-    /// <summary>Owner (user or organisation) of the repository issues are filed in.</summary>
-    public string? ErrorReportingGitHubOwner { get; set; }
-
-    /// <summary>Name of the repository issues are filed in.</summary>
-    public string? ErrorReportingGitHubRepo { get; set; }
-
     /// <summary>
-    /// Token used to create issues. Use a fine-grained PAT (or GitHub App
-    /// installation token) scoped to <em>issues: write</em> on the single
-    /// target repository and nothing else — this token lives on a machine that
+    /// Token used to create issues on the project repository. Use a fine-grained
+    /// PAT (or GitHub App installation token) scoped to <em>issues: write</em> on
+    /// that repository and nothing else — this token lives on a machine that
     /// is, by definition, experiencing failures. Never returned by the settings
     /// API and never written to the log.
     /// </summary>

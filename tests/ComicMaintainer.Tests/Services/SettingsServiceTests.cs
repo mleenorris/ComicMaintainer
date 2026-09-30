@@ -401,12 +401,10 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task UpdateErrorReportingSettingsAsync_PersistsDestinationAndSecretSeparately()
+    public async Task UpdateErrorReportingSettingsAsync_PersistsSettingsAndSecretTogether()
     {
         await _service.UpdateErrorReportingSettingsAsync(
             enabled: true,
-            gitHubOwner: "someone",
-            gitHubRepo: "their-fork",
             gitHubToken: "a-token-value",
             assignee: "copilot-swe-agent",
             maxIssuesPerDay: 5,
@@ -417,8 +415,9 @@ public class SettingsServiceTests : IDisposable
         var settings = ReadAppSettingsSection(settingsFilePath);
 
         Assert.True(settings["ErrorReportingEnabled"].GetBoolean());
-        Assert.Equal("someone", settings["ErrorReportingGitHubOwner"].GetString());
-        Assert.Equal("their-fork", settings["ErrorReportingGitHubRepo"].GetString());
+        // The destination is a constant in the application, never a setting.
+        Assert.False(settings.ContainsKey("ErrorReportingGitHubOwner"));
+        Assert.False(settings.ContainsKey("ErrorReportingGitHubRepo"));
         Assert.Equal("a-token-value", settings["ErrorReportingGitHubToken"].GetString());
         Assert.Equal(5, settings["ErrorReportingMaxIssuesPerDay"].GetInt32());
         Assert.Equal(12, settings["ErrorReportingDedupeWindowHours"].GetInt32());
@@ -430,8 +429,6 @@ public class SettingsServiceTests : IDisposable
     {
         await _service.UpdateErrorReportingSettingsAsync(
             enabled: true,
-            gitHubOwner: "someone",
-            gitHubRepo: "their-fork",
             gitHubToken: "a-token-value",
             assignee: null,
             maxIssuesPerDay: 5,
@@ -452,10 +449,10 @@ public class SettingsServiceTests : IDisposable
     public async Task UpdateErrorReportingSettingsAsync_LeavesTheStoredTokenAloneWhenOmitted()
     {
         await _service.UpdateErrorReportingSettingsAsync(
-            true, "someone", "their-fork", "a-token-value", null, 5, 12, true);
+            true, "a-token-value", null, 5, 12, true);
 
         await _service.UpdateErrorReportingSettingsAsync(
-            true, "someone", "their-fork", null, null, 5, 12, true);
+            true, null, null, 5, 12, true);
 
         var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
         Assert.Equal("a-token-value", settings["ErrorReportingGitHubToken"].GetString());
@@ -465,23 +462,21 @@ public class SettingsServiceTests : IDisposable
     public async Task UpdateErrorReportingSettingsAsync_ClearsTheTokenOnEmptyString()
     {
         await _service.UpdateErrorReportingSettingsAsync(
-            true, "someone", "their-fork", "a-token-value", null, 5, 12, true);
+            true, "a-token-value", null, 5, 12, true);
 
         await _service.UpdateErrorReportingSettingsAsync(
-            true, "someone", "their-fork", string.Empty, null, 5, 12, true);
+            false, string.Empty, null, 5, 12, true);
 
         var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
         Assert.Equal(JsonValueKind.Null, settings["ErrorReportingGitHubToken"].ValueKind);
     }
 
     [Fact]
-    public async Task UpdateErrorReportingSettingsAsync_RefusesToEnableWithoutADestination()
+    public async Task UpdateErrorReportingSettingsAsync_RefusesToEnableWithoutAToken()
     {
         await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
             enabled: true,
-            gitHubOwner: null,
-            gitHubRepo: null,
-            gitHubToken: "a-token-value",
+            gitHubToken: null,
             assignee: null,
             maxIssuesPerDay: 5,
             dedupeWindowHours: 12,
@@ -489,13 +484,12 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("../../etc", "repo")]
-    [InlineData("owner", "../other")]
-    [InlineData("owner with spaces", "repo")]
-    public async Task UpdateErrorReportingSettingsAsync_RejectsNamesThatWouldEscapeTheApiPath(string owner, string repo)
+    [InlineData("../../etc")]
+    [InlineData("login with spaces")]
+    public async Task UpdateErrorReportingSettingsAsync_RejectsAnAssigneeThatWouldEscapeTheApiPath(string assignee)
     {
         await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
-            true, owner, repo, "a-token-value", null, 5, 12, true));
+            true, "a-token-value", assignee, 5, 12, true));
     }
 
     [Theory]
@@ -506,6 +500,6 @@ public class SettingsServiceTests : IDisposable
     public async Task UpdateErrorReportingSettingsAsync_RejectsOutOfRangeLimits(int maxPerDay, int windowHours)
     {
         await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
-            true, "someone", "their-fork", "a-token-value", null, maxPerDay, windowHours, true));
+            true, "a-token-value", null, maxPerDay, windowHours, true));
     }
 }

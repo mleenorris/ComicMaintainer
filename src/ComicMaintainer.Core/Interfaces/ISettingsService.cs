@@ -137,11 +137,10 @@ public interface ISettingsService
     /// Persist the automated error-reporting settings. A null
     /// <paramref name="gitHubToken"/> leaves the stored token untouched so the
     /// UI never has to round-trip the secret; pass an empty string to clear it.
+    /// The destination repository is fixed and is not a setting.
     /// </summary>
     Task UpdateErrorReportingSettingsAsync(
         bool enabled,
-        string? gitHubOwner,
-        string? gitHubRepo,
         string? gitHubToken,
         string? assignee,
         int maxIssuesPerDay,

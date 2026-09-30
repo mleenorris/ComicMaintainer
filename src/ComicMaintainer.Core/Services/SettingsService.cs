@@ -286,14 +286,12 @@ public class SettingsService : ISettingsService
     /// Persists the automated error-reporting settings.
     /// </summary>
     /// <remarks>
-    /// Validation is intentionally strict on the owner/repo pair: a typo here
-    /// means every report is silently rejected by GitHub, which is exactly the
-    /// kind of failure nobody notices until they need the reports.
+    /// The destination repository is not among them: reports always go to the
+    /// project's own repository (see <c>ErrorReportingDestination</c>), so the
+    /// only thing an operator supplies is the token that grants access to it.
     /// </remarks>
     public async Task UpdateErrorReportingSettingsAsync(
         bool enabled,
-        string? gitHubOwner,
-        string? gitHubRepo,
         string? gitHubToken,
         string? assignee,
         int maxIssuesPerDay,
@@ -301,30 +299,18 @@ public class SettingsService : ISettingsService
         bool commentOnRecurrence,
         CancellationToken cancellationToken = default)
     {
-        var owner = Normalize(gitHubOwner);
-        var repo = Normalize(gitHubRepo);
         var normalizedAssignee = Normalize(assignee);
-
-        if (owner is not null && !GitHubNameValidator.IsValidOwner(owner))
-        {
-            throw new ArgumentException($"'{owner}' is not a valid GitHub owner name", nameof(gitHubOwner));
-        }
-
-        if (repo is not null && !GitHubNameValidator.IsValidRepository(repo))
-        {
-            throw new ArgumentException($"'{repo}' is not a valid GitHub repository name", nameof(gitHubRepo));
-        }
 
         if (normalizedAssignee is not null && !GitHubNameValidator.IsValidOwner(normalizedAssignee))
         {
             throw new ArgumentException($"'{normalizedAssignee}' is not a valid GitHub login", nameof(assignee));
         }
 
-        // Turning reporting on without a destination would queue reports that
-        // can never be delivered, so refuse rather than fail silently later.
-        if (enabled && (owner is null || repo is null))
+        // Turning reporting on without a token would queue reports that can
+        // never be delivered, so refuse rather than fail silently later.
+        if (enabled && !await HasUsableTokenAsync(gitHubToken, cancellationToken))
         {
-            throw new ArgumentException("A GitHub owner and repository are required to enable error reporting", nameof(gitHubOwner));
+            throw new ArgumentException("A GitHub token is required to enable error reporting", nameof(gitHubToken));
         }
 
         if (maxIssuesPerDay is < 0 or > 100)
@@ -339,13 +325,11 @@ public class SettingsService : ISettingsService
 
         // The whole reporting block is written in a single atomic file
         // replacement. Writing the settings one at a time would let the
-        // live-reloading sink observe a new owner beside the previous repo and
-        // token — and a failure partway through would leave that mixed
-        // destination active.
+        // live-reloading sink observe reporting switched on beside a token that
+        // has not been written yet — and a failure partway through would leave
+        // that mixed state active.
         var values = new Dictionary<string, object?>(StringComparer.Ordinal)
         {
-            ["ErrorReportingGitHubOwner"] = owner,
-            ["ErrorReportingGitHubRepo"] = repo,
             ["ErrorReportingAssignee"] = normalizedAssignee,
             ["ErrorReportingMaxIssuesPerDay"] = maxIssuesPerDay,
             ["ErrorReportingDedupeWindowHours"] = dedupeWindowHours,
@@ -382,6 +366,49 @@ public class SettingsService : ISettingsService
 
     private static string? Normalize(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>
+    /// True when a token is available to report with: one supplied in this
+    /// request, one already persisted, or one supplied by the environment. A
+    /// null request token means "keep the stored one".
+    /// </summary>
+    /// <remarks>
+    /// The persisted file is consulted directly rather than only through the
+    /// options monitor, which picks up a just-written change a file-watcher
+    /// tick later — long enough for a save made moments after the token was
+    /// stored to look untokened and be refused.
+    /// </remarks>
+    private async Task<bool> HasUsableTokenAsync(string? requestedToken, CancellationToken cancellationToken)
+    {
+        if (requestedToken is not null)
+        {
+            return !string.IsNullOrWhiteSpace(requestedToken);
+        }
+
+        if (!string.IsNullOrWhiteSpace(_appSettings.CurrentValue.ErrorReportingGitHubToken))
+        {
+            return true;
+        }
+
+        if (!File.Exists(_settingsFilePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var json = await File.ReadAllTextAsync(_settingsFilePath, cancellationToken);
+            return ReadAppSettingsSection(json).TryGetValue("ErrorReportingGitHubToken", out var stored)
+                && stored is string token
+                && !string.IsNullOrWhiteSpace(token);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Unreadable settings file: the write that follows would fail too,
+            // so report "no token" rather than guessing.
+            return false;
+        }
+    }
 
     private async Task UpdateSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
     {

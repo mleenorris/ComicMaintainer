@@ -29,7 +29,8 @@ public class SettingsService : ISettingsService
     private static readonly HashSet<string> SecretSettingNames = new(StringComparer.Ordinal)
     {
         "SmtpPassword",
-        "ComicVineApiKey"
+        "ComicVineApiKey",
+        "ErrorReportingGitHubToken"
     };
 
     public SettingsService(
@@ -280,6 +281,85 @@ public class SettingsService : ISettingsService
             await UpdateSecretSettingAsync("SmtpPassword", smtpPassword.Length == 0 ? null : smtpPassword, cancellationToken);
         }
     }
+
+    /// <summary>
+    /// Persists the automated error-reporting settings.
+    /// </summary>
+    /// <remarks>
+    /// Validation is intentionally strict on the owner/repo pair: a typo here
+    /// means every report is silently rejected by GitHub, which is exactly the
+    /// kind of failure nobody notices until they need the reports.
+    /// </remarks>
+    public async Task UpdateErrorReportingSettingsAsync(
+        bool enabled,
+        string? gitHubOwner,
+        string? gitHubRepo,
+        string? gitHubToken,
+        string? assignee,
+        int maxIssuesPerDay,
+        int dedupeWindowHours,
+        bool commentOnRecurrence,
+        CancellationToken cancellationToken = default)
+    {
+        var owner = Normalize(gitHubOwner);
+        var repo = Normalize(gitHubRepo);
+        var normalizedAssignee = Normalize(assignee);
+
+        if (owner is not null && !GitHubNameValidator.IsValidOwner(owner))
+        {
+            throw new ArgumentException($"'{owner}' is not a valid GitHub owner name", nameof(gitHubOwner));
+        }
+
+        if (repo is not null && !GitHubNameValidator.IsValidRepository(repo))
+        {
+            throw new ArgumentException($"'{repo}' is not a valid GitHub repository name", nameof(gitHubRepo));
+        }
+
+        if (normalizedAssignee is not null && !GitHubNameValidator.IsValidOwner(normalizedAssignee))
+        {
+            throw new ArgumentException($"'{normalizedAssignee}' is not a valid GitHub login", nameof(assignee));
+        }
+
+        // Turning reporting on without a destination would queue reports that
+        // can never be delivered, so refuse rather than fail silently later.
+        if (enabled && (owner is null || repo is null))
+        {
+            throw new ArgumentException("A GitHub owner and repository are required to enable error reporting", nameof(gitHubOwner));
+        }
+
+        if (maxIssuesPerDay is < 0 or > 100)
+        {
+            throw new ArgumentException("Maximum issues per day must be between 0 and 100", nameof(maxIssuesPerDay));
+        }
+
+        if (dedupeWindowHours is < 1 or > 720)
+        {
+            throw new ArgumentException("Dedupe window must be between 1 and 720 hours", nameof(dedupeWindowHours));
+        }
+
+        await UpdateSettingAsync("ErrorReportingGitHubOwner", owner, cancellationToken);
+        await UpdateSettingAsync("ErrorReportingGitHubRepo", repo, cancellationToken);
+        await UpdateSettingAsync("ErrorReportingAssignee", normalizedAssignee, cancellationToken);
+        await UpdateSettingAsync("ErrorReportingMaxIssuesPerDay", maxIssuesPerDay, cancellationToken);
+        await UpdateSettingAsync("ErrorReportingDedupeWindowHours", dedupeWindowHours, cancellationToken);
+        await UpdateSettingAsync("ErrorReportingCommentOnRecurrence", commentOnRecurrence, cancellationToken);
+
+        // A null token means "keep the stored secret"; an empty string clears it.
+        if (gitHubToken is not null)
+        {
+            await UpdateSecretSettingAsync(
+                "ErrorReportingGitHubToken",
+                gitHubToken.Length == 0 ? null : gitHubToken.Trim(),
+                cancellationToken);
+        }
+
+        // Enabled is written last so reporting is never switched on against a
+        // half-written destination.
+        await UpdateSettingAsync("ErrorReportingEnabled", enabled, cancellationToken);
+    }
+
+    private static string? Normalize(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private async Task UpdateSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
     {

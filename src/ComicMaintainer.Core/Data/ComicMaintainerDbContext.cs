@@ -33,6 +33,7 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
     public DbSet<EreaderDeviceEntity> EreaderDevices { get; set; } = null!;
     public DbSet<SeriesEmailSubscriptionEntity> SeriesEmailSubscriptions { get; set; } = null!;
     public DbSet<ComicEmailDeliveryEntity> ComicEmailDeliveries { get; set; } = null!;
+    public DbSet<ErrorReportEntity> ErrorReports { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -303,6 +304,31 @@ public class ComicMaintainerDbContext : IdentityDbContext<ApplicationUser, Appli
             // Auto-send dedupe looks up "was this file already delivered to this device".
             entity.HasIndex(e => new { e.FilePath, e.DeviceId, e.Status });
             entity.HasIndex(e => e.CreatedAt);
+        });
+
+        // Configure ErrorReportEntity
+        modelBuilder.Entity<ErrorReportEntity>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Fingerprint).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.Level).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.State).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.ExceptionType).HasMaxLength(512);
+            entity.Property(e => e.MessageTemplate).HasMaxLength(2048);
+            entity.Property(e => e.RenderedMessage).HasMaxLength(4096);
+            entity.Property(e => e.SourceContext).HasMaxLength(512);
+            entity.Property(e => e.StackTrace).HasMaxLength(8192);
+            entity.Property(e => e.AppVersion).HasMaxLength(64);
+            entity.Property(e => e.CorrelationId).HasMaxLength(128);
+            entity.Property(e => e.LastError).HasMaxLength(1024);
+            // The dedupe lookup is "have I seen this fingerprint before"; it runs
+            // on every captured error so it must be an index, and uniqueness is
+            // what guarantees two concurrent captures cannot file two issues.
+            entity.HasIndex(e => e.Fingerprint).IsUnique();
+            entity.HasIndex(e => e.LastSeenAt);
+            entity.HasIndex(e => e.State);
+            // Supports the rolling "issues created in the last 24 hours" cap.
+            entity.HasIndex(e => e.IssueCreatedAt);
         });
     }
 }
@@ -735,4 +761,96 @@ public class ComicEmailDeliveryEntity
     public string? ErrorMessage { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? SentAt { get; set; }
+}
+
+/// <summary>
+/// One row per distinct failure fingerprint observed on this installation.
+/// </summary>
+/// <remarks>
+/// This is the dedupe ledger for automated GitHub issue reporting: it is what
+/// makes "the same bug happened again" cheap (bump a counter) instead of
+/// expensive (file another issue). It survives restarts deliberately — a crash
+/// loop that restarts the process every minute would otherwise file a fresh
+/// issue on every boot.
+/// </remarks>
+public class ErrorReportEntity
+{
+    public int Id { get; set; }
+
+    /// <summary>Stable identity of the failure; unique.</summary>
+    public string Fingerprint { get; set; } = string.Empty;
+
+    /// <summary>Log level of the first occurrence (<c>Error</c> or <c>Fatal</c>).</summary>
+    public string Level { get; set; } = "Error";
+
+    public string? ExceptionType { get; set; }
+
+    /// <summary>Redacted message template of the first occurrence.</summary>
+    public string? MessageTemplate { get; set; }
+
+    /// <summary>Redacted rendered message of the most recent occurrence.</summary>
+    public string? RenderedMessage { get; set; }
+
+    public string? SourceContext { get; set; }
+
+    /// <summary>Redacted stack trace of the first occurrence, kept as the issue's sample.</summary>
+    public string? StackTrace { get; set; }
+
+    public string? AppVersion { get; set; }
+
+    /// <summary>Correlation id of the most recent occurrence, for log lookup.</summary>
+    public string? CorrelationId { get; set; }
+
+    public DateTime FirstSeenAt { get; set; } = DateTime.UtcNow;
+    public DateTime LastSeenAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Total occurrences observed, including those never reported.</summary>
+    public int OccurrenceCount { get; set; } = 1;
+
+    /// <summary>Issue number on the target repository, once one has been filed.</summary>
+    public int? GitHubIssueNumber { get; set; }
+
+    /// <summary>Web URL of the filed issue, shown in the admin UI.</summary>
+    public string? GitHubIssueUrl { get; set; }
+
+    /// <summary>When an issue was last created or commented on for this fingerprint.</summary>
+    public DateTime? LastReportedAt { get; set; }
+
+    /// <summary>
+    /// When the issue was created. Kept separate from
+    /// <see cref="LastReportedAt"/> (which recurrence comments also move) so the
+    /// per-day issue cap counts issues created, not issues touched.
+    /// </summary>
+    public DateTime? IssueCreatedAt { get; set; }
+
+    /// <summary>One of <see cref="ErrorReportState"/>.</summary>
+    public string State { get; set; } = ErrorReportState.New;
+
+    /// <summary>Why the last reporting attempt failed, when it did.</summary>
+    public string? LastError { get; set; }
+}
+
+/// <summary>
+/// Lifecycle of an <see cref="ErrorReportEntity"/>.
+/// </summary>
+public static class ErrorReportState
+{
+    /// <summary>Recorded locally, no issue filed yet.</summary>
+    public const string New = "new";
+
+    /// <summary>An issue exists on the target repository.</summary>
+    public const string Reported = "reported";
+
+    /// <summary>
+    /// Suppressed by an operator. Occurrences are still counted but no issue is
+    /// ever filed. This is the escape hatch for a failure that is real, noisy,
+    /// and already understood.
+    /// </summary>
+    public const string Muted = "muted";
+
+    /// <summary>Reporting was attempted and failed; it will be retried.</summary>
+    public const string Failed = "failed";
+
+    public static bool IsKnown(string? value) =>
+        value is New or Reported or Muted or Failed;
 }

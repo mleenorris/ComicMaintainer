@@ -749,15 +749,61 @@ grep '0HNOU94L3SUDV:00000001' /Config/*.log
 See [Request Correlation](#request-correlation) for details.
 
 ### Automatic Error Reporting
-- **GitHub Issue Creation**: Errors can automatically create GitHub issues when configured
-- Set `GITHUB_TOKEN` environment variable with a Personal Access Token (needs `repo` scope)
-- Each error generates a detailed issue with:
-  - Full stack trace and error context
-  - Timestamp and error ID for tracking
-  - Additional diagnostic information (file paths, operation details)
-  - Automatic assignment to configured user (default: `copilot`)
-  - Tagged with `bug` and `auto-generated` labels
-- Example: `docker run -e GITHUB_TOKEN=ghp_xxx -e GITHUB_ISSUE_ASSIGNEE=username ...`
+
+**Disabled by default.** When you opt in, errors and fatal failures logged by this instance are
+redacted, deduplicated, and filed as GitHub issues on a repository *you* nominate, so a coding
+agent (or you) can start on them without waiting for a manual bug report.
+
+How it works:
+
+1. A Serilog sink captures `Error`/`Fatal` events, including every unhandled web request failure
+   and every background-service failure.
+2. Each event is reduced to a **fingerprint** — a hash of the exception type, source context, the
+   message *template*, and the top normalized stack frames. Per-file and per-path detail does not
+   fragment the grouping, so one defect produces one issue.
+3. Every field is **redacted** before it leaves the machine: absolute paths are shortened to a
+   relative marker, email addresses and URL credentials are masked, and any value matching a stored
+   secret (SMTP password, ComicVine key, the reporting token itself) is replaced. Request bodies,
+   headers, environment variables and connection strings are never sent.
+4. A background dispatcher posts the issue with retry, backoff and a circuit breaker, so GitHub
+   being unreachable can never wedge the application. The first occurrence of a fingerprint creates
+   an issue; later occurrences only bump a counter, and optionally add a "still happening" comment
+   once per dedupe window. Issue creation is capped per day.
+
+Issues are titled `[field error] {ExceptionType} in {SourceContext}` and labelled `field-error`,
+`automated` and a severity label. If you set an assignee, new issues are assigned to that login —
+set it to the GitHub coding agent's login to have it pick the issue up and open a pull request.
+
+#### Configuration
+
+Configure it under **Settings → Automated Error Reporting** in the web interface, or with
+environment variables:
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `ERROR_REPORTING_ENABLED` | `false` | Master switch. |
+| `ERROR_REPORTING_GITHUB_OWNER` | _(none)_ | Owner of the target repository. |
+| `ERROR_REPORTING_GITHUB_REPO` | _(none)_ | Target repository name. |
+| `ERROR_REPORTING_GITHUB_TOKEN` | _(none)_ | Token used to create issues. Stored as a secret and never logged. |
+| `ERROR_REPORTING_ASSIGNEE` | _(none)_ | Optional GitHub login to assign new issues to. |
+| `ERROR_REPORTING_MAX_ISSUES_PER_DAY` | `10` | Rolling 24-hour cap on issue creation. |
+| `ERROR_REPORTING_DEDUPE_WINDOW_HOURS` | `24` | How long before a recurring failure earns a comment. |
+| `ERROR_REPORTING_COMMENT_ON_RECURRENCE` | `true` | Whether recurrences comment on the existing issue. |
+
+**Token scope:** use a fine-grained personal access token (or GitHub App installation token) with
+**`Issues: Read and write` on that single repository only**. No `contents`/code access is needed.
+
+**Privacy:** because this is self-hosted, point it at **your own** repository. Error data from your
+library is yours; nothing is sent anywhere until you explicitly enable the feature and supply a
+destination.
+
+#### Operator tools
+
+Administrators can list recent reports, see which ones produced issues, mute a noisy fingerprint,
+and send a harmless test report from the settings page or via `/api/error-reports`.
+
+To suppress reporting for a known-noisy log call without silencing the log itself, wrap it in
+`ILogger.BeginScope(ErrorReportLogProperties.Exclude("reason"))`.
 
 ## GitHub Actions / CI
 - The repository includes a GitHub Actions workflow to automatically build and push the Docker image to Docker Hub on every push or pull request to `master`.

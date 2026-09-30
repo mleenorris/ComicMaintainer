@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Utilities;
@@ -950,11 +951,18 @@ public class ComicEmailService : IComicEmailService
         {
             delivery.Status = EmailDeliveryStatus.Failed;
             delivery.ErrorMessage = Truncate(ex.Message, 1024);
-            _logger.LogError(
-                ex,
-                "Failed to email {FilePath} to device {DeviceId}",
-                LoggingHelper.SanitizePathForLog(delivery.FilePath),
-                delivery.DeviceId);
+
+            // A rejected delivery is almost always the remote SMTP server or the
+            // recipient address, both of which the operator controls; the
+            // failure is already surfaced on the delivery row.
+            using (_logger.BeginScope(ErrorReportLogProperties.Exclude("email delivery rejected by the remote server")))
+            {
+                _logger.LogError(
+                    ex,
+                    "Failed to email {FilePath} to device {DeviceId}",
+                    LoggingHelper.SanitizePathForLog(delivery.FilePath),
+                    delivery.DeviceId);
+            }
         }
         finally
         {

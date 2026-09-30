@@ -88,7 +88,17 @@ public class SettingsController : ControllerBase
             smtp_allow_insecure = _appSettings.CurrentValue.SmtpAllowInsecure,
             email_from_address = _appSettings.CurrentValue.EmailFromAddress,
             email_from_name = _appSettings.CurrentValue.EmailFromName,
-            email_max_attachment_mb = _appSettings.CurrentValue.EmailMaxAttachmentMegabytes
+            email_max_attachment_mb = _appSettings.CurrentValue.EmailMaxAttachmentMegabytes,
+            error_reporting_enabled = _appSettings.CurrentValue.ErrorReportingEnabled,
+            error_reporting_github_owner = _appSettings.CurrentValue.ErrorReportingGitHubOwner,
+            error_reporting_github_repo = _appSettings.CurrentValue.ErrorReportingGitHubRepo,
+            // As with the SMTP password, the token itself is never returned; the
+            // UI only needs to know whether one is stored.
+            error_reporting_github_token_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.ErrorReportingGitHubToken),
+            error_reporting_assignee = _appSettings.CurrentValue.ErrorReportingAssignee,
+            error_reporting_max_issues_per_day = _appSettings.CurrentValue.ErrorReportingMaxIssuesPerDay,
+            error_reporting_dedupe_window_hours = _appSettings.CurrentValue.ErrorReportingDedupeWindowHours,
+            error_reporting_comment_on_recurrence = _appSettings.CurrentValue.ErrorReportingCommentOnRecurrence
         };
         
         _logger.LogDebug("Returning settings: FilenameFormat={FilenameFormat}, IssueNumberPadding={IssueNumberPadding}, WatcherEnableRename={WatcherEnableRename}, WatcherEnableNormalize={WatcherEnableNormalize}, LogMaxBytes={LogMaxBytes}, DatabaseCleanupIntervalHours={DatabaseCleanupIntervalHours}",
@@ -844,6 +854,67 @@ public class SettingsController : ControllerBase
         public string? EmailFromAddress { get; set; }
         public string? EmailFromName { get; set; }
         public int EmailMaxAttachmentMb { get; set; } = 25;
+    }
+
+    /// <summary>
+    /// Updates the automated error-reporting settings. Omit <c>gitHubToken</c>
+    /// to keep the stored token; send an empty string to clear it.
+    /// </summary>
+    [HttpPut("error-reporting")]
+    public async Task<ActionResult> UpdateErrorReportingSettings([FromBody] ErrorReportingSettingsRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { error = "Request body is required" });
+        }
+
+        try
+        {
+            await _settingsService.UpdateErrorReportingSettingsAsync(
+                request.Enabled,
+                request.GitHubOwner,
+                request.GitHubRepo,
+                request.GitHubToken,
+                request.Assignee,
+                request.MaxIssuesPerDay,
+                request.DedupeWindowHours,
+                request.CommentOnRecurrence,
+                cancellationToken);
+
+            return Ok(new { message = "Error reporting settings updated successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update error reporting settings");
+            return StatusCode(500, new { error = "Failed to update error reporting settings" });
+        }
+    }
+
+    public class ErrorReportingSettingsRequest
+    {
+        public bool Enabled { get; set; }
+
+        /// <summary>Owner of the repository issues are filed in.</summary>
+        public string? GitHubOwner { get; set; }
+
+        /// <summary>Repository issues are filed in.</summary>
+        public string? GitHubRepo { get; set; }
+
+        /// <summary>Null keeps the stored token; empty string clears it.</summary>
+        public string? GitHubToken { get; set; }
+
+        /// <summary>Optional GitHub login new issues are assigned to.</summary>
+        public string? Assignee { get; set; }
+
+        public int MaxIssuesPerDay { get; set; } = 10;
+
+        public int DedupeWindowHours { get; set; } = 24;
+
+        public bool CommentOnRecurrence { get; set; } = true;
     }
 
     public class ExternalSeriesMetadataSettingsRequest

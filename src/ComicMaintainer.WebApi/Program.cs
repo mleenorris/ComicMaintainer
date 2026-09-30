@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models.Auth;
 using ComicMaintainer.Core.Reader.Interfaces;
@@ -13,6 +14,7 @@ using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.HealthChecks;
 using ComicMaintainer.WebApi.Hubs;
 using ComicMaintainer.WebApi.Infrastructure;
+using ComicMaintainer.WebApi.Logging;
 using ComicMaintainer.WebApi.Middleware;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -680,6 +682,33 @@ builder.Services.AddSingleton<ComicEmailQueue>(sp => new ComicEmailQueue(
 builder.Services.AddSingleton<IComicEmailQueue>(sp => sp.GetRequiredService<ComicEmailQueue>());
 builder.Services.AddSingleton<IComicEmailService, ComicEmailService>();
 
+// ---------------------------------------------------------------------------
+// Automated error reporting: Error/Fatal log events -> deduplicated GitHub issues.
+//
+// Everything here is inert until ErrorReportingEnabled is turned on and a
+// repository and token are configured; the sink drops every event and the
+// dispatcher idles on an empty queue. Registration is unconditional so the
+// feature can be switched on at runtime without restarting the container.
+// ---------------------------------------------------------------------------
+builder.Services.AddSingleton<IErrorReportQueue>(_ => new ErrorReportQueue());
+builder.Services.AddSingleton<IErrorReportFactory, ErrorReportFactory>();
+builder.Services.AddHttpClient(GitHubIssueClient.HttpClientName)
+    .ConfigureHttpClient(client =>
+    {
+        client.BaseAddress = new Uri("https://api.github.com/");
+        // GitHub rejects requests with no User-Agent.
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
+        // Reporting is strictly best-effort background work; never let a slow
+        // GitHub hold the dispatcher (and therefore the queue) for long.
+        client.Timeout = TimeSpan.FromSeconds(20);
+    });
+builder.Services.AddSingleton<IGitHubIssueClient, GitHubIssueClient>();
+builder.Services.AddSingleton<IErrorReportingService, ErrorReportingService>();
+// Picked up by Serilog's ReadFrom.Services(...) above and attached to the
+// logging pipeline, so every Error/Fatal from any component is captured.
+builder.Services.AddSingleton<Serilog.Core.ILogEventSink, ErrorReportingSink>();
+builder.Services.AddHostedService<ErrorReportDispatchHostedService>();
+
 
 // Add hosted service for file watcher
 builder.Services.AddHostedService<FileWatcherHostedService>();
@@ -1243,6 +1272,41 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         var emailMaxAttachmentMb = Environment.GetEnvironmentVariable("EMAIL_MAX_ATTACHMENT_MB");
         if (!string.IsNullOrEmpty(emailMaxAttachmentMb) && int.TryParse(emailMaxAttachmentMb, out var maxAttachmentMb) && maxAttachmentMb > 0)
             options.EmailMaxAttachmentMegabytes = maxAttachmentMb;
+
+        // Automated error reporting. Provided as environment variables as well as
+        // settings so the token can be supplied by a Docker secret / orchestrator
+        // and never has to be typed into (or stored in) user-settings.json.
+        var errorReportingEnabled = Environment.GetEnvironmentVariable("ERROR_REPORTING_ENABLED");
+        if (!string.IsNullOrEmpty(errorReportingEnabled))
+            options.ErrorReportingEnabled = errorReportingEnabled.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        var errorReportingOwner = Environment.GetEnvironmentVariable("ERROR_REPORTING_GITHUB_OWNER");
+        if (!string.IsNullOrEmpty(errorReportingOwner))
+            options.ErrorReportingGitHubOwner = errorReportingOwner;
+
+        var errorReportingRepo = Environment.GetEnvironmentVariable("ERROR_REPORTING_GITHUB_REPO");
+        if (!string.IsNullOrEmpty(errorReportingRepo))
+            options.ErrorReportingGitHubRepo = errorReportingRepo;
+
+        var errorReportingToken = Environment.GetEnvironmentVariable("ERROR_REPORTING_GITHUB_TOKEN");
+        if (!string.IsNullOrEmpty(errorReportingToken))
+            options.ErrorReportingGitHubToken = errorReportingToken;
+
+        var errorReportingAssignee = Environment.GetEnvironmentVariable("ERROR_REPORTING_ASSIGNEE");
+        if (!string.IsNullOrEmpty(errorReportingAssignee))
+            options.ErrorReportingAssignee = errorReportingAssignee;
+
+        var errorReportingMaxPerDay = Environment.GetEnvironmentVariable("ERROR_REPORTING_MAX_ISSUES_PER_DAY");
+        if (!string.IsNullOrEmpty(errorReportingMaxPerDay) && int.TryParse(errorReportingMaxPerDay, out var maxIssuesPerDay) && maxIssuesPerDay >= 0)
+            options.ErrorReportingMaxIssuesPerDay = maxIssuesPerDay;
+
+        var errorReportingDedupeHours = Environment.GetEnvironmentVariable("ERROR_REPORTING_DEDUPE_WINDOW_HOURS");
+        if (!string.IsNullOrEmpty(errorReportingDedupeHours) && int.TryParse(errorReportingDedupeHours, out var dedupeWindowHours) && dedupeWindowHours > 0)
+            options.ErrorReportingDedupeWindowHours = dedupeWindowHours;
+
+        var errorReportingComment = Environment.GetEnvironmentVariable("ERROR_REPORTING_COMMENT_ON_RECURRENCE");
+        if (!string.IsNullOrEmpty(errorReportingComment))
+            options.ErrorReportingCommentOnRecurrence = errorReportingComment.Equals("true", StringComparison.OrdinalIgnoreCase);
     }
 }
 

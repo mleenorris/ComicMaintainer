@@ -29,7 +29,8 @@ public class SettingsService : ISettingsService
     private static readonly HashSet<string> SecretSettingNames = new(StringComparer.Ordinal)
     {
         "SmtpPassword",
-        "ComicVineApiKey"
+        "ComicVineApiKey",
+        "ErrorReportingGitHubToken"
     };
 
     public SettingsService(
@@ -281,6 +282,107 @@ public class SettingsService : ISettingsService
         }
     }
 
+    /// <summary>
+    /// Persists the automated error-reporting settings.
+    /// </summary>
+    /// <remarks>
+    /// Validation is intentionally strict on the owner/repo pair: a typo here
+    /// means every report is silently rejected by GitHub, which is exactly the
+    /// kind of failure nobody notices until they need the reports.
+    /// </remarks>
+    public async Task UpdateErrorReportingSettingsAsync(
+        bool enabled,
+        string? gitHubOwner,
+        string? gitHubRepo,
+        string? gitHubToken,
+        string? assignee,
+        int maxIssuesPerDay,
+        int dedupeWindowHours,
+        bool commentOnRecurrence,
+        CancellationToken cancellationToken = default)
+    {
+        var owner = Normalize(gitHubOwner);
+        var repo = Normalize(gitHubRepo);
+        var normalizedAssignee = Normalize(assignee);
+
+        if (owner is not null && !GitHubNameValidator.IsValidOwner(owner))
+        {
+            throw new ArgumentException($"'{owner}' is not a valid GitHub owner name", nameof(gitHubOwner));
+        }
+
+        if (repo is not null && !GitHubNameValidator.IsValidRepository(repo))
+        {
+            throw new ArgumentException($"'{repo}' is not a valid GitHub repository name", nameof(gitHubRepo));
+        }
+
+        if (normalizedAssignee is not null && !GitHubNameValidator.IsValidOwner(normalizedAssignee))
+        {
+            throw new ArgumentException($"'{normalizedAssignee}' is not a valid GitHub login", nameof(assignee));
+        }
+
+        // Turning reporting on without a destination would queue reports that
+        // can never be delivered, so refuse rather than fail silently later.
+        if (enabled && (owner is null || repo is null))
+        {
+            throw new ArgumentException("A GitHub owner and repository are required to enable error reporting", nameof(gitHubOwner));
+        }
+
+        if (maxIssuesPerDay is < 0 or > 100)
+        {
+            throw new ArgumentException("Maximum issues per day must be between 0 and 100", nameof(maxIssuesPerDay));
+        }
+
+        if (dedupeWindowHours is < 1 or > 720)
+        {
+            throw new ArgumentException("Dedupe window must be between 1 and 720 hours", nameof(dedupeWindowHours));
+        }
+
+        // The whole reporting block is written in a single atomic file
+        // replacement. Writing the settings one at a time would let the
+        // live-reloading sink observe a new owner beside the previous repo and
+        // token — and a failure partway through would leave that mixed
+        // destination active.
+        var values = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["ErrorReportingGitHubOwner"] = owner,
+            ["ErrorReportingGitHubRepo"] = repo,
+            ["ErrorReportingAssignee"] = normalizedAssignee,
+            ["ErrorReportingMaxIssuesPerDay"] = maxIssuesPerDay,
+            ["ErrorReportingDedupeWindowHours"] = dedupeWindowHours,
+            ["ErrorReportingCommentOnRecurrence"] = commentOnRecurrence,
+            ["ErrorReportingEnabled"] = enabled
+        };
+
+        // A null token means "keep the stored secret"; an empty string clears it.
+        if (gitHubToken is not null)
+        {
+            values["ErrorReportingGitHubToken"] = gitHubToken.Length == 0 ? null : gitHubToken.Trim();
+        }
+
+        await PersistSettingsAsync(values, cancellationToken);
+
+        foreach (var name in values.Keys)
+        {
+            if (SecretSettingNames.Contains(name))
+            {
+                _logger.LogInformation(
+                    "Updated setting {SettingName} ({State})",
+                    name,
+                    values[name] is null ? "cleared" : "value hidden");
+                continue;
+            }
+
+            var value = values[name];
+            var sanitizedValue = value is string strValue
+                ? LoggingHelper.SanitizeForLog(strValue)
+                : value?.ToString() ?? "null";
+            _logger.LogInformation("Updated setting {SettingName} to {Value}", name, sanitizedValue);
+        }
+    }
+
+    private static string? Normalize(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     private async Task UpdateSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
     {
         if (SecretSettingNames.Contains(settingName))
@@ -312,7 +414,17 @@ public class SettingsService : ISettingsService
             cleared ? "cleared" : "value hidden");
     }
 
-    private async Task PersistSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
+    private Task PersistSettingAsync(string settingName, object? value, CancellationToken cancellationToken)
+        => PersistSettingsAsync(
+            new Dictionary<string, object?>(StringComparer.Ordinal) { [settingName] = value },
+            cancellationToken);
+
+    /// <summary>
+    /// Writes one or more settings in a single atomic replacement of
+    /// user-settings.json, so a reader that reloads on change never observes a
+    /// partially applied group of related settings.
+    /// </summary>
+    private async Task PersistSettingsAsync(IReadOnlyDictionary<string, object?> values, CancellationToken cancellationToken)
     {
         await _lock.WaitAsync(cancellationToken);
         try
@@ -331,8 +443,11 @@ public class SettingsService : ISettingsService
                 appSettingsSection = new Dictionary<string, object?>(StringComparer.Ordinal);
             }
 
-            // Update the setting
-            appSettingsSection[settingName] = value;
+            // Update the settings
+            foreach (var (settingName, value) in values)
+            {
+                appSettingsSection[settingName] = value;
+            }
 
             // Serialize and write atomically (temp file + move) so the configuration provider's
             // file watcher does not observe a half-written file.
@@ -348,7 +463,7 @@ public class SettingsService : ISettingsService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to persist setting {SettingName}", settingName);
+            _logger.LogError(ex, "Failed to persist settings {SettingNames}", string.Join(", ", values.Keys));
             throw;
         }
         finally

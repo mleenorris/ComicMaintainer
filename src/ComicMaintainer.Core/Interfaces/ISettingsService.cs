@@ -132,4 +132,20 @@ public interface ISettingsService
         string? fromName,
         int maxAttachmentMegabytes,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persist the automated error-reporting settings. A null
+    /// <paramref name="gitHubToken"/> leaves the stored token untouched so the
+    /// UI never has to round-trip the secret; pass an empty string to clear it.
+    /// </summary>
+    Task UpdateErrorReportingSettingsAsync(
+        bool enabled,
+        string? gitHubOwner,
+        string? gitHubRepo,
+        string? gitHubToken,
+        string? assignee,
+        int maxIssuesPerDay,
+        int dedupeWindowHours,
+        bool commentOnRecurrence,
+        CancellationToken cancellationToken = default);
 }

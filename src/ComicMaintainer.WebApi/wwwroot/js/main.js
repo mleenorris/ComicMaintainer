@@ -7382,6 +7382,32 @@
                 if (emailFromName) emailFromName.value = settingsData.email_from_name || '';
                 if (emailMaxAttachmentMb) emailMaxAttachmentMb.value = settingsData.email_max_attachment_mb || '';
                 loadEmailStatus();
+
+                const errorReportingEnabled = document.getElementById('errorReportingEnabledCheckbox');
+                const errorReportingOwner = document.getElementById('errorReportingOwner');
+                const errorReportingRepo = document.getElementById('errorReportingRepo');
+                const errorReportingToken = document.getElementById('errorReportingToken');
+                const errorReportingTokenHint = document.getElementById('errorReportingTokenHint');
+                const errorReportingClearToken = document.getElementById('errorReportingClearTokenCheckbox');
+                const errorReportingAssignee = document.getElementById('errorReportingAssignee');
+                const errorReportingMaxPerDay = document.getElementById('errorReportingMaxPerDay');
+                const errorReportingDedupeHours = document.getElementById('errorReportingDedupeHours');
+                const errorReportingComment = document.getElementById('errorReportingCommentCheckbox');
+                if (errorReportingEnabled) errorReportingEnabled.checked = !!settingsData.error_reporting_enabled;
+                if (errorReportingOwner) errorReportingOwner.value = settingsData.error_reporting_github_owner || '';
+                if (errorReportingRepo) errorReportingRepo.value = settingsData.error_reporting_github_repo || '';
+                // The token is never returned by the API; only whether one is stored.
+                if (errorReportingToken) errorReportingToken.value = '';
+                if (errorReportingTokenHint) {
+                    errorReportingTokenHint.textContent = settingsData.error_reporting_github_token_set
+                        ? 'Leave blank to keep the stored token.'
+                        : 'Use a fine-grained token with issues: write on that repository only.';
+                }
+                if (errorReportingClearToken) errorReportingClearToken.checked = false;
+                if (errorReportingAssignee) errorReportingAssignee.value = settingsData.error_reporting_assignee || '';
+                if (errorReportingMaxPerDay) errorReportingMaxPerDay.value = settingsData.error_reporting_max_issues_per_day ?? 10;
+                if (errorReportingDedupeHours) errorReportingDedupeHours.value = settingsData.error_reporting_dedupe_window_hours ?? 24;
+                if (errorReportingComment) errorReportingComment.checked = settingsData.error_reporting_comment_on_recurrence !== false;
                  
                 console.log('[SETTINGS] All settings loaded successfully, opening modal');
                 document.getElementById('settingsModal').classList.add('active');
@@ -9302,7 +9328,44 @@
                    return;
                 }
                 emailStatusCache = null;
-                 
+
+                const errorReportingEnabledEl = document.getElementById('errorReportingEnabledCheckbox');
+                if (errorReportingEnabledEl) {
+                    const errorReportingTokenInput = document.getElementById('errorReportingToken').value;
+                    const errorReportingClearTokenChecked = document.getElementById('errorReportingClearTokenCheckbox').checked;
+                    const errorReportingBody = {
+                        enabled: errorReportingEnabledEl.checked,
+                        gitHubOwner: document.getElementById('errorReportingOwner').value.trim() || null,
+                        gitHubRepo: document.getElementById('errorReportingRepo').value.trim() || null,
+                        // null keeps the stored token; '' clears it.
+                        gitHubToken: errorReportingClearTokenChecked ? '' : (errorReportingTokenInput || null),
+                        assignee: document.getElementById('errorReportingAssignee').value.trim() || null,
+                        maxIssuesPerDay: parseInt(document.getElementById('errorReportingMaxPerDay').value, 10) || 0,
+                        dedupeWindowHours: parseInt(document.getElementById('errorReportingDedupeHours').value, 10) || 24,
+                        commentOnRecurrence: document.getElementById('errorReportingCommentCheckbox').checked
+                    };
+                    const errorReportingResponse = await fetch(apiUrl('/api/settings/error-reporting'), {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...getAuthHeaders()
+                        },
+                        body: JSON.stringify(errorReportingBody)
+                    });
+                    if (handleAuthError(errorReportingResponse)) return;
+                    if (!errorReportingResponse.ok) {
+                        let errorMsg = `HTTP error! status: ${errorReportingResponse.status}`;
+                        try {
+                            const errBody = await errorReportingResponse.json();
+                            if (errBody && (errBody.error || errBody.message)) {
+                                errorMsg = errBody.error || errBody.message;
+                            }
+                        } catch (e) { /* ignore parse errors */ }
+                        showMessage('Failed to save error reporting settings: ' + errorMsg, 'error');
+                        return;
+                    }
+                }
+
                 showMessage('Settings saved successfully! Changes to log rotation, external metadata, and database cleanup will take effect on restart.', 'success');
                 closeSettings();
             } catch (error) {
@@ -9310,6 +9373,24 @@
             }
         }
         
+        async function sendErrorReportingTest() {
+            try {
+                const response = await fetch(apiUrl('/api/error-reports/test'), {
+                    method: 'POST',
+                    headers: getAuthHeaders()
+                });
+                if (handleAuthError(response)) return;
+                const result = await response.json().catch(() => null);
+                if (!response.ok) {
+                    showMessage((result && result.error) || `Test report failed (HTTP ${response.status})`, 'error');
+                    return;
+                }
+                showMessage((result && result.message) || 'Test report sent', 'success');
+            } catch (error) {
+                showMessage('Failed to send test report: ' + error.message, 'error');
+            }
+        }
+
         async function resetFilenameFormat() {
             try {
                 const response = await fetch(apiUrl('/api/settings/filename-format'), {

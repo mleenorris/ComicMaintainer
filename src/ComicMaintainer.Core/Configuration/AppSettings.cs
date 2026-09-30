@@ -259,4 +259,72 @@ public class AppSettings
     /// </summary>
     public int EmailMaxAttachmentMegabytes { get; set; } = 25;
 
+    // ---------------------------------------------------------------------
+    // Automated error reporting (field errors -> GitHub issues)
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Master switch for filing GitHub issues when the application logs an
+    /// error in the field. Defaults to <c>false</c> and must be turned on
+    /// explicitly.
+    /// <para>ComicMaintainer is self-hosted: error text originates on someone
+    /// else's machine and describes their library. Shipping that anywhere by
+    /// default — least of all to the upstream repository — would be a privacy
+    /// violation, so the operator has to opt in and nominate the repository
+    /// that receives the issues.</para>
+    /// </summary>
+    public bool ErrorReportingEnabled { get; set; }
+
+    /// <summary>Owner (user or organisation) of the repository issues are filed in.</summary>
+    public string? ErrorReportingGitHubOwner { get; set; }
+
+    /// <summary>Name of the repository issues are filed in.</summary>
+    public string? ErrorReportingGitHubRepo { get; set; }
+
+    /// <summary>
+    /// Token used to create issues. Use a fine-grained PAT (or GitHub App
+    /// installation token) scoped to <em>issues: write</em> on the single
+    /// target repository and nothing else — this token lives on a machine that
+    /// is, by definition, experiencing failures. Never returned by the settings
+    /// API and never written to the log.
+    /// </summary>
+    public string? ErrorReportingGitHubToken { get; set; }
+
+    /// <summary>
+    /// Minimum log level that produces a report: <c>Error</c> (default) or
+    /// <c>Fatal</c>. Anything below <c>Error</c> is rejected — warnings in this
+    /// application are routine and would flood the issue tracker.
+    /// </summary>
+    public string ErrorReportingMinimumLevel { get; set; } = "Error";
+
+    /// <summary>
+    /// Hard cap on issues created in any rolling 24 hours. A single bad release
+    /// can fail in dozens of distinct ways; this keeps the blast radius on the
+    /// issue tracker bounded. Occurrences beyond the cap still update the local
+    /// record, so nothing is lost. Defaults to 10.
+    /// </summary>
+    public int ErrorReportingMaxIssuesPerDay { get; set; } = 10;
+
+    /// <summary>
+    /// How long a fingerprint stays "already reported" before a recurrence is
+    /// allowed to comment on its issue again. Defaults to 24 hours.
+    /// </summary>
+    public int ErrorReportingDedupeWindowHours { get; set; } = 24;
+
+    /// <summary>
+    /// Optional GitHub login to assign new issues to. Set this to the coding
+    /// agent's login (for example <c>copilot-swe-agent</c>) to have it start
+    /// work automatically. When assignment is rejected — the login is not a
+    /// collaborator, or the agent is not enabled on the repository — the issue
+    /// is still created unassigned rather than being lost.
+    /// </summary>
+    public string? ErrorReportingAssignee { get; set; }
+
+    /// <summary>
+    /// When true, a recurrence of an already-reported fingerprint adds a
+    /// comment to the existing issue once the dedupe window has elapsed.
+    /// Defaults to true; occurrence counts are tracked locally either way.
+    /// </summary>
+    public bool ErrorReportingCommentOnRecurrence { get; set; } = true;
+
 }

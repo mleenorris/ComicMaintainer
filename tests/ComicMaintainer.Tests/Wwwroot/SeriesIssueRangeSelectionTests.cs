@@ -153,4 +153,16 @@ public class SeriesIssueRangeSelectionTests
                 RegexOptions.Singleline),
             contents);
     }
+
+    [Fact]
+    public void RangeSelection_StateIsResetWhenRoutingAwayOrOpeningAnotherSeries()
+    {
+        var contents = ReadMainJs();
+
+        Assert.Matches(
+            new Regex(
+                @"function handleRouteChange\(\) \{\s*const route = parseHash\(\);.*?if \(route\.view !== 'series' \|\| currentSeriesDetailId !== route\.seriesId\) \{\s*lastSelectedIssuePath = null;\s*seriesIssueRangeSelectArmed = false;",
+                RegexOptions.Singleline),
+            contents);
+    }
 }

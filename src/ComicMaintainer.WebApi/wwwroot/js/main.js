@@ -2047,6 +2047,10 @@
 
         function handleRouteChange() {
             const route = parseHash();
+            if (route.view !== 'series' || currentSeriesDetailId !== route.seriesId) {
+                lastSelectedIssuePath = null;
+                seriesIssueRangeSelectArmed = false;
+            }
             currentView = route.view;
             applyViewVisibility(route.view);
             if (route.view === 'home') {

@@ -143,6 +143,23 @@ public class EmailDeliveryUiTests
     }
 
     [Fact]
+    public void MainJs_ReconcilesAndSerializesCondensedBuildPolling()
+    {
+        var js = Read("js", "main.js");
+
+        Assert.Contains("function reconcileEmailCondenseBuilds", js);
+        Assert.Matches(
+            new Regex(@"refreshEmailCondenseBuilds\(\).*?reconcileEmailCondenseBuilds\(", RegexOptions.Singleline),
+            js);
+        Assert.Matches(
+            new Regex(@"pollEmailCondenseBuilds\(\).*?reconcileEmailCondenseBuilds\(", RegexOptions.Singleline),
+            js);
+        Assert.Contains("emailCondenseBuildPollInFlight", js);
+        Assert.Contains("setTimeout(", js);
+        Assert.Contains("progress.current_issue", js);
+    }
+
+    [Fact]
     public void MainJs_CondensedSendsRequestEpub()
     {
         var js = Read("js", "main.js");

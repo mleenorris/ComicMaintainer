@@ -37,6 +37,9 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
     private readonly TimeSpan _retention;
 
     private readonly ConcurrentDictionary<Guid, BuildEntry> _builds = new();
+    private readonly ConcurrentDictionary<Guid, Task> _workers = new();
+    private readonly object _registrationSync = new();
+    private bool _disposed;
 
     // Condensing is CPU/IO heavy, so only one book is built at a time and the
     // rest wait their turn with a visible "queued" status.
@@ -98,24 +101,37 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         var book = plan.Books[request.BookIndex];
         var signature = BuildSignature(request, ownerUserId);
 
-        // A double-clicked Download button must not build the same book twice.
-        var existing = _builds.Values.FirstOrDefault(e =>
-            e.Signature == signature && !CondensedBookBuildStatus.IsTerminal(e.Snapshot().Status));
-        if (existing is not null)
+        BuildEntry entry;
+        lock (_registrationSync)
         {
-            return existing.Snapshot();
+            ObjectDisposedException.ThrowIf(_disposed, this);
+
+            // Registration and the active-build lookup are one operation, so
+            // simultaneous requests for the same book join the same build.
+            var existing = _builds.Values.FirstOrDefault(e =>
+                e.Signature == signature && !CondensedBookBuildStatus.IsTerminal(e.Snapshot().Status));
+            if (existing is not null)
+            {
+                return existing.Snapshot();
+            }
+
+            entry = new BuildEntry(
+                Guid.NewGuid(),
+                ownerUserId,
+                signature,
+                book.DisplayName,
+                book.Files.Count,
+                _timeProvider.GetUtcNow().UtcDateTime);
+
+            _builds[entry.BuildId] = entry;
+            var worker = Task.Run(() => RunAsync(entry, request), CancellationToken.None);
+            _workers[entry.BuildId] = worker;
+            _ = worker.ContinueWith(
+                completedTask => _workers.TryRemove(entry.BuildId, out _),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
         }
-
-        var entry = new BuildEntry(
-            Guid.NewGuid(),
-            ownerUserId,
-            signature,
-            book.DisplayName,
-            book.Files.Count,
-            _timeProvider.GetUtcNow().UtcDateTime);
-
-        _builds[entry.BuildId] = entry;
-        _ = Task.Run(() => RunAsync(entry, request), CancellationToken.None);
 
         _logger.LogInformation(
             "Queued condensed EPUB build {BuildId} for {IssueCount} issue(s)",
@@ -360,25 +376,48 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
 
     public void Dispose()
     {
+        Task[] workers;
+        lock (_registrationSync)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            workers = _workers.Values.ToArray();
+        }
+
         try
         {
             _shutdownCts.Cancel();
         }
-        catch (ObjectDisposedException)
+        catch (Exception ex)
         {
-            // Already shut down.
+            _logger.LogWarning(ex, "An error occurred while cancelling condensed EPUB builds during shutdown");
         }
 
-        foreach (var entry in _builds.Values)
+        try
         {
-            if (_builds.TryRemove(entry.BuildId, out _))
+            Task.WhenAll(workers).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "A condensed EPUB build worker failed during shutdown");
+        }
+        finally
+        {
+            foreach (var entry in _builds.Values)
             {
-                Release(entry);
+                if (_builds.TryRemove(entry.BuildId, out _))
+                {
+                    Release(entry);
+                }
             }
-        }
 
-        _shutdownCts.Dispose();
-        _buildSlot.Dispose();
+            _shutdownCts.Dispose();
+            _buildSlot.Dispose();
+        }
     }
 
     /// <summary>

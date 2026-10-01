@@ -134,6 +134,54 @@ public class CondensedBookBuildTrackerTests : IDisposable
     }
 
     [Fact]
+    public async Task StartAsync_SimultaneousIdenticalRequestsRegisterOnlyOneBuild()
+    {
+        const int requestCount = 8;
+        var allPlansStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releasePlans = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var planned = 0;
+        SetupPlan(beforeReturn: async () =>
+        {
+            if (Interlocked.Increment(ref planned) == requestCount)
+            {
+                allPlansStarted.SetResult();
+            }
+
+            await releasePlans.Task;
+        });
+        var epub = CreateBook("Series 001-002");
+        var releaseBuild = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        SetupBuild(async (_, token) =>
+        {
+            await releaseBuild.Task.WaitAsync(token);
+            return new CondensedBookFile(epub, Path.GetFileName(epub));
+        });
+
+        var requests = Enumerable.Range(0, requestCount)
+            .Select(_ => Task.Run(() => _tracker.StartAsync(Request(), Owner)))
+            .ToArray();
+        await allPlansStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        releasePlans.SetResult();
+
+        var started = await Task.WhenAll(requests);
+
+        Assert.All(started, build => Assert.Equal(started[0].BuildId, build.BuildId));
+        _email.Verify(e => e.CreateCondensedBookAsync(
+            It.IsAny<IEnumerable<string>>(),
+            It.IsAny<string?>(),
+            It.IsAny<int?>(),
+            It.IsAny<int>(),
+            It.IsAny<bool>(),
+            It.IsAny<int?>(),
+            It.IsAny<bool>(),
+            It.IsAny<IProgress<EpubConversionProgress>?>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        releaseBuild.SetResult();
+        await WaitForTerminalAsync(started[0].BuildId);
+    }
+
+    [Fact]
     public async Task Cancel_StopsARunningBuild()
     {
         SetupPlan();
@@ -153,6 +201,38 @@ public class CondensedBookBuildTrackerTests : IDisposable
 
         // Nothing is left running, so a later build is not blocked.
         Assert.False(_tracker.Cancel(started.BuildId, Owner));
+    }
+
+    [Fact]
+    public async Task Dispose_WaitsForRunningBuildWorkersBeforeReturning()
+    {
+        SetupPlan();
+        var epub = CreateBook("Series 001-002");
+        var buildStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseBuild = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        SetupBuild(async (_, _) =>
+        {
+            buildStarted.SetResult();
+            await releaseBuild.Task;
+            return new CondensedBookFile(epub, Path.GetFileName(epub));
+        });
+
+        await _tracker.StartAsync(Request(), Owner);
+        await buildStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var disposal = Task.Run(_tracker.Dispose);
+        try
+        {
+            await Task.Delay(50);
+            Assert.False(disposal.IsCompleted);
+        }
+        finally
+        {
+            releaseBuild.SetResult();
+        }
+
+        await disposal.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(File.Exists(epub));
     }
 
     [Fact]
@@ -209,7 +289,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
         null,
         bookIndex);
 
-    private void SetupPlan(int issueCount = 2)
+    private void SetupPlan(int issueCount = 2, Func<Task>? beforeReturn = null)
     {
         var files = Enumerable.Range(1, issueCount)
             .Select(i => $"/comics/Series/Series - Chapter {i:D4}.cbz")
@@ -224,13 +304,21 @@ public class CondensedBookBuildTrackerTests : IDisposable
                 It.IsAny<int?>(),
                 It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new CondensePlanDto(
-                "all",
-                issueCount,
-                issueCount,
-                25 * 1024 * 1024,
-                new[] { new CondensedBookDto("Series 001-002", files, 1024, false) },
-                new Dictionary<string, string>()));
+            .Returns(async () =>
+            {
+                if (beforeReturn is not null)
+                {
+                    await beforeReturn();
+                }
+
+                return new CondensePlanDto(
+                    "all",
+                    issueCount,
+                    issueCount,
+                    25 * 1024 * 1024,
+                    new[] { new CondensedBookDto("Series 001-002", files, 1024, false) },
+                    new Dictionary<string, string>());
+            });
     }
 
     private void SetupBuild(

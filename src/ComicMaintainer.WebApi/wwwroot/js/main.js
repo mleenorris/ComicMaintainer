@@ -8361,6 +8361,7 @@
         // Builds started from this tab, which are saved as soon as they finish.
         const emailCondenseAutoDownloads = new Set();
         let emailCondenseBuildPollTimer = null;
+        let emailCondenseBuildPollInFlight = false;
         const EMAIL_CONDENSE_BUILD_POLL_MS = 2000;
         let currentEmailSubscriptionSeriesTitle = '';
 
@@ -8890,20 +8891,20 @@
         async function refreshEmailCondenseBuilds() {
             try {
                 const data = await fetchEmailJson('/api/email/condense-builds');
-                emailCondenseBuilds = Array.isArray(data.builds) ? data.builds : [];
+                reconcileEmailCondenseBuilds(Array.isArray(data.builds) ? data.builds : []);
             } catch (error) {
                 // A failure here must not break the send dialog; the builds
                 // panel simply stays as it was.
                 console.warn('Could not load condensed EPUB builds', error);
-                return;
             }
-            renderEmailCondenseBuilds();
-            if (emailCondenseBuilds.some(isEmailCondenseBuildActive)) startEmailCondenseBuildPolling();
         }
 
         function startEmailCondenseBuildPolling() {
             if (emailCondenseBuildPollTimer !== null) return;
-            emailCondenseBuildPollTimer = setInterval(pollEmailCondenseBuilds, EMAIL_CONDENSE_BUILD_POLL_MS);
+            emailCondenseBuildPollTimer = setTimeout(() => {
+                emailCondenseBuildPollTimer = null;
+                pollEmailCondenseBuilds();
+            }, EMAIL_CONDENSE_BUILD_POLL_MS);
         }
 
         function stopEmailCondenseBuildPolling() {
@@ -8918,21 +8919,38 @@
          * the dialog is closed so a long build still reports its outcome.
          */
         async function pollEmailCondenseBuilds() {
-            let builds;
+            if (emailCondenseBuildPollInFlight) return;
+            if (emailCondenseBuildPollTimer !== null) {
+                clearTimeout(emailCondenseBuildPollTimer);
+                emailCondenseBuildPollTimer = null;
+            }
+
+            emailCondenseBuildPollInFlight = true;
             try {
                 const data = await fetchEmailJson('/api/email/condense-builds');
-                builds = Array.isArray(data.builds) ? data.builds : [];
+                reconcileEmailCondenseBuilds(Array.isArray(data.builds) ? data.builds : []);
             } catch (error) {
                 // Transient failures (a restart, a dropped connection) must not
                 // abandon the build; the next tick tries again.
                 console.warn('Could not poll condensed EPUB builds', error);
-                return;
+            } finally {
+                emailCondenseBuildPollInFlight = false;
+                if (emailCondenseBuilds.some(isEmailCondenseBuildActive)) startEmailCondenseBuildPolling();
+                else stopEmailCondenseBuildPolling();
             }
+        }
 
+        function reconcileEmailCondenseBuilds(builds) {
             const previous = new Map(emailCondenseBuilds.map(b => [b.build_id, b.status]));
-            emailCondenseBuilds = builds;
+            emailCondenseBuilds = builds.map(build => {
+                const current = previous.get(build.build_id);
+                return current && !isCondensedBookBuildTerminal(build.status) &&
+                    isCondensedBookBuildTerminal(current)
+                    ? emailCondenseBuilds.find(existing => existing.build_id === build.build_id)
+                    : build;
+            });
 
-            for (const build of builds) {
+            for (const build of emailCondenseBuilds) {
                 if (previous.get(build.build_id) === build.status) continue;
                 if (build.status === 'completed') {
                     if (emailCondenseAutoDownloads.delete(build.build_id)) {
@@ -8949,7 +8967,12 @@
             }
 
             renderEmailCondenseBuilds();
-            if (!builds.some(isEmailCondenseBuildActive)) stopEmailCondenseBuildPolling();
+            if (emailCondenseBuilds.some(isEmailCondenseBuildActive)) startEmailCondenseBuildPolling();
+            else stopEmailCondenseBuildPolling();
+        }
+
+        function isCondensedBookBuildTerminal(status) {
+            return status === 'completed' || status === 'failed' || status === 'cancelled';
         }
 
         /** Saves the finished book of a completed build. */
@@ -9022,7 +9045,8 @@
                     if (progress.phase === 'validating') return `Checking the finished book...${pass}`;
                     if (progress.phase === 'recompressing') return `Too large; rebuilding with stronger compression${pass}`;
                     if (progress.total_pages > 0) {
-                        return `Page ${progress.completed_pages} of ${progress.total_pages}${pass}`;
+                        const issue = progress.current_issue ? ` · ${progress.current_issue}` : '';
+                        return `Page ${progress.completed_pages} of ${progress.total_pages}${issue}${pass}`;
                     }
                     return 'Starting...';
                 case 'completed':

@@ -117,8 +117,6 @@ public class ErrorReportingSinkTests
     private static AppSettings EnabledSettings() => new()
     {
         ErrorReportingEnabled = true,
-        ErrorReportingGitHubOwner = "someone",
-        ErrorReportingGitHubRepo = "their-fork",
         ErrorReportingGitHubToken = "a-token-value"
     };
 

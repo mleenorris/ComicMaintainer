@@ -1284,14 +1284,6 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         if (!string.IsNullOrEmpty(errorReportingEnabled))
             options.ErrorReportingEnabled = errorReportingEnabled.Equals("true", StringComparison.OrdinalIgnoreCase);
 
-        var errorReportingOwner = Environment.GetEnvironmentVariable("ERROR_REPORTING_GITHUB_OWNER");
-        if (!string.IsNullOrEmpty(errorReportingOwner))
-            options.ErrorReportingGitHubOwner = errorReportingOwner;
-
-        var errorReportingRepo = Environment.GetEnvironmentVariable("ERROR_REPORTING_GITHUB_REPO");
-        if (!string.IsNullOrEmpty(errorReportingRepo))
-            options.ErrorReportingGitHubRepo = errorReportingRepo;
-
         var errorReportingToken = Environment.GetEnvironmentVariable("ERROR_REPORTING_GITHUB_TOKEN");
         if (!string.IsNullOrEmpty(errorReportingToken))
             options.ErrorReportingGitHubToken = errorReportingToken;

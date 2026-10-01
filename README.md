@@ -751,8 +751,10 @@ See [Request Correlation](#request-correlation) for details.
 ### Automatic Error Reporting
 
 **Disabled by default.** When you opt in, errors and fatal failures logged by this instance are
-redacted, deduplicated, and filed as GitHub issues on a repository *you* nominate, so a coding
-agent (or you) can start on them without waiting for a manual bug report.
+redacted, deduplicated, and filed as GitHub issues on the ComicMaintainer project repository
+(`mleenorris/ComicMaintainer`), so a coding agent (or the maintainers) can start on them without
+waiting for a manual bug report. The destination is fixed — that repository is the only place a
+defect in this service can actually be fixed.
 
 How it works:
 
@@ -782,8 +784,6 @@ environment variables:
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
 | `ERROR_REPORTING_ENABLED` | `false` | Master switch. |
-| `ERROR_REPORTING_GITHUB_OWNER` | _(none)_ | Owner of the target repository. |
-| `ERROR_REPORTING_GITHUB_REPO` | _(none)_ | Target repository name. |
 | `ERROR_REPORTING_GITHUB_TOKEN` | _(none)_ | Token used to create issues. Stored as a secret and never logged. |
 | `ERROR_REPORTING_ASSIGNEE` | _(none)_ | Optional GitHub login to assign new issues to. |
 | `ERROR_REPORTING_MAX_ISSUES_PER_DAY` | `10` | Rolling 24-hour cap on issue creation. |
@@ -791,11 +791,12 @@ environment variables:
 | `ERROR_REPORTING_COMMENT_ON_RECURRENCE` | `true` | Whether recurrences comment on the existing issue. |
 
 **Token scope:** use a fine-grained personal access token (or GitHub App installation token) with
-**`Issues: Read and write` on that single repository only**. No `contents`/code access is needed.
+**`Issues: Read and write` on `mleenorris/ComicMaintainer` only**. No `contents`/code access is
+needed.
 
-**Privacy:** because this is self-hosted, point it at **your own** repository. Error data from your
-library is yours; nothing is sent anywhere until you explicitly enable the feature and supply a
-destination.
+**Privacy:** error data from your library is yours. Nothing is sent anywhere until you explicitly
+enable the feature and supply a token, and everything that is sent is redacted first — absolute
+paths, email addresses, URL credentials and stored secrets never leave the machine.
 
 #### Operator tools
 

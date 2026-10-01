@@ -141,6 +141,33 @@ public class EmailDeliveryUiTests
     }
 
     [Fact]
+    public void FormatSelectors_OfferAzw3()
+    {
+        var html = Read("index.html");
+        var reader = Read("reader.html");
+
+        // The device default, the per-send format and the subscription format
+        // must all offer AZW3, otherwise the backend format is unreachable.
+        Assert.Equal(3, Regex.Matches(html, "<option value=\"azw3\">").Count);
+        Assert.Contains("<option value=\"azw3\">", reader);
+    }
+
+    [Fact]
+    public void MainJs_KeepsAzw3AsADeviceDefault()
+    {
+        var js = Read("js", "main.js");
+
+        // The device format used to be coerced to epub/original, which silently
+        // dropped an AZW3 default on both load and save.
+        Assert.Matches(
+            new Regex(@"function normalizeEmailDeviceFormat\(value\)\s*\{[^}]*'azw3'", RegexOptions.Singleline),
+            js);
+        Assert.Contains("normalizeEmailDeviceFormat(device.deliveryFormat)", js);
+        Assert.Contains("normalizeEmailDeviceFormat(document.getElementById('emailDeviceFormat').value)", js);
+        Assert.Contains("if (normalized === 'azw3') return 'AZW3 (Kindle)';", js);
+    }
+
+    [Fact]
     public void MainJs_LoadsDeliveryHistoryFromApi()
     {
         var js = Read("js", "main.js");

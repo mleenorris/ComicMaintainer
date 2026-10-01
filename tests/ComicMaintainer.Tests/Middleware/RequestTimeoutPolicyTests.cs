@@ -185,6 +185,15 @@ public class RequestTimeoutPolicyTests
         {
             RequestServices = new ServiceCollection()
                 .AddSingleton<ILoggerFactory>(new SerilogLoggerFactory(logger))
+                // Registered exactly as Program.cs does, so the reported limit
+                // is resolved from the real policies rather than a stand-in.
+                .AddRequestTimeouts(options =>
+                {
+                    options.DefaultPolicy = RequestTimeoutPolicies.Create(RequestTimeoutPolicies.DefaultTimeout);
+                    options.AddPolicy(
+                        RequestTimeoutPolicies.LongRunning,
+                        RequestTimeoutPolicies.Create(RequestTimeoutPolicies.LongRunningTimeout));
+                })
                 .BuildServiceProvider()
         };
         context.Response.Body = new MemoryStream();

@@ -68,6 +68,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so free disk space read as "84258.8 MB".
 
 ### Fixed
+- **Condensed downloads no longer die at 30 seconds, and a timeout now files an issue.** Every
+  request in the application was capped by a 30 second default timeout policy, and because the
+  timeout middleware ran *before* routing it could never see an endpoint's own policy — so the
+  one declared longer policy was unreachable and nothing could opt out. Condensing a series
+  builds the whole book inside the request and then streams a result that can run to gigabytes,
+  so it was being cut off every time. Worse, ASP.NET Core handles a timeout internally: it logs
+  it at `Warning` with no method, path or correlation id and returns an empty `504`, and
+  automated error reporting only captures `Error` and above — so these failures were never
+  logged usefully, never filed as an issue, and reached the browser as a bare
+  "HTTP error! status: 504". Request timeouts are now applied after routing, the condensed
+  build and download endpoints are exempt (as are the event stream and the progress hub) while
+  planning and bulk queueing get a longer allowance, and a timeout is logged at `Error` with its
+  route, method, limit and correlation id — one issue per endpoint rather than one for all of
+  them — and answers with a readable message and that same correlation id.
+
+- **Condensed books that finished building are no longer lost on the way to disk.** The browser
+  was told to drop the downloaded book in the same instant the save was triggered, which in some
+  browsers cancels the save outright: the UI reported a successful download and no file
+  appeared. A download or build failure also ended at an on-screen banner and was never
+  reported, so nobody but the person looking at it ever learned of it; these failures are now
+  filed automatically, while a request the server simply refused (a series over the issue limit,
+  a book that is not ready yet) is still left to the user. A build recorded as completed whose
+  file has since vanished is now logged instead of silently asking the user to build it again.
+
 - **Webcomic mode now flows straight from one issue into the next.** The following issue was
   only looked up, fetched and appended once the reader hit the bottom of the current one, so
   every comic boundary paused on a "loading next comic" banner and then jumped the viewport to

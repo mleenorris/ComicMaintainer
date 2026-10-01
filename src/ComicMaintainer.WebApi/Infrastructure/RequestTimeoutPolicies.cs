@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.WebApi.Middleware;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Options;
 
 namespace ComicMaintainer.WebApi.Infrastructure;
 
@@ -46,7 +47,7 @@ public static class RequestTimeoutPolicies
     /// titled "[field error] Error in RequestTimeoutPolicies" rather than being
     /// attributed to whichever controller happened to be running.
     /// </summary>
-    private const string LoggerCategory = "ComicMaintainer.WebApi.Infrastructure.RequestTimeoutPolicies";
+    private static readonly string LoggerCategory = typeof(RequestTimeoutPolicies).FullName!;
 
     public static RequestTimeoutPolicy Create(TimeSpan timeout) => new()
     {
@@ -124,27 +125,32 @@ public static class RequestTimeoutPolicies
                .Replace("}", "}}", StringComparison.Ordinal);
 
     /// <summary>
-    /// The timeout that was actually applied, which is the endpoint's own policy
-    /// when it declares one and the default otherwise. Reported so the issue says
-    /// which limit was hit rather than implying every timeout is 30s.
+    /// The limit this request was actually held to, resolved the same way
+    /// <c>RequestTimeoutsMiddleware</c> resolves it. Reported so an issue names
+    /// the limit that was hit rather than implying every timeout is the default
+    /// one, which would send whoever reads it looking in the wrong place.
     /// </summary>
     private static TimeSpan ResolveTimeout(HttpContext context)
     {
-        var endpoint = context.GetEndpoint();
+        var options = context.RequestServices
+            .GetService<IOptionsMonitor<RequestTimeoutOptions>>()
+            ?.CurrentValue;
 
-        if (endpoint?.Metadata.GetMetadata<RequestTimeoutAttribute>() is { } attribute)
+        var attribute = context.GetEndpoint()?.Metadata.GetMetadata<RequestTimeoutAttribute>();
+
+        if (attribute?.Timeout is { } explicitTimeout)
         {
-            if (attribute.Timeout is { } explicitTimeout)
-            {
-                return explicitTimeout;
-            }
-
-            if (attribute.PolicyName == LongRunning)
-            {
-                return LongRunningTimeout;
-            }
+            return explicitTimeout;
         }
 
-        return DefaultTimeout;
+        if (attribute?.PolicyName is { } policyName
+            && options is not null
+            && options.Policies.TryGetValue(policyName, out var policy)
+            && policy.Timeout is { } policyTimeout)
+        {
+            return policyTimeout;
+        }
+
+        return options?.DefaultPolicy?.Timeout ?? DefaultTimeout;
     }
 }

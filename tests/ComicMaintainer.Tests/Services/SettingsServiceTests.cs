@@ -483,6 +483,39 @@ public class SettingsServiceTests : IDisposable
             commentOnRecurrence: true));
     }
 
+    [Fact]
+    public async Task UpdateErrorReportingSettingsAsync_RefusesToEnableAfterClearingTokenDespiteStaleOptions()
+    {
+        var previousEnvironmentToken = Environment.GetEnvironmentVariable("ERROR_REPORTING_GITHUB_TOKEN");
+        Environment.SetEnvironmentVariable("ERROR_REPORTING_GITHUB_TOKEN", null);
+
+        try
+        {
+            await _service.UpdateErrorReportingSettingsAsync(
+                true, "a-token-value", null, 5, 12, true);
+            await _service.UpdateErrorReportingSettingsAsync(
+                false, string.Empty, null, 5, 12, true);
+
+            _appSettings.ErrorReportingGitHubToken = "a-token-value";
+
+            await Assert.ThrowsAsync<ArgumentException>(() => _service.UpdateErrorReportingSettingsAsync(
+                enabled: true,
+                gitHubToken: null,
+                assignee: null,
+                maxIssuesPerDay: 5,
+                dedupeWindowHours: 12,
+                commentOnRecurrence: true));
+
+            var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+            Assert.False(settings["ErrorReportingEnabled"].GetBoolean());
+            Assert.Equal(JsonValueKind.Null, settings["ErrorReportingGitHubToken"].ValueKind);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("ERROR_REPORTING_GITHUB_TOKEN", previousEnvironmentToken);
+        }
+    }
+
     [Theory]
     [InlineData("../../etc")]
     [InlineData("login with spaces")]

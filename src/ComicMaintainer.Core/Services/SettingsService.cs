@@ -369,25 +369,29 @@ public class SettingsService : ISettingsService
 
     /// <summary>
     /// True when a token is available to report with: one supplied in this
-    /// request, one already persisted, or one supplied by the environment. A
+    /// request, one supplied by the environment, or one already persisted. A
     /// null request token means "keep the stored one".
     /// </summary>
     /// <remarks>
-    /// The persisted file is consulted directly rather than only through the
-    /// options monitor, which picks up a just-written change a file-watcher
-    /// tick later — long enough for a save made moments after the token was
-    /// stored to look untokened and be refused.
+    /// The persisted file is consulted directly because the options monitor can
+    /// lag a just-written change by a file-watcher tick. The explicit
+    /// environment override takes precedence over the persisted value.
     /// </remarks>
     private async Task<bool> HasUsableTokenAsync(string? requestedToken, CancellationToken cancellationToken)
     {
-        if (requestedToken is not null)
-        {
-            return !string.IsNullOrWhiteSpace(requestedToken);
-        }
-
-        if (!string.IsNullOrWhiteSpace(_appSettings.CurrentValue.ErrorReportingGitHubToken))
+        if (!string.IsNullOrWhiteSpace(requestedToken))
         {
             return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ERROR_REPORTING_GITHUB_TOKEN")))
+        {
+            return true;
+        }
+
+        if (requestedToken is not null)
+        {
+            return false;
         }
 
         if (!File.Exists(_settingsFilePath))

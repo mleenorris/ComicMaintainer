@@ -21,6 +21,7 @@ public class ComicEmailService : IComicEmailService
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbFactory;
     private readonly IComicEmailSender _sender;
     private readonly IEpubConversionService _epubConverter;
+    private readonly IAzw3ConversionService _azw3Converter;
     private readonly IComicEmailQueue _queue;
     private readonly ISeriesMetadataCacheService _seriesCache;
     private readonly ISeriesImageStore _seriesImages;
@@ -65,6 +66,7 @@ public class ComicEmailService : IComicEmailService
         IDbContextFactory<ComicMaintainerDbContext> dbFactory,
         IComicEmailSender sender,
         IEpubConversionService epubConverter,
+        IAzw3ConversionService azw3Converter,
         IComicEmailQueue queue,
         ISeriesMetadataCacheService seriesCache,
         ISeriesImageStore seriesImages,
@@ -74,6 +76,7 @@ public class ComicEmailService : IComicEmailService
         _dbFactory = dbFactory;
         _sender = sender;
         _epubConverter = epubConverter;
+        _azw3Converter = azw3Converter;
         _queue = queue;
         _seriesCache = seriesCache;
         _seriesImages = seriesImages;
@@ -885,7 +888,9 @@ public class ComicEmailService : IComicEmailService
             var maxBytes = GetMaxAttachmentBytes();
 
             var attachmentPath = resolved[0];
+            var isAzw3 = string.Equals(delivery.DeliveryFormat, EmailDeliveryFormat.Azw3, StringComparison.OrdinalIgnoreCase);
             if (resolved.Count > 1 ||
+                isAzw3 ||
                 string.Equals(delivery.DeliveryFormat, EmailDeliveryFormat.Epub, StringComparison.OrdinalIgnoreCase))
             {
                 var workDirectory = Path.Combine(GetTempDirectory(), "email", Guid.NewGuid().ToString("N"));
@@ -897,9 +902,19 @@ public class ComicEmailService : IComicEmailService
                     options = options with { Title = delivery.DisplayName, OutputFileName = delivery.DisplayName };
                 }
 
-                attachmentPath = resolved.Count == 1
-                    ? await _epubConverter.ConvertToEpubAsync(resolved[0], workDirectory, options, cancellationToken)
-                    : await _epubConverter.ConvertToEpubAsync(resolved, workDirectory, options, cancellationToken);
+                if (isAzw3)
+                {
+                    attachmentPath = resolved.Count == 1
+                        ? await _azw3Converter.ConvertToAzw3Async(resolved[0], workDirectory, options, cancellationToken)
+                        : await _azw3Converter.ConvertToAzw3Async(resolved, workDirectory, options, cancellationToken);
+                }
+                else
+                {
+                    attachmentPath = resolved.Count == 1
+                        ? await _epubConverter.ConvertToEpubAsync(resolved[0], workDirectory, options, cancellationToken)
+                        : await _epubConverter.ConvertToEpubAsync(resolved, workDirectory, options, cancellationToken);
+                }
+
                 temporaryAttachment = attachmentPath;
             }
 
@@ -1210,7 +1225,7 @@ public class ComicEmailService : IComicEmailService
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning(ex, "Failed to clean up temporary EPUB attachment");
+            _logger.LogWarning(ex, "Failed to clean up the temporary converted attachment");
         }
     }
 
@@ -1218,6 +1233,7 @@ public class ComicEmailService : IComicEmailService
         Path.GetExtension(path).ToLowerInvariant() switch
         {
             ".epub" => "application/epub+zip",
+            ".azw3" => "application/x-mobi8-ebook",
             ".cbz" => "application/vnd.comicbook+zip",
             ".cbr" => "application/vnd.comicbook-rar",
             _ => "application/octet-stream"

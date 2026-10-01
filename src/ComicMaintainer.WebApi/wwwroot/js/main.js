@@ -8465,9 +8465,17 @@
             `));
         }
 
+        // A device default must name a concrete format; anything unknown falls
+        // back to sending the original archive.
+        function normalizeEmailDeviceFormat(value) {
+            const normalized = String(value || '').toLowerCase();
+            return normalized === 'epub' || normalized === 'azw3' ? normalized : 'original';
+        }
+
         function formatEmailDeliveryFormat(value) {
             const normalized = String(value || '').toLowerCase();
             if (normalized === 'epub') return 'EPUB';
+            if (normalized === 'azw3') return 'AZW3 (Kindle)';
             if (normalized === 'device') return 'Device default';
             return 'Original archive';
         }
@@ -8542,14 +8550,14 @@
             document.getElementById('emailDeviceFormTitle').textContent = 'Edit Device';
             document.getElementById('emailDeviceName').value = device.name || '';
             document.getElementById('emailDeviceAddress').value = device.emailAddress || '';
-            document.getElementById('emailDeviceFormat').value = String(device.deliveryFormat || 'original').toLowerCase() === 'epub' ? 'epub' : 'original';
+            document.getElementById('emailDeviceFormat').value = normalizeEmailDeviceFormat(device.deliveryFormat);
         }
 
         async function saveEmailDevice() {
             const id = document.getElementById('emailDeviceId').value;
             const name = document.getElementById('emailDeviceName').value.trim();
             const emailAddress = document.getElementById('emailDeviceAddress').value.trim();
-            const deliveryFormat = document.getElementById('emailDeviceFormat').value === 'epub' ? 'epub' : 'original';
+            const deliveryFormat = normalizeEmailDeviceFormat(document.getElementById('emailDeviceFormat').value);
             if (!name || !emailAddress) {
                 showMessage('Device name and email address are required.', 'error');
                 return;

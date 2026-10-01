@@ -17,6 +17,7 @@ public class ComicEmailServiceTests : IDisposable
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbFactory;
     private readonly Mock<IComicEmailSender> _sender = new();
     private readonly Mock<IEpubConversionService> _epub = new();
+    private readonly Mock<IAzw3ConversionService> _azw3 = new();
     private readonly Mock<IComicEmailQueue> _queue = new();
     private readonly ComicEmailService _service;
     private readonly EreaderDeviceService _devices;
@@ -59,6 +60,7 @@ public class ComicEmailServiceTests : IDisposable
             _dbFactory,
             _sender.Object,
             _epub.Object,
+            _azw3.Object,
             _queue.Object,
             seriesCache.Object,
             new Mock<ISeriesImageStore>().Object,
@@ -314,6 +316,54 @@ public class ComicEmailServiceTests : IDisposable
         Assert.False(File.Exists(epubPath!));
         Assert.NotNull(usedOptions);
         Assert.Equal(25L * 1024 * 1024, usedOptions!.MaxSizeBytes);
+    }
+
+    [Fact]
+    public async Task ProcessDeliveryAsync_ConvertsToAzw3AndCleansUpTheTemporaryFile()
+    {
+        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Azw3);
+        var file = CreateComic("Series - Chapter 0001.cbz");
+        var queued = Assert.Single((await _service.QueueFilesAsync(
+            new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
+
+        string? azw3Path = null;
+        EpubConversionOptions? usedOptions = null;
+        _azw3.Setup(a => a.ConvertToAzw3Async(
+                file,
+                It.IsAny<string>(),
+                It.IsAny<EpubConversionOptions?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<string, string, EpubConversionOptions?, CancellationToken>((_, outDir, options, _) =>
+            {
+                usedOptions = options;
+                Directory.CreateDirectory(outDir);
+                azw3Path = Path.Combine(outDir, "Series - Chapter 0001.azw3");
+                File.WriteAllText(azw3Path, "azw3-bytes");
+                return Task.FromResult(azw3Path);
+            });
+
+        ComicEmailMessage? sent = null;
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<ComicEmailMessage, CancellationToken>((message, _) =>
+            {
+                sent = message;
+                Assert.True(File.Exists(message.AttachmentPath!));
+            })
+            .Returns(Task.CompletedTask);
+
+        await _service.ProcessDeliveryAsync(queued.Id);
+
+        Assert.Equal("application/x-mobi8-ebook", sent!.AttachmentContentType);
+        Assert.Equal("Series - Chapter 0001.azw3", sent.AttachmentFileName);
+        Assert.Equal(EmailDeliveryStatus.Sent, (await GetDeliveryAsync(queued.Id)).Status);
+        Assert.False(File.Exists(azw3Path!));
+        Assert.NotNull(usedOptions);
+        Assert.Equal(25L * 1024 * 1024, usedOptions!.MaxSizeBytes);
+        _epub.Verify(e => e.ConvertToEpubAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<EpubConversionOptions?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

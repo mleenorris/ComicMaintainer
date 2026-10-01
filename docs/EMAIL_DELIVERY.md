@@ -4,8 +4,8 @@ ComicMaintainer can email comics to saved e-reader addresses (Kindle "Send to Ki
 Kobo, PocketBook, or any mailbox that accepts attachments). Issues can be sent one at a
 time, as a whole series, or as an arbitrary selection, and a series can be subscribed so
 that every newly processed issue is delivered automatically. Each delivery can be sent as
-the original `.cbz`/`.cbr` archive or converted to EPUB first, and consecutive issues can
-be condensed into a single EPUB.
+the original `.cbz`/`.cbr` archive or converted to EPUB or AZW3 first, and consecutive
+issues can be condensed into a single EPUB.
 
 ## Contents
 
@@ -15,6 +15,7 @@ be condensed into a single EPUB.
 - [Condensing issues into one EPUB](#condensing-issues-into-one-epub)
 - [Automatic delivery for a series](#automatic-delivery-for-a-series)
 - [EPUB conversion](#epub-conversion)
+- [AZW3 conversion](#azw3-conversion)
 - [Delivery pipeline](#delivery-pipeline)
 - [API reference](#api-reference)
 - [Troubleshooting](#troubleshooting)
@@ -58,8 +59,8 @@ A device is a saved name, email address and default delivery format.
 - **Name** – free text, shown in the send menus (e.g. "Paperwhite").
 - **Email address** – a single bare mailbox (`user@example.com`). Display-name forms
   (`Name <user@example.com>`) and lists are rejected, and addresses must be unique.
-- **Delivery format** – `original` (send the archive untouched) or `epub` (convert
-  before sending).
+- **Delivery format** – `original` (send the archive untouched), `epub`, or `azw3`
+  (convert before sending).
 
 Devices are managed from **⋮ menu → 📧 Ereader Devices**. Managing devices only needs
 the `CanModifyLibrary` policy, so it is deliberately *not* inside the Settings modal
@@ -230,6 +231,36 @@ e-readers expect for comics:
 
 Converted files are temporary: they are created for the delivery and removed once the
 message has been sent.
+
+## AZW3 conversion
+
+AZW3 (Kindle Format 8) is Amazon's own fixed-layout format. A Kindle renders a sideloaded
+AZW3 comic with the panel/page handling it uses for its own store comics, whereas an EPUB
+sent to a Kindle is converted by Amazon's service on the way in, which can re-compress the
+pages. Send AZW3 to Kindles; send EPUB to Kobo, PocketBook and everything else.
+
+Conversion is performed natively by ComicMaintainer — no Calibre, `kindlegen` or any other
+external tool is needed, and the container image gains no extra dependencies.
+
+- The book is first built with the EPUB converter described above, so AZW3 inherits its
+  page ordering, series cover page, padded issue title, and size tiering. The AZW3 carries
+  the title, creator, publisher and language metadata; EPUB3 and calibre series metadata
+  are not copied. The intermediate EPUB is written to a staging directory that is always
+  removed, so only the `.azw3` file is left behind.
+- The EPUB is then rewritten as a single-file KF8 book: a PalmDB container holding the
+  uncompressed UTF-8 page documents, the skeleton and chunk (fragment) indices a Kindle
+  uses to reassemble each page, and one image resource record per page referenced with
+  `kindle:embed:`.
+- The EXTH metadata marks the book as a fixed-layout comic with no gutter or margin and a
+  locked orientation (`fixed-layout`, `book-type=comic`, `orientation-lock=none`,
+  `original-resolution`), which is what makes a Kindle show one full page at a time.
+- Compression tier selection uses the intermediate EPUB's size budget. The completed AZW3
+  is then checked against the attachment limit and rejected if it exceeds the limit.
+  Because the pages are the same images as in the EPUB, the attachment size is
+  approximately the same.
+
+Condensing several issues into one book always produces EPUB; AZW3 applies to per-issue
+deliveries.
 
 ## Delivery pipeline
 

@@ -670,8 +670,9 @@ builder.Services.AddSingleton<IUserPreferencesService, UserPreferencesService>()
 
 builder.Services.AddScoped<IAuthService, AuthService>();
 
-// Email delivery to saved ereader devices (with optional EPUB conversion).
+// Email delivery to saved ereader devices (with optional EPUB/AZW3 conversion).
 builder.Services.AddSingleton<IEpubConversionService, EpubConversionService>();
+builder.Services.AddSingleton<IAzw3ConversionService, Azw3ConversionService>();
 builder.Services.AddSingleton<IComicEmailSender, SmtpComicEmailSender>();
 builder.Services.AddSingleton<IEreaderDeviceService, EreaderDeviceService>();
 // The queue resolves the delivery service lazily: the service enqueues work and

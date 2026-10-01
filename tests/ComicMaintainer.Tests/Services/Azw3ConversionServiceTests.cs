@@ -93,6 +93,21 @@ public class Azw3ConversionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ConvertToAzw3Async_SplitsLargeIndicesAcrossBoundedRecords()
+    {
+        const int pageCount = 3500;
+        var cbz = CreateCbz("Series Name - Chapter 0001.cbz", pageCount);
+        var path = await _service.ConvertToAzw3Async(cbz, Path.Combine(_workDir, "large"));
+
+        var book = Azw3Reader.Read(path);
+
+        Assert.Equal(pageCount, book.Resources.Count);
+        Assert.Equal(pageCount, book.RebuildDocuments().Count);
+        Assert.Equal(2, book.IndexDataRecordCounts.Count);
+        Assert.All(book.IndexDataRecordCounts, count => Assert.True(count > 1));
+    }
+
+    [Fact]
     public async Task ConvertToAzw3Async_CondensesSeveralIssuesIntoOneBook()
     {
         var first = CreateCbz("Series Name - Chapter 0001.cbz", pageCount: 2);
@@ -167,12 +182,12 @@ public class Azw3ConversionServiceTests : IDisposable
             entryStream.Write(bytes, 0, bytes.Length);
         }
 
+        var pageBytes = CreateJpeg(20, 30);
         for (var i = 1; i <= pageCount; i++)
         {
             var page = zip.CreateEntry($"{i:D3}.jpg");
             using var pageStream = page.Open();
-            var bytes = CreateJpeg(20, 30);
-            pageStream.Write(bytes, 0, bytes.Length);
+            pageStream.Write(pageBytes, 0, pageBytes.Length);
         }
 
         return path;

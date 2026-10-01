@@ -87,8 +87,18 @@ public partial class Azw3ConversionService : IAzw3ConversionService
             var azw3Path = Path.Combine(
                 outputDirectory,
                 Path.GetFileNameWithoutExtension(epubPath) + ".azw3");
+            var tempPath = azw3Path + ".tmp";
 
-            await Task.Run(() => Convert(epubPath, azw3Path, cancellationToken), cancellationToken);
+            try
+            {
+                await Task.Run(() => Convert(epubPath, tempPath, cancellationToken), cancellationToken);
+                File.Move(tempPath, azw3Path, overwrite: true);
+            }
+            catch
+            {
+                TryDeleteFile(tempPath);
+                throw;
+            }
 
             _logger.LogInformation(
                 "Converted {IssueCount} issue(s) starting at {FilePath} to AZW3 ({Bytes} bytes)",
@@ -268,6 +278,21 @@ public partial class Azw3ConversionService : IAzw3ConversionService
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             _logger.LogWarning(ex, "Failed to clean up the intermediate book directory");
+        }
+    }
+
+    private void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Failed to clean up the incomplete AZW3 file");
         }
     }
 

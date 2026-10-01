@@ -209,11 +209,11 @@ pages. Send AZW3 to Kindles; send EPUB to Kobo, PocketBook and everything else.
 Conversion is performed natively by ComicMaintainer — no Calibre, `kindlegen` or any other
 external tool is needed, and the container image gains no extra dependencies.
 
-- The book is first built with the EPUB converter described above, so AZW3 inherits all of
-  its behaviour: page ordering, the series cover page, the metadata (including the
-  calibre series fields, which Kindle reads), the padded issue title, and the size
-  tiering. The intermediate EPUB is written to a staging directory that is always removed,
-  so only the `.azw3` file is left behind.
+- The book is first built with the EPUB converter described above, so AZW3 inherits its
+  page ordering, series cover page, padded issue title, and size tiering. The AZW3 carries
+  the title, creator, publisher and language metadata; EPUB3 and calibre series metadata
+  are not copied. The intermediate EPUB is written to a staging directory that is always
+  removed, so only the `.azw3` file is left behind.
 - The EPUB is then rewritten as a single-file KF8 book: a PalmDB container holding the
   uncompressed UTF-8 page documents, the skeleton and chunk (fragment) indices a Kindle
   uses to reassemble each page, and one image resource record per page referenced with
@@ -221,9 +221,10 @@ external tool is needed, and the container image gains no extra dependencies.
 - The EXTH metadata marks the book as a fixed-layout comic with no gutter or margin and a
   locked orientation (`fixed-layout`, `book-type=comic`, `orientation-lock=none`,
   `original-resolution`), which is what makes a Kindle show one full page at a time.
-- Because the pages are the same images as in the EPUB, the attachment size is
-  approximately the same. The attachment limit is applied while the intermediate EPUB is
-  built, not re-checked after the KF8 book is assembled.
+- Compression tier selection uses the intermediate EPUB's size budget. The completed AZW3
+  is then checked against the attachment limit and rejected if it exceeds the limit.
+  Because the pages are the same images as in the EPUB, the attachment size is
+  approximately the same.
 
 Condensing several issues into one book always produces EPUB; AZW3 applies to per-issue
 deliveries.

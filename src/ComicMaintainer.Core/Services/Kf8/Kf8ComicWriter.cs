@@ -42,6 +42,7 @@ internal sealed record Kf8Book(
 internal static class Kf8ComicWriter
 {
     private const int RecordSize = 0x1000;
+    private const int MaximumIndexRecordSize = ushort.MaxValue;
     private const uint Null = 0xFFFFFFFF;
     private const int MobiHeaderLength = 264;
     private const int IndexHeaderLength = 192;
@@ -350,71 +351,116 @@ internal static class Kf8ComicWriter
 
     /// <summary>
     /// Builds one index: a header record describing the geometry of the data
-    /// records, a single data record holding the entries, and the CNCX string
-    /// records the entries point at.
+    /// records, data records holding the entries, and the CNCX string records
+    /// the entries point at.
     /// </summary>
     private static List<byte[]> BuildIndex(
         byte[] tagx,
         IReadOnlyList<IndexEntry> entries,
         IReadOnlyList<byte[]> cncxRecords)
     {
-        using var block = new MemoryStream();
-        var offsets = new List<int>(entries.Count);
+        var encodedEntries = new List<byte[]>(entries.Count);
 
         foreach (var entry in entries)
         {
-            offsets.Add((int)block.Length);
+            using var encoded = new MemoryStream();
             var label = Encoding.UTF8.GetBytes(entry.Label);
-            block.WriteByte((byte)label.Length);
-            block.Write(label);
-            block.Write(entry.ControlBytes);
+            encoded.WriteByte((byte)label.Length);
+            encoded.Write(label);
+            encoded.Write(entry.ControlBytes);
             foreach (var value in entry.Values)
             {
-                block.Write(EncodeVariableWidth(value));
+                encoded.Write(EncodeVariableWidth(value));
             }
+
+            encodedEntries.Add(encoded.ToArray());
         }
 
-        var indexBlock = AlignBlock(block.ToArray());
-
-        using var idxt = new MemoryStream();
-        idxt.Write(Encoding.ASCII.GetBytes("IDXT"));
-        foreach (var offset in offsets)
+        var groups = new List<List<int>>();
+        var currentGroup = new List<int>();
+        var currentLength = 0;
+        for (var i = 0; i < encodedEntries.Count; i++)
         {
-            idxt.Write(UInt16Bytes(IndexHeaderLength + offset));
+            var nextLength = currentLength + encodedEntries[i].Length;
+            if (currentGroup.Count > 0 && GetDataRecordLength(nextLength, currentGroup.Count + 1) > MaximumIndexRecordSize)
+            {
+                groups.Add(currentGroup);
+                currentGroup = new List<int>();
+                currentLength = 0;
+            }
+
+            if (GetDataRecordLength(currentLength + encodedEntries[i].Length, currentGroup.Count + 1) > MaximumIndexRecordSize)
+            {
+                throw new InvalidOperationException("A KF8 index entry exceeds the maximum data record size.");
+            }
+
+            currentGroup.Add(i);
+            currentLength += encodedEntries[i].Length;
         }
 
-        var idxtBlock = AlignBlock(idxt.ToArray());
-
-        var dataHeader = new byte[IndexHeaderLength];
-        WriteAscii(dataHeader, 0, "INDX");
-        WriteUInt32(dataHeader, 4, IndexHeaderLength);
-        WriteUInt32(dataHeader, 12, 1);
-        WriteUInt32(dataHeader, 20, (uint)(IndexHeaderLength + indexBlock.Length));
-        WriteUInt32(dataHeader, 24, (uint)entries.Count);
-        for (var i = 28; i < 36; i++)
+        if (currentGroup.Count > 0)
         {
-            dataHeader[i] = 0xFF;
+            groups.Add(currentGroup);
         }
 
-        using var dataRecord = new MemoryStream();
-        dataRecord.Write(dataHeader);
-        dataRecord.Write(indexBlock);
-        dataRecord.Write(idxtBlock);
+        var dataRecords = new List<byte[]>(groups.Count);
+        var geometryEntries = new List<(byte[] Label, int Count)>(groups.Count);
+        foreach (var (group, recordNumber) in groups.Select((group, index) => (group, index + 1)))
+        {
+            using var block = new MemoryStream();
+            using var idxt = new MemoryStream();
+            idxt.Write(Encoding.ASCII.GetBytes("IDXT"));
 
-        // The header record describes each data record by the label of its last
-        // entry and its entry count, addressed through its own IDXT block.
-        var lastLabel = Encoding.UTF8.GetBytes(entries.Count == 0 ? string.Empty : entries[^1].Label);
+            foreach (var entryIndex in group)
+            {
+                idxt.Write(UInt16Bytes(IndexHeaderLength + (int)block.Length));
+                block.Write(encodedEntries[entryIndex]);
+            }
+
+            var indexBlock = AlignBlock(block.ToArray());
+            var idxtBlock = AlignBlock(idxt.ToArray());
+
+            var dataHeader = new byte[IndexHeaderLength];
+            WriteAscii(dataHeader, 0, "INDX");
+            WriteUInt32(dataHeader, 4, IndexHeaderLength);
+            WriteUInt32(dataHeader, 12, (uint)recordNumber);
+            WriteUInt32(dataHeader, 20, (uint)(IndexHeaderLength + indexBlock.Length));
+            WriteUInt32(dataHeader, 24, (uint)group.Count);
+            for (var i = 28; i < 36; i++)
+            {
+                dataHeader[i] = 0xFF;
+            }
+
+            using var dataRecord = new MemoryStream();
+            dataRecord.Write(dataHeader);
+            dataRecord.Write(indexBlock);
+            dataRecord.Write(idxtBlock);
+            dataRecords.Add(dataRecord.ToArray());
+
+            geometryEntries.Add((Encoding.UTF8.GetBytes(entries[group[^1]].Label), group.Count));
+        }
+
         using var geometry = new MemoryStream();
-        geometry.WriteByte((byte)lastLabel.Length);
-        geometry.Write(lastLabel);
-        geometry.Write(UInt16Bytes(entries.Count));
+        var geometryOffsets = new List<int>(geometryEntries.Count);
+        foreach (var (label, count) in geometryEntries)
+        {
+            geometryOffsets.Add((int)geometry.Length);
+            geometry.WriteByte((byte)label.Length);
+            geometry.Write(label);
+            geometry.Write(UInt16Bytes(count));
+        }
+
         var geometryBlock = AlignBlock(geometry.ToArray());
 
         var alignedTagx = AlignBlock(tagx);
 
         using var headerIdxt = new MemoryStream();
         headerIdxt.Write(Encoding.ASCII.GetBytes("IDXT"));
-        headerIdxt.Write(UInt16Bytes(IndexHeaderLength + alignedTagx.Length));
+        foreach (var offset in geometryOffsets)
+        {
+            headerIdxt.Write(UInt16Bytes(IndexHeaderLength + alignedTagx.Length + offset));
+        }
+
         var headerIdxtBlock = AlignBlock(headerIdxt.ToArray());
 
         var indexHeader = new byte[IndexHeaderLength];
@@ -422,7 +468,7 @@ internal static class Kf8ComicWriter
         WriteUInt32(indexHeader, 4, IndexHeaderLength);
         WriteUInt32(indexHeader, 16, 2);
         WriteUInt32(indexHeader, 20, (uint)(IndexHeaderLength + alignedTagx.Length + geometryBlock.Length));
-        WriteUInt32(indexHeader, 24, 1);
+        WriteUInt32(indexHeader, 24, (uint)geometryEntries.Count);
         WriteUInt32(indexHeader, 28, 65001);
         WriteUInt32(indexHeader, 32, Null);
         WriteUInt32(indexHeader, 36, (uint)entries.Count);
@@ -435,10 +481,17 @@ internal static class Kf8ComicWriter
         header.Write(geometryBlock);
         header.Write(headerIdxtBlock);
 
-        var records = new List<byte[]> { AlignBlock(header.ToArray()), dataRecord.ToArray() };
+        var records = new List<byte[]> { AlignBlock(header.ToArray()) };
+        records.AddRange(dataRecords);
         records.AddRange(cncxRecords);
         return records;
     }
+
+    private static int GetDataRecordLength(int entriesLength, int entryCount)
+        => IndexHeaderLength + AlignLength(entriesLength) + AlignLength(4 + (2 * entryCount));
+
+    private static int AlignLength(int length)
+        => (length + 3) & ~3;
 
     /// <summary>
     /// Holds the strings an index refers to. Entries point at them by byte

@@ -94,6 +94,8 @@ internal sealed class Azw3Reader
 
     public IReadOnlyList<byte[]> Resources { get; }
 
+    public List<int> IndexDataRecordCounts { get; } = new();
+
     public static Azw3Reader Read(string path)
     {
         var raw = File.ReadAllBytes(path);
@@ -199,8 +201,8 @@ internal sealed class Azw3Reader
     }
 
     /// <summary>
-    /// Reads one index: the header record supplies the tag definitions and the
-    /// data record that follows it holds the entries.
+    /// Reads one index: the header record supplies the tag definitions and
+    /// geometry for the data records that follow it.
     /// </summary>
     private List<IndexRow> ReadIndex(int headerRecord)
     {
@@ -223,45 +225,63 @@ internal sealed class Azw3Reader
             tags.Add((header[offset], header[offset + 1], header[offset + 2]));
         }
 
-        var data = _records[headerRecord + 1];
-        Assert.Equal("INDX", Encoding.ASCII.GetString(data, 0, 4));
-        var idxtOffset = (int)ReadUInt32(data, 20);
-        var entryCount = (int)ReadUInt32(data, 24);
-        Assert.Equal("IDXT", Encoding.ASCII.GetString(data, idxtOffset, 4));
-        Assert.Equal((int)ReadUInt32(header, 36), entryCount);
+        var dataRecordCount = (int)ReadUInt32(header, 24);
+        IndexDataRecordCounts.Add(dataRecordCount);
+        var expectedEntryCount = (int)ReadUInt32(header, 36);
+        var headerIdxtOffset = (int)ReadUInt32(header, 20);
+        Assert.Equal("IDXT", Encoding.ASCII.GetString(header, headerIdxtOffset, 4));
 
-        var rows = new List<IndexRow>(entryCount);
-        for (var i = 0; i < entryCount; i++)
+        var rows = new List<IndexRow>(expectedEntryCount);
+        for (var recordIndex = 0; recordIndex < dataRecordCount; recordIndex++)
         {
-            var offset = ReadUInt16(data, idxtOffset + 4 + (2 * i));
-            var labelLength = data[offset];
-            var label = Encoding.UTF8.GetString(data, offset + 1, labelLength);
+            var geometryOffset = ReadUInt16(header, headerIdxtOffset + 4 + (2 * recordIndex));
+            var geometryLabelLength = header[geometryOffset];
+            var geometryLabel = Encoding.UTF8.GetString(header, geometryOffset + 1, geometryLabelLength);
+            var geometryEntryCount = ReadUInt16(header, geometryOffset + 1 + geometryLabelLength);
 
-            var position = offset + 1 + labelLength;
-            var control = data[position++];
+            var data = _records[headerRecord + 1 + recordIndex];
+            Assert.Equal("INDX", Encoding.ASCII.GetString(data, 0, 4));
+            Assert.True(data.Length <= ushort.MaxValue);
+            var idxtOffset = (int)ReadUInt32(data, 20);
+            var entryCount = (int)ReadUInt32(data, 24);
+            Assert.Equal(geometryEntryCount, entryCount);
+            Assert.Equal("IDXT", Encoding.ASCII.GetString(data, idxtOffset, 4));
 
-            var values = new Dictionary<int, List<int>>();
-            foreach (var (number, valuesPerEntry, mask) in tags)
+            for (var i = 0; i < entryCount; i++)
             {
-                var masked = control & mask;
-                if (masked == 0)
+                var offset = ReadUInt16(data, idxtOffset + 4 + (2 * i));
+                var labelLength = data[offset];
+                var label = Encoding.UTF8.GetString(data, offset + 1, labelLength);
+
+                var position = offset + 1 + labelLength;
+                var control = data[position++];
+
+                var values = new Dictionary<int, List<int>>();
+                foreach (var (number, valuesPerEntry, mask) in tags)
                 {
-                    continue;
+                    var masked = control & mask;
+                    if (masked == 0)
+                    {
+                        continue;
+                    }
+
+                    var entries = masked >> BitOperations.TrailingZeroCount(mask);
+                    var list = new List<int>();
+                    for (var value = 0; value < entries * valuesPerEntry; value++)
+                    {
+                        list.Add(ReadVariableWidth(data, ref position));
+                    }
+
+                    values[number] = list;
                 }
 
-                var entries = masked >> BitOperations.TrailingZeroCount(mask);
-                var list = new List<int>();
-                for (var value = 0; value < entries * valuesPerEntry; value++)
-                {
-                    list.Add(ReadVariableWidth(data, ref position));
-                }
-
-                values[number] = list;
+                rows.Add(new IndexRow(label, values));
             }
 
-            rows.Add(new IndexRow(label, values));
+            Assert.Equal(geometryLabel, rows[^1].Label);
         }
 
+        Assert.Equal(expectedEntryCount, rows.Count);
         return rows;
     }
 

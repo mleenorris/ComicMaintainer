@@ -319,6 +319,38 @@ public class ComicEmailServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ProcessDeliveryAsync_UsesTheSeriesFolderCoverWhenTheCacheHasNoImage()
+    {
+        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
+        var file = CreateComic("Series - Chapter 0001.cbz", folder: "Covered Series");
+        var sidecar = Path.Combine(Path.GetDirectoryName(file)!, "cover.jpg");
+        await File.WriteAllBytesAsync(sidecar, new byte[] { 1, 2, 3 });
+
+        var queued = Assert.Single((await _service.QueueFilesAsync(
+            new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
+
+        EpubConversionOptions? usedOptions = null;
+        _epub.Setup(e => e.ConvertToEpubAsync(file, It.IsAny<string>(), It.IsAny<EpubConversionOptions?>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, EpubConversionOptions?, CancellationToken>((_, outDir, options, _) =>
+            {
+                usedOptions = options;
+                Directory.CreateDirectory(outDir);
+                var epubPath = Path.Combine(outDir, "Series - Chapter 0001.epub");
+                File.WriteAllText(epubPath, "epub-bytes");
+                return Task.FromResult(epubPath);
+            });
+
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await _service.ProcessDeliveryAsync(queued.Id);
+
+        // No series record exists, so the book would otherwise open on the
+        // first comic page instead of the series artwork.
+        Assert.Equal(sidecar, usedOptions!.SeriesImagePath);
+    }
+
+    [Fact]
     public async Task ProcessDeliveryAsync_ConvertsToAzw3AndCleansUpTheTemporaryFile()
     {
         var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Azw3);

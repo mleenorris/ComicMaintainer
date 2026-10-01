@@ -5,14 +5,14 @@ Kobo, PocketBook, or any mailbox that accepts attachments). Issues can be sent o
 time, as a whole series, or as an arbitrary selection, and a series can be subscribed so
 that every newly processed issue is delivered automatically. Each delivery can be sent as
 the original `.cbz`/`.cbr` archive or converted to EPUB or AZW3 first, and consecutive
-issues can be condensed into a single EPUB.
+issues can be condensed into a single EPUB or AZW3.
 
 ## Contents
 
 - [Configuring SMTP](#configuring-smtp)
 - [E-reader devices](#e-reader-devices)
 - [Sending comics](#sending-comics)
-- [Condensing issues into one EPUB](#condensing-issues-into-one-epub)
+- [Condensing issues into one book](#condensing-issues-into-one-book)
 - [Automatic delivery for a series](#automatic-delivery-for-a-series)
 - [EPUB conversion](#epub-conversion)
 - [AZW3 conversion](#azw3-conversion)
@@ -107,27 +107,38 @@ sent; any other path is rejected. Symlinks and junctions are resolved first — 
 and on every parent directory — so a link inside the library cannot point at a file
 outside it.
 
-## Condensing issues into one EPUB
+## Condensing issues into one book
 
 Instead of one book per issue, a send can *condense* consecutive issues into a single
-EPUB, so a device receives "Batman 001-005" rather than five separate books.
+book, so a device receives "Batman 001-005" rather than five separate books.
 
 - **Send each issue separately** – the default, unchanged behaviour.
-- **Combine every N issues into one EPUB** – the issues are put in reading order and
+- **Combine every N issues into one book** – the issues are put in reading order and
   grouped into books of N: issues 1-5, then 6-10, and so on. N is between 2 and 500.
-- **Combine all issues into one EPUB** – the whole selection (or the whole series)
+- **Combine all issues into one book** – the whole selection (or the whole series)
   becomes a single book.
 
 A book never mixes series: a selection spanning several series is grouped by series first
 and each group is chunked on its own. A send-series request is condensed in the issue
 order the series returns, even when the series is spread over several folders.
 
-Condensing always delivers EPUB — the original `.cbz`/`.cbr` archives cannot be merged —
-so the format picker is pinned to EPUB while a condense mode is selected. The condensed
-book keeps the series metadata and cover of its first issue, numbers its pages
-continuously, and gets one table-of-contents entry per issue so the device can still jump
-between them. Because it spans a range, no single issue number is written to the series
-position metadata.
+### Choosing the condensed format
+
+A condensed book can be delivered as EPUB or AZW3 — pick either in the **Format** picker,
+which stays available while a condense mode is selected. Only **Original archive** (and
+**Device default**, which may resolve to it) is unavailable, because `.cbz`/`.cbr`
+archives cannot be merged; the picker hides those entries while condensing and restores
+the previous choice when condensing is turned off. `POST /api/email/send`,
+`/send-series`, `/condense-download` and `/condense-builds` take the same
+`deliveryFormat`: `epub` (the default) or `azw3`; omitting it inherits the device default
+and falls back to EPUB when that device sends original archives, and `original` is
+rejected with a 400.
+
+An AZW3 is built from the same condensed EPUB (see [AZW3 conversion](#azw3-conversion)),
+so both formats contain exactly the same pages. The condensed book keeps the series
+metadata and cover of its first issue, numbers its pages continuously, and gets one
+table-of-contents entry per issue so the device can still jump between them. Because it
+spans a range, no single issue number is written to the series position metadata.
 
 ### Size check and the download fallback
 
@@ -259,8 +270,8 @@ external tool is needed, and the container image gains no extra dependencies.
   Because the pages are the same images as in the EPUB, the attachment size is
   approximately the same.
 
-Condensing several issues into one book always produces EPUB; AZW3 applies to per-issue
-deliveries.
+Condensed books support AZW3 as well: the issues are merged into one intermediate EPUB
+first and that book is rewritten as KF8, exactly as a single issue is.
 
 ## Delivery pipeline
 
@@ -333,7 +344,7 @@ curl -X POST http://localhost:5000/api/email/condense-plan \
 
 curl -X POST http://localhost:5000/api/email/send-series \
   -H "Content-Type: application/json" \
-  -d '{"seriesId":"batman","deviceId":1,"condenseMode":"count","issuesPerBook":5}'
+  -d '{"seriesId":"batman","deviceId":1,"condenseMode":"count","issuesPerBook":5,"deliveryFormat":"azw3"}'
 ```
 
 ## Troubleshooting

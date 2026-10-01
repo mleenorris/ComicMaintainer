@@ -8795,8 +8795,14 @@
          */
         function onEmailSendFormatChange() {
             const { mode } = getEmailCondenseSettings();
-            if (mode === 'none' || !currentEmailCondensePlan) return;
-            renderEmailCondensePlan(currentEmailCondensePlan);
+            if (mode === 'none') return;
+
+            // Picking a format while condensing is a deliberate choice, so it
+            // replaces the format remembered before condensing narrowed the
+            // picker and survives turning condensing off again.
+            emailFormatBeforeCondense = null;
+
+            if (currentEmailCondensePlan) renderEmailCondensePlan(currentEmailCondensePlan);
         }
 
         function buildEmailCondenseRequest(extra = {}) {

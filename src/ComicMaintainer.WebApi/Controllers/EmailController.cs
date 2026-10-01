@@ -1,7 +1,9 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using System.Security.Claims;
@@ -152,6 +154,9 @@ public class EmailController : ControllerBase
 
     /// <summary>Queues one or more specific files for delivery.</summary>
     [HttpPost("send")]
+    // Queueing walks and stats every file in the request, which for a bulk
+    // selection is minutes of work rather than seconds.
+    [RequestTimeout(RequestTimeoutPolicies.LongRunning)]
     public async Task<ActionResult<object>> SendFiles(
         [FromBody] SendFilesRequest request,
         CancellationToken cancellationToken)
@@ -201,6 +206,7 @@ public class EmailController : ControllerBase
 
     /// <summary>Queues every issue of a series for delivery.</summary>
     [HttpPost("send-series")]
+    [RequestTimeout(RequestTimeoutPolicies.LongRunning)]
     public async Task<ActionResult<object>> SendSeries(
         [FromBody] SendSeriesRequest request,
         CancellationToken cancellationToken)
@@ -289,6 +295,7 @@ public class EmailController : ControllerBase
     /// email and has to be downloaded instead.
     /// </summary>
     [HttpPost("condense-plan")]
+    [RequestTimeout(RequestTimeoutPolicies.LongRunning)]
     public async Task<ActionResult<object>> PlanCondense(
         [FromBody] CondenseRequest request,
         CancellationToken cancellationToken)
@@ -344,6 +351,9 @@ public class EmailController : ControllerBase
     /// large to email.
     /// </summary>
     [HttpPost("condense-download")]
+    // Builds the entire book inside the request and then streams it: how long
+    // that takes is a function of the series, not of anything we can bound.
+    [DisableRequestTimeout]
     public async Task<ActionResult> DownloadCondensedBook(
         [FromBody] CondenseRequest request,
         CancellationToken cancellationToken)
@@ -415,6 +425,9 @@ public class EmailController : ControllerBase
     /// <see cref="DownloadCondenseBuild"/> when it is done.
     /// </summary>
     [HttpPost("condense-builds")]
+    // Resolving a whole series and queueing the build is bounded work, but at a
+    // thousand issues it is not 30-second work.
+    [RequestTimeout(RequestTimeoutPolicies.LongRunning)]
     public async Task<ActionResult<object>> StartCondenseBuild(
         [FromBody] CondenseRequest request,
         CancellationToken cancellationToken)
@@ -477,6 +490,9 @@ public class EmailController : ControllerBase
 
     /// <summary>Streams the book a completed build produced.</summary>
     [HttpGet("condense-builds/{buildId:guid}/download")]
+    // A condensed series can run to gigabytes; how long the client takes to
+    // receive it is not something the server should cap.
+    [DisableRequestTimeout]
     public ActionResult DownloadCondenseBuild(Guid buildId)
     {
         var build = _builds.Get(buildId, CurrentUserId);
@@ -488,11 +504,23 @@ public class EmailController : ControllerBase
         var file = _builds.GetCompletedFile(buildId, CurrentUserId);
         if (file is null)
         {
+            if (build.Status == CondensedBookBuildStatus.Completed)
+            {
+                // The build says it succeeded but its artifact is gone, so the
+                // user is told to rebuild a book that was already built. That is
+                // a defect on our side rather than a user error, and logging it
+                // at Error is what gets it reported instead of silently
+                // surfacing as a confusing 409.
+                _logger.LogError(
+                    "Condensed book build {BuildId} is marked completed but its file is missing; the user was asked to rebuild it.",
+                    buildId);
+
+                return Conflict(new { error = "The built book is no longer available; build it again." });
+            }
+
             return Conflict(new
             {
-                error = build.Status == CondensedBookBuildStatus.Completed
-                    ? "The built book is no longer available; build it again."
-                    : $"The book is not ready to download (status: {build.Status})."
+                error = $"The book is not ready to download (status: {build.Status})."
             });
         }
 

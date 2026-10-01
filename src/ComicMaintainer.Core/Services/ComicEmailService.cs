@@ -1143,17 +1143,26 @@ public class ComicEmailService : IComicEmailService
                         : record.ResolvedSeriesName;
                 }
             }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not resolve cached series artwork for {FilePath}; trying series folder cover",
+                LoggingHelper.SanitizePathForLog(fullPath));
+        }
 
-            // The sidecar is a copy of the same artwork, so it keeps the book
-            // opening on the series image when the series was never looked up,
-            // its record carries no image, or the cached file is gone.
+        try
+        {
+            // Resolve the sidecar independently so a cache lookup failure
+            // cannot prevent the book from opening on the series image.
             imagePath ??= ResolveSeriesFolderCover(fullPath);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(
                 ex,
-                "Could not resolve series artwork for {FilePath}; sending EPUB without series cover",
+                "Could not resolve series folder cover for {FilePath}; sending EPUB without series cover",
                 LoggingHelper.SanitizePathForLog(fullPath));
         }
 

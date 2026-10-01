@@ -19,6 +19,7 @@ public class ComicEmailServiceTests : IDisposable
     private readonly Mock<IEpubConversionService> _epub = new();
     private readonly Mock<IAzw3ConversionService> _azw3 = new();
     private readonly Mock<IComicEmailQueue> _queue = new();
+    private readonly Mock<ISeriesMetadataCacheService> _seriesCache = new();
     private readonly ComicEmailService _service;
     private readonly EreaderDeviceService _devices;
     private readonly string _watchedDir;
@@ -50,8 +51,7 @@ public class ComicEmailServiceTests : IDisposable
 
         _sender.SetupGet(s => s.IsConfigured).Returns(true);
 
-        var seriesCache = new Mock<ISeriesMetadataCacheService>();
-        seriesCache.Setup(s => s.NormalizeKey(It.IsAny<string?>()))
+        _seriesCache.Setup(s => s.NormalizeKey(It.IsAny<string?>()))
             .Returns((string? value) => string.IsNullOrWhiteSpace(value)
                 ? "unknown-series"
                 : new string(value.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-'));
@@ -62,14 +62,14 @@ public class ComicEmailServiceTests : IDisposable
             _epub.Object,
             _azw3.Object,
             _queue.Object,
-            seriesCache.Object,
+            _seriesCache.Object,
             new Mock<ISeriesImageStore>().Object,
             settingsMonitor.Object,
             new Mock<ILogger<ComicEmailService>>().Object);
 
         _devices = new EreaderDeviceService(
             _dbFactory,
-            seriesCache.Object,
+            _seriesCache.Object,
             new Mock<ILogger<EreaderDeviceService>>().Object);
     }
 
@@ -318,8 +318,11 @@ public class ComicEmailServiceTests : IDisposable
         Assert.Equal(25L * 1024 * 1024, usedOptions!.MaxSizeBytes);
     }
 
-    [Fact]
-    public async Task ProcessDeliveryAsync_UsesTheSeriesFolderCoverWhenTheCacheHasNoImage()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProcessDeliveryAsync_UsesTheSeriesFolderCoverWhenTheCacheHasNoImageOrFails(
+        bool cacheLookupFails)
     {
         var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Epub);
         var file = CreateComic("Series - Chapter 0001.cbz", folder: "Covered Series");
@@ -328,6 +331,12 @@ public class ComicEmailServiceTests : IDisposable
 
         var queued = Assert.Single((await _service.QueueFilesAsync(
             new[] { file }, device.Id, null, EmailDeliverySource.Manual, false)).Queued);
+
+        if (cacheLookupFails)
+        {
+            _seriesCache.Setup(s => s.GetByTitleAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("Cache unavailable"));
+        }
 
         EpubConversionOptions? usedOptions = null;
         _epub.Setup(e => e.ConvertToEpubAsync(file, It.IsAny<string>(), It.IsAny<EpubConversionOptions?>(), It.IsAny<CancellationToken>()))

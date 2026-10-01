@@ -1384,6 +1384,16 @@ public class FileStoreServiceTests
             new ComicMetadata { Series = "Edited Series", Issue = "7" },
             ComicMetadataFieldFlags.Series | ComicMetadataFieldFlags.Issue);
 
+        var lastWriteAt = DateTime.UtcNow.AddMinutes(-5);
+        await using (var setupContext = await _serviceProvider
+            .GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>()
+            .CreateDbContextAsync())
+        {
+            var source = await setupContext.ComicFiles.FirstAsync(e => e.FilePath == oldPath);
+            source.LastWriteAt = lastWriteAt;
+            await setupContext.SaveChangesAsync();
+        }
+
         // Simulate the watcher pre-creating a default stub row (no metadata) for the new path.
         File.Move(oldPath, newPath);
         await _service.AddFileAsync(newPath);
@@ -1400,6 +1410,9 @@ public class FileStoreServiceTests
         Assert.NotNull(dbEntity);
         Assert.Equal("Edited Series", dbEntity!.Metadata?.Series);
         Assert.Equal("7", dbEntity.Metadata?.Issue);
+        Assert.Equal(FileMetadataSource.UserEdit.ToString(), dbEntity.MetadataSource);
+        Assert.NotNull(dbEntity.LastDbEditAt);
+        Assert.Equal(lastWriteAt, dbEntity.LastWriteAt);
     }
 
     [Fact]

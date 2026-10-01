@@ -1071,7 +1071,12 @@ public class FileStoreService : IFileStoreService
                     // and so cannot be modified" on save, which would abort the whole merge).
                     // Store a copy instead.
                     if (newEntity.Metadata == null && entity.Metadata != null)
+                    {
                         newEntity.Metadata = entity.Metadata.Clone();
+                        newEntity.LastDbEditAt = entity.LastDbEditAt;
+                        newEntity.LastWriteAt = entity.LastWriteAt;
+                        newEntity.MetadataSource = entity.MetadataSource;
+                    }
 
                     // The old row is the authoritative record for this physical file, so
                     // keep the earliest CreatedAt. The stub row inserted by the watcher

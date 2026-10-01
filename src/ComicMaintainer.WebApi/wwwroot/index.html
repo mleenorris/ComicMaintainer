@@ -1421,23 +1421,24 @@
                 </div>
                 <div class="form-group">
                     <label for="emailSendFormatSelect">Format</label>
-                    <select id="emailSendFormatSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="emailSendFormatSelect" onchange="onEmailSendFormatChange()" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
                         <option value="device">Device default</option>
                         <option value="original">Original archive</option>
                         <option value="epub">EPUB</option>
                         <option value="azw3">AZW3 (Kindle)</option>
                     </select>
+                    <small id="emailSendFormatHint" hidden style="display: block; margin-top: 4px; color: var(--text-muted);">Condensed books are generated, so only EPUB and AZW3 can be chosen.</small>
                 </div>
                 <div class="form-group">
                     <label for="emailCondenseModeSelect">Condense before sending</label>
                     <select id="emailCondenseModeSelect" onchange="onEmailCondenseChange()" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
                         <option value="none">Send each issue separately</option>
-                        <option value="count">Combine every N issues into one EPUB</option>
-                        <option value="all">Combine all issues into one EPUB</option>
+                        <option value="count">Combine every N issues into one book</option>
+                        <option value="all">Combine all issues into one book</option>
                     </select>
                 </div>
                 <div class="form-group" id="emailCondenseCountGroup" hidden>
-                    <label for="emailCondenseCountInput">Issues per EPUB</label>
+                    <label for="emailCondenseCountInput">Issues per book</label>
                     <input type="number" id="emailCondenseCountInput" min="2" max="500" step="1" value="5" onchange="onEmailCondenseChange()" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
                 </div>
                 <div id="emailCondensePlan" hidden style="margin-bottom: 12px; padding: 10px; border-radius: 5px; background: var(--bg-primary); color: var(--text-muted); font-size: 13px;"></div>

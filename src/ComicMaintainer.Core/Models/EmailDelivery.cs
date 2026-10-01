@@ -57,6 +57,39 @@ public static class EmailDeliveryFormat
     }
 
     /// <summary>
+    /// Normalizes the format of a condensed delivery, which can only be a
+    /// generated book: <see cref="Epub"/> or <see cref="Azw3"/>. Null/empty and
+    /// <see cref="Device"/> inherit <paramref name="deviceDefault"/>, falling
+    /// back to <see cref="Epub"/> when the device sends original archives.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="value"/> is <see cref="Original"/> (the source archives
+    /// cannot be merged) or is not a recognized format.
+    /// </exception>
+    public static string NormalizeCondensedOrThrow(string? value, string? deviceDefault, string paramName)
+    {
+        if (string.IsNullOrWhiteSpace(value) ||
+            string.Equals(value.Trim(), Device, StringComparison.OrdinalIgnoreCase))
+        {
+            // A device that sends original archives has no condensable default,
+            // so EPUB stays the format a condensed send falls back to.
+            return string.Equals(deviceDefault?.Trim(), Azw3, StringComparison.OrdinalIgnoreCase)
+                ? Azw3
+                : Epub;
+        }
+
+        var normalized = NormalizeOrThrow(value, Epub, paramName);
+        if (normalized == Original)
+        {
+            throw new ArgumentException(
+                "Condensed delivery cannot send the original archives; choose 'epub' or 'azw3'.",
+                paramName);
+        }
+
+        return normalized;
+    }
+
+    /// <summary>
     /// Normalizes a subscription format, which may additionally be
     /// <see cref="Device"/> to inherit the device default.
     /// </summary>
@@ -93,7 +126,7 @@ public static class EmailDeliveryFormat
 }
 
 /// <summary>
-/// How a batch of issues is condensed into EPUB books before delivery.
+/// How a batch of issues is condensed into books before delivery.
 /// </summary>
 public static class EmailCondenseMode
 {
@@ -218,10 +251,10 @@ public record ComicEmailDeliveryDto(
 
 /// <summary>
 /// One condensed book: the issues it contains, the name it will be delivered
-/// under and how large the generated EPUB is expected to be.
+/// under and how large the generated book is expected to be.
 /// </summary>
 /// <param name="EstimatedBytes">
-/// Best-effort size of the generated EPUB. The pages are carried over with
+/// Best-effort size of the generated book. The pages are carried over with
 /// their original compression, so the sum of the source archives plus a small
 /// container overhead is a close approximation.
 /// </param>
@@ -288,6 +321,10 @@ public static class CondensedBookBuildStatus
 /// The inputs of a condensed-book build: the same selection, condense settings
 /// and book index a synchronous download would use.
 /// </summary>
+/// <param name="DeliveryFormat">
+/// <c>epub</c> or <c>azw3</c>; null inherits the device default (EPUB when the
+/// device sends original archives).
+/// </param>
 public record CondensedBookBuildRequest(
     IReadOnlyList<string> FilePaths,
     string? CondenseMode,
@@ -295,7 +332,8 @@ public record CondensedBookBuildRequest(
     int BookIndex,
     bool PreserveIssueOrder = false,
     int? DeviceId = null,
-    bool SkipAlreadyDelivered = false);
+    bool SkipAlreadyDelivered = false,
+    string? DeliveryFormat = null);
 
 /// <summary>
 /// How far a build has got. Page counts are per compression pass and restart
@@ -335,7 +373,8 @@ public record CondensedBookBuildDto(
     DateTime? CompletedAt,
     string? Error,
     long? FileSizeBytes,
-    DateTime? ExpiresAt);
+    DateTime? ExpiresAt,
+    string DeliveryFormat = EmailDeliveryFormat.Epub);
 
 /// <summary>
 /// Outcome of queueing a batch of files for delivery: the deliveries that were

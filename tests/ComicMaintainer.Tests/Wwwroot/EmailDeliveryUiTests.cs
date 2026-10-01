@@ -104,9 +104,12 @@ public class EmailDeliveryUiTests
         Assert.Contains("value=\"count\"", html);
         Assert.Contains("value=\"all\"", html);
         Assert.Contains("id=\"emailCondenseCountInput\"", html);
+        // The format picker drives the condensed format, so it must tell the
+        // plan read-out when it changes.
+        Assert.Contains("onchange=\"onEmailSendFormatChange()\"", html);
         // Where the estimated sizes and the "too large to email" warning go.
         Assert.Contains("id=\"emailCondensePlan\"", html);
-        // Where a running/failed/finished EPUB build reports its status.
+        // Where a running/failed/finished book build reports its status.
         Assert.Contains("id=\"emailCondenseBuilds\"", html);
     }
 
@@ -160,20 +163,41 @@ public class EmailDeliveryUiTests
     }
 
     [Fact]
-    public void MainJs_CondensedSendsRequestEpub()
+    public void MainJs_CondensedSendsKeepEpubAndAzw3Selectable()
     {
         var js = Read("js", "main.js");
 
-        // Only EPUB can hold several issues, so the format picker is pinned
-        // while condensing and the user's own format is restored afterwards.
+        // A condensed book is generated, so only the original archives are
+        // unavailable while condensing: the picker stays enabled and the user
+        // keeps the choice between EPUB and AZW3.
+        Assert.Contains("function applyEmailCondenseFormatRestriction(condensing)", js);
         Assert.Matches(
-            new Regex(@"emailFormatBeforeCondense = format\.value;\s*format\.value = 'epub';", RegexOptions.Singleline),
+            new Regex(@"option\.disabled = condensing && !generated;\s*option\.hidden = condensing && !generated;", RegexOptions.Singleline),
             js);
         Assert.Matches(
-            new Regex(@"if \(emailFormatBeforeCondense !== null\) format\.value = emailFormatBeforeCondense;", RegexOptions.Singleline),
+            new Regex(@"if \(!isCondensableEmailFormat\(format\.value\)\) format\.value = 'epub';", RegexOptions.Singleline),
+            js);
+        // The user's own format is restored once condensing is turned off.
+        Assert.Matches(
+            new Regex(@"format\.value = emailFormatBeforeCondense;", RegexOptions.Singleline),
             js);
         Assert.Contains("condenseMode,", js);
         Assert.Contains("issuesPerBook", js);
+    }
+
+    [Fact]
+    public void MainJs_CondenseRequestsCarryTheChosenFormat()
+    {
+        var js = Read("js", "main.js");
+
+        // The plan, the send and any downloaded build must all use the format
+        // the user picked, and a built AZW3 must not be saved as an .epub.
+        Assert.Contains("deliveryFormat: getEmailCondenseFormat()", js);
+        Assert.Matches(
+            new Regex(@"function isCondensableEmailFormat\(value\)\s*\{[^}]*'azw3'", RegexOptions.Singleline),
+            js);
+        Assert.Contains("function getEmailCondenseFormat()", js);
+        Assert.Contains("build?.delivery_format === 'azw3' ? 'azw3' : 'epub'", js);
     }
 
     [Fact]

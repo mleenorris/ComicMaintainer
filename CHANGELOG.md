@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Condensed sends can be delivered as AZW3.** Combining issues into one book used to pin
+  the format picker to EPUB, so a Kindle could not receive a condensed book in its native
+  format. The picker now stays available while a condense mode is selected and offers both
+  EPUB and AZW3 (only the original archives are unavailable, because `.cbz`/`.cbr` files
+  cannot be merged), and `deliveryFormat` is honoured by `POST /api/email/send`,
+  `/send-series`, `/condense-download` and `/condense-builds`. Condensed downloads are built
+  and named in the chosen format, and a request without a format inherits the device default.
 - **Large condensed-EPUB downloads now report their progress and their failures.** Building
   a book from a big selection takes minutes — longer than a browser or a reverse proxy will
   hold a request open — so the download used to start, show nothing, and silently die or

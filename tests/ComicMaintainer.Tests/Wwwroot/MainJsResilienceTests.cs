@@ -74,6 +74,50 @@ public class MainJsResilienceTests
     }
 
     [Fact]
+    public void MainJs_ForwardsUnhandledErrorsToTheAutomatedErrorReporting()
+    {
+        var contents = ReadMainJs();
+
+        // Automated error reporting hangs off the server's logging pipeline, so
+        // a defect that lives entirely in the browser never reached it: the
+        // user saw a banner and the issue tracker stayed silent. These handlers
+        // are the only place such a failure can be captured.
+        Assert.Contains("/api/client-errors", contents);
+        Assert.Matches(new Regex(@"sendClientErrorReport\(detail, kind, source\)"), contents);
+        Assert.Matches(
+            new Regex(@"reportUnexpectedError\(event\.error, 'error', event\.filename\)"),
+            contents);
+        Assert.Matches(
+            new Regex(@"reportUnexpectedError\(event\.reason, 'unhandledrejection'\)"),
+            contents);
+    }
+
+    [Fact]
+    public void MainJs_ClientErrorReportingCannotFeedItself()
+    {
+        var contents = ReadMainJs();
+
+        var reporter = Regex.Match(
+            contents,
+            @"function sendClientErrorReport\(detail, kind, source\) \{.*?\n        \}",
+            RegexOptions.Singleline);
+        Assert.True(reporter.Success, "Expected to find sendClientErrorReport() in main.js");
+
+        // An error thrown or a promise rejected while reporting an error would
+        // arrive straight back at the window handlers and loop, so the request
+        // is wrapped in try/catch and its rejection is swallowed.
+        Assert.Contains("try {", reporter.Value);
+        Assert.Contains(".catch(() => {});", reporter.Value);
+
+        // The report must never navigate away from the state that produced the
+        // failure, which getAuthHeaders() does when the token has expired.
+        var executable = string.Join(
+            '\n',
+            reporter.Value.Split('\n').Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+        Assert.DoesNotContain("getAuthHeaders(", executable);
+    }
+
+    [Fact]
     public void MainJs_DebouncesViewportResizeWork()
     {
         var contents = ReadMainJs();

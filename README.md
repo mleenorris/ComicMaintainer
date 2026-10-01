@@ -759,10 +759,15 @@ defect in this service can actually be fixed.
 How it works:
 
 1. A Serilog sink captures `Error`/`Fatal` events, including every unhandled web request failure
-   and every background-service failure.
+   and every background-service failure. The web interface also posts uncaught browser errors and
+   unhandled promise rejections to `POST /api/client-errors`, so a defect that lives entirely in
+   the page — a broken button, a failed render — is reported through the same pipeline instead of
+   only showing the user a banner.
 2. Each event is reduced to a **fingerprint** — a hash of the exception type, source context, the
    message *template*, and the top normalized stack frames. Per-file and per-path detail does not
-   fragment the grouping, so one defect produces one issue.
+   fragment the grouping, so one defect produces one issue. Browser errors are normalized first so
+   that the same fault reported by different browsers, or from a differently-versioned asset URL,
+   still lands on one issue.
 3. Every field is **redacted** before it leaves the machine: absolute paths are shortened to a
    relative marker, email addresses and URL credentials are masked, and any value matching a stored
    secret (SMTP password, ComicVine key, the reporting token itself) is replaced. Request bodies,
@@ -773,8 +778,9 @@ How it works:
    once per dedupe window. Issue creation is capped per day.
 
 Issues are titled `[field error] {ExceptionType} in {SourceContext}` and labelled `field-error`,
-`automated` and a severity label. If you set an assignee, new issues are assigned to that login —
-set it to the GitHub coding agent's login to have it pick the issue up and open a pull request.
+`automated` and a severity label. Browser-side failures use `Browser` as the source context. If you
+set an assignee, new issues are assigned to that login — set it to the GitHub coding agent's login
+to have it pick the issue up and open a pull request.
 
 #### Configuration
 

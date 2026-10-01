@@ -142,5 +142,15 @@ public class ErrorReportingSinkTests
             string? correlationId,
             DateTime timestampUtc)
             => throw new InvalidOperationException("factory exploded");
+
+        public ErrorReport CreateExternal(
+            string level,
+            string? messageTemplate,
+            string? renderedMessage,
+            ExternalFailure failure,
+            string? sourceContext,
+            string? correlationId,
+            DateTime timestampUtc)
+            => throw new InvalidOperationException("factory exploded");
     }
 }

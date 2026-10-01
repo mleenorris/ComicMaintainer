@@ -124,4 +124,43 @@ public class MainJsTemplateRenderingTests
         Assert.Contains("function jsArg(value) {", contents);
         Assert.Contains("return rawHtml(escapeJs(String(value ?? '')));", contents);
     }
+
+    [Fact]
+    public void MainJs_WrapsEveryJsArgInterpolationInSingleQuotes()
+    {
+        var contents = ReadMainJs();
+
+        // jsArg() escapes for a value sitting inside a *single-quoted* JS
+        // string literal; it deliberately emits no quotes of its own. Dropping
+        // them splices the raw value into the handler as an expression, so an
+        // id such as 3f2504e0-4f89-11d3-9a0c-0305e82c3301 becomes
+        // onclick="doThing(3f2504e0-4f89-11d3-9a0c-0305e82c3301)".
+        //
+        // That is a SyntaxError, and an inline handler is only compiled when
+        // its event fires: the markup renders fine, the button simply does
+        // nothing and the failure surfaces as a window 'error' event. Numeric
+        // arguments are interpolated bare (`${index}`) and never through
+        // jsArg(), so every jsArg() interpolation must be quoted.
+        var interpolations = Regex.Matches(contents, @"\$\{jsArg\([^{}]*\)\}");
+        Assert.NotEmpty(interpolations);
+
+        var unquoted = interpolations
+            .Where(m => !IsWrappedInSingleQuotes(contents, m))
+            .Select(m => contents.Substring(
+                Math.Max(0, m.Index - 40),
+                Math.Min(contents.Length, m.Index + m.Length + 40) - Math.Max(0, m.Index - 40)))
+            .ToList();
+
+        Assert.Empty(unquoted);
+    }
+
+    private static bool IsWrappedInSingleQuotes(string contents, Match match)
+    {
+        var before = match.Index - 1;
+        var after = match.Index + match.Length;
+        return before >= 0
+            && after < contents.Length
+            && contents[before] == '\''
+            && contents[after] == '\'';
+    }
 }

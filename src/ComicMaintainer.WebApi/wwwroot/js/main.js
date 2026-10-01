@@ -8911,7 +8911,7 @@
                 appendHtml(list, html`
                     <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0;">
                         <span>${book.display_name} · ${book.issue_count} issue${book.issue_count === 1 ? '' : 's'} · ~${formatFileSize(book.estimated_bytes || 0)}${book.exceeds_attachment_limit ? ' · too large to email' : ''}</span>
-                        <button class="btn btn-small" type="button" onclick="downloadCondensedBook(${jsArg(index)})">Download</button>
+                        <button class="btn btn-small" type="button" onclick="downloadCondensedBook(${index})">Download</button>
                     </div>
                 `);
             }
@@ -9177,11 +9177,11 @@
                             <span>${build.display_name} · ${build.issue_count} issue${build.issue_count === 1 ? '' : 's'}</span>
                             <span style="display: flex; gap: 6px;">
                                 ${build.status === 'completed'
-                                    ? html`<button class="btn btn-small" type="button" onclick="downloadBuiltCondensedBook(${jsArg(build.build_id)})">Download</button>`
+                                    ? html`<button class="btn btn-small" type="button" onclick="downloadBuiltCondensedBook('${jsArg(build.build_id)}')">Download</button>`
                                     : ''}
                                 ${active
-                                    ? html`<button class="btn btn-small" type="button" onclick="cancelCondensedBookBuild(${jsArg(build.build_id)})">Cancel</button>`
-                                    : html`<button class="btn btn-small" type="button" onclick="dismissCondensedBookBuild(${jsArg(build.build_id)})">Dismiss</button>`}
+                                    ? html`<button class="btn btn-small" type="button" onclick="cancelCondensedBookBuild('${jsArg(build.build_id)}')">Cancel</button>`
+                                    : html`<button class="btn btn-small" type="button" onclick="dismissCondensedBookBuild('${jsArg(build.build_id)}')">Dismiss</button>`}
                             </span>
                         </div>
                         ${active

@@ -340,10 +340,13 @@ public class EmailDeliveryUiTests
         Assert.Contains("reportCondenseFailure('download', error)", js);
         Assert.Contains("reportCondenseFailure('start build', error)", js);
 
-        // A 4xx is the server answering, not failing; filing an issue for every
-        // "series exceeds the issue limit" would bury the real failures.
+        // An HTTP response has already been handled or reported on the server.
+        // Only failures that never got a response should file a browser issue.
         Assert.Matches(
-            new Regex(@"status >= 400 && status < 500\) return;", RegexOptions.Singleline),
+            new Regex(@"if \(error\?\.status != null\) return;", RegexOptions.Singleline),
+            js);
+        Assert.Matches(
+            new Regex(@"if \(handleAuthError\(response\)\) \{\s*const error = new Error\('Authentication required'\);\s*error.status = response.status;", RegexOptions.Singleline),
             js);
     }
 }

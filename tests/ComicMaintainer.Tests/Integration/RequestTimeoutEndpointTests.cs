@@ -1,7 +1,14 @@
+using System.Net;
 using ComicMaintainer.WebApi.Infrastructure;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Policy;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Timeouts;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ComicMaintainer.Tests.Integration;
@@ -80,6 +87,43 @@ public class RequestTimeoutEndpointTests : IClassFixture<WebApplicationFactory<P
 
         Assert.NotNull(hub);
         Assert.NotNull(hub!.Metadata.GetMetadata<DisableRequestTimeoutAttribute>());
+    }
+
+    [Fact]
+    public async Task TimeoutMiddlewareHonorsRoutedEndpointMetadata()
+    {
+        using var factory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                services.PostConfigure<RequestTimeoutOptions>(options =>
+                    options.DefaultPolicy = RequestTimeoutPolicies.Create(TimeSpan.FromMilliseconds(50)));
+                services.Configure<MvcOptions>(options => options.Filters.Add(new SlowActionFilter()));
+                services.AddSingleton<IAuthorizationMiddlewareResultHandler, TestAuthorizationHandler>();
+            });
+        });
+        using var client = factory.CreateClient();
+
+        var normal = await client.GetAsync("/api/version");
+        Assert.Equal(HttpStatusCode.GatewayTimeout, normal.StatusCode);
+
+        var optedOut = await client.GetAsync("/api/events/stream");
+        Assert.Equal(HttpStatusCode.OK, optedOut.StatusCode);
+    }
+
+    private sealed class SlowActionFilter : IAsyncActionFilter
+    {
+        public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
+        {
+            await Task.Delay(200, context.HttpContext.RequestAborted);
+            context.Result = new OkResult();
+        }
+    }
+
+    private sealed class TestAuthorizationHandler : IAuthorizationMiddlewareResultHandler
+    {
+        public Task HandleAsync(RequestDelegate next, HttpContext context,
+            AuthorizationPolicy policy, PolicyAuthorizationResult authorizeResult) => next(context);
     }
 
     private RouteEndpoint FindEndpoint(string routePattern)

@@ -8407,7 +8407,9 @@
                 }
             });
             if (handleAuthError(response)) {
-                throw new Error('Authentication required');
+                const error = new Error('Authentication required');
+                error.status = response.status;
+                throw error;
             }
             if (!response.ok) {
                 let message = `HTTP error! status: ${response.status}`;
@@ -8418,9 +8420,8 @@
                     }
                 } catch (_) {}
                 const error = new Error(message);
-                // Carried so a caller can tell a rejected request (a 4xx the
-                // user can act on) from a broken one (a 5xx, a timeout) and
-                // only report the latter.
+                // Carried so a caller can distinguish an HTTP response from
+                // a failure that never received one.
                 error.status = response.status;
                 throw error;
             }
@@ -9075,16 +9076,16 @@
          * banner: the catch blocks below show the user a message and nothing
          * else, so a broken build or a download that never arrives was invisible
          * to everyone except the person looking at it. These paths now report
-         * themselves through the same pipeline as a server-side error.
+         * network failures through the same issue pipeline as a server-side
+         * error, while HTTP errors remain the server's responsibility.
          *
-         * A 4xx is skipped deliberately. Those are answers, not faults — "this
-         * series exceeds the issue limit", "the book is not ready yet" — and
-         * filing an issue for each one would bury the real failures.
+         * HTTP responses are already handled or reported by the server. Only
+         * failures without a response (such as a dropped connection) are
+         * reported here, avoiding duplicate issues for server-side failures.
          */
         function reportCondenseFailure(stage, error) {
             if (typeof sendClientErrorReport !== 'function') return;
-            const status = Number(error?.status);
-            if (Number.isFinite(status) && status >= 400 && status < 500) return;
+            if (error?.status != null) return;
             sendClientErrorReport(error, 'error', `condensed book: ${stage}`);
         }
 

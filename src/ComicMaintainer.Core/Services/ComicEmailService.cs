@@ -62,6 +62,13 @@ public class ComicEmailService : IComicEmailService
         RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(1));
 
+    /// <summary>
+    /// Extensions a series cover sidecar can have, in the order they are
+    /// preferred. Mirrors the extensions <see cref="ISeriesFolderCoverWriter"/>
+    /// writes.
+    /// </summary>
+    private static readonly string[] SeriesFolderCoverExtensions = { ".jpg", ".png", ".webp" };
+
     public ComicEmailService(
         IDbContextFactory<ComicMaintainerDbContext> dbFactory,
         IComicEmailSender sender,
@@ -1103,56 +1110,88 @@ public class ComicEmailService : IComicEmailService
 
     /// <summary>
     /// Looks up the cached series record for a file so the generated EPUB can
-    /// carry the series cover art and the resolved series name. Best-effort:
-    /// a miss (or any lookup failure) simply produces an EPUB that falls back
-    /// to the first comic page as its cover.
+    /// carry the series cover art and the resolved series name, falling back to
+    /// the <c>cover.&lt;ext&gt;</c> sidecar ComicMaintainer writes next to the
+    /// issues when the cache holds no image of its own. Best-effort: when
+    /// neither is available the EPUB falls back to the first comic page as its
+    /// cover.
     /// </summary>
     private async Task<EpubConversionOptions> BuildEpubOptionsAsync(
         string fullPath,
         long? maxSizeBytes,
         CancellationToken cancellationToken)
     {
-        var fallback = new EpubConversionOptions(MaxSizeBytes: maxSizeBytes);
+        string? imagePath = null;
+        string? seriesTitle = null;
 
         try
         {
             // The library groups a series by the name of its containing folder,
             // which is also how the cache record is keyed.
             var folderTitle = Path.GetFileName(Path.GetDirectoryName(fullPath));
-            if (string.IsNullOrWhiteSpace(folderTitle))
+            if (!string.IsNullOrWhiteSpace(folderTitle))
             {
-                return fallback;
+                var record = await _seriesCache.GetByTitleAsync(folderTitle, cancellationToken);
+                if (record is not null)
+                {
+                    imagePath = string.IsNullOrWhiteSpace(record.LocalImageFile)
+                        ? null
+                        : _seriesImages.ResolveAbsolutePath(record.LocalImageFile);
+
+                    seriesTitle = string.IsNullOrWhiteSpace(record.ResolvedSeriesName)
+                        ? record.CanonicalTitle
+                        : record.ResolvedSeriesName;
+                }
             }
-
-            var record = await _seriesCache.GetByTitleAsync(folderTitle, cancellationToken);
-            if (record is null)
-            {
-                return fallback;
-            }
-
-            var imagePath = string.IsNullOrWhiteSpace(record.LocalImageFile)
-                ? null
-                : _seriesImages.ResolveAbsolutePath(record.LocalImageFile);
-
-            var seriesTitle = string.IsNullOrWhiteSpace(record.ResolvedSeriesName)
-                ? record.CanonicalTitle
-                : record.ResolvedSeriesName;
-
-            if (imagePath is null && string.IsNullOrWhiteSpace(seriesTitle))
-            {
-                return fallback;
-            }
-
-            return new EpubConversionOptions(imagePath, seriesTitle, maxSizeBytes);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(
                 ex,
-                "Could not resolve series artwork for {FilePath}; sending EPUB without series cover",
+                "Could not resolve cached series artwork for {FilePath}; trying series folder cover",
                 LoggingHelper.SanitizePathForLog(fullPath));
-            return fallback;
         }
+
+        try
+        {
+            // Resolve the sidecar independently so a cache lookup failure
+            // cannot prevent the book from opening on the series image.
+            imagePath ??= ResolveSeriesFolderCover(fullPath);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not resolve series folder cover for {FilePath}; sending EPUB without series cover",
+                LoggingHelper.SanitizePathForLog(fullPath));
+        }
+
+        return new EpubConversionOptions(imagePath, seriesTitle, maxSizeBytes);
+    }
+
+    /// <summary>
+    /// Finds the series cover sidecar sitting next to an issue. Mirrors the
+    /// names <see cref="ISeriesFolderCoverWriter"/> writes, which is also the
+    /// convention other comic library managers follow.
+    /// </summary>
+    private static string? ResolveSeriesFolderCover(string fullPath)
+    {
+        var folder = Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            return null;
+        }
+
+        foreach (var extension in SeriesFolderCoverExtensions)
+        {
+            var candidate = Path.Combine(folder, "cover" + extension);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
     }
 
     private string GetTempDirectory()

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.IO.Compression;
 using System.Security;
+using System.Security.Cryptography;
 using System.Text;
 using System.Xml.Serialization;
 using ComicMaintainer.Core.Interfaces;
@@ -114,6 +115,10 @@ public class EpubConversionService : IEpubConversionService
     {
         Directory.CreateDirectory(outputDirectory);
 
+        // Identifies the cover art the book is going to open with, so a copy of
+        // it embedded in a source archive is not repeated as a page.
+        var seriesCoverHash = TryHashFile(options?.SeriesImagePath);
+
         // A condensed book can span hundreds of issues, so no archive is kept
         // open beyond the issue being read: only the page names are retained
         // here and each archive is reopened, one at a time, while its pages are
@@ -148,6 +153,8 @@ public class EpubConversionService : IEpubConversionService
                 throw new InvalidOperationException(
                     $"Archive contains no page images and cannot be converted to EPUB: {Path.GetFileName(comicFilePath)}");
             }
+
+            ApplyCoverEntries(archive, pages, seriesCoverHash, comicFilePath);
 
             issues.Add(new IssueSource(comicFilePath, pages, ReadComicInfo(archive)));
         }
@@ -260,6 +267,136 @@ public class EpubConversionService : IEpubConversionService
         {
             TryDelete(tempPath);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Positions the cover art a source archive carries. ComicMaintainer (and
+    /// other library managers) embed the series cover into an archive as a
+    /// root-level <c>cover.&lt;ext&gt;</c> entry, which the natural page sort
+    /// would otherwise drop in between (or after) the numbered pages, so the
+    /// book would open on an ordinary page and show the series art somewhere in
+    /// the middle. The entry is therefore moved to the front of the issue, and
+    /// removed entirely when it is a copy of the series image the book already
+    /// opens with so that image is not shown twice in a row.
+    /// </summary>
+    private void ApplyCoverEntries(
+        IArchive archive,
+        List<string> pages,
+        byte[]? seriesCoverHash,
+        string comicFilePath)
+    {
+        var covers = pages.Where(IsCoverEntry).ToList();
+        if (covers.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var cover in covers)
+        {
+            // The last remaining image has to stay: an issue with no page at
+            // all cannot be converted.
+            if (seriesCoverHash is null || pages.Count == 1)
+            {
+                break;
+            }
+
+            var entry = archive.Entries.FirstOrDefault(e =>
+                !e.IsDirectory && string.Equals(e.Key, cover, StringComparison.Ordinal));
+            if (entry is null || !MatchesHash(entry, seriesCoverHash, comicFilePath))
+            {
+                continue;
+            }
+
+            pages.Remove(cover);
+            _logger.LogDebug(
+                "Dropped the embedded series cover '{Entry}' from {FilePath}; the book already opens with it",
+                LoggingHelper.SanitizeForLog(cover),
+                LoggingHelper.SanitizePathForLog(comicFilePath));
+        }
+
+        // Whatever cover entries are left belong at the front of their issue,
+        // in the order the natural sort produced.
+        var remaining = pages.Where(IsCoverEntry).ToList();
+        if (remaining.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var cover in remaining)
+        {
+            pages.Remove(cover);
+        }
+
+        pages.InsertRange(0, remaining);
+    }
+
+    /// <summary>
+    /// True for a root-level <c>cover.&lt;ext&gt;</c> entry, the conventional
+    /// name for an archive's cover art. Nested entries are ordinary pages: a
+    /// "chapter 1/cover.jpg" is part of that chapter.
+    /// </summary>
+    private static bool IsCoverEntry(string key)
+    {
+        var normalized = key.Replace('\\', '/');
+        if (normalized.Contains('/'))
+        {
+            return false;
+        }
+
+        return string.Equals(
+            Path.GetFileNameWithoutExtension(normalized),
+            "cover",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Hashes a file so copies of it can be recognized elsewhere. Returns null
+    /// when there is no file to hash or it cannot be read; the caller then
+    /// treats nothing as a duplicate.
+    /// </summary>
+    private byte[]? TryHashFile(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = File.OpenRead(path);
+            return SHA256.HashData(stream);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            _logger.LogDebug(
+                ex,
+                "Could not hash the series cover {ImagePath}; an embedded copy of it will be kept as a page",
+                LoggingHelper.SanitizePathForLog(path));
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// True when an archive entry's content hashes to <paramref name="hash"/>.
+    /// An unreadable entry is reported as "not a match" so it stays a page and
+    /// fails later, in the page pipeline, with a message naming it.
+    /// </summary>
+    private bool MatchesHash(IArchiveEntry entry, byte[] hash, string comicFilePath)
+    {
+        try
+        {
+            using var stream = entry.OpenEntryStream();
+            return SHA256.HashData(stream).AsSpan().SequenceEqual(hash);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or NotSupportedException)
+        {
+            _logger.LogDebug(
+                ex,
+                "Could not read '{Entry}' from {FilePath} while looking for an embedded series cover",
+                LoggingHelper.SanitizeForLog(entry.Key ?? string.Empty),
+                LoggingHelper.SanitizePathForLog(comicFilePath));
+            return false;
         }
     }
 

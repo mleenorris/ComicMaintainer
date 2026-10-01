@@ -1369,6 +1369,53 @@ public class FileStoreServiceTests
     }
 
     [Fact]
+    public async Task UpdateFilePathAsync_NewPathRowAlreadyExists_CarriesMetadataOntoSurvivingRow()
+    {
+        // Regression: ComicFileEntity.Metadata is an owned entity, so handing the old row's
+        // tracked instance to the surviving row makes EF reject the save ("part of a key and
+        // so cannot be modified"). The merge then failed outright and left both rows behind,
+        // losing the user's edits. A copy must be stored instead.
+        var oldPath = Path.Combine(_testDirectory, "meta_collide_old.cbz");
+        var newPath = Path.Combine(_testDirectory, "meta_collide_new.cbz");
+        File.WriteAllText(oldPath, "content");
+        await _service.AddFileAsync(oldPath);
+        await _service.ApplyUserMetadataEditAsync(
+            oldPath,
+            new ComicMetadata { Series = "Edited Series", Issue = "7" },
+            ComicMetadataFieldFlags.Series | ComicMetadataFieldFlags.Issue);
+
+        var lastWriteAt = DateTime.UtcNow.AddMinutes(-5);
+        await using (var setupContext = await _serviceProvider
+            .GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>()
+            .CreateDbContextAsync())
+        {
+            var source = await setupContext.ComicFiles.FirstAsync(e => e.FilePath == oldPath);
+            source.LastWriteAt = lastWriteAt;
+            await setupContext.SaveChangesAsync();
+        }
+
+        // Simulate the watcher pre-creating a default stub row (no metadata) for the new path.
+        File.Move(oldPath, newPath);
+        await _service.AddFileAsync(newPath);
+
+        // Act
+        await _service.UpdateFilePathAsync(oldPath, newPath);
+
+        // Assert - the edited metadata survives on the merged row
+        await using var dbContext = await _serviceProvider
+            .GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>()
+            .CreateDbContextAsync();
+        Assert.False(await dbContext.ComicFiles.AnyAsync(e => e.FilePath == oldPath));
+        var dbEntity = await dbContext.ComicFiles.FirstOrDefaultAsync(e => e.FilePath == newPath);
+        Assert.NotNull(dbEntity);
+        Assert.Equal("Edited Series", dbEntity!.Metadata?.Series);
+        Assert.Equal("7", dbEntity.Metadata?.Issue);
+        Assert.Equal(FileMetadataSource.UserEdit.ToString(), dbEntity.MetadataSource);
+        Assert.NotNull(dbEntity.LastDbEditAt);
+        Assert.Equal(lastWriteAt, dbEntity.LastWriteAt);
+    }
+
+    [Fact]
     public async Task UpdateFilePathAsync_PreservesCreatedAt()
     {
         // Regression: Overview "Series Updates" buckets series by their newest file's

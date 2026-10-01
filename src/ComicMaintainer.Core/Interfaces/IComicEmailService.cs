@@ -30,16 +30,23 @@ public interface IComicEmailService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Queues <paramref name="filePaths"/> as condensed EPUB books: the issues
+    /// Queues <paramref name="filePaths"/> as condensed books: the issues
     /// are put in reading order and grouped into books of
     /// <paramref name="issuesPerBook"/> issues (or one book for every issue when
-    /// the mode is <see cref="EmailCondenseMode.All"/>). Condensed delivery is
-    /// always EPUB; the original archives cannot be merged.
+    /// the mode is <see cref="EmailCondenseMode.All"/>). Condensed delivery
+    /// always produces a generated book — EPUB or AZW3, per
+    /// <paramref name="deliveryFormat"/> — because the original archives cannot
+    /// be merged.
     /// A book never mixes series. Set <paramref name="preserveIssueOrder"/> when
     /// the caller already supplies a single series in reading order (a
     /// send-series request); otherwise the issues are grouped by series folder
     /// and read in natural order within each group.
     /// </summary>
+    /// <param name="deliveryFormat">
+    /// <c>epub</c> or <c>azw3</c>; null or <c>device</c> inherits the device
+    /// default (EPUB when the device sends original archives). <c>original</c>
+    /// is rejected.
+    /// </param>
     Task<EmailQueueResult> QueueCondensedFilesAsync(
         IEnumerable<string> filePaths,
         int deviceId,
@@ -48,6 +55,7 @@ public interface IComicEmailService
         string source,
         bool skipAlreadyDelivered,
         bool preserveIssueOrder = false,
+        string? deliveryFormat = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -72,6 +80,11 @@ public interface IComicEmailService
     /// plan for the same inputs) as a temporary file for the caller to stream
     /// back as a download. The caller must delete the file when finished.
     /// </summary>
+    /// <param name="deliveryFormat">
+    /// <c>epub</c> or <c>azw3</c>; null or <c>device</c> inherits the default of
+    /// <paramref name="deviceId"/> (EPUB when there is no device or it sends
+    /// original archives). <c>original</c> is rejected.
+    /// </param>
     /// <param name="progress">
     /// Optional sink notified while the book is built. A book condensed from a
     /// whole series takes minutes, so a caller that shows a status needs it.
@@ -85,6 +98,7 @@ public interface IComicEmailService
         int? deviceId = null,
         bool skipAlreadyDelivered = false,
         IProgress<EpubConversionProgress>? progress = null,
+        string? deliveryFormat = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

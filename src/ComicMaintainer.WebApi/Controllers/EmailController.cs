@@ -176,6 +176,7 @@ public class EmailController : ControllerBase
                     EmailDeliverySource.Manual,
                     request.SkipAlreadyDelivered,
                     preserveIssueOrder: false,
+                    request.DeliveryFormat,
                     cancellationToken)
                 : await _email.QueueFilesAsync(
                     request.Files,
@@ -254,6 +255,7 @@ public class EmailController : ControllerBase
                     // GetSeriesIssuesAsync already returns one series in issue
                     // order; re-sorting it by folder would reorder the books.
                     preserveIssueOrder: true,
+                    request.DeliveryFormat,
                     cancellationToken)
                 : await _email.QueueFilesAsync(
                     files,
@@ -369,6 +371,7 @@ public class EmailController : ControllerBase
                 request.DeviceId,
                 request.SkipAlreadyDelivered,
                 progress: null,
+                request.DeliveryFormat,
                 cancellationToken);
         }
         catch (ArgumentException ex)
@@ -402,7 +405,7 @@ public class EmailController : ControllerBase
             return Task.CompletedTask;
         });
 
-        return File(stream, "application/epub+zip", book.FileName);
+        return File(stream, GetBookContentType(book.FileName), book.FileName);
     }
 
     /// <summary>
@@ -437,7 +440,8 @@ public class EmailController : ControllerBase
                     request.BookIndex,
                     PreserveIssueOrder: !string.IsNullOrWhiteSpace(request.SeriesId),
                     request.DeviceId,
-                    request.SkipAlreadyDelivered),
+                    request.SkipAlreadyDelivered,
+                    request.DeliveryFormat),
                 CurrentUserId,
                 cancellationToken);
 
@@ -502,7 +506,7 @@ public class EmailController : ControllerBase
             bufferSize: 64 * 1024,
             FileOptions.Asynchronous);
 
-        return File(stream, "application/epub+zip", file.FileName);
+        return File(stream, GetBookContentType(file.FileName), file.FileName);
     }
 
     /// <summary>Stops a running build.</summary>
@@ -540,6 +544,7 @@ public class EmailController : ControllerBase
         error = build.Error,
         file_size_bytes = build.FileSizeBytes,
         expires_at = build.ExpiresAt,
+        delivery_format = build.DeliveryFormat,
         progress = new
         {
             phase = build.Progress.Phase,
@@ -560,6 +565,15 @@ public class EmailController : ControllerBase
     /// able to enumerate or download them.
     /// </summary>
     private string? CurrentUserId => User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+    /// <summary>
+    /// Content type of a generated condensed book, which is an EPUB or an AZW3
+    /// depending on the requested delivery format.
+    /// </summary>
+    private static string GetBookContentType(string fileName) =>
+        Path.GetExtension(fileName).Equals(".azw3", StringComparison.OrdinalIgnoreCase)
+            ? "application/x-mobi8-ebook"
+            : "application/epub+zip";
 
     /// <summary>
     /// Resolves the issues a condense request targets: either the explicit file
@@ -709,8 +723,8 @@ public class EmailController : ControllerBase
 
         /// <summary>
         /// <c>none</c> (default), <c>count</c> to condense every
-        /// <see cref="IssuesPerBook"/> issues into one EPUB, or <c>all</c> to
-        /// condense the whole selection into a single EPUB.
+        /// <see cref="IssuesPerBook"/> issues into one book, or <c>all</c> to
+        /// condense the whole selection into a single book.
         /// </summary>
         public string? CondenseMode { get; set; }
 
@@ -753,6 +767,13 @@ public class EmailController : ControllerBase
 
         /// <summary>Zero-based index of the book to download (download endpoint only).</summary>
         public int BookIndex { get; set; }
+
+        /// <summary>
+        /// Format the book is generated in: <c>epub</c> (the default) or
+        /// <c>azw3</c>. <c>original</c> is rejected because the source archives
+        /// cannot be merged.
+        /// </summary>
+        public string? DeliveryFormat { get; set; }
 
         /// <summary>
         /// Device the books would be sent to. Combined with

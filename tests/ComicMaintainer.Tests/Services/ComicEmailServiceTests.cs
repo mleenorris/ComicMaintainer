@@ -780,6 +780,142 @@ public class ComicEmailServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task QueueCondensedFilesAsync_QueuesTheRequestedAzw3Format()
+    {
+        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Original);
+        var files = Enumerable.Range(1, 2).Select(i => CreateComic($"Series - Chapter {i:D4}.cbz")).ToList();
+
+        var result = await _service.QueueCondensedFilesAsync(
+            files,
+            device.Id,
+            EmailCondenseMode.All,
+            null,
+            EmailDeliverySource.Manual,
+            skipAlreadyDelivered: false,
+            preserveIssueOrder: false,
+            EmailDeliveryFormat.Azw3);
+
+        var queued = Assert.Single(result.Queued);
+        Assert.Equal(EmailDeliveryFormat.Azw3, queued.DeliveryFormat);
+    }
+
+    [Fact]
+    public async Task QueueCondensedFilesAsync_InheritsAnAzw3DeviceDefault()
+    {
+        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", EmailDeliveryFormat.Azw3);
+        var files = Enumerable.Range(1, 2).Select(i => CreateComic($"Series - Chapter {i:D4}.cbz")).ToList();
+
+        var result = await _service.QueueCondensedFilesAsync(
+            files, device.Id, EmailCondenseMode.All, null, EmailDeliverySource.Manual, skipAlreadyDelivered: false);
+
+        Assert.Equal(EmailDeliveryFormat.Azw3, Assert.Single(result.Queued).DeliveryFormat);
+    }
+
+    [Fact]
+    public async Task QueueCondensedFilesAsync_RejectsTheOriginalFormat()
+    {
+        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
+        var files = Enumerable.Range(1, 2).Select(i => CreateComic($"Series - Chapter {i:D4}.cbz")).ToList();
+
+        // The source archives cannot be merged, so condensing them is impossible.
+        await Assert.ThrowsAsync<ArgumentException>(() => _service.QueueCondensedFilesAsync(
+            files,
+            device.Id,
+            EmailCondenseMode.All,
+            null,
+            EmailDeliverySource.Manual,
+            skipAlreadyDelivered: false,
+            preserveIssueOrder: false,
+            EmailDeliveryFormat.Original));
+    }
+
+    [Fact]
+    public async Task ProcessDeliveryAsync_SendsACondensedBookAsASingleAzw3()
+    {
+        var device = await _devices.CreateDeviceAsync("Kindle", "kindle@kindle.com", null);
+        var files = Enumerable.Range(1, 3).Select(i => CreateComic($"Series - Chapter {i:D4}.cbz")).ToList();
+        var queued = Assert.Single((await _service.QueueCondensedFilesAsync(
+            files,
+            device.Id,
+            EmailCondenseMode.All,
+            null,
+            EmailDeliverySource.Manual,
+            skipAlreadyDelivered: false,
+            preserveIssueOrder: false,
+            EmailDeliveryFormat.Azw3)).Queued);
+
+        IReadOnlyList<string>? converted = null;
+        _azw3.Setup(a => a.ConvertToAzw3Async(
+                It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<string>(),
+                It.IsAny<EpubConversionOptions?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<IReadOnlyList<string>, string, EpubConversionOptions?, CancellationToken>((paths, outDir, _, _) =>
+            {
+                converted = paths;
+                Directory.CreateDirectory(outDir);
+                var azw3Path = Path.Combine(outDir, "Series 001-003.azw3");
+                File.WriteAllText(azw3Path, "azw3-bytes");
+                return Task.FromResult(azw3Path);
+            });
+
+        ComicEmailMessage? sent = null;
+        _sender.Setup(s => s.SendAsync(It.IsAny<ComicEmailMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<ComicEmailMessage, CancellationToken>((m, _) => sent = m)
+            .Returns(Task.CompletedTask);
+
+        await _service.ProcessDeliveryAsync(queued.Id);
+
+        Assert.Equal(files, converted);
+        Assert.Equal("application/x-mobi8-ebook", sent!.AttachmentContentType);
+        Assert.Equal("Series 001-003.azw3", sent.AttachmentFileName);
+        Assert.Equal(EmailDeliveryStatus.Sent, (await GetDeliveryAsync(queued.Id)).Status);
+        _epub.Verify(e => e.ConvertToEpubAsync(
+            It.IsAny<IReadOnlyList<string>>(),
+            It.IsAny<string>(),
+            It.IsAny<EpubConversionOptions?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateCondensedBookAsync_BuildsAnAzw3WhenRequested()
+    {
+        var files = Enumerable.Range(1, 2).Select(i => CreateComic($"Series - Chapter {i:D4}.cbz")).ToList();
+
+        IReadOnlyList<string>? converted = null;
+        _azw3.Setup(a => a.ConvertToAzw3Async(
+                It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<string>(),
+                It.IsAny<EpubConversionOptions?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<IReadOnlyList<string>, string, EpubConversionOptions?, CancellationToken>((paths, outDir, _, _) =>
+            {
+                converted = paths;
+                Directory.CreateDirectory(outDir);
+                var azw3Path = Path.Combine(outDir, "Series 001-002.azw3");
+                File.WriteAllText(azw3Path, "azw3-bytes");
+                return Task.FromResult(azw3Path);
+            });
+
+        var book = await _service.CreateCondensedBookAsync(
+            files,
+            EmailCondenseMode.All,
+            null,
+            bookIndex: 0,
+            preserveIssueOrder: false,
+            deviceId: null,
+            skipAlreadyDelivered: false,
+            progress: null,
+            deliveryFormat: EmailDeliveryFormat.Azw3);
+
+        Assert.Equal(files, converted);
+        Assert.Equal("Series 001-002.azw3", book.FileName);
+        Assert.True(File.Exists(book.FilePath));
+
+        Directory.Delete(Path.GetDirectoryName(book.FilePath)!, recursive: true);
+    }
+
+    [Fact]
     public async Task CreateCondensedBookAsync_RemovesTheWorkDirectoryWhenConversionFails()
     {
         var files = Enumerable.Range(1, 2).Select(i => CreateComic($"Series - Chapter {i:D4}.cbz")).ToList();

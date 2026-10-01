@@ -8380,13 +8380,14 @@
         let currentEmailCondensePlan = null;
         // Guards against an out-of-order plan response overwriting a newer one.
         let emailCondensePlanToken = 0;
-        // Delivery format chosen before condensing forced EPUB, restored when
-        // the user goes back to sending each issue separately.
+        // Delivery format chosen before condensing narrowed the picker to the
+        // generated formats, restored when the user goes back to sending each
+        // issue separately.
         let emailFormatBeforeCondense = null;
         // How many condensed books of the current plan have been rendered.
         let emailCondenseBooksShown = 0;
         const EMAIL_CONDENSE_BOOK_PAGE_SIZE = 10;
-        // Condensed EPUB builds the user has running or recently finished. They
+        // Condensed book builds the user has running or recently finished. They
         // live on the server, so they outlast this dialog and a page reload.
         let emailCondenseBuilds = [];
         // Builds started from this tab, which are saved as soon as they finish.
@@ -8715,13 +8716,9 @@
             if (mode) mode.value = 'none';
             const countGroup = document.getElementById('emailCondenseCountGroup');
             if (countGroup) countGroup.hidden = true;
-            const format = document.getElementById('emailSendFormatSelect');
-            if (format) {
-                format.disabled = false;
-                // Condensing forces EPUB; a reopened modal must not keep that
-                // choice over the user's own format.
-                if (emailFormatBeforeCondense !== null) format.value = emailFormatBeforeCondense;
-            }
+            // Condensing narrows the format picker; a reopened modal must not
+            // keep that restriction, nor the format it fell back to.
+            applyEmailCondenseFormatRestriction(false);
             emailFormatBeforeCondense = null;
             const panel = document.getElementById('emailCondensePlan');
             if (panel) {
@@ -8737,27 +8734,69 @@
             return { mode, issuesPerBook };
         }
 
+        /** EPUB and AZW3 are the formats a condensed book can be generated in. */
+        function isCondensableEmailFormat(value) {
+            const normalized = String(value || '').toLowerCase();
+            return normalized === 'epub' || normalized === 'azw3';
+        }
+
+        /** The format the condensed books of the open send dialog are built in. */
+        function getEmailCondenseFormat() {
+            const value = document.getElementById('emailSendFormatSelect')?.value;
+            return isCondensableEmailFormat(value) ? String(value).toLowerCase() : 'epub';
+        }
+
+        function shortEmailFormatLabel(value) {
+            return String(value || '').toLowerCase() === 'azw3' ? 'AZW3' : 'EPUB';
+        }
+
+        /**
+         * Limits the format picker to the formats a condensed book can be
+         * generated in while condensing, and restores every option afterwards.
+         * The user still chooses between EPUB and AZW3; only the original
+         * archives are unavailable, because they cannot be merged.
+         */
+        function applyEmailCondenseFormatRestriction(condensing) {
+            const format = document.getElementById('emailSendFormatSelect');
+            const hint = document.getElementById('emailSendFormatHint');
+            if (hint) hint.hidden = !condensing;
+            if (!format) return;
+
+            // Left enabled while condensing so EPUB and AZW3 stay selectable.
+            format.disabled = false;
+            for (const option of Array.from(format.options)) {
+                const generated = isCondensableEmailFormat(option.value);
+                option.disabled = condensing && !generated;
+                option.hidden = condensing && !generated;
+            }
+
+            if (condensing) {
+                if (emailFormatBeforeCondense === null) emailFormatBeforeCondense = format.value;
+                if (!isCondensableEmailFormat(format.value)) format.value = 'epub';
+            } else if (emailFormatBeforeCondense !== null) {
+                format.value = emailFormatBeforeCondense;
+                emailFormatBeforeCondense = null;
+            }
+        }
+
         function onEmailCondenseChange() {
             const { mode } = getEmailCondenseSettings();
             const countGroup = document.getElementById('emailCondenseCountGroup');
             if (countGroup) countGroup.hidden = mode !== 'count';
 
-            // Several issues can only be merged into an EPUB; the original
-            // archives cannot be combined.
-            const format = document.getElementById('emailSendFormatSelect');
-            if (format) {
-                if (mode !== 'none') {
-                    if (emailFormatBeforeCondense === null) emailFormatBeforeCondense = format.value;
-                    format.value = 'epub';
-                    format.disabled = true;
-                } else {
-                    if (emailFormatBeforeCondense !== null) format.value = emailFormatBeforeCondense;
-                    emailFormatBeforeCondense = null;
-                    format.disabled = false;
-                }
-            }
+            applyEmailCondenseFormatRestriction(mode !== 'none');
 
             refreshEmailCondensePlan();
+        }
+
+        /**
+         * Keeps the condense read-out in step with the chosen format: the plan
+         * itself does not change, only the format its books are built in.
+         */
+        function onEmailSendFormatChange() {
+            const { mode } = getEmailCondenseSettings();
+            if (mode === 'none' || !currentEmailCondensePlan) return;
+            renderEmailCondensePlan(currentEmailCondensePlan);
         }
 
         function buildEmailCondenseRequest(extra = {}) {
@@ -8772,6 +8811,7 @@
                     : { files: currentEmailSend?.files || [] }),
                 condenseMode: mode,
                 issuesPerBook,
+                deliveryFormat: getEmailCondenseFormat(),
                 deviceId: Number.isFinite(deviceId) ? deviceId : null,
                 skipAlreadyDelivered: document.getElementById('emailSkipAlreadyDeliveredCheckbox')?.checked !== false,
                 ...extra
@@ -8830,7 +8870,8 @@
 
             const limit = formatFileSize(plan.max_attachment_bytes || 0);
             const oversized = plan.oversized_book_count || 0;
-            const heading = `${books.length} EPUB${books.length === 1 ? '' : 's'} from ${plan.total_issues} issue${plan.total_issues === 1 ? '' : 's'} (attachment limit ${limit}).`;
+            const formatLabel = shortEmailFormatLabel(getEmailCondenseFormat());
+            const heading = `${books.length} ${formatLabel}${books.length === 1 ? '' : 's'} from ${plan.total_issues} issue${plan.total_issues === 1 ? '' : 's'} (attachment limit ${limit}).`;
 
             renderHtml(panel, html`
                 <div style="margin-bottom: 8px;">${heading}</div>
@@ -8906,9 +8947,9 @@
                 upsertEmailCondenseBuild(build);
                 renderEmailCondenseBuilds();
                 startEmailCondenseBuildPolling();
-                showMessage('Building the condensed EPUB. Progress is shown in the send dialog; you can close it and come back.', 'info');
+                showMessage(`Building the condensed ${shortEmailFormatLabel(getEmailCondenseFormat())}. Progress is shown in the send dialog; you can close it and come back.`, 'info');
             } catch (error) {
-                showMessage('Failed to start the condensed EPUB build: ' + error.message, 'error');
+                showMessage('Failed to start the condensed book build: ' + error.message, 'error');
             }
         }
 
@@ -8934,7 +8975,7 @@
             } catch (error) {
                 // A failure here must not break the send dialog; the builds
                 // panel simply stays as it was.
-                console.warn('Could not load condensed EPUB builds', error);
+                console.warn('Could not load condensed book builds', error);
             }
         }
 
@@ -8971,7 +9012,7 @@
             } catch (error) {
                 // Transient failures (a restart, a dropped connection) must not
                 // abandon the build; the next tick tries again.
-                console.warn('Could not poll condensed EPUB builds', error);
+                console.warn('Could not poll condensed book builds', error);
             } finally {
                 emailCondenseBuildPollInFlight = false;
                 if (emailCondenseBuilds.some(isEmailCondenseBuildActive)) startEmailCondenseBuildPolling();
@@ -9036,14 +9077,16 @@
                 const url = URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = url;
-                link.download = `${build?.display_name || 'condensed'}.epub`;
+                // The build reports the format it produced, so an AZW3 is not
+                // saved under an .epub name the ereader would reject.
+                link.download = `${build?.display_name || 'condensed'}.${build?.delivery_format === 'azw3' ? 'azw3' : 'epub'}`;
                 document.body.appendChild(link);
                 link.click();
                 link.remove();
                 URL.revokeObjectURL(url);
-                showMessage('Condensed EPUB downloaded.', 'success');
+                showMessage(`Condensed ${shortEmailFormatLabel(build?.delivery_format)} downloaded.`, 'success');
             } catch (error) {
-                showMessage('Failed to download the condensed EPUB: ' + error.message, 'error');
+                showMessage('Failed to download the condensed book: ' + error.message, 'error');
             }
         }
 
@@ -9051,7 +9094,7 @@
             try {
                 await fetchEmailJson(`/api/email/condense-builds/${encodeURIComponent(buildId)}/cancel`, { method: 'POST' });
                 emailCondenseAutoDownloads.delete(buildId);
-                showMessage('Cancelling the condensed EPUB build...', 'info');
+                showMessage('Cancelling the condensed book build...', 'info');
                 await pollEmailCondenseBuilds();
             } catch (error) {
                 showMessage('Failed to cancel the build: ' + error.message, 'error');
@@ -9115,7 +9158,7 @@
             }
 
             panel.hidden = false;
-            renderHtml(panel, html`<div style="margin-bottom: 8px;">EPUB builds</div>`);
+            renderHtml(panel, html`<div style="margin-bottom: 8px;">Condensed book builds</div>`);
 
             for (const build of emailCondenseBuilds) {
                 const progress = build.progress || {};

@@ -248,6 +248,7 @@ public class ComicEmailService : IComicEmailService
         string source,
         bool skipAlreadyDelivered,
         bool preserveIssueOrder = false,
+        string? deliveryFormat = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(filePaths);
@@ -277,6 +278,11 @@ public class ComicEmailService : IComicEmailService
         {
             throw new InvalidOperationException($"Ereader device {deviceId} was not found.");
         }
+
+        var format = EmailDeliveryFormat.NormalizeCondensedOrThrow(
+            deliveryFormat,
+            device.DeliveryFormat,
+            nameof(deliveryFormat));
 
         var skipped = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         List<ComicEmailDeliveryEntity> queued;
@@ -321,9 +327,9 @@ public class ComicEmailService : IComicEmailService
                     DeviceId = device.Id,
                     DeviceName = device.Name,
                     DeviceEmail = device.EmailAddress,
-                    // Only EPUB can carry several issues; the source archives
-                    // themselves cannot be merged.
-                    DeliveryFormat = EmailDeliveryFormat.Epub,
+                    // Only a generated book can carry several issues; the source
+                    // archives themselves cannot be merged.
+                    DeliveryFormat = format,
                     Status = EmailDeliveryStatus.Pending,
                     Source = normalizedSource,
                     CondensedFilePaths = group.Count > 1 ? JsonSerializer.Serialize(group) : null,
@@ -353,9 +359,10 @@ public class ComicEmailService : IComicEmailService
         if (queued.Count > 0)
         {
             _logger.LogInformation(
-                "Queued {Count} condensed comic email(s) to {DeviceName}",
+                "Queued {Count} condensed comic email(s) to {DeviceName} as {Format}",
                 queued.Count,
-                LoggingHelper.SanitizeForLog(device.Name));
+                LoggingHelper.SanitizeForLog(device.Name),
+                format);
         }
 
         return new EmailQueueResult(queued.Select(ToDto).ToList(), skipped);
@@ -421,8 +428,11 @@ public class ComicEmailService : IComicEmailService
         int? deviceId = null,
         bool skipAlreadyDelivered = false,
         IProgress<EpubConversionProgress>? progress = null,
+        string? deliveryFormat = null,
         CancellationToken cancellationToken = default)
     {
+        var format = await ResolveCondensedFormatAsync(deliveryFormat, deviceId, cancellationToken);
+
         var plan = await PlanCondensedDeliveryAsync(
             filePaths,
             condenseMode,
@@ -453,8 +463,10 @@ public class ComicEmailService : IComicEmailService
 
         try
         {
-            var epubPath = await _epubConverter.ConvertToEpubAsync(book.Files, workDirectory, options, cancellationToken);
-            return new CondensedBookFile(epubPath, Path.GetFileName(epubPath));
+            var bookPath = string.Equals(format, EmailDeliveryFormat.Azw3, StringComparison.Ordinal)
+                ? await _azw3Converter.ConvertToAzw3Async(book.Files, workDirectory, options, cancellationToken)
+                : await _epubConverter.ConvertToEpubAsync(book.Files, workDirectory, options, cancellationToken);
+            return new CondensedBookFile(bookPath, Path.GetFileName(bookPath));
         }
         catch
         {
@@ -464,6 +476,36 @@ public class ComicEmailService : IComicEmailService
             TryDeleteDirectory(workDirectory);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Resolves the format a condensed book is generated in. A download can be
+    /// requested without a device, in which case there is no default to inherit
+    /// and EPUB is used.
+    /// </summary>
+    private async Task<string> ResolveCondensedFormatAsync(
+        string? deliveryFormat,
+        int? deviceId,
+        CancellationToken cancellationToken)
+    {
+        string? deviceDefault = null;
+        var inheritsDevice = string.IsNullOrWhiteSpace(deliveryFormat) ||
+            string.Equals(deliveryFormat.Trim(), EmailDeliveryFormat.Device, StringComparison.OrdinalIgnoreCase);
+
+        if (inheritsDevice && deviceId is int id)
+        {
+            await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+            deviceDefault = await db.EreaderDevices
+                .AsNoTracking()
+                .Where(d => d.Id == id)
+                .Select(d => d.DeliveryFormat)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        return EmailDeliveryFormat.NormalizeCondensedOrThrow(
+            deliveryFormat,
+            deviceDefault,
+            nameof(deliveryFormat));
     }
 
     private void TryDeleteDirectory(string directory)

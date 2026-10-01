@@ -3,7 +3,7 @@ using ComicMaintainer.Core.Models;
 namespace ComicMaintainer.Core.Interfaces;
 
 /// <summary>
-/// Runs condensed-EPUB downloads as tracked background builds.
+/// Runs condensed-book downloads as tracked background builds.
 /// </summary>
 /// <remarks>
 /// Condensing a large selection takes minutes, which is far longer than a

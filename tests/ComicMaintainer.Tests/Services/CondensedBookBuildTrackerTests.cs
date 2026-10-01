@@ -8,7 +8,7 @@ using Moq;
 namespace ComicMaintainer.Tests.Services;
 
 /// <summary>
-/// Guards the status monitoring for condensed EPUB creation: a large book is
+/// Guards the status monitoring for condensed book creation: a large book is
 /// built outside the request that asked for it, so its progress, its failure
 /// reason and its finished file must all be observable afterwards.
 /// </summary>
@@ -175,6 +175,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
             It.IsAny<int?>(),
             It.IsAny<bool>(),
             It.IsAny<IProgress<EpubConversionProgress>?>(),
+            It.IsAny<string?>(),
             It.IsAny<CancellationToken>()), Times.Once);
 
         releaseBuild.SetResult();
@@ -283,11 +284,52 @@ public class CondensedBookBuildTrackerTests : IDisposable
         Assert.False(_tracker.Discard(started.BuildId, "user-2"));
     }
 
-    private static CondensedBookBuildRequest Request(int bookIndex = 0) => new(
+    [Fact]
+    public async Task StartAsync_ReportsTheFormatOfTheBuiltBook()
+    {
+        SetupPlan();
+        var azw3 = CreateBook("Series 001-002", "azw3");
+        SetupBuild((_, _) => Task.FromResult(new CondensedBookFile(azw3, Path.GetFileName(azw3))));
+
+        var started = await _tracker.StartAsync(Request(deliveryFormat: EmailDeliveryFormat.Azw3), Owner);
+        Assert.Equal(EmailDeliveryFormat.Azw3, started.DeliveryFormat);
+
+        var finished = await WaitForTerminalAsync(started.BuildId);
+        Assert.Equal(CondensedBookBuildStatus.Completed, finished.Status);
+        Assert.Equal(EmailDeliveryFormat.Azw3, finished.DeliveryFormat);
+    }
+
+    [Fact]
+    public async Task StartAsync_BuildsTheSameBookSeparatelyPerFormat()
+    {
+        SetupPlan();
+        var book = CreateBook("Series 001-002");
+        SetupBuild((_, _) => Task.FromResult(new CondensedBookFile(book, Path.GetFileName(book))));
+
+        var epub = await _tracker.StartAsync(Request(deliveryFormat: EmailDeliveryFormat.Epub), Owner);
+        var azw3 = await _tracker.StartAsync(Request(deliveryFormat: EmailDeliveryFormat.Azw3), Owner);
+
+        // Two formats of the same selection are two different books, so the
+        // second request must not join the first build.
+        Assert.NotEqual(epub.BuildId, azw3.BuildId);
+
+        await WaitForTerminalAsync(epub.BuildId);
+        await WaitForTerminalAsync(azw3.BuildId);
+    }
+
+    [Fact]
+    public async Task StartAsync_RejectsAFormatThatCannotBeCondensed()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            _tracker.StartAsync(Request(deliveryFormat: EmailDeliveryFormat.Original), Owner));
+    }
+
+    private static CondensedBookBuildRequest Request(int bookIndex = 0, string? deliveryFormat = null) => new(
         new[] { "/comics/Series/Series - Chapter 0001.cbz", "/comics/Series/Series - Chapter 0002.cbz" },
         "all",
         null,
-        bookIndex);
+        bookIndex,
+        DeliveryFormat: deliveryFormat);
 
     private void SetupPlan(int issueCount = 2, Func<Task>? beforeReturn = null)
     {
@@ -334,6 +376,7 @@ public class CondensedBookBuildTrackerTests : IDisposable
                 It.IsAny<int?>(),
                 It.IsAny<bool>(),
                 It.IsAny<IProgress<EpubConversionProgress>?>(),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
             .Returns((
                 IEnumerable<string> _,
@@ -344,15 +387,16 @@ public class CondensedBookBuildTrackerTests : IDisposable
                 int? _,
                 bool _,
                 IProgress<EpubConversionProgress>? progress,
+                string? _,
                 CancellationToken token) => build(progress, token));
     }
 
-    private string CreateBook(string name)
+    private string CreateBook(string name, string extension = "epub")
     {
         var directory = Path.Combine(_workDir, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, name + ".epub");
-        File.WriteAllText(path, "epub bytes");
+        var path = Path.Combine(directory, $"{name}.{extension}");
+        File.WriteAllText(path, $"{extension} bytes");
         return path;
     }
 

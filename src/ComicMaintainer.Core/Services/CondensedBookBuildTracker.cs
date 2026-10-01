@@ -79,6 +79,14 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
 
         PruneExpired();
 
+        // Rejects an impossible format (the originals cannot be merged) before
+        // anything is planned. A request that inherits the device default is
+        // reported as EPUB until the finished file says otherwise.
+        var format = EmailDeliveryFormat.NormalizeCondensedOrThrow(
+            request.DeliveryFormat,
+            deviceDefault: null,
+            nameof(request));
+
         // Planning validates the selection and names the book, so an impossible
         // request fails while the caller is still waiting for a response rather
         // than minutes later inside a background build.
@@ -121,7 +129,8 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
                 signature,
                 book.DisplayName,
                 book.Files.Count,
-                _timeProvider.GetUtcNow().UtcDateTime);
+                _timeProvider.GetUtcNow().UtcDateTime,
+                format);
 
             _builds[entry.BuildId] = entry;
             var worker = Task.Run(() => RunAsync(entry, request), CancellationToken.None);
@@ -134,7 +143,8 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         }
 
         _logger.LogInformation(
-            "Queued condensed EPUB build {BuildId} for {IssueCount} issue(s)",
+            "Queued condensed {Format} build {BuildId} for {IssueCount} issue(s)",
+            format,
             entry.BuildId,
             book.Files.Count);
 
@@ -233,25 +243,26 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
                 request.DeviceId,
                 request.SkipAlreadyDelivered,
                 new ConversionProgressSink(entry),
+                request.DeliveryFormat,
                 linked.Token);
 
             var size = new FileInfo(book.FilePath).Length;
             entry.MarkCompleted(book, size, _timeProvider.GetUtcNow().UtcDateTime, _retention);
 
             _logger.LogInformation(
-                "Condensed EPUB build {BuildId} finished ({Bytes} bytes)",
+                "Condensed book build {BuildId} finished ({Bytes} bytes)",
                 entry.BuildId,
                 size);
         }
         catch (OperationCanceledException)
         {
             entry.MarkCancelled(_timeProvider.GetUtcNow().UtcDateTime, _retention);
-            _logger.LogInformation("Condensed EPUB build {BuildId} was cancelled", entry.BuildId);
+            _logger.LogInformation("Condensed book build {BuildId} was cancelled", entry.BuildId);
         }
         catch (Exception ex)
         {
             entry.MarkFailed(ex.Message, _timeProvider.GetUtcNow().UtcDateTime, _retention);
-            _logger.LogError(ex, "Condensed EPUB build {BuildId} failed", entry.BuildId);
+            _logger.LogError(ex, "Condensed book build {BuildId} failed", entry.BuildId);
         }
         finally
         {
@@ -365,6 +376,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         builder.Append(request.PreserveIssueOrder).Append('\n');
         builder.Append(request.DeviceId?.ToString() ?? string.Empty).Append('\n');
         builder.Append(request.SkipAlreadyDelivered).Append('\n');
+        builder.Append(request.DeliveryFormat ?? string.Empty).Append('\n');
         foreach (var path in request.FilePaths)
         {
             builder.Append(path).Append('\n');
@@ -394,7 +406,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "An error occurred while cancelling condensed EPUB builds during shutdown");
+            _logger.LogWarning(ex, "An error occurred while cancelling condensed book builds during shutdown");
         }
 
         try
@@ -403,7 +415,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "A condensed EPUB build worker failed during shutdown");
+            _logger.LogError(ex, "A condensed book build worker failed during shutdown");
         }
         finally
         {
@@ -447,6 +459,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         private string? _error;
         private CondensedBookFile? _file;
         private long? _fileSizeBytes;
+        private string _deliveryFormat;
         private bool _disposed;
 
         public BuildEntry(
@@ -455,7 +468,8 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
             string signature,
             string displayName,
             int issueCount,
-            DateTime createdAt)
+            DateTime createdAt,
+            string deliveryFormat)
         {
             BuildId = buildId;
             OwnerUserId = ownerUserId;
@@ -463,6 +477,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
             DisplayName = displayName;
             IssueCount = issueCount;
             CreatedAt = createdAt;
+            _deliveryFormat = deliveryFormat;
         }
 
         public Guid BuildId { get; }
@@ -489,7 +504,8 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
                     _completedAt,
                     _error,
                     _fileSizeBytes,
-                    _expiresAt);
+                    _expiresAt,
+                    _deliveryFormat);
             }
         }
 
@@ -559,6 +575,15 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
             {
                 _status = CondensedBookBuildStatus.Completed;
                 _file = file;
+                // The builder resolves the format (a request can inherit the
+                // device default), so the finished file is what the caller is
+                // told it got.
+                _deliveryFormat = string.Equals(
+                    Path.GetExtension(file.FilePath),
+                    ".azw3",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? EmailDeliveryFormat.Azw3
+                    : EmailDeliveryFormat.Epub;
                 _fileSizeBytes = sizeBytes;
                 _completedAt = now;
                 _expiresAt = now.Add(retention);

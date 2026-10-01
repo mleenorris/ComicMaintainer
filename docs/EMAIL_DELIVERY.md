@@ -137,7 +137,8 @@ rejected with a 400.
 
 An AZW3 is built from the same condensed EPUB (see [AZW3 conversion](#azw3-conversion)),
 so both formats contain exactly the same pages. The condensed book keeps the series
-metadata and cover of its first issue, numbers its pages continuously, and gets one
+metadata of its first issue, opens on the series cover page (see
+[EPUB conversion](#epub-conversion)), numbers its pages continuously, and gets one
 table-of-contents entry per issue so the device can still jump between them. Because it
 spans a range, no single issue number is written to the series position metadata.
 
@@ -221,13 +222,23 @@ Conversion produces a fixed-layout EPUB 3 containing one page per image, which i
 e-readers expect for comics:
 
 - Images are ordered with the same natural sort used elsewhere in the application, and
-  `__MACOSX/` entries are ignored.
+  `__MACOSX/` entries are ignored. A root-level `cover.<ext>` entry is cover art rather
+  than an ordinary page — ComicMaintainer embeds the series cover into the first archive
+  of a series that way — so it is moved to the front of its issue instead of sorting in
+  among (or after) the numbered pages. A `cover.<ext>` inside a sub-folder stays an
+  ordinary page.
 - Each page is a minimal XHTML document whose viewport matches the image dimensions, so
   pages are displayed whole rather than reflowed.
-- The cached series artwork (the same image the library shows for the series) is embedded
-  as a dedicated cover page, marked `cover-image`, placed first in the spine and referenced
-  from the navigation landmarks. When no series image is cached — or the cached file is
-  missing or undecodable — the first comic page is marked as the cover instead, as before.
+- The series artwork (the same image the library shows for the series) is embedded as a
+  dedicated cover page, marked `cover-image`, placed first in the spine and referenced
+  from the navigation landmarks, so every book — single issue or condensed — opens on the
+  series image. It is taken from the cached series image, and when the series has none
+  (or the cached file is gone) from the `cover.<ext>` sidecar written next to the issues.
+  An embedded `cover.<ext>` entry that is a byte-identical copy of that artwork is dropped
+  from the pages so the same image is not shown twice in a row — unless it is the
+  archive's only image, which is kept as the sole page.
+- When no series artwork can be resolved at all — or the file is missing or undecodable —
+  the first comic page is marked as the cover instead, as before.
 - Series, issue number and the series collection are written to the OPF metadata in both
   the EPUB 3 form (`belongs-to-collection` / `collection-type` / `group-position`) and the
   legacy calibre form (`calibre:series` / `calibre:series_index`), because readers support

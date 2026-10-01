@@ -202,6 +202,135 @@ public class EpubConversionServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ConvertToEpubAsync_WithEmbeddedCoverEntry_MakesItTheFirstPage()
+    {
+        // The series cover an archive carries sorts after the numbered pages,
+        // so without special handling the book would open on page 1 and show
+        // the series art at the very end.
+        var cbz = Path.Combine(_workDir, "embedded-cover.cbz");
+        using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
+        {
+            WriteImageEntry(zip, "001.jpg");
+            WriteImageEntry(zip, "002.jpg");
+            WriteImageEntry(zip, "cover.jpg", CreateJpeg(60, 90));
+        }
+
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-embedded-cover"));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        var names = archive.Entries.Select(e => e.FullName).ToList();
+        Assert.Equal(3, names.Count(n => n.StartsWith("OEBPS/images/page", StringComparison.Ordinal)));
+
+        // The embedded cover is the first page, so it is also what the reader
+        // shows as the book's cover image.
+        Assert.Contains("content=\"width=60, height=90\"", ReadEntry(archive, "OEBPS/page0001.xhtml"));
+        Assert.Contains(
+            "<item id=\"cover-image\" href=\"images/page0001.jpg\"",
+            ReadEntry(archive, "OEBPS/content.opf"));
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_WithEmbeddedCopyOfTheSeriesImage_DropsTheDuplicatePage()
+    {
+        var coverPath = Path.Combine(_workDir, "duplicate-cover.jpg");
+        var coverBytes = CreateJpeg(60, 90);
+        await File.WriteAllBytesAsync(coverPath, coverBytes);
+
+        // ComicMaintainer embeds the cached series cover into the first archive
+        // of a series, so the same image would otherwise appear twice in a row.
+        var cbz = Path.Combine(_workDir, "duplicate-cover.cbz");
+        using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
+        {
+            WriteImageEntry(zip, "001.jpg");
+            WriteImageEntry(zip, "002.jpg");
+            WriteImageEntry(zip, "cover.jpg", coverBytes);
+        }
+
+        var epubPath = await _service.ConvertToEpubAsync(
+            cbz,
+            Path.Combine(_workDir, "out-duplicate-cover"),
+            new EpubConversionOptions(coverPath, "Series Name"));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        var names = archive.Entries.Select(e => e.FullName).ToList();
+        Assert.Contains("OEBPS/cover.xhtml", names);
+        Assert.Equal(2, names.Count(n => n.StartsWith("OEBPS/images/page", StringComparison.Ordinal)));
+
+        // Only the dedicated cover page carries the series art; the pages that
+        // follow it are the comic's own.
+        Assert.DoesNotContain("content=\"width=60, height=90\"", ReadEntry(archive, "OEBPS/page0001.xhtml"));
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_WithOnlyACoverEntry_KeepsItAsThePage()
+    {
+        var coverPath = Path.Combine(_workDir, "sole-cover.jpg");
+        var coverBytes = CreateJpeg(60, 90);
+        await File.WriteAllBytesAsync(coverPath, coverBytes);
+
+        var cbz = Path.Combine(_workDir, "sole-cover.cbz");
+        using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
+        {
+            WriteImageEntry(zip, "cover.jpg", coverBytes);
+        }
+
+        var epubPath = await _service.ConvertToEpubAsync(
+            cbz,
+            Path.Combine(_workDir, "out-sole-cover"),
+            new EpubConversionOptions(coverPath, "Series Name"));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        // Dropping the only image would leave a book with no pages at all.
+        Assert.Contains("OEBPS/images/page0001.jpg", archive.Entries.Select(e => e.FullName));
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_KeepsNestedCoverEntriesInPageOrder()
+    {
+        // Only a root-level cover.* is series art; one inside a chapter folder
+        // is that chapter's own page and must keep its place.
+        var cbz = Path.Combine(_workDir, "nested-cover.cbz");
+        using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
+        {
+            WriteImageEntry(zip, "chapter 1/001.jpg");
+            WriteImageEntry(zip, "chapter 1/cover.jpg", CreateJpeg(60, 90));
+        }
+
+        var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-nested-cover"));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        Assert.DoesNotContain("content=\"width=60, height=90\"", ReadEntry(archive, "OEBPS/page0001.xhtml"));
+        Assert.Contains("content=\"width=60, height=90\"", ReadEntry(archive, "OEBPS/page0002.xhtml"));
+    }
+
+    [Fact]
+    public async Task ConvertToEpubAsync_CondensedBook_PlacesEachIssueCoverFirst()
+    {
+        var first = Path.Combine(_workDir, "Condensed - Chapter 0001.cbz");
+        using (var zip = ZipFile.Open(first, ZipArchiveMode.Create))
+        {
+            WriteImageEntry(zip, "001.jpg");
+            WriteImageEntry(zip, "cover.jpg", CreateJpeg(60, 90));
+        }
+
+        var second = Path.Combine(_workDir, "Condensed - Chapter 0002.cbz");
+        using (var zip = ZipFile.Open(second, ZipArchiveMode.Create))
+        {
+            WriteImageEntry(zip, "001.jpg");
+            WriteImageEntry(zip, "cover.jpg", CreateJpeg(70, 100));
+        }
+
+        var epubPath = await _service.ConvertToEpubAsync(
+            new[] { first, second },
+            Path.Combine(_workDir, "out-condensed-cover"),
+            new EpubConversionOptions(Title: "Condensed 001-002"));
+
+        using var archive = ZipFile.OpenRead(epubPath);
+        Assert.Contains("content=\"width=60, height=90\"", ReadEntry(archive, "OEBPS/page0001.xhtml"));
+        Assert.Contains("content=\"width=70, height=100\"", ReadEntry(archive, "OEBPS/page0003.xhtml"));
+    }
+
+    [Fact]
     public async Task ConvertToEpubAsync_WithoutComicInfoSeries_UsesTheProvidedSeriesTitle()
     {
         var cbz = CreateCbz("No Series.cbz", pageCount: 1, includeComicInfo: false);

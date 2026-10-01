@@ -1066,8 +1066,12 @@ public class FileStoreService : IFileStoreService
                         newEntity.MetadataVersion = entity.MetadataVersion;
                     if (newEntity.WrittenMetadataVersion == 0 && entity.WrittenMetadataVersion != 0)
                         newEntity.WrittenMetadataVersion = entity.WrittenMetadataVersion;
+                    // Metadata is an owned entity keyed by its principal, so the old row's
+                    // tracked instance cannot be handed to the surviving row ("part of a key
+                    // and so cannot be modified" on save, which would abort the whole merge).
+                    // Store a copy instead.
                     if (newEntity.Metadata == null && entity.Metadata != null)
-                        newEntity.Metadata = entity.Metadata;
+                        newEntity.Metadata = entity.Metadata.Clone();
 
                     // The old row is the authoritative record for this physical file, so
                     // keep the earliest CreatedAt. The stub row inserted by the watcher

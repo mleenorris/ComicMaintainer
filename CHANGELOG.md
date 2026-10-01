@@ -76,7 +76,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   destination row is: the processing state (renamed/normalized/duplicate, metadata stamps and
   the original creation date) is merged onto the row that won, the stale old-path row is
   removed, and every user's read state and reading position still follow the file to its new
-  name instead of being left behind.
+  name instead of being left behind. The merge itself no longer fails on a file whose metadata
+  has been edited either: the metadata is now copied onto the surviving row instead of being
+  handed over from the row that is about to be deleted, which the database layer rejected and
+  which previously left both rows in place with the edits stranded on the old one.
 
 - **Webcomic mode now flows straight from one issue into the next.** The following issue was
   only looked up, fetched and appended once the reader hit the bottom of the current one, so

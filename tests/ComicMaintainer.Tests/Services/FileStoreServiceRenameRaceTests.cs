@@ -1,5 +1,6 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Data;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using ComicMaintainer.Tests.Helpers;
 using Microsoft.Data.Sqlite;
@@ -84,6 +85,10 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
         await _service.AddFileAsync(OldPath);
         await _service.MarkFileNormalizedAsync(OldPath, true);
         await _service.MarkFileReadAsync(OldPath, true);
+        await _service.ApplyUserMetadataEditAsync(
+            OldPath,
+            new ComicMetadata { Series = "Monarch", Issue = "100" },
+            ComicMetadataFieldFlags.Series | ComicMetadataFieldFlags.Issue);
 
         File.Move(OldPath, NewPath);
 
@@ -102,6 +107,7 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
         Assert.False(await db.ComicFiles.AnyAsync(e => e.FilePath == OldPath));
         var surviving = Assert.Single(await db.ComicFiles.Where(e => e.FilePath == NewPath).ToListAsync());
         Assert.True(surviving.IsNormalized);
+        Assert.Equal("Monarch", surviving.Metadata?.Series);
 
         // Per-user read state still follows the file.
         Assert.False(await db.UserFileReadStatuses.AnyAsync(e => e.FilePath == OldPath));

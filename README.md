@@ -204,6 +204,7 @@ The service includes a web-based interface for managing your comic files:
 5. Use the checkboxes to select files for batch operations:
    - Check individual files one at a time
    - Check the folder checkbox to select/deselect all files in that folder
+   - In a series' issue grid, check one issue and then **Shift-click** another to apply that issue's new state to every issue between the two
    - Use "Select All" to select everything
 6. Click "Process All Files" to run the standard processing on all files
 7. Click "Process Selected" to run processing only on your selected files

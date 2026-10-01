@@ -75,6 +75,12 @@ public interface IComicEmailService
         bool skipAlreadyDelivered = false,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Resolves a condensed delivery format, including the device default.</summary>
+    Task<string> ResolveCondensedFormatAsync(
+        string? deliveryFormat,
+        int? deviceId = null,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Builds one condensed book (the <paramref name="bookIndex"/>-th book of the
     /// plan for the same inputs) as a temporary file for the caller to stream

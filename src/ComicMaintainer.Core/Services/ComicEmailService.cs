@@ -483,7 +483,7 @@ public class ComicEmailService : IComicEmailService
     /// requested without a device, in which case there is no default to inherit
     /// and EPUB is used.
     /// </summary>
-    private async Task<string> ResolveCondensedFormatAsync(
+    public async Task<string> ResolveCondensedFormatAsync(
         string? deliveryFormat,
         int? deviceId,
         CancellationToken cancellationToken)

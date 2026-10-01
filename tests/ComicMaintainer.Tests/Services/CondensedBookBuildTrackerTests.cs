@@ -26,6 +26,19 @@ public class CondensedBookBuildTrackerTests : IDisposable
         _workDir = Path.Combine(Path.GetTempPath(), $"condense-build-tests-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_workDir);
 
+        _email
+            .Setup(e => e.ResolveCondensedFormatAsync(
+                It.IsAny<string?>(),
+                It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((
+                string? format,
+                int? deviceId,
+                CancellationToken _) => Task.FromResult(
+                deviceId == 42
+                    ? EmailDeliveryFormat.Azw3
+                    : EmailDeliveryFormat.NormalizeCondensedOrThrow(format, null, nameof(format))));
+
         _tracker = new CondensedBookBuildTracker(
             _email.Object,
             new Mock<ILogger<CondensedBookBuildTracker>>().Object,
@@ -300,6 +313,21 @@ public class CondensedBookBuildTrackerTests : IDisposable
     }
 
     [Fact]
+    public async Task StartAsync_ReportsAnInheritedAzw3DeviceDefaultImmediately()
+    {
+        SetupPlan();
+        var azw3 = CreateBook("Series 001-002", "azw3");
+        SetupBuild((_, _) => Task.FromResult(new CondensedBookFile(azw3, Path.GetFileName(azw3))));
+
+        var started = await _tracker.StartAsync(
+            Request(deviceId: 42),
+            Owner);
+
+        Assert.Equal(EmailDeliveryFormat.Azw3, started.DeliveryFormat);
+        Assert.Equal(EmailDeliveryFormat.Azw3, (await WaitForTerminalAsync(started.BuildId)).DeliveryFormat);
+    }
+
+    [Fact]
     public async Task StartAsync_BuildsTheSameBookSeparatelyPerFormat()
     {
         SetupPlan();
@@ -324,11 +352,15 @@ public class CondensedBookBuildTrackerTests : IDisposable
             _tracker.StartAsync(Request(deliveryFormat: EmailDeliveryFormat.Original), Owner));
     }
 
-    private static CondensedBookBuildRequest Request(int bookIndex = 0, string? deliveryFormat = null) => new(
+    private static CondensedBookBuildRequest Request(
+        int bookIndex = 0,
+        string? deliveryFormat = null,
+        int? deviceId = null) => new(
         new[] { "/comics/Series/Series - Chapter 0001.cbz", "/comics/Series/Series - Chapter 0002.cbz" },
         "all",
         null,
         bookIndex,
+        DeviceId: deviceId,
         DeliveryFormat: deliveryFormat);
 
     private void SetupPlan(int issueCount = 2, Func<Task>? beforeReturn = null)

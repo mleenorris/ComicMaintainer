@@ -79,13 +79,12 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
 
         PruneExpired();
 
-        // Rejects an impossible format (the originals cannot be merged) before
-        // anything is planned. A request that inherits the device default is
-        // reported as EPUB until the finished file says otherwise.
-        var format = EmailDeliveryFormat.NormalizeCondensedOrThrow(
+        // Resolve the format before registering the build so inherited device
+        // defaults are reflected in queued/running snapshots and signatures.
+        var format = await _email.ResolveCondensedFormatAsync(
             request.DeliveryFormat,
-            deviceDefault: null,
-            nameof(request));
+            request.DeviceId,
+            cancellationToken);
 
         // Planning validates the selection and names the book, so an impossible
         // request fails while the caller is still waiting for a response rather
@@ -107,7 +106,7 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
         }
 
         var book = plan.Books[request.BookIndex];
-        var signature = BuildSignature(request, ownerUserId);
+        var signature = BuildSignature(request with { DeliveryFormat = format }, ownerUserId);
 
         BuildEntry entry;
         lock (_registrationSync)
@@ -133,7 +132,9 @@ public sealed class CondensedBookBuildTracker : ICondensedBookBuildTracker, IDis
                 format);
 
             _builds[entry.BuildId] = entry;
-            var worker = Task.Run(() => RunAsync(entry, request), CancellationToken.None);
+            var worker = Task.Run(
+                () => RunAsync(entry, request with { DeliveryFormat = format }),
+                CancellationToken.None);
             _workers[entry.BuildId] = worker;
             _ = worker.ContinueWith(
                 completedTask => _workers.TryRemove(entry.BuildId, out _),

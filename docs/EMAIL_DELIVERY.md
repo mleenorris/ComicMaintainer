@@ -128,7 +128,8 @@ A condensed book can be delivered as EPUB or AZW3 — pick either in the **Forma
 which stays available while a condense mode is selected. Only **Original archive** (and
 **Device default**, which may resolve to it) is unavailable, because `.cbz`/`.cbr`
 archives cannot be merged; the picker hides those entries while condensing and restores
-the previous choice when condensing is turned off. `POST /api/email/send`,
+the previous choice when condensing is turned off, except that choosing EPUB or AZW3
+while condensing clears the remembered pre-condense choice. `POST /api/email/send`,
 `/send-series`, `/condense-download` and `/condense-builds` take the same
 `deliveryFormat`: `epub` (the default) or `azw3`; omitting it inherits the device default
 and falls back to EPUB when that device sends original archives, and `original` is

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Timeouts;
 using ComicMaintainer.WebApi.Services;
 
 namespace ComicMaintainer.WebApi.Controllers;
@@ -21,6 +22,8 @@ public class EventsController : ControllerBase
     }
 
     [HttpGet("stream")]
+    // The stream is open for as long as the page is; it is never a timeout.
+    [DisableRequestTimeout]
     public async Task Stream()
     {
         Response.Headers.Append("Content-Type", "text/event-stream");

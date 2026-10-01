@@ -8407,7 +8407,9 @@
                 }
             });
             if (handleAuthError(response)) {
-                throw new Error('Authentication required');
+                const error = new Error('Authentication required');
+                error.status = response.status;
+                throw error;
             }
             if (!response.ok) {
                 let message = `HTTP error! status: ${response.status}`;
@@ -8417,7 +8419,11 @@
                         message = body.error || body.message;
                     }
                 } catch (_) {}
-                throw new Error(message);
+                const error = new Error(message);
+                // Carried so a caller can distinguish an HTTP response from
+                // a failure that never received one.
+                error.status = response.status;
+                throw error;
             }
             if (response.status === 204) return {};
             try {
@@ -8956,6 +8962,7 @@
                 showMessage(`Building the condensed ${shortEmailFormatLabel(getEmailCondenseFormat())}. Progress is shown in the send dialog; you can close it and come back.`, 'info');
             } catch (error) {
                 showMessage('Failed to start the condensed book build: ' + error.message, 'error');
+                reportCondenseFailure('start build', error);
             }
         }
 
@@ -9061,6 +9068,27 @@
             return status === 'completed' || status === 'failed' || status === 'cancelled';
         }
 
+        /**
+         * Files a condensed-book failure with the automated issue tracker.
+         *
+         * Condensing a whole series is the longest and most failure-prone thing
+         * this UI asks for, and every one of its failures used to end at a
+         * banner: the catch blocks below show the user a message and nothing
+         * else, so a broken build or a download that never arrives was invisible
+         * to everyone except the person looking at it. These paths now report
+         * network failures through the same issue pipeline as a server-side
+         * error, while HTTP errors remain the server's responsibility.
+         *
+         * HTTP responses are already handled or reported by the server. Only
+         * failures without a response (such as a dropped connection) are
+         * reported here, avoiding duplicate issues for server-side failures.
+         */
+        function reportCondenseFailure(stage, error) {
+            if (typeof sendClientErrorReport !== 'function') return;
+            if (error?.status != null) return;
+            sendClientErrorReport(error, 'error', `condensed book: ${stage}`);
+        }
+
         /** Saves the finished book of a completed build. */
         async function downloadBuiltCondensedBook(buildId) {
             const build = emailCondenseBuilds.find(b => b.build_id === buildId);
@@ -9076,7 +9104,9 @@
                         const body = await response.json();
                         if (body && (body.error || body.message)) message = body.error || body.message;
                     } catch (_) {}
-                    throw new Error(message);
+                    const error = new Error(message);
+                    error.status = response.status;
+                    throw error;
                 }
 
                 const blob = await response.blob();
@@ -9089,10 +9119,15 @@
                 document.body.appendChild(link);
                 link.click();
                 link.remove();
-                URL.revokeObjectURL(url);
+                // Revoked on a later turn, not in this one: the browser has only
+                // been handed the object URL at this point, and tearing it down
+                // in the same tick as the click cancels the save outright in
+                // some browsers.
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
                 showMessage(`Condensed ${shortEmailFormatLabel(build?.delivery_format)} downloaded.`, 'success');
             } catch (error) {
                 showMessage('Failed to download the condensed book: ' + error.message, 'error');
+                reportCondenseFailure('download', error);
             }
         }
 

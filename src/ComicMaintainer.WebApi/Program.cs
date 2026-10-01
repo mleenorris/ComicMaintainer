@@ -480,15 +480,21 @@ builder.Services.Configure<GzipCompressionProviderOptions>(options =>
     options.Level = CompressionLevel.Optimal;
 });
 
-// Add request timeout (ASP.NET Core 9 best practice)
+// Add request timeout.
+//
+// The default policy applies to *every* request, so each policy here answers a
+// timed-out request through RequestTimeoutPolicies.WriteTimedOutResponseAsync:
+// it logs the timeout at Error (the framework only logs a context-free warning,
+// which automated error reporting never sees) and returns the error/correlation
+// body the UI knows how to show instead of an empty 504.
 builder.Services.AddRequestTimeouts(options =>
 {
-    options.DefaultPolicy = new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutPolicy
-    {
-        Timeout = TimeSpan.FromSeconds(30)
-    };
-    // Longer timeout for comic page operations
-    options.AddPolicy("ComicOperations", TimeSpan.FromMinutes(2));
+    options.DefaultPolicy = RequestTimeoutPolicies.Create(RequestTimeoutPolicies.DefaultTimeout);
+    // For endpoints that do real work before they can answer: condensing a whole
+    // series into one book, planning or queueing a bulk send.
+    options.AddPolicy(
+        RequestTimeoutPolicies.LongRunning,
+        RequestTimeoutPolicies.Create(RequestTimeoutPolicies.LongRunningTimeout));
 });
 
 // Add rate limiting (ASP.NET Core 9 best practice)
@@ -823,9 +829,6 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 
-// Use request timeouts
-app.UseRequestTimeouts();
-
 // Use response compression
 app.UseResponseCompression();
 
@@ -979,12 +982,21 @@ app.UseWhen(
 }));
 
 app.UseRouting();
+
+// Request timeouts must run *after* routing: RequestTimeoutsMiddleware reads the
+// policy off the matched endpoint, so before UseRouting() there is no endpoint
+// and every request — a condensed-book build, a multi-gigabyte download, the SSE
+// stream — silently got the 30 second default with no way to opt out.
+app.UseRequestTimeouts();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseRateLimiter();
 
 app.MapControllers();
-app.MapHub<ProgressHub>("/hubs/progress");
+// A hub connection is open for as long as the page is, so it must never be
+// subject to the default request timeout.
+app.MapHub<ProgressHub>("/hubs/progress").DisableRequestTimeout();
 
 // Map health check endpoints. Both are anonymous so probes do not need credentials.
 app.MapHealthChecks("/health", new HealthCheckOptions

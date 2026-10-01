@@ -311,4 +311,42 @@ public class EmailDeliveryUiTests
         Assert.Contains("applyReaderEmailVisibility", html);
         Assert.Contains("canModifyLibrary === false", html);
     }
+
+    [Fact]
+    public void MainJs_CondensedDownloadDoesNotRevokeTheObjectUrlBeforeTheSaveStarts()
+    {
+        var js = Read("js", "main.js");
+
+        // Clicking the link only hands the browser the object URL; revoking it
+        // in the same tick cancels the save outright in some browsers, which is
+        // exactly how a condensed book "downloads successfully" and never
+        // arrives.
+        Assert.DoesNotMatch(
+            new Regex(@"link\.click\(\);\s*link\.remove\(\);\s*URL\.revokeObjectURL", RegexOptions.Singleline),
+            js);
+        Assert.Matches(
+            new Regex(@"setTimeout\(\(\) => URL\.revokeObjectURL\(url\)", RegexOptions.Singleline),
+            js);
+    }
+
+    [Fact]
+    public void MainJs_CondensedBookFailuresAreReportedForAutomaticIssueFiling()
+    {
+        var js = Read("js", "main.js");
+
+        // These catch blocks used to end at a banner, so a failed condensed
+        // build or download was visible only to the person looking at it.
+        Assert.Contains("function reportCondenseFailure", js);
+        Assert.Contains("reportCondenseFailure('download', error)", js);
+        Assert.Contains("reportCondenseFailure('start build', error)", js);
+
+        // An HTTP response has already been handled or reported on the server.
+        // Only failures that never got a response should file a browser issue.
+        Assert.Matches(
+            new Regex(@"if \(error\?\.status != null\) return;", RegexOptions.Singleline),
+            js);
+        Assert.Matches(
+            new Regex(@"if \(handleAuthError\(response\)\) \{\s*const error = new Error\('Authentication required'\);\s*error.status = response.status;", RegexOptions.Singleline),
+            js);
+    }
 }

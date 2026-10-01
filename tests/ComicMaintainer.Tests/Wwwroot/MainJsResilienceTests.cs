@@ -93,6 +93,20 @@ public class MainJsResilienceTests
     }
 
     [Fact]
+    public void MainJs_DescribesErrorLikeRejectionReasons()
+    {
+        var contents = ReadMainJs();
+
+        // Rejection reasons are often plain error-like objects, and a real
+        // Error from another realm fails `instanceof Error`. Stringifying those
+        // yields "[object Object]", which drops the stack and collapses
+        // unrelated failures onto one fingerprint.
+        Assert.Contains("function describeClientError(detail)", contents);
+        Assert.Matches(new Regex(@"const described = describeClientError\(detail\);"), contents);
+        Assert.DoesNotContain("detail instanceof Error", contents);
+    }
+
+    [Fact]
     public void MainJs_ClientErrorReportingCannotFeedItself()
     {
         var contents = ReadMainJs();

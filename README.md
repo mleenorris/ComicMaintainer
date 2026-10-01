@@ -759,10 +759,11 @@ defect in this service can actually be fixed.
 How it works:
 
 1. A Serilog sink captures `Error`/`Fatal` events, including every unhandled web request failure
-   and every background-service failure. The web interface also posts uncaught browser errors and
-   unhandled promise rejections to `POST /api/client-errors`, so a defect that lives entirely in
-   the page — a broken button, a failed render — is reported through the same pipeline instead of
-   only showing the user a banner.
+   and every background-service failure. The library page also posts its uncaught browser errors
+   and unhandled promise rejections to `POST /api/client-errors`, so a defect that lives entirely
+   in that page — a broken button, a failed render — is reported through the same pipeline instead
+   of only showing the user a banner. The standalone pages (the reader, jobs, login and setup) do
+   not load the shared script and are not covered yet.
 2. Each event is reduced to a **fingerprint** — a hash of the exception type, source context, the
    message *template*, and the top normalized stack frames. Per-file and per-path detail does not
    fragment the grouping, so one defect produces one issue. Browser errors are normalized first so

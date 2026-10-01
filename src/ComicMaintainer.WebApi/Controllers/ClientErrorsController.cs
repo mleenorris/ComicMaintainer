@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.ErrorReporting;
 using Microsoft.AspNetCore.Authorization;
@@ -123,6 +124,13 @@ public class ClientErrorsController : ControllerBase
 }
 
 /// <summary>Which browser hook caught the failure.</summary>
+/// <remarks>
+/// Converted explicitly because the API does not register a global string enum
+/// converter: without this the browser's readable <c>"UnhandledRejection"</c>
+/// fails model binding with a 400 and the report is lost before it is read.
+/// The converter still accepts the numeric form.
+/// </remarks>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ClientErrorKind
 {
     /// <summary>A <c>window</c> 'error' event.</summary>

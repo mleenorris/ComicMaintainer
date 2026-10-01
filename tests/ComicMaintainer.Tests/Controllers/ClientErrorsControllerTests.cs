@@ -5,6 +5,7 @@ using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.Json;
 
 namespace ComicMaintainer.Tests.Controllers;
 
@@ -215,6 +216,23 @@ public class ClientErrorsControllerTests
         controller.ReportClientError(request);
 
         return Assert.Single(Drain(queue));
+    }
+
+    [Theory]
+    [InlineData("\"UnhandledRejection\"", ClientErrorKind.UnhandledRejection)]
+    [InlineData("\"Error\"", ClientErrorKind.Error)]
+    [InlineData("1", ClientErrorKind.UnhandledRejection)]
+    public void ClientErrorRequest_BindsTheKindTheBrowserSends(string kindJson, ClientErrorKind expected)
+    {
+        // The API registers no global string enum converter, so without the
+        // converter on ClientErrorKind the browser's readable name fails model
+        // binding with a 400 and the report is lost before it is ever read.
+        var request = JsonSerializer.Deserialize<ClientErrorRequest>(
+            $"{{\"name\":\"TypeError\",\"kind\":{kindJson}}}",
+            JsonSerializerOptions.Web);
+
+        Assert.NotNull(request);
+        Assert.Equal(expected, request!.Kind);
     }
 
     private static ClientErrorsController CreateController(IErrorReportQueue queue, bool reportingEnabled)

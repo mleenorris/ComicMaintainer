@@ -11704,11 +11704,11 @@
          */
         function sendClientErrorReport(detail, kind, source) {
             try {
-                const error = detail instanceof Error ? detail : null;
+                const described = describeClientError(detail);
                 const body = JSON.stringify({
-                    name: clipClientErrorField(error ? error.name : detail?.name, CLIENT_ERROR_FIELD_LIMITS.name),
-                    message: clipClientErrorField(error ? error.message : detail, CLIENT_ERROR_FIELD_LIMITS.message),
-                    stack: clipClientErrorField(error?.stack, CLIENT_ERROR_FIELD_LIMITS.stack),
+                    name: clipClientErrorField(described.name, CLIENT_ERROR_FIELD_LIMITS.name),
+                    message: clipClientErrorField(described.message, CLIENT_ERROR_FIELD_LIMITS.message),
+                    stack: clipClientErrorField(described.stack, CLIENT_ERROR_FIELD_LIMITS.stack),
                     source: clipClientErrorField(source, CLIENT_ERROR_FIELD_LIMITS.url),
                     // Path only: a query string can carry a search term or a
                     // file path, and the server needs neither to locate a bug.
@@ -11737,6 +11737,33 @@
                 // Reporting is best effort and must never mask the failure it
                 // was trying to describe.
             }
+        }
+
+        /**
+         * Pulls name/message/stack off whatever was thrown or rejected.
+         * `instanceof Error` is not usable on its own: a rejection reason is
+         * often a plain error-like object, and a real Error from another realm
+         * (an iframe, a worker) fails the check. Stringifying those yields
+         * "[object Object]", which loses the stack and makes every unrelated
+         * failure share one fingerprint.
+         */
+        function describeClientError(detail) {
+            if (detail === null || detail === undefined) {
+                return { name: '', message: String(detail), stack: '' };
+            }
+
+            if (typeof detail === 'object' || typeof detail === 'function') {
+                const message = typeof detail.message === 'string' && detail.message
+                    ? detail.message
+                    : String(detail);
+                return {
+                    name: typeof detail.name === 'string' ? detail.name : '',
+                    message,
+                    stack: typeof detail.stack === 'string' ? detail.stack : ''
+                };
+            }
+
+            return { name: '', message: String(detail), stack: '' };
         }
 
         function clipClientErrorField(value, maxLength) {

@@ -534,6 +534,11 @@
         // so a deselect can remove exactly the paths a series added.
         let selectedSeriesFilePaths = new Map();
         let selectedSeriesPathLoads = new Map();
+        // File path of the issue whose checkbox was clicked last in the series
+        // detail view. It anchors a shift-click range selection.
+        let lastSelectedIssuePath = null;
+        // True while an issue checkbox is being toggled with Shift held.
+        let seriesIssueRangeSelectArmed = false;
         let currentEditFile = null;
         let collapsedDirectories = new Set();
         let searchQuery = '';
@@ -2042,6 +2047,10 @@
 
         function handleRouteChange() {
             const route = parseHash();
+            if (route.view !== 'series' || currentSeriesDetailId !== route.seriesId) {
+                lastSelectedIssuePath = null;
+                seriesIssueRangeSelectArmed = false;
+            }
             currentView = route.view;
             applyViewVisibility(route.view);
             if (route.view === 'home') {
@@ -3581,6 +3590,7 @@
             currentSeriesDetailId = null;
             currentSeriesDetailTitleKeys = null;
             currentSeriesDetailSeries = null;
+            lastSelectedIssuePath = null;
             navigate(seriesDetailOrigin === 'home' ? '#/home' : '#/library');
         }
 
@@ -4025,10 +4035,10 @@
             const issue = item.issue;
             return `
                                 <div class="series-issue-card ${issue.read ? 'series-issue-card--read' : 'series-issue-card--unread'} ${selectedFiles.has(issue.file_path) ? 'series-issue-card--selected' : ''} ${issue.duplicate ? 'series-issue-card--duplicate' : ''}" data-file-path="${escapeHtml(issue.file_path)}">
-                                    <label class="series-issue-select" aria-label="Select ${escapeHtml(issue.title || issue.file_name)}" onclick="event.stopPropagation()">
+                                    <label class="series-issue-select" aria-label="Select ${escapeHtml(issue.title || issue.file_name)}" title="Shift-click to select every issue between this one and the last one you clicked" onclick="event.stopPropagation()" onmousedown="rememberSeriesIssueRangeModifier(event)" onkeydown="rememberSeriesIssueRangeModifier(event)">
                                         <input type="checkbox"
                                                ${selectedFiles.has(issue.file_path) ? 'checked' : ''}
-                                               onchange="toggleFileSelection('${escapeJs(issue.file_path)}', this.checked)">
+                                               onchange="toggleSeriesIssueSelection('${escapeJs(issue.file_path)}', this.checked)">
                                     </label>
                                     ${issue.duplicate ? `<span class="series-issue-duplicate-badge" title="Duplicate">🔁 Duplicate</span>` : ''}
                                     <span class="series-issue-read-corner series-issue-read-corner--${issue.read ? 'read' : 'unread'}" title="${issue.read ? 'Read' : 'Unread'}" aria-label="${issue.read ? 'Read' : 'Unread'}"></span>
@@ -4705,8 +4715,87 @@
             document.querySelectorAll('.series-issue-card[data-file-path]').forEach(card => {
                 if (card.dataset.filePath === filepath) {
                     card.classList.toggle('series-issue-card--selected', checked);
+                    // The clicked checkbox is already in the right state, but
+                    // the rest of a shift-click range is only selected in the
+                    // model, so push the state onto those boxes here.
+                    const checkbox = card.querySelector('.series-issue-select input[type="checkbox"]');
+                    if (checkbox && checkbox.checked !== checked) {
+                        checkbox.checked = checked;
+                    }
                 }
             });
+        }
+
+        // Records whether the interaction that is about to toggle an issue
+        // checkbox was made with Shift held. The modifier is only available on
+        // the originating mouse/key event: the change event that follows
+        // carries no modifier state, and the click a <label> forwards to its
+        // checkbox is synthesised and may drop it. A mousedown/keydown on the
+        // label happens exactly once per interaction, whichever part of the
+        // control was hit, so it is the reliable place to read it.
+        function rememberSeriesIssueRangeModifier(event) {
+            seriesIssueRangeSelectArmed = !!(event && event.shiftKey);
+        }
+
+        // Checkbox change handler for the issue cards in the series detail
+        // view. With Shift held, the issue's new state is applied to every
+        // issue between the previously clicked one and this one; otherwise this
+        // is a plain toggle. Either way the issue becomes the anchor for the
+        // next shift-click.
+        function toggleSeriesIssueSelection(filepath, checked) {
+            const range = seriesIssueRangeSelectArmed
+                ? getSeriesIssueSelectionRange(lastSelectedIssuePath, filepath)
+                : null;
+            seriesIssueRangeSelectArmed = false;
+            lastSelectedIssuePath = filepath;
+            // Without a usable anchor a shift-click behaves like a plain click.
+            if (!range) {
+                toggleFileSelection(filepath, checked);
+                return;
+            }
+            applySeriesIssueRangeSelection(range, checked);
+        }
+
+        // Collects the file paths of the issue cards between two issues,
+        // inclusive, in the order they are displayed. The grid orders cards by
+        // issue number and interleaves missing-issue placeholders (which carry
+        // no data-file-path), so the rendered DOM — not the cached issue array
+        // — defines what "in between" means. Returns null when the range
+        // cannot be resolved, e.g. the anchor is no longer rendered.
+        function getSeriesIssueSelectionRange(anchorPath, targetPath) {
+            if (!anchorPath || !targetPath || anchorPath === targetPath) return null;
+            const grid = document.querySelector('#seriesDetailPanel .series-issues-grid');
+            if (!grid) return null;
+            const paths = Array.from(grid.querySelectorAll('.series-issue-card[data-file-path]'))
+                .map(card => card.dataset.filePath)
+                .filter(path => typeof path === 'string' && path.length > 0);
+            const anchorIndex = paths.indexOf(anchorPath);
+            const targetIndex = paths.indexOf(targetPath);
+            if (anchorIndex === -1 || targetIndex === -1) return null;
+            return paths.slice(
+                Math.min(anchorIndex, targetIndex),
+                Math.max(anchorIndex, targetIndex) + 1);
+        }
+
+        // Applies one selection state to a whole range of issues, then refreshes
+        // the shared selection UI once rather than per issue.
+        function applySeriesIssueRangeSelection(paths, checked) {
+            paths.forEach(path => {
+                if (checked) {
+                    selectedFiles.add(path);
+                } else {
+                    selectedFiles.delete(path);
+                }
+                updateSeriesIssueSelectionState(path, checked);
+            });
+            // Shift-clicking also extends the document's text selection, which
+            // would leave the issues in the range highlighted.
+            const textSelection = typeof window.getSelection === 'function' ? window.getSelection() : null;
+            if (textSelection && typeof textSelection.removeAllRanges === 'function') {
+                textSelection.removeAllRanges();
+            }
+            updateSelectInfo();
+            updateSelectAllCheckbox();
         }
 
         function getFolderForRelativePath(relativePath) {

@@ -122,6 +122,19 @@ public class EpubConversionService : IEpubConversionService
         var issues = new List<IssueSource>(comicFilePaths.Count);
         foreach (var comicFilePath in comicFilePaths)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            Report(
+                options,
+                EpubConversionPhase.Reading,
+                completedPages: 0,
+                totalPages: 0,
+                completedIssues: issues.Count,
+                totalIssues: comicFilePaths.Count,
+                currentIssue: Path.GetFileName(comicFilePath),
+                pass: 1,
+                totalPasses: BuildCompressionTiers(options?.MaxSizeBytes).Count);
+
             using var archive = OpenArchive(comicFilePath);
 
             var pages = archive.Entries
@@ -184,7 +197,22 @@ public class EpubConversionService : IEpubConversionService
                     bookId,
                     seriesCover,
                     tier,
+                    options,
+                    tierIndex + 1,
+                    tiers.Count,
+                    pageCount,
                     cancellationToken);
+
+                Report(
+                    options,
+                    EpubConversionPhase.Validating,
+                    completedPages: pageCount,
+                    totalPages: pageCount,
+                    completedIssues: issues.Count,
+                    totalIssues: issues.Count,
+                    currentIssue: null,
+                    pass: tierIndex + 1,
+                    totalPasses: tiers.Count);
 
                 // The archive is complete only after the ZipArchive is disposed;
                 // re-read it so a structurally broken book is never handed to callers.
@@ -200,6 +228,16 @@ public class EpubConversionService : IEpubConversionService
                         length,
                         budget);
                     TryDelete(tempPath);
+                    Report(
+                        options,
+                        EpubConversionPhase.Recompressing,
+                        completedPages: 0,
+                        totalPages: pageCount,
+                        completedIssues: 0,
+                        totalIssues: issues.Count,
+                        currentIssue: null,
+                        pass: tierIndex + 2,
+                        totalPasses: tiers.Count);
                     continue;
                 }
 
@@ -264,6 +302,10 @@ public class EpubConversionService : IEpubConversionService
         string bookId,
         SeriesCover? seriesCover,
         CompressionTier tier,
+        EpubConversionOptions? options,
+        int pass,
+        int totalPasses,
+        int totalPages,
         CancellationToken cancellationToken)
     {
         var requiredEntries = new List<string> { "META-INF/container.xml" };
@@ -295,6 +337,7 @@ public class EpubConversionService : IEpubConversionService
 
             var manifestPages = new List<EpubPage>(issues.Sum(i => i.Pages.Count));
             var index = 0;
+            var completedIssues = 0;
             foreach (var issue in issues)
             {
                 var chapterTitle = BuildTitle(
@@ -368,7 +411,20 @@ public class EpubConversionService : IEpubConversionService
                         MediaType: prepared.MediaType,
                         Width: prepared.Width,
                         Height: prepared.Height));
+
+                    Report(
+                        options,
+                        EpubConversionPhase.Writing,
+                        completedPages: index,
+                        totalPages: totalPages,
+                        completedIssues: completedIssues,
+                        totalIssues: issues.Count,
+                        currentIssue: Path.GetFileName(issue.FilePath),
+                        pass: pass,
+                        totalPasses: totalPasses);
                 }
+
+                completedIssues++;
             }
 
             WriteEntry(epub, "OEBPS/content.opf", BuildOpf(bookId, title, seriesName, comicInfo, seriesCover, manifestPages, issues.Count > 1));
@@ -378,6 +434,45 @@ public class EpubConversionService : IEpubConversionService
         }
 
         return requiredEntries;
+    }
+
+    /// <summary>
+    /// Pushes a progress snapshot to the caller's sink, if it supplied one. A
+    /// sink that throws must never abort an otherwise healthy conversion, so
+    /// failures are swallowed after being logged once per report.
+    /// </summary>
+    private void Report(
+        EpubConversionOptions? options,
+        EpubConversionPhase phase,
+        int completedPages,
+        int totalPages,
+        int completedIssues,
+        int totalIssues,
+        string? currentIssue,
+        int pass,
+        int totalPasses)
+    {
+        if (options?.Progress is not { } progress)
+        {
+            return;
+        }
+
+        try
+        {
+            progress.Report(new EpubConversionProgress(
+                phase,
+                completedPages,
+                totalPages,
+                completedIssues,
+                totalIssues,
+                currentIssue,
+                pass,
+                totalPasses));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "EPUB conversion progress callback failed; continuing the conversion");
+        }
     }
 
     /// <summary>

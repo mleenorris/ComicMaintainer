@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Large condensed-EPUB downloads now report their progress and their failures.** Building
+  a book from a big selection takes minutes — longer than a browser or a reverse proxy will
+  hold a request open — so the download used to start, show nothing, and silently die or
+  fail with no visible reason. **Download** in the send dialog now starts a tracked build
+  through `POST /api/email/condense-builds` that runs detached from the request, and the
+  dialog polls it and shows a progress bar with the phase (reading the archives, writing
+  pages, validating, recompressing), the issue being written and the page count. A finished
+  build offers Download, a failed one shows the error that stopped it, and either can be
+  cancelled or dismissed. Builds are per user, run one at a time, are de-duplicated when the
+  same book is requested twice, and are kept with their file for 30 minutes so an interrupted
+  download can be retried. `POST /api/email/condense-download` remains for small books.
 - **Every API response now carries a correlation ID, and errors show it.** Each request is
   tagged with an `X-Correlation-Id` (echoed on the response, honoured if the caller supplies
   one) and that id is stamped on every log line the request produces in `debug*.log`. An

@@ -417,6 +417,7 @@ public class ComicEmailService : IComicEmailService
         bool preserveIssueOrder = false,
         int? deviceId = null,
         bool skipAlreadyDelivered = false,
+        IProgress<EpubConversionProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         var plan = await PlanCondensedDeliveryAsync(
@@ -443,7 +444,8 @@ public class ComicEmailService : IComicEmailService
         var options = await BuildEpubOptionsAsync(book.Files[0], maxSizeBytes: null, cancellationToken) with
         {
             Title = book.DisplayName,
-            OutputFileName = book.DisplayName
+            OutputFileName = book.DisplayName,
+            Progress = progress
         };
 
         try

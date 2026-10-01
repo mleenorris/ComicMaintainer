@@ -247,6 +247,81 @@ public record CondensePlanDto(
 /// </summary>
 public record CondensedBookFile(string FilePath, string FileName);
 
+/// <summary>Lifecycle of a tracked condensed-book build.</summary>
+public static class CondensedBookBuildStatus
+{
+    /// <summary>Accepted, waiting for an earlier build to finish.</summary>
+    public const string Queued = "queued";
+
+    /// <summary>Being built right now.</summary>
+    public const string Running = "running";
+
+    /// <summary>Finished; the file can be downloaded until the build expires.</summary>
+    public const string Completed = "completed";
+
+    /// <summary>Stopped by an error; <c>Error</c> says what went wrong.</summary>
+    public const string Failed = "failed";
+
+    /// <summary>Stopped because the caller cancelled it.</summary>
+    public const string Cancelled = "cancelled";
+
+    public static bool IsTerminal(string status) =>
+        status is Completed or Failed or Cancelled;
+}
+
+/// <summary>
+/// The inputs of a condensed-book build: the same selection, condense settings
+/// and book index a synchronous download would use.
+/// </summary>
+public record CondensedBookBuildRequest(
+    IReadOnlyList<string> FilePaths,
+    string? CondenseMode,
+    int? IssuesPerBook,
+    int BookIndex,
+    bool PreserveIssueOrder = false,
+    int? DeviceId = null,
+    bool SkipAlreadyDelivered = false);
+
+/// <summary>
+/// How far a build has got. Page counts are per compression pass and restart
+/// when a pass is retried, which only happens for size-budgeted books.
+/// </summary>
+public record CondensedBookBuildProgress(
+    string Phase,
+    int CompletedPages,
+    int TotalPages,
+    int CompletedIssues,
+    int TotalIssues,
+    string? CurrentIssue,
+    int Pass,
+    int TotalPasses)
+{
+    public static CondensedBookBuildProgress Empty { get; } =
+        new("queued", 0, 0, 0, 0, null, 1, 1);
+
+    /// <summary>
+    /// Completion of the current pass, 0-100. Zero while the source archives
+    /// are still being indexed and the page total is unknown.
+    /// </summary>
+    public int Percentage => TotalPages > 0
+        ? (int)Math.Clamp((long)CompletedPages * 100 / TotalPages, 0, 100)
+        : 0;
+}
+
+/// <summary>A tracked condensed-book build, as reported to the caller.</summary>
+public record CondensedBookBuildDto(
+    Guid BuildId,
+    string Status,
+    string DisplayName,
+    int IssueCount,
+    CondensedBookBuildProgress Progress,
+    DateTime CreatedAt,
+    DateTime? StartedAt,
+    DateTime? CompletedAt,
+    string? Error,
+    long? FileSizeBytes,
+    DateTime? ExpiresAt);
+
 /// <summary>
 /// Outcome of queueing a batch of files for delivery: the deliveries that were
 /// created plus the files that were skipped (with the reason).

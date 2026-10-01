@@ -106,6 +106,8 @@ public class EmailDeliveryUiTests
         Assert.Contains("id=\"emailCondenseCountInput\"", html);
         // Where the estimated sizes and the "too large to email" warning go.
         Assert.Contains("id=\"emailCondensePlan\"", html);
+        // Where a running/failed/finished EPUB build reports its status.
+        Assert.Contains("id=\"emailCondenseBuilds\"", html);
     }
 
     [Fact]
@@ -116,11 +118,45 @@ public class EmailDeliveryUiTests
         // The user must learn before sending that a mass condense cannot be
         // emailed, and be offered the download instead.
         Assert.Contains("/api/email/condense-plan", js);
-        Assert.Contains("/api/email/condense-download", js);
+        Assert.Contains("/api/email/condense-builds", js);
         Assert.Matches(
             new Regex(@"setEmailSendEnabled\(emailSendAvailable && plan\.can_email === true\)", RegexOptions.Singleline),
             js);
         Assert.Contains("function downloadCondensedBook", js);
+    }
+
+    [Fact]
+    public void MainJs_TracksCondensedEpubBuildProgress()
+    {
+        var js = Read("js", "main.js");
+
+        // A big condensed book takes minutes to build. The UI must start a
+        // tracked build, poll it, and surface both progress and the failure
+        // reason rather than leaving the user with a silent spinner.
+        Assert.Contains("function pollEmailCondenseBuilds", js);
+        Assert.Contains("function renderEmailCondenseBuilds", js);
+        Assert.Contains("function cancelCondensedBookBuild", js);
+        Assert.Contains("/api/email/condense-builds/${encodeURIComponent(buildId)}/download", js);
+        Assert.Matches(
+            new Regex(@"build\.status === 'failed'", RegexOptions.Singleline),
+            js);
+    }
+
+    [Fact]
+    public void MainJs_ReconcilesAndSerializesCondensedBuildPolling()
+    {
+        var js = Read("js", "main.js");
+
+        Assert.Contains("function reconcileEmailCondenseBuilds", js);
+        Assert.Matches(
+            new Regex(@"refreshEmailCondenseBuilds\(\).*?reconcileEmailCondenseBuilds\(", RegexOptions.Singleline),
+            js);
+        Assert.Matches(
+            new Regex(@"pollEmailCondenseBuilds\(\).*?reconcileEmailCondenseBuilds\(", RegexOptions.Singleline),
+            js);
+        Assert.Contains("emailCondenseBuildPollInFlight", js);
+        Assert.Contains("setTimeout(", js);
+        Assert.Contains("progress.current_issue", js);
     }
 
     [Fact]

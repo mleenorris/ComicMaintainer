@@ -4,6 +4,7 @@ using ComicMaintainer.Core.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using System.Security.Claims;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
@@ -20,6 +21,7 @@ public class EmailController : ControllerBase
 
     private readonly IEreaderDeviceService _devices;
     private readonly IComicEmailService _email;
+    private readonly ICondensedBookBuildTracker _builds;
     private readonly ISeriesLibraryService _seriesLibrary;
     private readonly IOptionsMonitor<AppSettings> _appSettings;
     private readonly ILogger<EmailController> _logger;
@@ -27,12 +29,14 @@ public class EmailController : ControllerBase
     public EmailController(
         IEreaderDeviceService devices,
         IComicEmailService email,
+        ICondensedBookBuildTracker builds,
         ISeriesLibraryService seriesLibrary,
         IOptionsMonitor<AppSettings> appSettings,
         ILogger<EmailController> logger)
     {
         _devices = devices;
         _email = email;
+        _builds = builds;
         _seriesLibrary = seriesLibrary;
         _appSettings = appSettings;
         _logger = logger;
@@ -364,6 +368,7 @@ public class EmailController : ControllerBase
                 preserveIssueOrder: !string.IsNullOrWhiteSpace(request.SeriesId),
                 request.DeviceId,
                 request.SkipAlreadyDelivered,
+                progress: null,
                 cancellationToken);
         }
         catch (ArgumentException ex)
@@ -399,6 +404,162 @@ public class EmailController : ControllerBase
 
         return File(stream, "application/epub+zip", book.FileName);
     }
+
+    /// <summary>
+    /// Starts a condensed book build in the background and returns its id. The
+    /// build outlives this request, so a book that takes minutes can be polled
+    /// for progress with <see cref="GetCondenseBuild"/> and collected from
+    /// <see cref="DownloadCondenseBuild"/> when it is done.
+    /// </summary>
+    [HttpPost("condense-builds")]
+    public async Task<ActionResult<object>> StartCondenseBuild(
+        [FromBody] CondenseRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { error = "Request body is required" });
+        }
+
+        var (files, error) = await ResolveCondenseFilesAsync(request, cancellationToken);
+        if (error is not null)
+        {
+            return error;
+        }
+
+        try
+        {
+            var build = await _builds.StartAsync(
+                new CondensedBookBuildRequest(
+                    files!,
+                    request.CondenseMode,
+                    request.IssuesPerBook,
+                    request.BookIndex,
+                    PreserveIssueOrder: !string.IsNullOrWhiteSpace(request.SeriesId),
+                    request.DeviceId,
+                    request.SkipAlreadyDelivered),
+                CurrentUserId,
+                cancellationToken);
+
+            return Accepted(ToBuildResponse(build));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>Every condensed book build the caller has started recently.</summary>
+    [HttpGet("condense-builds")]
+    public ActionResult<object> GetCondenseBuilds()
+    {
+        var builds = _builds.List(CurrentUserId).Select(ToBuildResponse);
+        return Ok(new { builds });
+    }
+
+    /// <summary>Progress and outcome of one condensed book build.</summary>
+    [HttpGet("condense-builds/{buildId:guid}")]
+    public ActionResult<object> GetCondenseBuild(Guid buildId)
+    {
+        var build = _builds.Get(buildId, CurrentUserId);
+        return build is null
+            ? NotFound(new { error = "Build not found" })
+            : Ok(ToBuildResponse(build));
+    }
+
+    /// <summary>Streams the book a completed build produced.</summary>
+    [HttpGet("condense-builds/{buildId:guid}/download")]
+    public ActionResult DownloadCondenseBuild(Guid buildId)
+    {
+        var build = _builds.Get(buildId, CurrentUserId);
+        if (build is null)
+        {
+            return NotFound(new { error = "Build not found" });
+        }
+
+        var file = _builds.GetCompletedFile(buildId, CurrentUserId);
+        if (file is null)
+        {
+            return Conflict(new
+            {
+                error = build.Status == CondensedBookBuildStatus.Completed
+                    ? "The built book is no longer available; build it again."
+                    : $"The book is not ready to download (status: {build.Status})."
+            });
+        }
+
+        // The file is kept until the build expires or is discarded so an
+        // interrupted download can simply be retried.
+        var stream = new FileStream(
+            file.FilePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 64 * 1024,
+            FileOptions.Asynchronous);
+
+        return File(stream, "application/epub+zip", file.FileName);
+    }
+
+    /// <summary>Stops a running build.</summary>
+    [HttpPost("condense-builds/{buildId:guid}/cancel")]
+    public ActionResult<object> CancelCondenseBuild(Guid buildId)
+    {
+        if (_builds.Get(buildId, CurrentUserId) is null)
+        {
+            return NotFound(new { error = "Build not found" });
+        }
+
+        return _builds.Cancel(buildId, CurrentUserId)
+            ? Ok(new { cancelled = true })
+            : Conflict(new { error = "The build has already finished." });
+    }
+
+    /// <summary>Forgets a build and deletes anything it produced.</summary>
+    [HttpDelete("condense-builds/{buildId:guid}")]
+    public ActionResult DeleteCondenseBuild(Guid buildId)
+    {
+        return _builds.Discard(buildId, CurrentUserId)
+            ? NoContent()
+            : NotFound(new { error = "Build not found" });
+    }
+
+    private static object ToBuildResponse(CondensedBookBuildDto build) => new
+    {
+        build_id = build.BuildId.ToString(),
+        status = build.Status,
+        display_name = build.DisplayName,
+        issue_count = build.IssueCount,
+        created_at = build.CreatedAt,
+        started_at = build.StartedAt,
+        completed_at = build.CompletedAt,
+        error = build.Error,
+        file_size_bytes = build.FileSizeBytes,
+        expires_at = build.ExpiresAt,
+        progress = new
+        {
+            phase = build.Progress.Phase,
+            completed_pages = build.Progress.CompletedPages,
+            total_pages = build.Progress.TotalPages,
+            completed_issues = build.Progress.CompletedIssues,
+            total_issues = build.Progress.TotalIssues,
+            current_issue = build.Progress.CurrentIssue,
+            pass = build.Progress.Pass,
+            total_passes = build.Progress.TotalPasses,
+            percentage = build.Progress.Percentage
+        }
+    };
+
+    /// <summary>
+    /// Builds are private to the user who started them: they are temporary
+    /// files served back outside the library, so another account must not be
+    /// able to enumerate or download them.
+    /// </summary>
+    private string? CurrentUserId => User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
     /// <summary>
     /// Resolves the issues a condense request targets: either the explicit file

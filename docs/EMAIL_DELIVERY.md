@@ -137,19 +137,52 @@ its estimated size — the pages keep their original compression, so the sum of 
 archives plus the container overhead is a close approximation.
 
 Books over the limit are flagged, **Send** is disabled, and each book can be downloaded
-instead with `POST /api/email/condense-download`, which builds that one book on demand
-and streams it back (with no size budget, so the pages keep full quality). The dialog
-lists ten books at a time with a **Show more** control, so every book — including an
-oversized one far down a long plan — has its own Download button. The temporary file is
-deleted as soon as the response has been streamed. Reducing the issues per book is the
-other way out. `POST /api/email/send` and `/send-series` apply the same size check, so an
+instead (with no size budget, so the pages keep full quality). The dialog lists ten books
+at a time with a **Show more** control, so every book — including an oversized one far
+down a long plan — has its own Download button. Reducing the issues per book is the other
+way out. `POST /api/email/send` and `/send-series` apply the same size check, so an
 oversized book is rejected with an error rather than queued.
+
+### Tracking a download build
+
+Condensing hundreds of issues takes minutes — longer than a browser or a reverse proxy
+will hold a request open — so a download is not built inside the request that asks for
+it. **Download** posts to `POST /api/email/condense-builds`, which validates the request,
+registers a build and returns immediately with a `build_id`. The build then runs detached
+from that request, so closing the dialog, navigating away or losing the connection does
+not abandon it.
+
+The dialog polls `GET /api/email/condense-builds` every two seconds and shows each build
+with a progress bar, the phase it is in (reading the source archives, writing pages,
+validating, or recompressing when a size budget forces another pass), the issue being
+written and the page count of the current pass. A finished build offers **Download**; a
+failed one shows the error that stopped it. **Cancel** stops a build that is still
+running, and **Dismiss** forgets a finished one and deletes its file.
+
+Details worth knowing:
+
+- Builds are **per user**: a build is only visible to, downloadable by and cancellable by
+  the account that started it.
+- Only **one build runs at a time** per instance. Additional builds are accepted with
+  status `queued` and start when the one ahead of them finishes, so a big selection
+  cannot be turned into many parallel conversions.
+- Clicking **Download** twice for the same book does not start a second build; the request
+  is fingerprinted and an identical build that is still active is returned instead.
+- A finished build is kept for **30 minutes**, and its file stays on disk for that long,
+  so an interrupted download can simply be retried. After that the build and its file are
+  removed; the 20 most recent finished builds per user are kept.
+- Because the build outlives the request, a failure is reported as a build status rather
+  than being lost when the connection drops.
+
+`POST /api/email/condense-download` still exists and builds one book synchronously in the
+request, streaming it back and deleting the temporary file afterwards. It is retained for
+scripts and is only suitable for small books.
 
 Condensed sends honour `skipAlreadyDelivered`, and an issue that already went out *inside
 an earlier condensed book* counts as delivered — for ordinary per-issue sends too, so an
 issue is never mailed twice. Pass the same `deviceId` and `skipAlreadyDelivered` to
-`condense-plan` and `condense-download` as to the send, or the plan will describe
-different books than the ones queued.
+`condense-plan` and to the build as to the send, or the plan will describe different books
+than the ones queued.
 
 ## Automatic delivery for a series
 
@@ -234,7 +267,13 @@ policy; the SMTP settings endpoint requires `CanAdminister`.
 | `POST` | `/api/email/send` | Queue specific files. |
 | `POST` | `/api/email/send-series` | Queue every issue of a series. |
 | `POST` | `/api/email/condense-plan` | Describe the condensed books a selection or series would produce, with size estimates. |
-| `POST` | `/api/email/condense-download` | Build and download one condensed book instead of emailing it. |
+| `POST` | `/api/email/condense-download` | Build and stream one condensed book in the request (legacy; small books only). |
+| `POST` | `/api/email/condense-builds` | Start a tracked background build of one condensed book. |
+| `GET` | `/api/email/condense-builds` | List the caller's builds with status and progress. |
+| `GET` | `/api/email/condense-builds/{buildId}` | Status and progress of one build. |
+| `GET` | `/api/email/condense-builds/{buildId}/download` | Download the file of a completed build. |
+| `POST` | `/api/email/condense-builds/{buildId}/cancel` | Cancel a queued or running build. |
+| `DELETE` | `/api/email/condense-builds/{buildId}` | Forget a build and delete its file. |
 | `GET` | `/api/email/subscriptions` | List subscriptions, optionally filtered by series. |
 | `PUT` | `/api/email/subscriptions` | Create or update a series subscription. |
 | `DELETE` | `/api/email/subscriptions/{id}` | Remove a subscription. |

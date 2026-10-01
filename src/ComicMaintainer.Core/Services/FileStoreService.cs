@@ -1009,14 +1009,44 @@ public class FileStoreService : IFileStoreService
                         entity.LastModified = fileInfo.LastWriteTime;
                     }
                     entity.UpdatedAt = DateTime.UtcNow;
-                    await dbContext.SaveChangesAsync(cancellationToken);
-                    _logger.LogDebug("Updated file path in database: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
+
+                    try
+                    {
+                        await dbContext.SaveChangesAsync(cancellationToken);
+                        _logger.LogDebug("Updated file path in database: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
+                    }
+                    catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
+                                                        sqliteEx.SqliteErrorCode == 19) // UNIQUE constraint
+                    {
+                        // Race condition: another writer (typically the watcher observing the
+                        // move as a Created event) inserted a row for the new path between the
+                        // lookup above and this save, so the rename collides with the unique
+                        // index on ComicFiles.FilePath. Roll the in-flight rename back on the
+                        // tracked entity and fall through to the merge path below, which folds
+                        // this row's processing state onto the row that won. Without this the
+                        // save failed outright, leaving both the stale old-path row and an
+                        // unmerged stub behind and skipping the read-status move.
+                        var entry = dbContext.Entry(entity);
+                        entry.CurrentValues.SetValues(entry.OriginalValues);
+
+                        newEntity = await dbContext.ComicFiles
+                            .FirstOrDefaultAsync(e => e.FilePath == newPath, cancellationToken);
+
+                        if (newEntity == null)
+                        {
+                            throw;
+                        }
+
+                        _logger.LogDebug("New path row was created concurrently, merging instead: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
+                    }
                 }
-                else
+
+                if (newEntity != null)
                 {
-                    // New path already has a row. This happens when the FileSystemWatcher
-                    // observes the move as a Created event and inserts a default stub row
-                    // for the target *before* the processor migrates the original record.
+                    // New path already has a row (found up front, or by the unique-constraint
+                    // recovery above). This happens when the FileSystemWatcher observes the
+                    // move as a Created event and inserts a default stub row for the target
+                    // *before* the processor migrates the original record.
                     // The old-path row is the authoritative carrier of processing state for
                     // this physical file (e.g. IsNormalized set by a preceding normalize),
                     // so merge that state onto the surviving row instead of discarding it.

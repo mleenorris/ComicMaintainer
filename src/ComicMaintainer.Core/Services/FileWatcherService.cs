@@ -529,15 +529,48 @@ public class FileWatcherService : IFileWatcherService, IDisposable
     /// arrive faster than they can be drained, the OS drops events that we never see. Those files
     /// would otherwise stay unprocessed until the service is restarted. To recover, we rescan the
     /// watched directory and re-queue any comic files so the missed ones get picked up.
+    /// <para>
+    /// Permission errors are different: the watcher raises them when it cannot start watching an
+    /// individual sub-directory (e.g. a folder the service account cannot read). Watching continues
+    /// for the rest of the tree, and a rescan cannot read that folder either, so these are reported
+    /// as a warning about an environment/permission problem instead of an application error and no
+    /// rescan is triggered.
+    /// </para>
     /// </summary>
     private void OnWatcherError(object sender, ErrorEventArgs e)
     {
         var ex = e.GetException();
+
+        if (IsAccessDenied(ex))
+        {
+            _logger.LogWarning(LoggingHelper.WithWatcherPrefix(
+                "File watcher cannot access a path and will not monitor it; check the file-system permissions of the watched directory. Details: {Message}"),
+                ex?.Message);
+            return;
+        }
+
         _logger.LogError(ex, LoggingHelper.WithWatcherPrefix(
             "File watcher reported an error; some file-system events may have been lost. Triggering a recovery rescan."));
 
         // Recover off the event thread so we don't block the watcher's notification pipeline.
         _ = Task.Run(async () => await RecoverFromMissedEventsAsync());
+    }
+
+    /// <summary>
+    /// Returns true when the supplied exception (or any of its inner exceptions) indicates that a
+    /// path could not be accessed because of file-system permissions.
+    /// </summary>
+    private static bool IsAccessDenied(Exception? exception)
+    {
+        for (var current = exception; current != null; current = current.InnerException)
+        {
+            if (current is UnauthorizedAccessException)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

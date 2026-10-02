@@ -724,6 +724,57 @@ public class FileWatcherServiceTests : IDisposable
             "A change flagged via SuppressProcessing should not trigger processing");
     }
 
+    [Fact]
+    public void OnWatcherError_WithAccessDenied_LogsWarningWithoutRecoveryRescan()
+    {
+        // Arrange - the watcher raises an access-denied error when it cannot monitor a
+        // sub-directory. This is an environment/permission issue, not an application fault.
+        var exception = new UnauthorizedAccessException(
+            "Access to the path '/comics/Doomsday' is denied.",
+            new IOException("Permission denied"));
+
+        // Act
+        InvokeWatcherError(exception);
+
+        // Assert - reported as a warning, and no recovery rescan is attempted.
+        VerifyLogged(LogLevel.Warning, Times.Once());
+        VerifyLogged(LogLevel.Error, Times.Never());
+    }
+
+    [Fact]
+    public void OnWatcherError_WithBufferOverflow_LogsError()
+    {
+        // Arrange - a buffer overflow means events were genuinely dropped and must be recovered.
+        var exception = new InternalBufferOverflowException("Too many changes at once.");
+
+        // Act
+        InvokeWatcherError(exception);
+
+        // Assert
+        VerifyLogged(LogLevel.Error, Times.Once());
+    }
+
+    private void InvokeWatcherError(Exception exception)
+    {
+        var handler = typeof(FileWatcherService).GetMethod(
+            "OnWatcherError",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(handler);
+        handler!.Invoke(_service, new object[] { _service, new ErrorEventArgs(exception) });
+    }
+
+    private void VerifyLogged(LogLevel level, Times times)
+    {
+        _mockLogger.Verify(
+            l => l.Log(
+                level,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()),
+            times);
+    }
+
     public void Dispose()
     {
         _service.StopAsync().Wait();

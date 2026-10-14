@@ -487,9 +487,10 @@ public class SuwayomiService : ISuwayomiService
     /// <summary>
     /// Builds the GraphQL endpoint for a configured base URL. Only absolute
     /// http/https URLs are accepted so a malformed value cannot turn into a
-    /// request against an unexpected scheme.
+    /// request against an unexpected scheme. Public so settings validation (and
+    /// tests) can reuse the exact same rule.
     /// </summary>
-    internal static bool TryBuildEndpoint(string? baseUrl, out Uri endpoint)
+    public static bool TryBuildEndpoint(string? baseUrl, out Uri endpoint)
     {
         endpoint = null!;
         if (string.IsNullOrWhiteSpace(baseUrl))

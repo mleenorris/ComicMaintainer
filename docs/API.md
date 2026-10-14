@@ -12,6 +12,7 @@ This document provides detailed information about the ComicMaintainer REST API e
 - [File Management](#file-management)
 - [Job Management](#job-management)
 - [Settings](#settings)
+- [Suwayomi Downloads](#suwayomi-downloads)
 - [Events](#events)
 - [Request Correlation](#request-correlation)
 - [Error Responses](#error-responses)
@@ -445,6 +446,85 @@ Get watcher process status.
   "enabled": true
 }
 ```
+
+## Suwayomi Downloads
+
+Queue downloads for missing issues on a connected [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) server. All endpoints require authentication; `POST` requires library write permission.
+
+### GET /api/suwayomi/status
+
+Probe the configured server.
+
+**Response:**
+```json
+{
+  "enabled": true,
+  "configured": true,
+  "connected": true,
+  "serverName": "Suwayomi-Server",
+  "version": "1.1.0",
+  "error": null
+}
+```
+
+### GET /api/suwayomi/series
+
+Search the Suwayomi library by title.
+
+**Query Parameters:**
+- `query` (string, optional) - Title to match. Omit to list the first entries.
+- `limit` (int, optional) - Maximum results, 1-100 (default 20).
+
+**Response:**
+```json
+{
+  "series": [
+    { "id": 4, "title": "Solo Leveling", "inLibrary": true, "thumbnailUrl": "/api/v1/manga/4/thumbnail" }
+  ]
+}
+```
+
+### GET /api/suwayomi/series/{id}/chapters
+
+List the chapters Suwayomi knows about for one of its series.
+
+**Response:**
+```json
+{
+  "chapters": [
+    { "id": 41, "name": "Chapter 1", "chapterNumber": 1, "isDownloaded": true }
+  ]
+}
+```
+
+### POST /api/suwayomi/download-missing
+
+Queue downloads for the issue numbers a series is missing locally.
+
+**Request Body:**
+```json
+{
+  "seriesTitle": "Solo Leveling",
+  "suwayomiSeriesId": 4,
+  "issueNumbers": [2, 3]
+}
+```
+
+`suwayomiSeriesId` is optional; when omitted the series is resolved by matching `seriesTitle` against the Suwayomi library.
+
+**Response:**
+```json
+{
+  "series": { "id": 4, "title": "Solo Leveling", "inLibrary": true },
+  "queuedChapters": [
+    { "id": 42, "name": "Chapter 2", "chapterNumber": 2, "isDownloaded": false }
+  ],
+  "unmatchedIssueNumbers": [3],
+  "alreadyDownloadedIssueNumbers": []
+}
+```
+
+Returns `400` with `{ "error": "..." }` when the integration is disabled or misconfigured, the server is unreachable, or no matching series is in the Suwayomi library.
 
 ## Events
 

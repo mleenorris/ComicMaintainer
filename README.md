@@ -489,6 +489,36 @@ To stay under each provider's published API quota and avoid being blocked, Comic
 
 When a provider returns HTTP 429 the request is automatically retried once after the server-indicated `Retry-After` interval (capped at 2 minutes), the failure is recorded against the provider's health tracker, and the `/api/metadata/providers` endpoint surfaces a `rate_limited: true` flag with a `Degraded - rate limited` status message until the back-off window passes. All outbound requests are also tagged with a descriptive `User-Agent` so providers can identify our traffic.
 
+### Suwayomi Downloads
+
+ComicMaintainer can connect to a [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) server and ask it to download the issues a series is missing. The series detail view already highlights gaps in the issue numbering; when the integration is enabled and reachable, the "Missing N issues" banner gains a **⬇️ Download from Suwayomi** button that queues the matching chapters on the Suwayomi side.
+
+How matching works:
+
+- The local series title is matched against the titles in the **Suwayomi library** (exact match first, then prefix/substring, ignoring punctuation and case). Only library entries are considered, because Suwayomi only tracks chapters for series that have been added to its library.
+- Each missing whole issue number is matched to a chapter whose chapter number floors to it (so `3.5` can satisfy issue `3`). Chapters Suwayomi has already downloaded are skipped, and issue numbers with no chapter at all are reported back as unmatched.
+- Matched chapters are added to Suwayomi's download queue (`enqueueChapterDownloads`). Suwayomi writes the files into **its own** download directory, so mount that directory inside ComicMaintainer's watched directory for the new files to be picked up and processed automatically.
+
+**Configuration:**
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| `EnableSuwayomi` | `ENABLE_SUWAYOMI` | `false` | Master switch for the integration. |
+| `SuwayomiBaseUrl` | `SUWAYOMI_BASE_URL` | `http://localhost:4567` | Base URL of the Suwayomi server; the GraphQL endpoint `{BaseUrl}/api/graphql` is derived from it. Only `http`/`https` URLs are accepted. |
+| `SuwayomiUsername` | `SUWAYOMI_USERNAME` | _(unset)_ | Optional user name when the server requires basic auth. |
+| `SuwayomiPassword` | `SUWAYOMI_PASSWORD` | _(unset)_ | Optional password. Stored as a secret: it is never logged and never returned by the settings API. |
+
+Settings are editable in **Settings → Suwayomi Downloads**, which also has a **Test Connection** button.
+
+**API endpoints** (see [API Documentation](docs/API.md)):
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/suwayomi/status` | Probe the configured server. |
+| `GET` | `/api/suwayomi/series?query=` | Search the Suwayomi library. |
+| `GET` | `/api/suwayomi/series/{id}/chapters` | List the chapters of a Suwayomi series. |
+| `POST` | `/api/suwayomi/download-missing` | Queue downloads for `{ seriesTitle, suwayomiSeriesId?, issueNumbers[] }`. |
+
 ### External Series Images
 
 When external metadata refreshes succeed, ComicMaintainer also tries to download a series-level cover image from the chosen provider (ComicVine `image.super_url`, MangaDex `cover_art`, AniList `coverImage.extraLarge`) and persist it under `{ConfigDirectory}/series-images/`. The downloaded image is rendered on series cards and the series detail view in place of the first-page-of-first-issue cover, with automatic fallback to the file-based cover when the external image fails to load.

@@ -2151,6 +2151,9 @@
             renderSeriesDetail(seriesId);
             loadSeriesIssues(seriesId);
             updateLibraryViewLayout();
+            // Decides whether the missing-issues banner offers the Suwayomi
+            // download action; re-renders the panel if the answer changes.
+            refreshSuwayomiAvailability();
         }
 
         // ── Overview page ─────────────────────────────────────────────────────
@@ -3981,9 +3984,129 @@
             return items;
         }
 
+        // ── Suwayomi downloads ────────────────────────────────────────────
+        //
+        // Whether the configured Suwayomi server answered its status probe.
+        // Cached so the missing-issues banner can decide synchronously whether
+        // to offer the download action without a request per render.
+        let suwayomiAvailable = false;
+        let suwayomiStatusPromise = null;
+
+        async function fetchSuwayomiStatus() {
+            const response = await fetch(apiUrl('/api/suwayomi/status'), {
+                headers: getAuthHeaders(),
+                credentials: 'same-origin'
+            });
+            if (!response.ok) throw new Error('suwayomi status ' + response.status);
+            return await response.json();
+        }
+
+        // Probes the Suwayomi server once per page load and re-renders the open
+        // series detail when the answer changes, so the download action appears
+        // without requiring a manual refresh.
+        function refreshSuwayomiAvailability() {
+            if (suwayomiStatusPromise) return suwayomiStatusPromise;
+            suwayomiStatusPromise = (async () => {
+                try {
+                    const status = await fetchSuwayomiStatus();
+                    const available = !!(status && status.enabled && status.connected);
+                    if (available !== suwayomiAvailable) {
+                        suwayomiAvailable = available;
+                        if (currentSeriesDetailId) {
+                            renderSeriesDetail(currentSeriesDetailId);
+                        }
+                    }
+                } catch (err) {
+                    console.warn('Suwayomi status check failed', err);
+                    suwayomiAvailable = false;
+                }
+                return suwayomiAvailable;
+            })();
+            return suwayomiStatusPromise;
+        }
+
+        // Settings action: probe the configured server and report what it said.
+        async function testSuwayomiConnection() {
+            const hint = document.getElementById('suwayomiStatusHint');
+            if (hint) hint.textContent = 'Testing connection...';
+            try {
+                const status = await fetchSuwayomiStatus();
+                let text;
+                if (!status.enabled) {
+                    text = 'The Suwayomi integration is disabled.';
+                } else if (status.connected) {
+                    const name = status.server_name || status.serverName || 'Suwayomi';
+                    const version = status.version ? ` ${status.version}` : '';
+                    text = `Connected to ${name}${version}.`;
+                } else {
+                    text = status.error || 'Could not reach the Suwayomi server.';
+                }
+                if (hint) hint.textContent = text;
+                showMessage(text, status.connected ? 'success' : 'error');
+                // Reflect the new state in any open series detail.
+                suwayomiStatusPromise = null;
+                refreshSuwayomiAvailability();
+            } catch (err) {
+                const text = 'Could not check the Suwayomi server.';
+                if (hint) hint.textContent = text;
+                showMessage(text, 'error');
+            }
+        }
+
+        // Series-detail action: ask Suwayomi to download every issue the series
+        // is missing. Suwayomi writes them to its own download directory, which
+        // the watcher picks up once it is visible to this service.
+        async function downloadMissingIssuesFromSuwayomi(seriesId, seriesTitle) {
+            const cached = seriesIssuesCache.get(seriesId);
+            const issues = (cached && cached.issues) || [];
+            const missing = computeMissingIssueNumbers(issues);
+            if (!missing.length) {
+                showMessage('This series has no missing issues.', 'info');
+                return;
+            }
+
+            showMessage(`Asking Suwayomi for ${missing.length} missing issue${missing.length === 1 ? '' : 's'}...`, 'info');
+            try {
+                const response = await fetch(apiUrl('/api/suwayomi/download-missing'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ seriesTitle: seriesTitle || '', issueNumbers: missing })
+                });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    let errorMsg = `HTTP error! status: ${response.status}`;
+                    try {
+                        const errBody = await response.json();
+                        if (errBody && (errBody.error || errBody.message)) {
+                            errorMsg = errBody.error || errBody.message;
+                        }
+                    } catch (e) { /* ignore parse errors */ }
+                    showMessage('Suwayomi download failed: ' + errorMsg, 'error');
+                    return;
+                }
+                const result = await response.json();
+                const queued = (result.queuedChapters || result.queued_chapters || []).length;
+                const unmatched = (result.unmatchedIssueNumbers || result.unmatched_issue_numbers || []).length;
+                let message = queued
+                    ? `Queued ${queued} chapter${queued === 1 ? '' : 's'} on Suwayomi.`
+                    : 'Nothing was queued on Suwayomi.';
+                if (unmatched) {
+                    message += ` ${unmatched} issue${unmatched === 1 ? ' has' : 's have'} no matching chapter.`;
+                }
+                showMessage(message, queued ? 'success' : 'info');
+            } catch (err) {
+                console.error('Suwayomi download failed', err);
+                showMessage('Suwayomi download failed.', 'error');
+            }
+        }
+
         // Render a small banner above the issues grid summarizing any missing
         // integer issue numbers between #1 and the highest known issue number.
-        function renderMissingIssuesBanner(issues) {
+        function renderMissingIssuesBanner(issues, series) {
             const missing = computeMissingIssueNumbers(issues);
             if (!missing.length) return '';
             // Compress runs of consecutive numbers into ranges (e.g. 2,3,4 -> "2-4").
@@ -4002,12 +4125,21 @@
             ranges.push(start === prev ? `#${start}` : `#${start}-${prev}`);
             const label = ranges.join(', ');
             const count = missing.length;
+            // The Suwayomi action is only useful when the integration is
+            // configured, so it is rendered lazily once the status probe has
+            // reported a reachable server (see refreshSuwayomiAvailability).
+            const seriesId = series && series.id ? series.id : '';
+            const seriesTitle = series && (series.title || series.canonical_title) ? (series.title || series.canonical_title) : '';
+            const action = seriesId && suwayomiAvailable
+                ? `<button type="button" class="btn btn-small" data-requires-write onclick="downloadMissingIssuesFromSuwayomi('${escapeJs(seriesId)}','${escapeJs(seriesTitle)}')" title="Ask the configured Suwayomi server to download these issues">⬇️ Download from Suwayomi</button>`
+                : '';
             return `
                 <div class="series-detail-missing-banner" role="status">
                     <span class="series-detail-missing-banner-icon" aria-hidden="true">⚠️</span>
                     <span class="series-detail-missing-banner-text">
                         Missing ${count} issue${count === 1 ? '' : 's'}: ${escapeHtml(label)}
                     </span>
+                    ${action}
                 </div>
             `;
         }
@@ -4259,7 +4391,7 @@
                             <span class="series-detail-selection-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} in this series${!allLoaded ? ` · showing ${issues.length}` : ''}</span>
                             <button type="button" class="btn btn-small" data-requires-write onclick="openEmailSendModalForSelected()">📧 Email Selected</button>
                         </div>
-                        ${rawHtml(renderMissingIssuesBanner(issues))}
+                        ${rawHtml(renderMissingIssuesBanner(issues, series))}
                     ` : ''}
                     ${issuesLoading ? html`
                         <div class="loading">
@@ -7430,6 +7562,24 @@
                 document.getElementById('enableAniListMetadata').checked = !!settingsData.enable_anilist_metadata;
                 document.getElementById('aniListBaseUrl').value = settingsData.anilist_base_url || 'https://graphql.anilist.co';
 
+                // Load Suwayomi download-server settings
+                const enableSuwayomi = document.getElementById('enableSuwayomiCheckbox');
+                const suwayomiBaseUrl = document.getElementById('suwayomiBaseUrl');
+                const suwayomiUsername = document.getElementById('suwayomiUsername');
+                const suwayomiPassword = document.getElementById('suwayomiPassword');
+                const suwayomiPasswordHint = document.getElementById('suwayomiPasswordHint');
+                const suwayomiClearPassword = document.getElementById('suwayomiClearPasswordCheckbox');
+                if (enableSuwayomi) enableSuwayomi.checked = !!settingsData.enable_suwayomi;
+                if (suwayomiBaseUrl) suwayomiBaseUrl.value = settingsData.suwayomi_base_url || '';
+                if (suwayomiUsername) suwayomiUsername.value = settingsData.suwayomi_username || '';
+                if (suwayomiPassword) suwayomiPassword.value = '';
+                if (suwayomiPasswordHint) {
+                    suwayomiPasswordHint.textContent = settingsData.suwayomi_password_set
+                        ? 'Leave blank to keep the stored password.'
+                        : 'Enter a password only if your Suwayomi server requires one.';
+                }
+                if (suwayomiClearPassword) suwayomiClearPassword.checked = false;
+
                 // Load default library view
                 const defaultLibraryViewSelect = document.getElementById('defaultLibraryViewSelect');
                 if (defaultLibraryViewSelect) {
@@ -9750,6 +9900,39 @@
                    return;
                 }
                 emailStatusCache = null;
+
+                const suwayomiEnabledEl = document.getElementById('enableSuwayomiCheckbox');
+                if (suwayomiEnabledEl) {
+                    const suwayomiPasswordInput = document.getElementById('suwayomiPassword').value;
+                    const suwayomiClearPasswordChecked = document.getElementById('suwayomiClearPasswordCheckbox').checked;
+                    const suwayomiBody = {
+                        enabled: suwayomiEnabledEl.checked,
+                        baseUrl: document.getElementById('suwayomiBaseUrl').value.trim() || null,
+                        username: document.getElementById('suwayomiUsername').value.trim() || null,
+                        // null keeps the stored password; '' clears it.
+                        password: suwayomiClearPasswordChecked ? '' : (suwayomiPasswordInput || null)
+                    };
+                    const suwayomiResponse = await fetch(apiUrl('/api/settings/suwayomi'), {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...getAuthHeaders()
+                        },
+                        body: JSON.stringify(suwayomiBody)
+                    });
+                    if (handleAuthError(suwayomiResponse)) return;
+                    if (!suwayomiResponse.ok) {
+                        let errorMsg = `HTTP error! status: ${suwayomiResponse.status}`;
+                        try {
+                            const errBody = await suwayomiResponse.json();
+                            if (errBody && (errBody.error || errBody.message)) {
+                                errorMsg = errBody.error || errBody.message;
+                            }
+                        } catch (e) { /* ignore parse errors */ }
+                        showMessage('Failed to save Suwayomi settings: ' + errorMsg, 'error');
+                        return;
+                    }
+                }
 
                 const errorReportingEnabledEl = document.getElementById('errorReportingEnabledCheckbox');
                 if (errorReportingEnabledEl) {

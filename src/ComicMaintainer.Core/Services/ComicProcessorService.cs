@@ -105,6 +105,12 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     {
         try
         {
+            if (!TryResolveAllowedPath(filePath, out _))
+            {
+                _logger.LogWarning("ProcessFileAsync: File is outside the allowed directories: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                return false;
+            }
+
             _logger.LogInformation("ProcessFileAsync: Starting processing for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             // Skip files that the database already considers fully processed, preventing
@@ -1285,10 +1291,13 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     {
         try
         {
-            if (!File.Exists(filePath) || !IsComicArchive(filePath))
+            if (!TryResolveAllowedPath(filePath, out var resolvedPath))
                 return Task.FromResult<ComicMetadata?>(null);
 
-            using var archive = ArchiveFactory.Open(filePath);
+            if (!File.Exists(resolvedPath) || !IsComicArchive(resolvedPath))
+                return Task.FromResult<ComicMetadata?>(null);
+
+            using var archive = ArchiveFactory.Open(resolvedPath);
             
             // Look for ComicInfo.xml
             var comicInfoEntry = archive.Entries.FirstOrDefault(e => 
@@ -1388,6 +1397,18 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     {
         try
         {
+            if (!TryResolveAllowedPath(filePath, out var resolvedPath))
+            {
+                _logger.LogWarning(
+                    "Cannot update metadata: file is outside the allowed directories: {FilePath}",
+                    LoggingHelper.SanitizePathForLog(filePath));
+                return false;
+            }
+
+            // Operate on the validated physical path so a linked path component
+            // cannot redirect the rewrite to an archive outside the library.
+            filePath = resolvedPath;
+
             if (!File.Exists(filePath))
             {
                 _logger.LogWarning(
@@ -1998,7 +2019,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
 
         _logger.LogWarning(
             "Chapter number '{Chapter}' would be lost from filename during rename of {OriginalPath}; appending it to preserve the chapter.",
-            chapterToPreserve,
+            LoggingHelper.SanitizeForLog(chapterToPreserve),
             LoggingHelper.SanitizePathForLog(originalPath));
 
         var separator = string.IsNullOrEmpty(filenameStem) ? string.Empty : " - ";
@@ -2030,6 +2051,18 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
 
         return integerFormatted;
     }
+
+    /// <summary>
+    /// Resolves <paramref name="filePath"/> to its physical location (following
+    /// symlinks and junctions on the file and every ancestor directory) and
+    /// verifies the result is inside the watched or duplicate directory.
+    /// </summary>
+    private bool TryResolveAllowedPath(string filePath, out string resolvedPath) =>
+        LibraryPathValidator.TryResolveWithin(
+            filePath,
+            out resolvedPath,
+            _settings.WatchedDirectory,
+            _settings.DuplicateDirectory);
 
     private bool TargetFileExists(string targetPath, string? sourcePath = null)
     {

@@ -127,6 +127,53 @@ public class ComicProcessorServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetMetadataAsync_ExternalTargetReachedThroughLinkedDirectory_ReturnsNull()
+    {
+        // Arrange - an archive outside the watched directory, reachable through
+        // a linked directory inside it.
+        var outsideDir = Path.Combine(Path.GetTempPath(), $"comic_outside_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outsideDir);
+        var outsideFile = CreateTestComicArchive("External Series", "7", directory: outsideDir);
+        var linkedDir = Path.Combine(_testDirectory, "linked");
+
+        try
+        {
+            Directory.CreateSymbolicLink(linkedDir, outsideDir);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            // The platform/filesystem does not allow creating links here.
+            try { Directory.Delete(outsideDir, true); } catch { }
+            return;
+        }
+
+        try
+        {
+            var linkedPath = Path.Combine(linkedDir, Path.GetFileName(outsideFile));
+
+            // Act
+            var metadata = await _service.GetMetadataAsync(linkedPath);
+            var updated = await _service.UpdateMetadataAsync(linkedPath, new ComicMetadata { Series = "Hijacked" });
+
+            // Assert
+            Assert.Null(metadata);
+            Assert.False(updated);
+
+            // The external archive must still hold its original metadata.
+            using var archive = ZipFile.OpenRead(outsideFile);
+            var comicInfo = archive.GetEntry("ComicInfo.xml");
+            Assert.NotNull(comicInfo);
+            using var reader = new StreamReader(comicInfo!.Open());
+            Assert.Contains("External Series", reader.ReadToEnd());
+        }
+        finally
+        {
+            try { Directory.Delete(linkedDir); } catch { }
+            try { Directory.Delete(outsideDir, true); } catch { }
+        }
+    }
+
+    [Fact]
     public async Task UpdateMetadataAsync_ValidFile_ReturnsTrue()
     {
         // Arrange
@@ -603,10 +650,10 @@ public class ComicProcessorServiceTests : IDisposable
         return service.GetJob(jobId); // Return whatever state we're in after timeout
     }
 
-    private string CreateTestComicArchive(string series, string issue, int? year = null)
+    private string CreateTestComicArchive(string series, string issue, int? year = null, string? directory = null)
     {
         var fileName = $"{series} - Chapter {issue}.cbz";
-        var filePath = Path.Combine(_testDirectory, fileName);
+        var filePath = Path.Combine(directory ?? _testDirectory, fileName);
 
         // Create ComicInfo.xml content
         var comicInfoXml = $@"<?xml version=""1.0""?>

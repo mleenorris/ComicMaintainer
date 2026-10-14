@@ -77,7 +77,7 @@ public class ComicReaderController : ControllerBase
 
         if (!IsPathSafe(filePath))
         {
-            _logger.LogWarning("Attempt to access file outside watched directory: {FilePath}", filePath);
+            _logger.LogWarning("Attempt to access file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 

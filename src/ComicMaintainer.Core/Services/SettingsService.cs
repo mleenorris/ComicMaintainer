@@ -274,9 +274,7 @@ public class SettingsService : ISettingsService
                 continue;
             }
 
-            var sanitizedValue = value is string strValue
-                ? LoggingHelper.SanitizeForLog(strValue)
-                : value?.ToString() ?? "null";
+            var sanitizedValue = LoggingHelper.SanitizeForLog(value?.ToString() ?? "null");
             _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, sanitizedValue);
         }
     }
@@ -409,9 +407,7 @@ public class SettingsService : ISettingsService
             }
 
             var value = values[name];
-            var sanitizedValue = value is string strValue
-                ? LoggingHelper.SanitizeForLog(strValue)
-                : value?.ToString() ?? "null";
+            var sanitizedValue = LoggingHelper.SanitizeForLog(value?.ToString() ?? "null");
             _logger.LogInformation("Updated setting {SettingName} to {Value}", name, sanitizedValue);
         }
     }
@@ -477,9 +473,7 @@ public class SettingsService : ISettingsService
         await PersistSettingAsync(settingName, value, cancellationToken);
 
         // Sanitize value for logging to prevent log forging.
-        var sanitizedValue = value is string strValue
-            ? LoggingHelper.SanitizeForLog(strValue)
-            : value?.ToString() ?? "null";
+        var sanitizedValue = LoggingHelper.SanitizeForLog(value?.ToString() ?? "null");
         _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, sanitizedValue);
     }
 

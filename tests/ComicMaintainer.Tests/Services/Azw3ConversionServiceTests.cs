@@ -4,8 +4,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Logging;
 using Moq;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Jpeg;
+using ImageMagick;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -58,9 +57,9 @@ public class Azw3ConversionServiceTests : IDisposable
         Assert.Equal(3, book.Resources.Count);
         foreach (var resource in book.Resources)
         {
-            var info = Image.Identify(resource);
-            Assert.Equal(20, info.Width);
-            Assert.Equal(30, info.Height);
+            var info = new MagickImageInfo(resource);
+            Assert.Equal(20u, info.Width);
+            Assert.Equal(30u, info.Height);
         }
 
         Assert.Equal("3", book.Exth[125]);
@@ -142,9 +141,9 @@ public class Azw3ConversionServiceTests : IDisposable
         var book = Azw3Reader.Read(path);
 
         Assert.Equal(2, book.Resources.Count);
-        var cover = Image.Identify(book.Resources[0]);
-        Assert.Equal(40, cover.Width);
-        Assert.Equal(60, cover.Height);
+        var cover = new MagickImageInfo(book.Resources[0]);
+        Assert.Equal(40u, cover.Width);
+        Assert.Equal(60u, cover.Height);
         Assert.Equal("40x60", book.Exth[126]);
     }
 
@@ -195,10 +194,11 @@ public class Azw3ConversionServiceTests : IDisposable
 
     private static byte[] CreateJpeg(int width, int height)
     {
-        using var image = new Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(width, height);
-        using var buffer = new MemoryStream();
-        image.Save(buffer, new JpegEncoder());
-        return buffer.ToArray();
+        using var image = new MagickImage(MagickColors.White, (uint)width, (uint)height)
+        {
+            Format = MagickFormat.Jpeg
+        };
+        return image.ToByteArray();
     }
 
     public void Dispose()

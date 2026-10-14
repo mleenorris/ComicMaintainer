@@ -6,7 +6,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services.Kf8;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Logging;
-using SixLabors.ImageSharp;
+using ImageMagick;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -157,7 +157,7 @@ public partial class Azw3ConversionService : IAzw3ConversionService
             var imagePath = ResolvePath(GetDirectory(documentPath), source.Groups[1].Value);
             var imageBytes = ReadEntryBytes(archive, imagePath);
 
-            var info = Image.Identify(imageBytes);
+            var info = new MagickImageInfo(imageBytes);
             var mediaType = manifest.Values
                 .FirstOrDefault(item => string.Equals(ResolvePath(opfDirectory, item.Href), imagePath, StringComparison.Ordinal))
                 .MediaType;
@@ -169,8 +169,8 @@ public partial class Azw3ConversionService : IAzw3ConversionService
             pages.Add(new Kf8Page(
                 imageBytes,
                 string.IsNullOrWhiteSpace(mediaType) ? "image/jpeg" : mediaType,
-                info.Width,
-                info.Height,
+                checked((int)info.Width),
+                checked((int)info.Height),
                 title));
         }
 

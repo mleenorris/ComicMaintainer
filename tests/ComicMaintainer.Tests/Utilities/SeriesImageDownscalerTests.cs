@@ -1,9 +1,5 @@
 using ComicMaintainer.Core.Utilities;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Jpeg;
-using SixLabors.ImageSharp.Formats.Png;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
+using ImageMagick;
 
 namespace ComicMaintainer.Tests.Utilities;
 
@@ -19,7 +15,7 @@ public class SeriesImageDownscalerTests
         var result = SeriesImageDownscaler.DownscaleToJpeg(source, maxBytes, maxDimension: 1024);
 
         Assert.True(result.Length <= maxBytes, $"Result {result.Length} exceeded cap {maxBytes}");
-        using var img = Image.Load(result);
+        using var img = new MagickImage(result);
         Assert.True(Math.Max(img.Width, img.Height) <= 1024);
     }
 
@@ -30,9 +26,9 @@ public class SeriesImageDownscalerTests
 
         var result = SeriesImageDownscaler.DownscaleToJpeg(source, 500 * 1024, maxDimension: 1000);
 
-        using var img = Image.Load(result);
-        Assert.Equal(1000, img.Width);
-        Assert.Equal(500, img.Height);
+        using var img = new MagickImage(result);
+        Assert.Equal(1000u, img.Width);
+        Assert.Equal(500u, img.Height);
     }
 
     [Fact]
@@ -42,9 +38,9 @@ public class SeriesImageDownscalerTests
 
         var result = SeriesImageDownscaler.DownscaleToJpeg(source, 500 * 1024, maxDimension: 2048);
 
-        using var img = Image.Load(result);
-        Assert.Equal(300, img.Width);
-        Assert.Equal(200, img.Height);
+        using var img = new MagickImage(result);
+        Assert.Equal(300u, img.Width);
+        Assert.Equal(200u, img.Height);
     }
 
     [Fact]
@@ -56,37 +52,14 @@ public class SeriesImageDownscalerTests
             SeriesImageDownscaler.DownscaleToJpeg(garbage, 100 * 1024, 1024));
     }
 
-    // Build an image full of random pixels so it does not compress trivially,
-    // guaranteeing the encoded payload is genuinely large before downscaling.
+    // Build a noisy image so it does not compress trivially, guaranteeing the
+    // encoded payload is genuinely large before downscaling.
     private static byte[] CreateNoisyImage(int width, int height, bool asJpeg)
     {
-        using var image = new Image<Rgba32>(width, height);
-        var rng = new Random(1234);
-        image.ProcessPixelRows(accessor =>
-        {
-            for (var y = 0; y < accessor.Height; y++)
-            {
-                var row = accessor.GetRowSpan(y);
-                for (var x = 0; x < row.Length; x++)
-                {
-                    row[x] = new Rgba32(
-                        (byte)rng.Next(256),
-                        (byte)rng.Next(256),
-                        (byte)rng.Next(256),
-                        255);
-                }
-            }
-        });
-
-        using var ms = new MemoryStream();
-        if (asJpeg)
-        {
-            image.Save(ms, new JpegEncoder { Quality = 100 });
-        }
-        else
-        {
-            image.Save(ms, new PngEncoder());
-        }
-        return ms.ToArray();
+        using var image = new MagickImage(MagickColors.Gray, (uint)width, (uint)height);
+        image.AddNoise(NoiseType.Gaussian);
+        image.Format = asJpeg ? MagickFormat.Jpeg : MagickFormat.Png;
+        image.Quality = 100;
+        return image.ToByteArray();
     }
 }

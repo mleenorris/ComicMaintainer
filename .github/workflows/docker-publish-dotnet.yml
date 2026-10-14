@@ -8,6 +8,9 @@ on:
     branches: 
       - dotnet
 
+permissions:
+  contents: read
+
 jobs:
   build-and-push-dotnet:
     runs-on: ubuntu-latest

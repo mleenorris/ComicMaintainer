@@ -70,6 +70,11 @@ public class SettingsController : ControllerBase
             mangadex_base_url = _appSettings.CurrentValue.MangaDexBaseUrl,
             enable_anilist_metadata = _appSettings.CurrentValue.EnableAniListMetadata,
             anilist_base_url = _appSettings.CurrentValue.AniListBaseUrl,
+            enable_suwayomi = _appSettings.CurrentValue.EnableSuwayomi,
+            suwayomi_base_url = _appSettings.CurrentValue.SuwayomiBaseUrl,
+            suwayomi_username = _appSettings.CurrentValue.SuwayomiUsername,
+            // As with the SMTP password, the password itself is never returned.
+            suwayomi_password_set = !string.IsNullOrEmpty(_appSettings.CurrentValue.SuwayomiPassword),
             default_library_view = _appSettings.CurrentValue.DefaultLibraryView,
             allow_registration = _appSettings.CurrentValue.AllowRegistration,
             default_preferred_language = _appSettings.CurrentValue.DefaultPreferredLanguage,
@@ -858,6 +863,54 @@ public class SettingsController : ControllerBase
         public string? EmailFromAddress { get; set; }
         public string? EmailFromName { get; set; }
         public int EmailMaxAttachmentMb { get; set; } = 25;
+    }
+
+    /// <summary>
+    /// Updates the Suwayomi download-server settings. Omit <c>password</c> to
+    /// keep the stored password; send an empty string to clear it.
+    /// </summary>
+    [HttpPut("suwayomi")]
+    public async Task<ActionResult> UpdateSuwayomiSettings([FromBody] SuwayomiSettingsRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { error = "Request body is required" });
+        }
+
+        try
+        {
+            await _settingsService.UpdateSuwayomiSettingsAsync(
+                request.Enabled,
+                request.BaseUrl,
+                request.Username,
+                request.Password,
+                cancellationToken);
+
+            return Ok(new { message = "Suwayomi settings updated successfully" });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update Suwayomi settings");
+            return StatusCode(500, new { error = "Failed to update Suwayomi settings" });
+        }
+    }
+
+    public class SuwayomiSettingsRequest
+    {
+        public bool Enabled { get; set; }
+
+        /// <summary>Base URL of the Suwayomi server, e.g. <c>http://localhost:4567</c>.</summary>
+        public string? BaseUrl { get; set; }
+
+        /// <summary>Optional user name when the server requires basic auth.</summary>
+        public string? Username { get; set; }
+
+        /// <summary>Null keeps the stored password; empty string clears it.</summary>
+        public string? Password { get; set; }
     }
 
     /// <summary>

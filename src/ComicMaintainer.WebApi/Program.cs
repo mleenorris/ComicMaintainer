@@ -652,6 +652,15 @@ builder.Services.AddHttpClient(nameof(AniListMangaSeriesMetadataService))
     {
         client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
     });
+builder.Services.AddHttpClient(SuwayomiService.HttpClientName)
+    .ConfigureHttpClient(client =>
+    {
+        // Suwayomi is normally a server on the local network; keep the timeout
+        // short so a wrong URL fails fast instead of hanging a request.
+        client.Timeout = TimeSpan.FromSeconds(30);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ComicMaintainer/1.0 (+https://github.com/mleenorris/ComicMaintainer)");
+    });
+builder.Services.AddSingleton<ISuwayomiService, SuwayomiService>();
 builder.Services.AddSingleton<ComicVineSeriesMetadataService>();
 builder.Services.AddSingleton<MangaDexSeriesMetadataService>();
 builder.Services.AddSingleton<AniListManhwaSeriesMetadataService>();
@@ -1225,6 +1234,22 @@ internal sealed class AppSettingsEnvironmentPostConfigure : Microsoft.Extensions
         var aniListBaseUrl = Environment.GetEnvironmentVariable("ANILIST_BASE_URL");
         if (!string.IsNullOrEmpty(aniListBaseUrl))
             options.AniListBaseUrl = aniListBaseUrl;
+
+        var enableSuwayomi = Environment.GetEnvironmentVariable("ENABLE_SUWAYOMI");
+        if (!string.IsNullOrEmpty(enableSuwayomi))
+            options.EnableSuwayomi = enableSuwayomi.Equals("true", StringComparison.OrdinalIgnoreCase);
+
+        var suwayomiBaseUrl = Environment.GetEnvironmentVariable("SUWAYOMI_BASE_URL");
+        if (!string.IsNullOrEmpty(suwayomiBaseUrl))
+            options.SuwayomiBaseUrl = suwayomiBaseUrl;
+
+        var suwayomiUsername = Environment.GetEnvironmentVariable("SUWAYOMI_USERNAME");
+        if (!string.IsNullOrEmpty(suwayomiUsername))
+            options.SuwayomiUsername = suwayomiUsername;
+
+        var suwayomiPassword = Environment.GetEnvironmentVariable("SUWAYOMI_PASSWORD");
+        if (!string.IsNullOrEmpty(suwayomiPassword))
+            options.SuwayomiPassword = suwayomiPassword;
 
         var mangaDexRps = Environment.GetEnvironmentVariable("MANGADEX_REQUESTS_PER_SECOND");
         if (!string.IsNullOrEmpty(mangaDexRps) && int.TryParse(mangaDexRps, out var mdRps) && mdRps > 0)

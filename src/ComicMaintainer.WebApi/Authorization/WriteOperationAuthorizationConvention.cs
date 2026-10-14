@@ -40,6 +40,7 @@ public class WriteOperationAuthorizationConvention : IActionModelConvention
         ["ScheduledJobs"] = AuthorizationPolicies.CanModifyLibrary,
         ["Watcher"] = AuthorizationPolicies.CanModifyLibrary,
         ["Email"] = AuthorizationPolicies.CanModifyLibrary,
+        ["Suwayomi"] = AuthorizationPolicies.CanModifyLibrary,
         // Reads are already restricted by the controller-level Admin policy;
         // listing it here keeps write endpoints added later covered by default.
         ["ErrorReports"] = AuthorizationPolicies.CanAdminister,

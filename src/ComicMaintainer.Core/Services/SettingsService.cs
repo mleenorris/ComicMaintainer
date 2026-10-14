@@ -248,14 +248,36 @@ public class SettingsService : ISettingsService
             throw new ArgumentException($"'{normalizedUrl}' is not a valid http(s) URL", nameof(baseUrl));
         }
 
-        await UpdateSettingAsync("EnableSuwayomi", enabled, cancellationToken);
-        await UpdateSettingAsync("SuwayomiBaseUrl", normalizedUrl, cancellationToken);
-        await UpdateSettingAsync("SuwayomiUsername", string.IsNullOrWhiteSpace(username) ? null : username.Trim(), cancellationToken);
+        var values = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["EnableSuwayomi"] = enabled,
+            ["SuwayomiBaseUrl"] = normalizedUrl,
+            ["SuwayomiUsername"] = string.IsNullOrWhiteSpace(username) ? null : username.Trim()
+        };
 
         // A null password means "keep the stored secret"; an empty string clears it.
         if (password is not null)
         {
-            await UpdateSecretSettingAsync("SuwayomiPassword", password.Length == 0 ? null : password, cancellationToken);
+            values["SuwayomiPassword"] = password.Length == 0 ? null : password;
+        }
+
+        await PersistSettingsAsync(values, cancellationToken);
+
+        foreach (var (settingName, value) in values)
+        {
+            if (SecretSettingNames.Contains(settingName))
+            {
+                _logger.LogInformation(
+                    "Updated setting {SettingName} ({State})",
+                    settingName,
+                    value is null ? "cleared" : "value hidden");
+                continue;
+            }
+
+            var sanitizedValue = value is string strValue
+                ? LoggingHelper.SanitizeForLog(strValue)
+                : value?.ToString() ?? "null";
+            _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, sanitizedValue);
         }
     }
 

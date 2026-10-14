@@ -83,7 +83,13 @@ public class SuwayomiService : ISuwayomiService
                 "query { aboutServer { name version } }",
                 null,
                 cancellationToken);
-            var about = document.RootElement.GetProperty("data").GetProperty("aboutServer");
+            if (!document.RootElement.TryGetProperty("data", out var data)
+                || !data.TryGetProperty("aboutServer", out var about)
+                || about.ValueKind != JsonValueKind.Object)
+            {
+                throw new SuwayomiException("The Suwayomi server returned an unexpected response.");
+            }
+
             status.Connected = true;
             status.ServerName = GetStringOrNull(about, "name");
             status.Version = GetStringOrNull(about, "version");
@@ -322,43 +328,74 @@ public class SuwayomiService : ISuwayomiService
             throw new SuwayomiException($"Suwayomi has no series with id {seriesId}.");
         }
 
+        if (!series.InLibrary)
+        {
+            throw new SuwayomiException($"Suwayomi series with id {seriesId} is not in the library.");
+        }
+
         return series;
     }
 
     private async Task<IReadOnlyList<SuwayomiSeries>> GetLibrarySeriesAsync(CancellationToken cancellationToken)
     {
         const string queryText = """
-            query Library($first: Int!) {
-              mangas(condition: { inLibrary: true }, first: $first) {
+            query Library($first: Int!, $after: String) {
+              mangas(condition: { inLibrary: true }, first: $first, after: $after) {
                 nodes { id title inLibrary thumbnailUrl }
+                pageInfo { hasNextPage endCursor }
               }
             }
             """;
 
-        using var document = await ExecuteAsync(
-            queryText,
-            new Dictionary<string, object?> { ["first"] = MaxLibraryPageSize },
-            cancellationToken);
-
         var series = new List<SuwayomiSeries>();
-        if (!document.RootElement.TryGetProperty("data", out var data)
-            || !data.TryGetProperty("mangas", out var connection)
-            || !connection.TryGetProperty("nodes", out var nodes)
-            || nodes.ValueKind != JsonValueKind.Array)
+        string? after = null;
+        while (true)
         {
-            return series;
-        }
+            using var document = await ExecuteAsync(
+                queryText,
+                new Dictionary<string, object?>
+                {
+                    ["first"] = MaxLibraryPageSize,
+                    ["after"] = after
+                },
+                cancellationToken);
 
-        foreach (var node in nodes.EnumerateArray())
-        {
-            var entry = ReadSeries(node);
-            if (entry is not null)
+            if (!document.RootElement.TryGetProperty("data", out var data)
+                || !data.TryGetProperty("mangas", out var connection)
+                || connection.ValueKind != JsonValueKind.Object
+                || !connection.TryGetProperty("nodes", out var nodes)
+                || nodes.ValueKind != JsonValueKind.Array)
             {
-                series.Add(entry);
+                throw new SuwayomiException("The Suwayomi server returned an unexpected response.");
+            }
+
+            foreach (var node in nodes.EnumerateArray())
+            {
+                var entry = ReadSeries(node);
+                if (entry is not null)
+                {
+                    series.Add(entry);
+                }
+            }
+
+            if (!connection.TryGetProperty("pageInfo", out var pageInfo)
+                || pageInfo.ValueKind != JsonValueKind.Object
+                || GetBooleanOrNull(pageInfo, "hasNextPage") is not { } hasNextPage)
+            {
+                throw new SuwayomiException("The Suwayomi server returned an unexpected response.");
+            }
+
+            if (!hasNextPage)
+            {
+                return series;
+            }
+
+            after = GetStringOrNull(pageInfo, "endCursor");
+            if (string.IsNullOrWhiteSpace(after))
+            {
+                throw new SuwayomiException("The Suwayomi server returned an unexpected response.");
             }
         }
-
-        return series;
     }
 
     private static SuwayomiSeries? ReadSeries(JsonElement node)
@@ -458,6 +495,11 @@ public class SuwayomiService : ISuwayomiService
 
             try
             {
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    throw new SuwayomiException("The Suwayomi server returned an unexpected response.");
+                }
+
                 if (document.RootElement.TryGetProperty("errors", out var errors)
                     && errors.ValueKind == JsonValueKind.Array
                     && errors.GetArrayLength() > 0)
@@ -469,7 +511,8 @@ public class SuwayomiService : ISuwayomiService
                     throw new SuwayomiException($"The Suwayomi server rejected the request: {message}");
                 }
 
-                if (!document.RootElement.TryGetProperty("data", out _))
+                if (!document.RootElement.TryGetProperty("data", out var data)
+                    || data.ValueKind != JsonValueKind.Object)
                 {
                     throw new SuwayomiException("The Suwayomi server returned an unexpected response.");
                 }

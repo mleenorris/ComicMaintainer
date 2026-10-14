@@ -92,6 +92,19 @@ public class SuwayomiServiceTests
     }
 
     [Fact]
+    public async Task GetStatusAsync_ReportsUnexpectedResponseShapeInsteadOfThrowing()
+    {
+        var handler = new StubHttpMessageHandler(_ => Json("""{"data":{}}"""));
+
+        var service = CreateService(handler, EnabledSettings());
+
+        var status = await service.GetStatusAsync();
+
+        Assert.False(status.Connected);
+        Assert.Contains("unexpected response", status.Error);
+    }
+
+    [Fact]
     public async Task SearchSeriesAsync_RanksExactMatchesFirstAndIgnoresPunctuation()
     {
         var handler = new StubHttpMessageHandler(_ => Json("""
@@ -99,7 +112,7 @@ public class SuwayomiServiceTests
                 {"id":7,"title":"Another Series","inLibrary":true},
                 {"id":3,"title":"Solo Leveling: Ragnarok","inLibrary":true},
                 {"id":1,"title":"Solo Leveling!","inLibrary":true}
-            ]}}}
+            ],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}
             """));
 
         var service = CreateService(handler, EnabledSettings());
@@ -109,6 +122,31 @@ public class SuwayomiServiceTests
         Assert.Equal(2, results.Count);
         Assert.Equal(1, results[0].Id);
         Assert.Equal(3, results[1].Id);
+    }
+
+    [Fact]
+    public async Task SearchSeriesAsync_FollowsLibraryPaginationCursors()
+    {
+        var afterValues = new List<string?>();
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            using var document = JsonDocument.Parse(body);
+            var after = document.RootElement.GetProperty("variables").GetProperty("after");
+            afterValues.Add(after.ValueKind == JsonValueKind.String ? after.GetString() : null);
+
+            return afterValues.Count == 1
+                ? Json("""{"data":{"mangas":{"nodes":[{"id":1,"title":"First","inLibrary":true}],"pageInfo":{"hasNextPage":true,"endCursor":"next-page"}}}}""")
+                : Json("""{"data":{"mangas":{"nodes":[{"id":2,"title":"Later Match","inLibrary":true}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}""");
+        });
+
+        var service = CreateService(handler, EnabledSettings());
+
+        var results = await service.SearchSeriesAsync("Later Match");
+
+        Assert.Single(results);
+        Assert.Equal(2, results[0].Id);
+        Assert.Equal(new string?[] { null, "next-page" }, afterValues);
     }
 
     [Fact]
@@ -151,7 +189,7 @@ public class SuwayomiServiceTests
 
             if (body.Contains("mangas("))
             {
-                return Json("""{"data":{"mangas":{"nodes":[{"id":4,"title":"Solo Leveling","inLibrary":true}]}}}""");
+                return Json("""{"data":{"mangas":{"nodes":[{"id":4,"title":"Solo Leveling","inLibrary":true}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}""");
             }
 
             if (body.Contains("chapters("))
@@ -198,7 +236,7 @@ public class SuwayomiServiceTests
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             if (body.Contains("mangas("))
             {
-                return Json("""{"data":{"mangas":{"nodes":[{"id":4,"title":"Solo Leveling","inLibrary":true}]}}}""");
+                return Json("""{"data":{"mangas":{"nodes":[{"id":4,"title":"Solo Leveling","inLibrary":true}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}""");
             }
 
             if (body.Contains("chapters("))
@@ -222,13 +260,32 @@ public class SuwayomiServiceTests
     public async Task DownloadMissingIssuesAsync_ThrowsWhenTheSeriesIsNotInTheSuwayomiLibrary()
     {
         var handler = new StubHttpMessageHandler(_ =>
-            Json("""{"data":{"mangas":{"nodes":[{"id":4,"title":"Something Else","inLibrary":true}]}}}"""));
+            Json("""{"data":{"mangas":{"nodes":[{"id":4,"title":"Something Else","inLibrary":true}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}"""));
 
         var service = CreateService(handler, EnabledSettings());
 
         var exception = await Assert.ThrowsAsync<SuwayomiException>(
             () => service.DownloadMissingIssuesAsync("Solo Leveling", new[] { 1 }));
         Assert.Contains("Solo Leveling", exception.Message);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_RejectsDirectIdOutsideLibrary()
+    {
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return body.Contains("mangas(")
+                ? Json("""{"data":{"mangas":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}""")
+                : Json("""{"data":{"manga":{"id":4,"title":"Solo Leveling","inLibrary":false}}}""");
+        });
+
+        var service = CreateService(handler, EnabledSettings());
+
+        var exception = await Assert.ThrowsAsync<SuwayomiException>(
+            () => service.DownloadMissingIssuesAsync(null, new[] { 1 }, seriesId: 4));
+
+        Assert.Contains("not in the library", exception.Message);
     }
 
     [Fact]
@@ -241,7 +298,7 @@ public class SuwayomiServiceTests
             var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             if (body.Contains("mangas("))
             {
-                return Json("""{"data":{"mangas":{"nodes":[{"id":4,"title":"Solo Leveling","inLibrary":true}]}}}""");
+                return Json("""{"data":{"mangas":{"nodes":[{"id":4,"title":"Solo Leveling","inLibrary":true}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}""");
             }
 
             return Json("""{"data":{"chapters":{"nodes":[]}}}""");

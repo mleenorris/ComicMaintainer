@@ -4057,8 +4057,27 @@
         // is missing. Suwayomi writes them to its own download directory, which
         // the watcher picks up once it is visible to this service.
         async function downloadMissingIssuesFromSuwayomi(seriesId, seriesTitle) {
-            const cached = seriesIssuesCache.get(seriesId);
-            const issues = (cached && cached.issues) || [];
+            let issues;
+            try {
+                const response = await fetch(
+                    apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}&page=1`),
+                    {
+                        headers: getAuthHeaders ? getAuthHeaders() : undefined,
+                        credentials: 'same-origin'
+                    });
+                if (handleAuthError(response)) return;
+                if (!response.ok) {
+                    showMessage(`Could not load the full issue list (HTTP ${response.status}).`, 'error');
+                    return;
+                }
+                const data = await response.json();
+                issues = Array.isArray(data.issues) ? data.issues : [];
+            } catch (err) {
+                console.error('Could not load the full issue list for Suwayomi', err);
+                showMessage('Could not load the full issue list for Suwayomi.', 'error');
+                return;
+            }
+
             const missing = computeMissingIssueNumbers(issues);
             if (!missing.length) {
                 showMessage('This series has no missing issues.', 'info');
@@ -9932,6 +9951,9 @@
                         showMessage('Failed to save Suwayomi settings: ' + errorMsg, 'error');
                         return;
                     }
+
+                    suwayomiStatusPromise = null;
+                    await refreshSuwayomiAvailability();
                 }
 
                 const errorReportingEnabledEl = document.getElementById('errorReportingEnabledCheckbox');

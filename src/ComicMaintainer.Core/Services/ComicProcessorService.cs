@@ -105,7 +105,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     {
         try
         {
-            if (!IsPathWithinAllowedDirectories(filePath))
+            if (!TryResolveAllowedPath(filePath, out _))
             {
                 _logger.LogWarning("ProcessFileAsync: File is outside the allowed directories: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 return false;
@@ -1291,13 +1291,13 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     {
         try
         {
-            if (!IsPathWithinAllowedDirectories(filePath))
+            if (!TryResolveAllowedPath(filePath, out var resolvedPath))
                 return Task.FromResult<ComicMetadata?>(null);
 
-            if (!File.Exists(filePath) || !IsComicArchive(filePath))
+            if (!File.Exists(resolvedPath) || !IsComicArchive(resolvedPath))
                 return Task.FromResult<ComicMetadata?>(null);
 
-            using var archive = ArchiveFactory.Open(filePath);
+            using var archive = ArchiveFactory.Open(resolvedPath);
             
             // Look for ComicInfo.xml
             var comicInfoEntry = archive.Entries.FirstOrDefault(e => 
@@ -1397,13 +1397,17 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     {
         try
         {
-            if (!IsPathWithinAllowedDirectories(filePath))
+            if (!TryResolveAllowedPath(filePath, out var resolvedPath))
             {
                 _logger.LogWarning(
                     "Cannot update metadata: file is outside the allowed directories: {FilePath}",
                     LoggingHelper.SanitizePathForLog(filePath));
                 return false;
             }
+
+            // Operate on the validated physical path so a linked path component
+            // cannot redirect the rewrite to an archive outside the library.
+            filePath = resolvedPath;
 
             if (!File.Exists(filePath))
             {
@@ -2048,40 +2052,17 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         return integerFormatted;
     }
 
-    private bool IsPathWithinAllowedDirectories(string filePath)
-    {
-        if (string.IsNullOrWhiteSpace(filePath))
-            return false;
-
-        try
-        {
-            var fullPath = Path.GetFullPath(filePath);
-            foreach (var allowedDirectory in new[]
-                     {
-                         _settings.WatchedDirectory,
-                         _settings.DuplicateDirectory
-                     })
-            {
-                if (string.IsNullOrWhiteSpace(allowedDirectory))
-                    continue;
-
-                var fullAllowedDirectory = Path.GetFullPath(allowedDirectory);
-                var relativePath = Path.GetRelativePath(fullAllowedDirectory, fullPath);
-                if (!Path.IsPathRooted(relativePath)
-                    && relativePath != ".."
-                    && !relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    /// <summary>
+    /// Resolves <paramref name="filePath"/> to its physical location (following
+    /// symlinks and junctions on the file and every ancestor directory) and
+    /// verifies the result is inside the watched or duplicate directory.
+    /// </summary>
+    private bool TryResolveAllowedPath(string filePath, out string resolvedPath) =>
+        LibraryPathValidator.TryResolveWithin(
+            filePath,
+            out resolvedPath,
+            _settings.WatchedDirectory,
+            _settings.DuplicateDirectory);
 
     private bool TargetFileExists(string targetPath, string? sourcePath = null)
     {

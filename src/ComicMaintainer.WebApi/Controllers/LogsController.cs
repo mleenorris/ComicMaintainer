@@ -117,11 +117,18 @@ public class LogsController : ControllerBase
                     });
                 }
 
+                // Directory enumeration already restricts candidates to the
+                // configured log pattern; compare filenames the same way the
+                // filesystem does so each listed name selects its own file.
+                var filenameComparison = OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase
+                    : StringComparison.Ordinal;
+
                 var matchingLogFile = Directory.GetFiles(configDir, logFilePattern)
                     .FirstOrDefault(path => string.Equals(
                         Path.GetFileName(path),
                         sanitizedFilename,
-                        StringComparison.OrdinalIgnoreCase));
+                        filenameComparison));
 
                 if (matchingLogFile is null)
                 {

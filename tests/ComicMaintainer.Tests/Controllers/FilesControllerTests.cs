@@ -1514,6 +1514,95 @@ public class FilesControllerTests
         _mockFileStore.Verify(fs => fs.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact]
+    public async Task DeleteFile_WithExternalTargetReachedThroughLinkedDirectory_ReturnsBadRequest()
+    {
+        // Arrange
+        var root = Path.Combine(Path.GetTempPath(), $"cm-link-{Guid.NewGuid():N}");
+        var watchedDir = Path.Combine(root, "watched");
+        var outsideDir = Path.Combine(root, "outside");
+        System.IO.Directory.CreateDirectory(watchedDir);
+        System.IO.Directory.CreateDirectory(outsideDir);
+        var outsideFile = Path.Combine(outsideDir, "book.cbz");
+        await File.WriteAllTextAsync(outsideFile, "external");
+        var linkedDir = Path.Combine(watchedDir, "linked");
+
+        try
+        {
+            System.IO.Directory.CreateSymbolicLink(linkedDir, outsideDir);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            // The platform/filesystem does not allow creating links here.
+            try { System.IO.Directory.Delete(root, true); } catch { }
+            return;
+        }
+
+        try
+        {
+            _mockSettings.Setup(s => s.CurrentValue).Returns(new AppSettings { WatchedDirectory = watchedDir });
+
+            // Act
+            var result = await _controller.DeleteFile(Path.Combine(linkedDir, "book.cbz"));
+
+            // Assert
+            var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal("File path is outside the allowed directory", badRequestResult.Value);
+            Assert.True(File.Exists(outsideFile));
+            _mockFileStore.Verify(fs => fs.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(linkedDir); } catch { }
+            try { System.IO.Directory.Delete(root, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task DeleteFileByEncodedPath_WithExternalTargetReachedThroughLinkedDirectory_ReturnsBadRequest()
+    {
+        // Arrange
+        var root = Path.Combine(Path.GetTempPath(), $"cm-link-{Guid.NewGuid():N}");
+        var watchedDir = Path.Combine(root, "watched");
+        var outsideDir = Path.Combine(root, "outside");
+        System.IO.Directory.CreateDirectory(watchedDir);
+        System.IO.Directory.CreateDirectory(outsideDir);
+        var outsideFile = Path.Combine(outsideDir, "book.cbz");
+        await File.WriteAllTextAsync(outsideFile, "external");
+        var linkedDir = Path.Combine(watchedDir, "linked");
+
+        try
+        {
+            System.IO.Directory.CreateSymbolicLink(linkedDir, outsideDir);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            // The platform/filesystem does not allow creating links here.
+            try { System.IO.Directory.Delete(root, true); } catch { }
+            return;
+        }
+
+        try
+        {
+            _mockSettings.Setup(s => s.CurrentValue).Returns(new AppSettings { WatchedDirectory = watchedDir });
+            var encodedPath = EncodeFilePathForUrl(Path.Combine(linkedDir, "book.cbz"));
+
+            // Act
+            var result = await _controller.DeleteFileByEncodedPath(encodedPath);
+
+            // Assert
+            var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
+            Assert.Equal("File path is outside the allowed directory", badRequestResult.Value);
+            Assert.True(File.Exists(outsideFile));
+            _mockFileStore.Verify(fs => fs.RemoveFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            try { System.IO.Directory.Delete(linkedDir); } catch { }
+            try { System.IO.Directory.Delete(root, true); } catch { }
+        }
+    }
+
     // New RESTful endpoint tests
 
     [Fact]

@@ -283,14 +283,32 @@ public class LogsControllerTests : IDisposable
         var logFile = Path.Combine(_testLogDir, "debug.log");
         File.WriteAllText(logFile, "Some content");
 
-        // Act
-        var result = _controller.GetLogs(type: "debug", filename: "nonexistent.log");
+        // Act - a name matching the requested log type, but with no file on disk
+        var result = _controller.GetLogs(type: "debug", filename: "debug-missing.log");
 
         // Assert
         var okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.NotNull(okResult.Value);
         var content = okResult.Value.GetType().GetProperty("content")?.GetValue(okResult.Value) as string;
         Assert.Contains("not found", content);
+    }
+
+    [Fact]
+    public void GetLogs_WithMissingFilenameNotMatchingType_ReturnsErrorMessage()
+    {
+        // Arrange
+        var logFile = Path.Combine(_testLogDir, "debug.log");
+        File.WriteAllText(logFile, "Some content");
+
+        // Act - the type check runs before the directory lookup, so a missing
+        // file whose name does not match the type reports the mismatch
+        var result = _controller.GetLogs(type: "debug", filename: "nonexistent.log");
+
+        // Assert
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.NotNull(okResult.Value);
+        var content = okResult.Value.GetType().GetProperty("content")?.GetValue(okResult.Value) as string;
+        Assert.Contains("does not match", content);
     }
 
     [Fact]

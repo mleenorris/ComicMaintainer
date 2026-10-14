@@ -1559,7 +1559,7 @@
                          <button class="btn" onclick="openDuplicateReader()">📖 Read Comic</button>
                          <button class="btn" id="duplicateReviewReadToggleBtn" onclick="toggleDuplicateReadStatus()">✅ Mark Read</button>
                          <button class="btn btn-danger" onclick="deleteCurrentDuplicate()">🗑️ Delete Duplicate</button>
-                         <button class="btn btn-danger" id="duplicateReviewDeleteAllBtn" onclick="deleteAllDuplicates()">🗑️ Delete All Duplicates</button>
+                         <button class="btn btn-danger" id="duplicateReviewDeleteAllBtn" onclick="deleteAllDuplicates()" data-requires-write>🗑️ Delete All Duplicates</button>
                      </div>
                      <div class="duplicate-review-tip">
                          Review duplicates one-by-one, inspect their metadata, and delete the copy you do not want to keep.

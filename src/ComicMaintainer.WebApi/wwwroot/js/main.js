@@ -633,6 +633,7 @@
         let progressResultElements = new Map();
         let duplicateReviewFiles = [];
         let duplicateReviewIndex = 0;
+        let duplicateReviewLoadId = 0;
         let combineFolderGroups = [];
         let combineFolderIndex = 0;
         let combineFolderSelectedDestination = null;
@@ -5221,27 +5222,33 @@
 
         // Open the duplicate review modal and optionally focus a specific duplicate file when provided.
         async function openDuplicateReviewModal(initialFilepath = null) {
+            const loadId = ++duplicateReviewLoadId;
             const modal = document.getElementById('duplicateReviewModal');
             const emptyState = document.getElementById('duplicateReviewEmptyState');
             const content = document.getElementById('duplicateReviewContent');
 
+            duplicateReviewFiles = [];
+            duplicateReviewIndex = 0;
             modal.classList.add('active');
             emptyState.style.display = 'none';
             emptyState.textContent = 'No duplicate files are waiting for review.';
             content.style.display = 'block';
             document.getElementById('duplicateReviewName').textContent = 'Loading duplicates...';
             document.getElementById('duplicateReviewPath').textContent = '';
+            updateDuplicateReviewNavigation();
 
             try {
                 const response = await fetch(apiUrl('/api/files?filter=duplicates&per_page=-1&sort=name'), {
                     headers: getAuthHeaders()
                 });
+                if (loadId !== duplicateReviewLoadId) return;
                 if (handleAuthError(response)) return;
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
                 const data = await response.json();
+                if (loadId !== duplicateReviewLoadId) return;
                 duplicateReviewFiles = Array.isArray(data.files) ? data.files : [];
 
                 if (duplicateReviewFiles.length === 0) {
@@ -5257,6 +5264,7 @@
                 duplicateReviewIndex = matchedIndex >= 0 ? matchedIndex : 0;
                 renderDuplicateReviewItem();
             } catch (error) {
+                if (loadId !== duplicateReviewLoadId) return;
                 console.error('Failed to load duplicates for review:', error);
                 emptyState.style.display = 'block';
                 emptyState.textContent = `Failed to load duplicates: ${error.message}`;
@@ -5266,6 +5274,7 @@
         }
 
         function closeDuplicateReviewModal() {
+            duplicateReviewLoadId++;
             document.getElementById('duplicateReviewModal').classList.remove('active');
         }
 

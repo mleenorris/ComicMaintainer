@@ -47,6 +47,7 @@ public class DuplicateReviewBulkDeleteTests
 
         Assert.True(button.Success, "Expected a #duplicateReviewDeleteAllBtn button in the duplicate review modal.");
         Assert.Contains("onclick=\"deleteAllDuplicates()\"", button.Value);
+        Assert.Contains("data-requires-write", button.Value);
     }
 
     [Fact]
@@ -77,5 +78,20 @@ public class DuplicateReviewBulkDeleteTests
         var body = js.Substring(start, Math.Min(1200, js.Length - start));
         Assert.Contains("duplicateReviewDeleteAllBtn", body);
         Assert.Matches(new Regex(@"deleteAllBtn\.disabled\s*=\s*total\s*===\s*0"), body);
+    }
+
+    [Fact]
+    public void MainJs_DuplicateReviewReloadClearsStateAndIgnoresStaleResponses()
+    {
+        var js = Read("js", "main.js");
+
+        var start = js.IndexOf("async function openDuplicateReviewModal(", StringComparison.Ordinal);
+        Assert.True(start >= 0, "Expected openDuplicateReviewModal in main.js");
+
+        var body = js.Substring(start, Math.Min(3000, js.Length - start));
+        Assert.Contains("const loadId = ++duplicateReviewLoadId;", body);
+        Assert.Contains("duplicateReviewFiles = [];", body);
+        Assert.Contains("updateDuplicateReviewNavigation();", body);
+        Assert.Contains("if (loadId !== duplicateReviewLoadId) return;", body);
     }
 }

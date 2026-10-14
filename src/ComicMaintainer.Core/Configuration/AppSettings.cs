@@ -70,6 +70,19 @@ public class AppSettings
     public bool EnableAniListMetadata { get; set; }
     public string AniListBaseUrl { get; set; } = "https://graphql.anilist.co";
 
+    // Suwayomi (Tachiyomi server) download integration. When enabled, the
+    // service can ask a Suwayomi server to download the issues a series is
+    // missing; Suwayomi's own download directory is expected to be visible to
+    // this service (e.g. mounted inside the watched directory).
+    public bool EnableSuwayomi { get; set; }
+    public string SuwayomiBaseUrl { get; set; } = "http://localhost:4567";
+
+    /// <summary>Optional user name when the Suwayomi server requires basic auth.</summary>
+    public string? SuwayomiUsername { get; set; }
+
+    /// <summary>Optional password paired with <see cref="SuwayomiUsername"/>. Treated as a secret.</summary>
+    public string? SuwayomiPassword { get; set; }
+
     /// <summary>
     /// Client-side rate limit for MangaDex API requests. MangaDex enforces a
     /// global limit of 5 requests/second per IP; we default to 4/sec to leave

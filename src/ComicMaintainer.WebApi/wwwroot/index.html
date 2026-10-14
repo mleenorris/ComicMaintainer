@@ -1153,6 +1153,38 @@
                     <label for="aniListBaseUrl">AniList GraphQL Endpoint</label>
                     <input type="text" id="aniListBaseUrl" name="aniListBaseUrl" placeholder="https://graphql.anilist.co" autocomplete="off">
                 </div>
+
+                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Suwayomi Downloads</h3>
+                <div class="form-group">
+                    <label for="enableSuwayomiCheckbox" style="display: flex; align-items: center; cursor: pointer;">
+                        <input type="checkbox" id="enableSuwayomiCheckbox" name="enableSuwayomiCheckbox" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                        <span>Enable Suwayomi integration</span>
+                    </label>
+                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        Lets ComicMaintainer ask a <a href="https://github.com/Suwayomi/Suwayomi-Server" target="_blank" rel="noopener noreferrer">Suwayomi</a> server to download the issues a series is missing. Suwayomi saves them to its own download directory, so mount that directory inside the watched directory for the new files to be picked up.
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="suwayomiBaseUrl">Suwayomi Server URL</label>
+                    <input type="text" id="suwayomiBaseUrl" name="suwayomiBaseUrl" placeholder="http://localhost:4567" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="suwayomiUsername">Username (optional)</label>
+                    <input type="text" id="suwayomiUsername" name="suwayomiUsername" placeholder="Only if the server requires basic auth" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="suwayomiPassword">Password (optional)</label>
+                    <input type="password" id="suwayomiPassword" name="suwayomiPassword" placeholder="Enter password" autocomplete="new-password">
+                    <small id="suwayomiPasswordHint" style="display: block; margin-top: 5px; color: var(--text-muted);"></small>
+                    <label for="suwayomiClearPasswordCheckbox" style="display: flex; align-items: center; cursor: pointer; margin-top: 8px;">
+                        <input type="checkbox" id="suwayomiClearPasswordCheckbox" name="suwayomiClearPasswordCheckbox" style="margin-right: 10px; width: 16px; height: 16px; cursor: pointer;">
+                        <span style="font-size: 13px; color: var(--text-muted);">Clear the stored password</span>
+                    </label>
+                </div>
+                <div class="form-group">
+                    <button class="btn" type="button" onclick="testSuwayomiConnection()">🔌 Test Connection</button>
+                    <small id="suwayomiStatusHint" style="display: block; margin-top: 5px; color: var(--text-muted);">Save your settings before testing.</small>
+                </div>
                 
                 <h3 style="margin-bottom: 10px; margin-top: 35px; color: #e74c3c; border-bottom: 2px solid #e74c3c; padding-bottom: 8px;">⚠️ Danger Zone</h3>
                 <div class="form-group" style="border: 2px solid #e74c3c; border-radius: 8px; padding: 20px; background: var(--bg-hover);">

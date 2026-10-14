@@ -30,7 +30,8 @@ public class SettingsService : ISettingsService
     {
         "SmtpPassword",
         "ComicVineApiKey",
-        "ErrorReportingGitHubToken"
+        "ErrorReportingGitHubToken",
+        "SuwayomiPassword"
     };
 
     public SettingsService(
@@ -227,6 +228,57 @@ public class SettingsService : ISettingsService
     public async Task UpdateAniListBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default)
     {
         await UpdateSettingAsync("AniListBaseUrl", baseUrl, cancellationToken);
+    }
+
+    public async Task UpdateSuwayomiSettingsAsync(
+        bool enabled,
+        string? baseUrl,
+        string? username,
+        string? password,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedUrl = string.IsNullOrWhiteSpace(baseUrl) ? null : baseUrl.Trim().TrimEnd('/');
+        if (enabled && normalizedUrl is null)
+        {
+            throw new ArgumentException("A Suwayomi server URL is required to enable the integration", nameof(baseUrl));
+        }
+
+        if (normalizedUrl is not null && !SuwayomiService.TryBuildEndpoint(normalizedUrl, out _))
+        {
+            throw new ArgumentException($"'{normalizedUrl}' is not a valid http(s) URL", nameof(baseUrl));
+        }
+
+        var values = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["EnableSuwayomi"] = enabled,
+            ["SuwayomiBaseUrl"] = normalizedUrl,
+            ["SuwayomiUsername"] = string.IsNullOrWhiteSpace(username) ? null : username.Trim()
+        };
+
+        // A null password means "keep the stored secret"; an empty string clears it.
+        if (password is not null)
+        {
+            values["SuwayomiPassword"] = password.Length == 0 ? null : password;
+        }
+
+        await PersistSettingsAsync(values, cancellationToken);
+
+        foreach (var (settingName, value) in values)
+        {
+            if (SecretSettingNames.Contains(settingName))
+            {
+                _logger.LogInformation(
+                    "Updated setting {SettingName} ({State})",
+                    settingName,
+                    value is null ? "cleared" : "value hidden");
+                continue;
+            }
+
+            var sanitizedValue = value is string strValue
+                ? LoggingHelper.SanitizeForLog(strValue)
+                : value?.ToString() ?? "null";
+            _logger.LogInformation("Updated setting {SettingName} to {Value}", settingName, sanitizedValue);
+        }
     }
 
     public async Task UpdateDefaultPreferredLanguageAsync(string? language, CancellationToken cancellationToken = default)

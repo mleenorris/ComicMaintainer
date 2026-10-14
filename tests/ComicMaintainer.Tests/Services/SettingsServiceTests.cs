@@ -401,6 +401,74 @@ public class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateSuwayomiSettingsAsync_PersistsSettingsAndSecretTogether()
+    {
+        await _service.UpdateSuwayomiSettingsAsync(
+            enabled: true,
+            baseUrl: "http://suwayomi.example:4567/",
+            username: " reader ",
+            password: "a-password-value");
+
+        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+
+        Assert.True(settings["EnableSuwayomi"].GetBoolean());
+        // The trailing slash is normalized away so the GraphQL endpoint is
+        // built from a canonical base URL.
+        Assert.Equal("http://suwayomi.example:4567", settings["SuwayomiBaseUrl"].GetString());
+        Assert.Equal("reader", settings["SuwayomiUsername"].GetString());
+        Assert.Equal("a-password-value", settings["SuwayomiPassword"].GetString());
+    }
+
+    [Fact]
+    public async Task UpdateSuwayomiSettingsAsync_NeverLogsThePassword()
+    {
+        await _service.UpdateSuwayomiSettingsAsync(true, "http://suwayomi.example:4567", "reader", "a-password-value");
+
+        _loggerMock.Verify(
+            l => l.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains("a-password-value")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateSuwayomiSettingsAsync_LeavesTheStoredPasswordAloneWhenOmitted()
+    {
+        await _service.UpdateSuwayomiSettingsAsync(true, "http://suwayomi.example:4567", "reader", "a-password-value");
+        await _service.UpdateSuwayomiSettingsAsync(true, "http://suwayomi.example:4567", "reader", null);
+
+        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+        Assert.Equal("a-password-value", settings["SuwayomiPassword"].GetString());
+    }
+
+    [Fact]
+    public async Task UpdateSuwayomiSettingsAsync_ClearsThePasswordOnEmptyString()
+    {
+        await _service.UpdateSuwayomiSettingsAsync(true, "http://suwayomi.example:4567", "reader", "a-password-value");
+        await _service.UpdateSuwayomiSettingsAsync(true, "http://suwayomi.example:4567", "reader", string.Empty);
+
+        var settings = ReadAppSettingsSection(Path.Combine(_testConfigDir, "user-settings.json"));
+        Assert.Equal(JsonValueKind.Null, settings["SuwayomiPassword"].ValueKind);
+    }
+
+    [Fact]
+    public async Task UpdateSuwayomiSettingsAsync_RefusesToEnableWithoutAUrl()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.UpdateSuwayomiSettingsAsync(true, null, null, null));
+    }
+
+    [Fact]
+    public async Task UpdateSuwayomiSettingsAsync_RejectsAnInvalidUrl()
+    {
+        await Assert.ThrowsAsync<ArgumentException>(
+            () => _service.UpdateSuwayomiSettingsAsync(true, "ftp://suwayomi.example", null, null));
+    }
+
+    [Fact]
     public async Task UpdateErrorReportingSettingsAsync_PersistsSettingsAndSecretTogether()
     {
         await _service.UpdateErrorReportingSettingsAsync(

@@ -109,6 +109,18 @@ public interface ISettingsService
     Task UpdateAniListBaseUrlAsync(string? baseUrl, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Persist the Suwayomi download-server settings. A null
+    /// <paramref name="password"/> leaves the stored password untouched so the
+    /// UI never has to round-trip the secret; pass an empty string to clear it.
+    /// </summary>
+    Task UpdateSuwayomiSettingsAsync(
+        bool enabled,
+        string? baseUrl,
+        string? username,
+        string? password,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Update the global default preferred language used as a fallback when a
     /// series has no per-series language override. Accepts one of <c>en</c>,
     /// <c>ja</c>, <c>ko</c>, <c>zh</c>, or null/empty to clear.

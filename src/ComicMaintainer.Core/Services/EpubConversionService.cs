@@ -805,6 +805,20 @@ public class EpubConversionService : IEpubConversionService
                 return null;
             }
 
+            // Cheaply inspect the header dimensions before a full decode so a
+            // small but enormously sized cached cover (a "decompression bomb")
+            // is rejected without allocating its pixel buffer.
+            var info = new MagickImageInfo(bytes);
+            if (info.Height > 0 && info.Width > MaxDecodedPixels / info.Height)
+            {
+                _logger.LogWarning(
+                    "Series cover {ImagePath} dimensions ({Width}x{Height}) exceed the decode limit; falling back to the first page",
+                    LoggingHelper.SanitizePathForLog(seriesImagePath),
+                    info.Width,
+                    info.Height);
+                return null;
+            }
+
             // MagickImage fully decodes the pixel data rather than just reading the
             // header (as MagickImageInfo does), so a truncated/corrupt cached cover
             // reliably throws here and falls back to the first-page cover below.

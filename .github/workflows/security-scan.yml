@@ -2,130 +2,87 @@ name: Security Vulnerability Scanning
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [ dotnet ]
   pull_request:
-    branches: [ master, main ]
+    branches: [ dotnet ]
   schedule:
     # Run security scans weekly on Monday at 9:00 AM UTC
     - cron: '0 9 * * 1'
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
-  security-scan:
-    name: Security Vulnerability Scan
+  dependency-scan:
+    name: NuGet Dependency Vulnerability Scan
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
-      actions: read
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-      
-      - name: Set up Python
-        uses: actions/setup-python@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
         with:
-          python-version: '3.11'
-      
-      - name: Install dependencies
+          dotnet-version: '10.0.x'
+
+      # The MAUI app is skipped deliberately: it targets net9.0-android and needs the
+      # maui-android workload, which is not installed on the runner.
+      - name: Restore dependencies (excluding MAUI)
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install bandit[toml] pip-audit safety
-      
-      - name: Run Bandit security scan
-        continue-on-error: true
+          dotnet restore src/ComicMaintainer.Core/ComicMaintainer.Core.csproj
+          dotnet restore src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj
+          dotnet restore tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
+
+      - name: Check for vulnerable NuGet packages
+        env:
+          # Advisories that are known, reviewed and cannot be patched without breaking the
+          # build. Review these whenever the pinned packages can finally be upgraded.
+          #   GHSA-j3p4-wp97-rph4, GHSA-j9gm-c75j-xc9q, GHSA-jjfr-hcj7-qf5w:
+          #     ImageSharp TIFF encoder / histogram issues, fixed only in 4.1.2, which needs a
+          #     paid Six Labors license key. The app never encodes TIFF and never runs
+          #     histogram equalization.
+          ACCEPTED_ADVISORIES: "GHSA-j3p4-wp97-rph4 GHSA-j9gm-c75j-xc9q GHSA-jjfr-hcj7-qf5w"
         run: |
-          bandit -r src/ -f json -o bandit-report.json
-          bandit -r src/ -f txt -o bandit-report.txt
-      
-      - name: Upload Bandit results
+          set -o pipefail
+          : > nuget-vulnerabilities.txt
+          for project in \
+            src/ComicMaintainer.Core/ComicMaintainer.Core.csproj \
+            src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj \
+            tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
+          do
+            dotnet list "$project" package --vulnerable --include-transitive \
+              | tee -a nuget-vulnerabilities.txt
+          done
+
+          # "dotnet list package --vulnerable" exits 0 whether or not anything was found, so the
+          # report text decides the outcome: High and Critical advisories fail the build unless
+          # they are accepted above; anything lower is reported and triaged.
+          blocking=$(awk -v accepted="$ACCEPTED_ADVISORIES" '
+            /https:\/\/github.com\/advisories\// {
+              url = $NF
+              severity = $(NF - 1)
+              n = split(url, parts, "/")
+              id = parts[n]
+              if (severity != "High" && severity != "Critical") next
+              if (index(" " accepted " ", " " id " ") > 0) next
+              print severity, id
+            }' nuget-vulnerabilities.txt | sort -u)
+
+          if [ -n "$blocking" ]; then
+            echo "❌ Unaccepted high or critical vulnerabilities found:"
+            echo "$blocking"
+            exit 1
+          fi
+          echo "✅ No unaccepted high or critical NuGet vulnerabilities found"
+
+      - name: Upload dependency scan report
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: bandit-security-report
-          path: |
-            bandit-report.json
-            bandit-report.txt
+          name: nuget-vulnerability-report
+          path: nuget-vulnerabilities.txt
           retention-days: 30
-      
-      - name: Run pip-audit for dependency vulnerabilities
-        continue-on-error: true
-        run: |
-          pip-audit -r requirements.txt --format json --output pip-audit-report.json || true
-          pip-audit -r requirements.txt --format markdown --output pip-audit-report.md || true
-      
-      - name: Upload pip-audit results
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: pip-audit-report
-          path: |
-            pip-audit-report.json
-            pip-audit-report.md
-          retention-days: 30
-      
-      - name: Check for critical vulnerabilities
-        run: |
-          echo "=== Bandit Security Scan Summary ==="
-          if [ -f bandit-report.txt ]; then
-            tail -20 bandit-report.txt
-          fi
-          
-          echo ""
-          echo "=== Dependency Vulnerability Summary ==="
-          if [ -f pip-audit-report.json ]; then
-            python3 -c "
-          import json
-          import sys
-          with open('pip-audit-report.json', 'r') as f:
-              data = json.load(f)
-          
-          total_vulns = sum(len(dep.get('vulns', [])) for dep in data.get('dependencies', []))
-          
-          if total_vulns > 0:
-              print(f'❌ Found {total_vulns} known vulnerabilities in dependencies')
-              for dep in data.get('dependencies', []):
-                  if dep.get('vulns'):
-                      print(f\"  - {dep['name']} {dep['version']}: {len(dep['vulns'])} vulnerabilities\")
-              sys.exit(1)
-          else:
-              print('✅ No known vulnerabilities found in dependencies')
-          "
-          else
-            echo "⚠️  pip-audit report not found"
-          fi
-      
-      - name: Generate security summary
-        if: always()
-        run: |
-          echo "# Security Scan Summary" > security-summary.md
-          echo "" >> security-summary.md
-          echo "**Scan Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> security-summary.md
-          echo "" >> security-summary.md
-          
-          if [ -f bandit-report.txt ]; then
-            echo "## Bandit Code Security Scan" >> security-summary.md
-            echo '```' >> security-summary.md
-            tail -30 bandit-report.txt >> security-summary.md
-            echo '```' >> security-summary.md
-          fi
-          
-          echo "" >> security-summary.md
-          
-          if [ -f pip-audit-report.md ]; then
-            echo "## Dependency Vulnerability Scan" >> security-summary.md
-            cat pip-audit-report.md >> security-summary.md
-          fi
-      
-      - name: Upload security summary
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: security-summary
-          path: security-summary.md
-          retention-days: 90
 
   docker-security-scan:
     name: Docker Image Security Scan
@@ -133,46 +90,49 @@ jobs:
     permissions:
       contents: read
       security-events: write
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-      
+
       - name: Build Docker image for scanning
         uses: docker/build-push-action@v7
         with:
           context: .
+          file: ./Dockerfile.dotnet
           push: false
-          tags: comictagger-watcher:latest
+          tags: comicmaintainer:scan
           load: true
-      
+
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'comictagger-watcher:latest'
+          image-ref: 'comicmaintainer:scan'
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH,MEDIUM'
-      
+
+      # Trivy results are a third-party SARIF upload, which GitHub accepts alongside the
+      # CodeQL default setup.
       - name: Upload Trivy results to GitHub Security tab
-        if: always()
+        if: always() && hashFiles('trivy-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results.sarif'
-      
+
       - name: Run Trivy vulnerability scanner (table format)
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'comictagger-watcher:latest'
+          image-ref: 'comicmaintainer:scan'
           format: 'table'
           output: 'trivy-results.txt'
           severity: 'CRITICAL,HIGH,MEDIUM'
-      
+
       - name: Upload Trivy results
-        if: always()
+        if: always() && hashFiles('trivy-results.txt') != ''
         uses: actions/upload-artifact@v7
         with:
           name: trivy-security-report

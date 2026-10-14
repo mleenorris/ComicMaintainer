@@ -20,9 +20,13 @@
     <!-- Stay on 0.41.x: 0.46+ replaced the static ZipArchive/RarArchive/ArchiveFactory.Open
          factory methods with SharpCompress.Factories, which the archive services still use. -->
     <PackageReference Include="SharpCompress" Version="0.41.0" />
-    <!-- Stay on 3.1.x: ImageSharp 4.x requires a paid Six Labors license key and fails the
-         build with "No Six Labors license found". -->
+    <!-- Stay on 3.1.x: ImageSharp 3.2+ and 4.x require a paid Six Labors license key and fail
+         the build with "No Six Labors license found". -->
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.12" />
+    <!-- Pulled in transitively by MailKit/MimeKit, which still ask for 10.0.0. That version is
+         affected by CVE-2026-84008 (.NET denial of service), fixed in 10.0.13, so the floor is
+         raised explicitly here. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
     <PackageReference Include="System.Threading.RateLimiting" Version="10.0.12" />
   </ItemGroup>
 

@@ -828,9 +828,9 @@ This project implements automated security vulnerability scanning to ensure code
 
 The project uses multiple security scanning tools:
 
-1. **Bandit** - Scans Python code for common security issues
-2. **pip-audit** - Checks dependencies for known vulnerabilities
-3. **Trivy** - Scans Docker images for OS and library vulnerabilities
+1. **CodeQL** - Static analysis of C# and JavaScript, run through GitHub code scanning default setup
+2. **`dotnet list package --vulnerable`** - Checks NuGet dependencies for known vulnerabilities
+3. **Trivy** - Scans the Docker image for OS and library vulnerabilities
 
 Security scans run automatically:
 - On every push and pull request
@@ -840,19 +840,14 @@ Security scans run automatically:
 ### Running Security Scans Locally
 
 ```bash
-# Install security tools
-pip install -r requirements-dev.txt
-
-# Scan code for security issues
-bandit -r src/
-
 # Check dependencies for vulnerabilities
-pip-audit -r requirements.txt
+dotnet restore src/ComicMaintainer.Core/ComicMaintainer.Core.csproj
+dotnet list src/ComicMaintainer.Core/ComicMaintainer.Core.csproj package --vulnerable --include-transitive
 
 # Scan Docker image
-docker build -t comictagger-watcher:scan .
+docker build -f Dockerfile.dotnet -t comicmaintainer:scan .
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-  aquasec/trivy image comictagger-watcher:scan
+  aquasec/trivy image comicmaintainer:scan
 ```
 
 For more information, see [SECURITY.md](SECURITY.md).

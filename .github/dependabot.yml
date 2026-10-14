@@ -16,10 +16,12 @@ updates:
     labels:
       - dependencies
     ignore:
-      # ImageSharp 4.x requires a paid Six Labors license key; builds fail without one.
+      # ImageSharp 3.2+ and 4.x require a paid Six Labors license key; without one the build
+      # fails with "No Six Labors license found", so only 3.1.x patches are accepted.
       - dependency-name: "SixLabors.ImageSharp"
         update-types:
           - version-update:semver-major
+          - version-update:semver-minor
       # SharpCompress 0.46+ removed the static archive Open/Create factory methods the
       # archive services are written against, so these bumps do not compile.
       - dependency-name: "SharpCompress"

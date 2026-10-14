@@ -68,6 +68,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so free disk space read as "84258.8 MB".
 
 ### Fixed
+- **CodeQL and the security scan workflow no longer fail on every run.** Code scanning is
+  configured through CodeQL *default setup* in the repository settings, and GitHub refuses
+  results from an advanced configuration while that is enabled — so `codeql-analysis.yml`
+  ended every run (including each Dependabot pull request) with "CodeQL analyses from advanced
+  configurations cannot be processed when the default setup is enabled". That workflow has been
+  removed in favour of default setup, which already scans C# and JavaScript. `security-scan.yml`
+  was still the Python-branch version: it installed `requirements.txt` and built a root
+  `Dockerfile`, neither of which exists here, so both of its jobs failed immediately. It now
+  runs on the `dotnet` branch, checks NuGet packages with
+  `dotnet list package --vulnerable --include-transitive`, and scans the image built from
+  `Dockerfile.dotnet` with Trivy. Dependabot also stopped proposing `SixLabors.ImageSharp`
+  minor bumps, because 3.2.0 began requiring a paid Six Labors license key and fails the build.
 - **Condensed downloads no longer die at 30 seconds, and a timeout now files an issue.** Every
   request in the application was capped by a 30 second default timeout policy, and because the
   timeout middleware ran *before* routing it could never see an endpoint's own policy — so the

@@ -15,17 +15,15 @@ This project implements automated security scanning to identify and address vuln
 
 ### Automated Scans
 
-1. **Code Security Scanning (Bandit)**
-   - Scans Python code for common security issues
+1. **Code Security Scanning (CodeQL)**
+   - Scans C# and JavaScript for security issues
+   - Runs through GitHub code scanning default setup on pushes, pull requests and a schedule
+   - Results available in the GitHub Security tab
+
+2. **Dependency Vulnerability Scanning (`dotnet list package --vulnerable`)**
+   - Checks NuGet dependencies, including transitive ones, against the GitHub Advisory Database
    - Runs on every push and pull request
    - Weekly scheduled scans on Monday at 9:00 AM UTC
-   - Results available in GitHub Actions artifacts
-
-2. **Dependency Vulnerability Scanning (pip-audit)**
-   - Checks Python dependencies for known vulnerabilities
-   - Scans against the Python Packaging Advisory Database
-   - Runs on every push and pull request
-   - Weekly scheduled scans
 
 3. **Docker Image Security Scanning (Trivy)**
    - Scans the Docker image for OS and library vulnerabilities
@@ -37,37 +35,24 @@ This project implements automated security scanning to identify and address vuln
 
 You can run security scans locally before submitting code:
 
-#### Install Security Tools
-```bash
-pip install bandit pip-audit
-```
-
-#### Run Code Security Scan
-```bash
-# Scan with Bandit
-bandit -r src/ -f txt
-
-# Scan with detailed output
-bandit -r src/ -f json -o bandit-report.json
-```
-
 #### Run Dependency Security Scan
 ```bash
 # Check dependencies for vulnerabilities
-pip-audit -r requirements.txt
+dotnet restore src/ComicMaintainer.Core/ComicMaintainer.Core.csproj
+dotnet list src/ComicMaintainer.Core/ComicMaintainer.Core.csproj package --vulnerable --include-transitive
 
-# Generate detailed report
-pip-audit -r requirements.txt --format json --output pip-audit-report.json
+# Packages that are no longer maintained
+dotnet list src/ComicMaintainer.WebApi/ComicMaintainer.WebApi.csproj package --deprecated
 ```
 
 #### Run Docker Image Scan
 ```bash
 # Build the image
-docker build -t comictagger-watcher:scan .
+docker build -f Dockerfile.dotnet -t comicmaintainer:scan .
 
 # Scan with Trivy
 docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-  aquasec/trivy image comictagger-watcher:scan
+  aquasec/trivy image comicmaintainer:scan
 ```
 
 ## Reporting a Vulnerability
@@ -214,8 +199,8 @@ This project aims to follow security best practices including:
 - [Docker Security Best Practices](https://docs.docker.com/engine/security/)
 - [OWASP Top 10](https://owasp.org/www-project-top-ten/)
 - [Python Security](https://python.readthedocs.io/en/stable/library/security_warnings.html)
-- [Bandit Documentation](https://bandit.readthedocs.io/)
-- [pip-audit Documentation](https://pypi.org/project/pip-audit/)
+- [CodeQL Documentation](https://codeql.github.com/docs/)
+- [`dotnet list package` Documentation](https://learn.microsoft.com/dotnet/core/tools/dotnet-list-package)
 
 ## Version History
 

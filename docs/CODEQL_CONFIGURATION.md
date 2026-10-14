@@ -1,128 +1,45 @@
 # CodeQL Configuration
 
-This document explains the CodeQL security scanning configuration for the ComicMaintainer repository.
+This document explains how CodeQL security scanning is configured for the ComicMaintainer repository.
 
-## Overview
+## Current setup: CodeQL default setup
 
-The repository uses branch-aware CodeQL analysis to scan for security vulnerabilities in the appropriate languages for each branch:
+CodeQL runs through GitHub's **default setup**, which is enabled in the repository settings
+(*Settings → Code security → Code scanning → CodeQL analysis*). GitHub chooses the languages,
+builds C# in `none` build mode and runs the analysis on pushes, pull requests and on a schedule.
 
-- **dotnet branch**: Analyzes C# and JavaScript code (for .NET projects)
-- **master and python branches**: Analyzes Python and JavaScript code
+There is intentionally **no CodeQL workflow file** in `.github/workflows`. A repository can only
+use one of the two configurations at a time: while default setup is enabled, any advanced
+workflow that uploads CodeQL results fails with
 
-## Workflow Configuration
+```
+Code Scanning could not process the submitted SARIF file:
+CodeQL analyses from advanced configurations cannot be processed when the default setup is enabled
+```
 
-The CodeQL workflow is defined in `.github/workflows/codeql-analysis.yml` and consists of two separate jobs:
+The former `.github/workflows/codeql-analysis.yml` failed this way on every run (including every
+Dependabot pull request), so it was removed in favour of default setup.
 
-### 1. analyze-dotnet Job
-
-**Triggers**: Runs when the branch is `dotnet` or when a PR targets `dotnet`
-
-**Languages Analyzed**:
-- **C#**: For .NET Core/ASP.NET Core code
-- **JavaScript**: For frontend and Node.js code
-
-**Build Process**:
-- Sets up .NET 10.0.x
-- Restores dependencies for Core, WebApi, and Tests projects (excluding MAUI)
-- Builds projects in Release configuration
-
-**Path Exclusions**:
-- `**/node_modules` - Node.js dependencies
-- `**/wwwroot/lib` - Frontend libraries
-- `**/bin`, `**/obj` - Build artifacts
-- `**/coveragereport` - Test coverage reports
-- `**/*.min.js`, `**/*.min.css` - Minified files
-
-### 2. analyze-python Job
-
-**Triggers**: Runs when the branch is `master` or `python`, or when a PR targets these branches
-
-**Languages Analyzed**:
-- **Python**: For Python application code
-- **JavaScript**: For frontend code
-
-**Setup Process**:
-- Sets up Python 3.11
-- Installs dependencies from requirements.txt
-- Uses pip caching for faster builds
-
-**Path Exclusions**:
-- `**/node_modules` - Node.js dependencies
-- `**/__pycache__` - Python bytecode cache
-- `**/*.pyc` - Python compiled files
-- `**/venv`, `**/.venv` - Python virtual environments
-- `**/*.min.js`, `**/*.min.css` - Minified files
-
-## Triggers
-
-The workflow runs on:
-
-1. **Push events**: When code is pushed to master, main, dotnet, or python branches
-2. **Pull request events**: When PRs target master, main, dotnet, or python branches
-3. **Scheduled scans**: Weekly on Wednesdays at 3:00 AM UTC (cron: `0 3 * * 3`)
-4. **Manual triggers**: Can be triggered manually via workflow_dispatch
-
-## Query Suite
-
-Both jobs use the `security-and-quality` query suite, which includes:
-- Security vulnerability detection
-- Code quality checks
-- Best practice violations
-- Common coding errors
-
-## Timeouts
-
-- **Job timeout**: 60 minutes
-- **Analysis timeout**: 30 minutes per language
-
-## Results
-
-- Results are uploaded to GitHub Security tab
-- Analysis summaries are stored as artifacts for 90 days
-- Separate artifact names distinguish between branches:
-  - `codeql-summary-dotnet-{language}` for dotnet branch
-  - `codeql-summary-python-{language}` for master/python branches
-
-## Benefits of Branch-Aware Configuration
-
-1. **Accuracy**: Analyzes only the languages present in each branch
-2. **Performance**: Avoids trying to analyze non-existent code
-3. **Clarity**: Clear separation of analysis results by branch/language
-4. **Maintainability**: Single workflow file manages all branches
-
-## Viewing Results
+## Viewing results
 
 1. Navigate to the repository's **Security** tab
-2. Click on **Code scanning alerts**
-3. Filter by branch, language, or severity as needed
-4. Click on individual alerts for detailed information and remediation guidance
+2. Click **Code scanning alerts**
+3. Filter by branch, tool or severity as needed
 
-## Important Notes
+## Switching back to an advanced configuration
 
-### Requirements Files
+An advanced workflow is only needed for things default setup cannot express, such as a custom
+query suite (`security-and-quality`), custom path filters, or a hand-written build for the
+C# projects that skips the MAUI app. To switch:
 
-- **dotnet branch**: Uses .csproj files for dependency management (no requirements.txt)
-- **master/python branches**: Uses requirements.txt for Python dependencies
-- The workflow includes a check (`if [ -f requirements.txt ]`) to handle branches that don't have this file
+1. In *Settings → Code security → Code scanning*, set **CodeQL analysis** to **Advanced**
+   (or disable default setup). This step must happen first; otherwise the workflow's uploads
+   are rejected.
+2. Add a workflow that calls `github/codeql-action/init`, builds the projects and calls
+   `github/codeql-action/analyze`.
+3. Update this document to describe the workflow.
 
-### Branch Support
+## Other security scanning
 
-The workflow explicitly supports:
-- `dotnet` - For C#/.NET projects
-- `master`, `main`, `python` - For Python projects
-
-### Event Types
-
-The workflow runs on all event types:
-- **Push events**: Triggers when code is pushed to monitored branches
-- **Pull requests**: Triggers when PRs target monitored branches  
-- **Scheduled scans**: Runs weekly on all monitored branches
-- **Manual triggers**: Can be triggered manually on any monitored branch
-
-## Maintenance
-
-When adding new branches with different languages:
-1. Add a new job in the workflow file
-2. Configure appropriate language matrix
-3. Add conditional logic based on branch name
-4. Update this documentation
+Dependency and container scanning are covered by `.github/workflows/security-scan.yml`; see
+[SECURITY_SCANNING.md](SECURITY_SCANNING.md).

@@ -5274,10 +5274,17 @@
             const counter = document.getElementById('duplicateReviewCounter');
             const prevBtn = document.getElementById('duplicateReviewPrevBtn');
             const nextBtn = document.getElementById('duplicateReviewNextBtn');
+            const deleteAllBtn = document.getElementById('duplicateReviewDeleteAllBtn');
 
             counter.textContent = total > 0 ? `${duplicateReviewIndex + 1} of ${total}` : '0 of 0';
             prevBtn.disabled = total === 0 || duplicateReviewIndex <= 0;
             nextBtn.disabled = total === 0 || duplicateReviewIndex >= total - 1;
+            if (deleteAllBtn) {
+                deleteAllBtn.disabled = total === 0;
+                deleteAllBtn.textContent = total > 0
+                    ? `🗑️ Delete All ${total} Duplicates`
+                    : '🗑️ Delete All Duplicates';
+            }
         }
 
         function renderDuplicateReviewItem() {
@@ -5362,6 +5369,61 @@
 
             await deleteSingleFile(file.relative_path);
             await openDuplicateReviewModal();
+        }
+
+        // Delete every file currently marked as a duplicate in one background
+        // job instead of stepping through them one-by-one.
+        async function deleteAllDuplicates() {
+            const paths = duplicateReviewFiles
+                .map(file => file.relative_path)
+                .filter(path => typeof path === 'string' && path.length > 0);
+
+            if (paths.length === 0) {
+                showMessage('No duplicates to delete', 'error');
+                return;
+            }
+
+            if (!confirm(`Are you sure you want to delete all ${paths.length} file(s) marked as duplicates?\n\nThis action cannot be undone!`)) {
+                return;
+            }
+
+            closeDuplicateReviewModal();
+            showProgressModal(`Deleting ${paths.length} duplicate(s)...`);
+
+            try {
+                const response = await fetch(apiUrl('/api/jobs/delete-selected'), {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
+                    },
+                    body: JSON.stringify({ Files: paths })
+                });
+
+                if (handleAuthError(response)) {
+                    closeProgressModal();
+                    return;
+                }
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.error || `Failed to start delete job (HTTP ${response.status})`);
+                }
+
+                const data = await response.json();
+                const jobId = data.jobId || data.job_id;
+                const totalItems = data.totalItems || data.total_items || paths.length;
+
+                duplicateReviewFiles = [];
+                duplicateReviewIndex = 0;
+
+                showMessage(`Deleting ${totalItems} duplicate(s) in background`, 'info');
+                await trackJobStatus(jobId, `Deleting ${totalItems} duplicate(s)...`);
+            } catch (error) {
+                console.error('[DUPLICATES] Error starting delete-all job:', error);
+                showMessage('Failed to start delete: ' + error.message, 'error');
+                closeProgressModal();
+            }
         }
 
         // Per-series folder list state. Holds the latest response from

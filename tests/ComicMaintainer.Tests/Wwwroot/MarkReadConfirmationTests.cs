@@ -37,25 +37,38 @@ public class MarkReadConfirmationTests
     }
 
     [Theory]
-    [InlineData("markAllFilesRead")]
-    [InlineData("markAllFilesUnread")]
-    [InlineData("markSelectedFilesRead")]
-    [InlineData("markSelectedFilesUnread")]
-    public void BulkReadStatusAction_ConfirmsBeforeSendingTheBatchRequest(string functionName)
+    [InlineData("markAllFilesRead", "EVERY file in the library as read", "overwrites the read status of all files and cannot be undone")]
+    [InlineData("markAllFilesUnread", "EVERY file in the library as unread", "clears the read status of all files and cannot be undone")]
+    [InlineData("markSelectedFilesRead", "selected file", "overwrites the current read status and cannot be undone")]
+    [InlineData("markSelectedFilesUnread", "selected file", "clears the current read status and cannot be undone")]
+    public void BulkReadStatusAction_ConfirmsBeforeSendingTheBatchRequest(
+        string functionName,
+        string expectedScope,
+        string expectedImpact)
     {
         var contents = ReadMainJs();
 
         var start = contents.IndexOf($"async function {functionName}(", StringComparison.Ordinal);
         Assert.True(start >= 0, $"Expected main.js to define {functionName}");
 
-        var fetchIndex = contents.IndexOf("read-batch", start, StringComparison.Ordinal);
-        Assert.True(fetchIndex > start, $"Expected {functionName} to call the read-batch endpoint");
+        var nextFunction = contents.IndexOf("\n        async function ", start + 1, StringComparison.Ordinal);
+        var end = nextFunction >= 0 ? nextFunction : contents.Length;
+        var body = contents[start..end];
 
-        var body = contents[start..fetchIndex];
+        var fetchIndex = body.IndexOf("read-batch", StringComparison.Ordinal);
+        Assert.True(fetchIndex >= 0, $"Expected {functionName} to call the read-batch endpoint");
 
+        var confirmation = Regex.Match(
+            body,
+            @"if\s*\(\s*!\s*confirm\((?<prompt>.*?)\)\s*\)\s*\{\s*return;\s*\}",
+            RegexOptions.Singleline);
         Assert.True(
-            Regex.IsMatch(body, @"if\s*\(\s*!\s*confirm\("),
-            $"{functionName} must prompt for confirmation (if (!confirm(...)) return;) before changing read status, " +
-            "so an accidental click does not set or clear read state in bulk.");
+            confirmation.Success,
+            $"{functionName} must return when its confirmation prompt is canceled.");
+        Assert.True(
+            confirmation.Index < fetchIndex,
+            $"{functionName} must confirm before calling the read-batch endpoint.");
+        Assert.Contains(expectedScope, confirmation.Groups["prompt"].Value);
+        Assert.Contains(expectedImpact, confirmation.Groups["prompt"].Value);
     }
 }

@@ -7394,7 +7394,7 @@
         }
 
         async function markAllFilesRead() {
-            if (!confirm('Mark all files as read?')) {
+            if (!confirm('Mark EVERY file in the library as read?\n\nThis overwrites the read status of all files and cannot be undone.')) {
                 return;
             }
             
@@ -7424,7 +7424,7 @@
         }
         
         async function markAllFilesUnread() {
-            if (!confirm('Mark all files as unread?')) {
+            if (!confirm('Mark EVERY file in the library as unread?\n\nThis clears the read status of all files and cannot be undone.')) {
                 return;
             }
             
@@ -7458,6 +7458,10 @@
                 showMessage('No files selected', 'warning');
                 return;
             }
+
+            if (!confirm(`Mark ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''} as read?\n\nThis overwrites the current read status and cannot be undone.`)) {
+                return;
+            }
             
             try {
                 showMessage('Marking selected files as read...', 'info');
@@ -7487,6 +7491,10 @@
         async function markSelectedFilesUnread() {
             if (selectedFiles.size === 0) {
                 showMessage('No files selected', 'warning');
+                return;
+            }
+
+            if (!confirm(`Mark ${selectedFiles.size} selected file${selectedFiles.size > 1 ? 's' : ''} as unread?\n\nThis clears the current read status and cannot be undone.`)) {
                 return;
             }
             

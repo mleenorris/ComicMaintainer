@@ -4,8 +4,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Logging;
 using Moq;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Jpeg;
+using ImageMagick;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -458,14 +457,11 @@ public class EpubConversionServiceTests : IDisposable
         var cbz = Path.Combine(_workDir, "webp.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
-            using var image = new Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(20, 30);
-            using var buffer = new MemoryStream();
-            image.Save(buffer, new SixLabors.ImageSharp.Formats.Webp.WebpEncoder());
-
-            var entry = zip.CreateEntry("001.webp");
-            using var stream = entry.Open();
-            var bytes = buffer.ToArray();
-            stream.Write(bytes, 0, bytes.Length);
+            using var image = new MagickImage(MagickColors.White, 20, 30)
+            {
+                Format = MagickFormat.WebP
+            };
+            WriteImageEntry(zip, "001.webp", image.ToByteArray());
         }
 
         var epubPath = await _service.ConvertToEpubAsync(cbz, Path.Combine(_workDir, "out-webp"));
@@ -483,14 +479,15 @@ public class EpubConversionServiceTests : IDisposable
         var cbz = Path.Combine(_workDir, "mislabeled.cbz");
         using (var zip = ZipFile.Open(cbz, ZipArchiveMode.Create))
         {
-            using var image = new Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(20, 30);
-            using var buffer = new MemoryStream();
-            image.Save(buffer, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+            using var image = new MagickImage(MagickColors.White, 20, 30)
+            {
+                Format = MagickFormat.Png
+            };
 
             // PNG data stored under a .jpg name: declaring image/jpeg makes readers show a blank page.
             var entry = zip.CreateEntry("001.jpg");
             using var stream = entry.Open();
-            var bytes = buffer.ToArray();
+            var bytes = image.ToByteArray();
             stream.Write(bytes, 0, bytes.Length);
         }
 
@@ -710,9 +707,12 @@ public class EpubConversionServiceTests : IDisposable
 
     private static byte[] CreateJpeg(int width, int height)
     {
-        using var image = new Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(width, height);
+        using var image = new MagickImage(MagickColors.White, (uint)width, (uint)height)
+        {
+            Format = MagickFormat.Jpeg
+        };
         using var buffer = new MemoryStream();
-        image.Save(buffer, new JpegEncoder());
+        image.Write(buffer);
         return buffer.ToArray();
     }
 
@@ -738,10 +738,11 @@ public class EpubConversionServiceTests : IDisposable
         }
         else
         {
-            using var image = new Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(20, 30);
-            using var buffer = new MemoryStream();
-            image.Save(buffer, new JpegEncoder());
-            bytes = buffer.ToArray();
+            using var image = new MagickImage(MagickColors.White, 20, 30)
+            {
+                Format = MagickFormat.Jpeg
+            };
+            bytes = image.ToByteArray();
         }
 
         var entry = zip.CreateEntry(entryName);
@@ -755,27 +756,12 @@ public class EpubConversionServiceTests : IDisposable
     /// </summary>
     private static byte[] CreateNoisyPng(int width, int height)
     {
-        using var image = new Image<SixLabors.ImageSharp.PixelFormats.Rgba32>(width, height);
-        var random = new Random(1234);
-        image.ProcessPixelRows(accessor =>
+        using var image = new MagickImage(MagickColors.Gray, (uint)width, (uint)height)
         {
-            for (var y = 0; y < accessor.Height; y++)
-            {
-                var row = accessor.GetRowSpan(y);
-                for (var x = 0; x < row.Length; x++)
-                {
-                    row[x] = new SixLabors.ImageSharp.PixelFormats.Rgba32(
-                        (byte)random.Next(256),
-                        (byte)random.Next(256),
-                        (byte)random.Next(256),
-                        255);
-                }
-            }
-        });
-
-        using var buffer = new MemoryStream();
-        image.Save(buffer, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
-        return buffer.ToArray();
+            Format = MagickFormat.Png
+        };
+        image.AddNoise(NoiseType.Gaussian);
+        return image.ToByteArray();
     }
 
     private static string ReadEntry(ZipArchive archive, string name)

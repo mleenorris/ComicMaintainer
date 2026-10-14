@@ -1,6 +1,4 @@
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Jpeg;
-using SixLabors.ImageSharp.Processing;
+using ImageMagick;
 
 namespace ComicMaintainer.Core.Utilities;
 
@@ -49,10 +47,11 @@ public static class SeriesImageDownscaler
 
         // Cheaply inspect the header dimensions before a full decode so a
         // decompression bomb is rejected without allocating its pixel buffer.
+        var sourceBytes = source.ToArray();
         try
         {
-            var info = Image.Identify(source);
-            if ((long)info.Width * info.Height > MaxDecodedPixels)
+            var info = new MagickImageInfo(sourceBytes);
+            if (info.Height > 0 && info.Width > MaxDecodedPixels / info.Height)
             {
                 throw new InvalidOperationException(
                     $"Source image dimensions ({info.Width}x{info.Height}) exceed the decode limit");
@@ -68,10 +67,10 @@ public static class SeriesImageDownscaler
                 "Could not read the source image header for downscaling", ex);
         }
 
-        Image image;
+        MagickImage image;
         try
         {
-            image = Image.Load(source);
+            image = new MagickImage(sourceBytes);
         }
         catch (Exception ex)
         {
@@ -83,7 +82,7 @@ public static class SeriesImageDownscaler
         {
             // Clamp the target dimension: never upscale beyond the source.
             var largestSide = Math.Max(image.Width, image.Height);
-            var targetDimension = Math.Min(maxDimension, largestSide);
+            var targetDimension = Math.Min((uint)maxDimension, largestSide);
 
             for (var attempt = 0; attempt < QualitySteps.Length + 2; attempt++)
             {
@@ -99,7 +98,7 @@ public static class SeriesImageDownscaler
                 }
 
                 // Still too big at the lowest quality: shrink further and retry.
-                var reduced = Math.Max(1, (int)(targetDimension * 0.75));
+                var reduced = Math.Max(1u, (uint)(targetDimension * 0.75));
                 if (reduced == targetDimension)
                 {
                     break;
@@ -112,24 +111,23 @@ public static class SeriesImageDownscaler
         }
     }
 
-    private static void ResizeInPlace(Image image, int maxDimension)
+    private static void ResizeInPlace(MagickImage image, uint maxDimension)
     {
         if (Math.Max(image.Width, image.Height) <= maxDimension)
         {
             return;
         }
 
-        image.Mutate(ctx => ctx.Resize(new ResizeOptions
-        {
-            Mode = ResizeMode.Max,
-            Size = new Size(maxDimension, maxDimension)
-        }));
+        var scale = (double)maxDimension / Math.Max(image.Width, image.Height);
+        var width = Math.Max(1u, (uint)Math.Round(image.Width * scale));
+        var height = Math.Max(1u, (uint)Math.Round(image.Height * scale));
+        image.Resize(width, height);
     }
 
-    private static byte[] EncodeJpeg(Image image, int quality)
+    private static byte[] EncodeJpeg(MagickImage image, int quality)
     {
-        using var ms = new MemoryStream();
-        image.Save(ms, new JpegEncoder { Quality = quality });
-        return ms.ToArray();
+        image.Format = MagickFormat.Jpeg;
+        image.Quality = (uint)quality;
+        return image.ToByteArray();
     }
 }

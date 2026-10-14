@@ -11,9 +11,7 @@ using Microsoft.Extensions.Logging;
 using SharpCompress.Archives;
 using SharpCompress.Archives.Rar;
 using SystemZipArchive = System.IO.Compression.ZipArchive;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.Formats.Jpeg;
-using SixLabors.ImageSharp.Processing;
+using ImageMagick;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -807,18 +805,30 @@ public class EpubConversionService : IEpubConversionService
                 return null;
             }
 
-            // Image.Load fully decodes the pixel data rather than just reading the
-            // header (as Image.Identify does), so a truncated/corrupt cached cover
+            // Cheaply inspect the header dimensions before a full decode so a
+            // small but enormously sized cached cover (a "decompression bomb")
+            // is rejected without allocating its pixel buffer.
+            var info = new MagickImageInfo(bytes);
+            if (info.Height > 0 && info.Width > MaxDecodedPixels / info.Height)
+            {
+                _logger.LogWarning(
+                    "Series cover {ImagePath} dimensions ({Width}x{Height}) exceed the decode limit; falling back to the first page",
+                    LoggingHelper.SanitizePathForLog(seriesImagePath),
+                    info.Width,
+                    info.Height);
+                return null;
+            }
+
+            // MagickImage fully decodes the pixel data rather than just reading the
+            // header (as MagickImageInfo does), so a truncated/corrupt cached cover
             // reliably throws here and falls back to the first-page cover below.
-            using var image = Image.Load(bytes);
+            using var image = new MagickImage(bytes);
             if (image.Width <= 0 || image.Height <= 0)
             {
                 return null;
             }
 
-            var extension = NormalizeImageExtension(image.Metadata.DecodedImageFormat?.FileExtensions.FirstOrDefault() is { } ext
-                ? "." + ext
-                : Path.GetExtension(seriesImagePath));
+            var extension = GetImageExtension(image.Format, Path.GetExtension(seriesImagePath));
             var mediaType = GetMediaType(extension);
             if (!IsEreaderSafeMediaType(mediaType))
             {
@@ -834,11 +844,11 @@ public class EpubConversionService : IEpubConversionService
                 ImagePath: "images/cover" + extension,
                 XhtmlPath: "cover.xhtml",
                 MediaType: mediaType,
-                Width: image.Width,
-                Height: image.Height,
+                Width: checked((int)image.Width),
+                Height: checked((int)image.Height),
                 Bytes: bytes);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or UnknownImageFormatException or InvalidImageContentException or NotSupportedException or ImageFormatException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or MagickException or NotSupportedException or OverflowException)
         {
             _logger.LogWarning(
                 ex,
@@ -873,29 +883,31 @@ public class EpubConversionService : IEpubConversionService
             // tiny archive entry that declares an enormous size (a
             // "decompression bomb") is rejected without allocating its pixel
             // buffer.
-            var info = Image.Identify(imageBytes);
-            if (info is not null && (long)info.Width * info.Height > MaxDecodedPixels)
+            var info = new MagickImageInfo(imageBytes);
+            if (info.Height > 0 && info.Width > MaxDecodedPixels / info.Height)
             {
                 throw new InvalidOperationException(
                     $"Page image '{entryKey}' dimensions ({info.Width}x{info.Height}) exceed the decode limit.");
             }
 
-            using var image = Image.Load(imageBytes);
+            using var image = new MagickImage(imageBytes);
             if (image.Width <= 0 || image.Height <= 0)
             {
                 throw new InvalidOperationException(
                     $"Page image '{entryKey}' has no usable dimensions.");
             }
 
-            var extension = NormalizeImageExtension(
-                image.Metadata.DecodedImageFormat?.FileExtensions.FirstOrDefault() is { } detected
-                    ? "." + detected
-                    : fallbackExtension);
+            var extension = GetImageExtension(image.Format, fallbackExtension);
             var mediaType = GetMediaType(extension);
 
             if (tier.IsLossless && IsEreaderSafeMediaType(mediaType))
             {
-                return new PreparedImage(imageBytes, extension, mediaType, image.Width, image.Height);
+                return new PreparedImage(
+                    imageBytes,
+                    extension,
+                    mediaType,
+                    checked((int)image.Width),
+                    checked((int)image.Height));
             }
 
             // Re-encoded either because the source format shows up as a blank
@@ -903,7 +915,7 @@ public class EpubConversionService : IEpubConversionService
             // to fit the delivery size budget.
             return EncodeAsJpeg(image, tier);
         }
-        catch (Exception ex) when (ex is UnknownImageFormatException or InvalidImageContentException or NotSupportedException or ImageFormatException)
+        catch (Exception ex) when (ex is MagickException or NotSupportedException or OverflowException)
         {
             throw new InvalidOperationException(
                 $"Page image '{entryKey}' could not be decoded and would render as a blank page.",
@@ -916,23 +928,27 @@ public class EpubConversionService : IEpubConversionService
     /// caps the longest edge. JPEG is the only format every ereader renders
     /// reliably and it is what keeps an oversized book under the mail limit.
     /// </summary>
-    private static PreparedImage EncodeAsJpeg(Image image, CompressionTier tier)
+    private static PreparedImage EncodeAsJpeg(MagickImage image, CompressionTier tier)
     {
-        var width = image.Width;
-        var height = image.Height;
+        var width = checked((int)image.Width);
+        var height = checked((int)image.Height);
 
         if (tier.MaxDimension is int max && max > 0 && Math.Max(width, height) > max)
         {
             var scale = (double)max / Math.Max(width, height);
             width = Math.Max(1, (int)Math.Round(width * scale));
             height = Math.Max(1, (int)Math.Round(height * scale));
-            image.Mutate(ctx => ctx.Resize(width, height));
+            image.Resize((uint)width, (uint)height);
         }
 
-        using var buffer = new MemoryStream();
-        image.Save(buffer, new JpegEncoder { Quality = tier.Quality ?? 90 });
-        return new PreparedImage(buffer.ToArray(), ".jpg", "image/jpeg", width, height);
+        image.Quality = (uint)(tier.Quality ?? 90);
+        return new PreparedImage(image.ToByteArray(MagickFormat.Jpeg), ".jpg", "image/jpeg", width, height);
     }
+
+    private static string GetImageExtension(MagickFormat format, string fallbackExtension)
+        => string.Equals(format.ToString(), "Undefined", StringComparison.OrdinalIgnoreCase)
+            ? NormalizeImageExtension(fallbackExtension)
+            : NormalizeImageExtension("." + format);
 
     private static bool IsEreaderSafeMediaType(string mediaType)
         => mediaType is "image/jpeg" or "image/png" or "image/gif";

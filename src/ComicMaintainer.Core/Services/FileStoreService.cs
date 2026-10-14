@@ -489,21 +489,21 @@ public class FileStoreService : IFileStoreService
             {
                 dbContext.ComicFiles.Remove(entity);
                 await dbContext.SaveChangesAsync(cancellationToken);
-                _logger.LogDebug("Removed file from database: {FilePath}", SanitizeForLogging(filePath));
+                _logger.LogDebug("Removed file from database");
             }
             else
             {
-                _logger.LogDebug("File already removed from database: {FilePath}", SanitizeForLogging(filePath));
+                _logger.LogDebug("File already removed from database");
             }
         }
         catch (DbUpdateConcurrencyException ex)
         {
             // File was already deleted by another process/thread - this is not an error
-            _logger.LogDebug(ex, "File already removed from database (concurrency): {FilePath}", SanitizeForLogging(filePath));
+            _logger.LogDebug(ex, "File already removed from database (concurrency)");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error removing file from database: {FilePath}", SanitizeForLogging(filePath));
+            _logger.LogError(ex, "Error removing file from database");
         }
         
         // Broadcast file list update to connected clients

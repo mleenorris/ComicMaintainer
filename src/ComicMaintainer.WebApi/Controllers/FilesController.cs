@@ -68,21 +68,22 @@ public class FilesController : ControllerBase
     }
 
     /// <summary>
-    /// Validates that a file path is within the watched directory to prevent path traversal attacks
+    /// Validates that a file path is within the watched directory to prevent path
+    /// traversal attacks. Symlinks and junctions are resolved first — on the path
+    /// itself and on every ancestor directory — so a link inside the watched
+    /// directory cannot reach an external target.
     /// </summary>
-    private bool IsPathSafe(string filePath)
-    {
-        try
-        {
-            var fullPath = Path.GetFullPath(filePath);
-            var watchedDir = Path.GetFullPath(_settings.CurrentValue.WatchedDirectory);
-            return fullPath.StartsWith(watchedDir, StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private bool IsPathSafe(string filePath) => TryResolveSafePath(filePath, out _);
+
+    /// <summary>
+    /// Link-aware variant of <see cref="IsPathSafe"/> that also returns the
+    /// validated physical path to use for subsequent file system operations.
+    /// </summary>
+    private bool TryResolveSafePath(string filePath, out string resolvedPath) =>
+        LibraryPathValidator.TryResolveWithin(
+            filePath,
+            out resolvedPath,
+            _settings.CurrentValue.WatchedDirectory);
 
     [HttpGet]
     public async Task<ActionResult<object>> GetFiles(
@@ -2044,7 +2045,7 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting metadata for {FilePath}", filePath);
+            _logger.LogError(ex, "Error getting metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, "Error retrieving metadata");
         }
     }
@@ -2153,7 +2154,7 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating metadata for {FilePath}", filePath);
+            _logger.LogError(ex, "Error updating metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             await LogHistoryAsync(filePath, "Update Metadata", false, ex.Message);
             return StatusCode(500, "Error updating metadata");
         }
@@ -2265,7 +2266,7 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing file {FilePath}", filePath);
+            _logger.LogError(ex, "Error processing file {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, "Error processing file");
         }
     }
@@ -2469,18 +2470,18 @@ public class FilesController : ControllerBase
                 return BadRequest("Invalid file path");
 
             // Validate path is within watched directory to prevent path traversal attacks
-            if (!IsPathSafe(filePath))
+            if (!TryResolveSafePath(filePath, out var resolvedPath))
             {
                 _logger.LogWarning("Attempt to delete file outside watched directory: {EncodedPath}", LoggingHelper.SanitizeForLog(encodedFilePath));
                 return BadRequest("File path is outside the allowed directory");
             }
 
-            if (System.IO.File.Exists(filePath))
+            if (System.IO.File.Exists(resolvedPath))
             {
                 // Remove from file store first (unlikely to fail), then delete physical file
                 // This order prevents orphaned file store entries if file deletion fails
                 await _fileStore.RemoveFileAsync(filePath);
-                System.IO.File.Delete(filePath);
+                System.IO.File.Delete(resolvedPath);
                 
                 // Log to processing history
                 await LogHistoryAsync(filePath, "Delete", true);
@@ -2511,18 +2512,18 @@ public class FilesController : ControllerBase
         try
         {
             // Validate path is within watched directory to prevent path traversal attacks
-            if (!IsPathSafe(filePath))
+            if (!TryResolveSafePath(filePath, out var resolvedPath))
             {
-                _logger.LogWarning("Attempt to delete file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                _logger.LogWarning("Attempt to delete file outside watched directory");
                 return BadRequest("File path is outside the allowed directory");
             }
 
-            if (System.IO.File.Exists(filePath))
+            if (System.IO.File.Exists(resolvedPath))
             {
                 // Remove from file store first (unlikely to fail), then delete physical file
                 // This order prevents orphaned file store entries if file deletion fails
                 await _fileStore.RemoveFileAsync(filePath);
-                System.IO.File.Delete(filePath);
+                System.IO.File.Delete(resolvedPath);
                 
                 // Log to processing history
                 await LogHistoryAsync(filePath, "Delete", true);
@@ -2533,8 +2534,7 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
-            _logger.LogError(ex, "Error deleting file {FilePath}", sanitizedPath);
+            _logger.LogError(ex, "Error deleting file");
             
             // Log to processing history
             await LogHistoryAsync(filePath, "Delete", false, ex.Message);

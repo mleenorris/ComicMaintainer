@@ -56,7 +56,7 @@ public class ComicReaderService : IComicReaderService
                 return await GetPageFromCbrAsync(filePath, pageNumber);
             }
             
-            _logger.LogWarning("Unsupported file extension: {Extension}", extension);
+            _logger.LogWarning("Unsupported file extension: {Extension}", LoggingHelper.SanitizeForLog(extension));
             return null;
         }
         catch (Exception ex)
@@ -87,7 +87,7 @@ public class ComicReaderService : IComicReaderService
                 return await GetPageNamesFromCbrAsync(filePath);
             }
             
-            _logger.LogWarning("Unsupported file extension: {Extension}", extension);
+            _logger.LogWarning("Unsupported file extension: {Extension}", LoggingHelper.SanitizeForLog(extension));
             return new List<string>();
         }
         catch (Exception ex)

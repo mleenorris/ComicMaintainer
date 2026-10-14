@@ -1211,75 +1211,12 @@ public class ComicEmailService : IComicEmailService
     /// </summary>
     private bool TryResolveLibraryPath(string path, out string fullPath)
     {
-        fullPath = string.Empty;
-
-        try
-        {
-            var resolved = ResolveRealPath(Path.GetFullPath(path));
-            var settings = _settings.CurrentValue;
-
-            if (!IsWithin(resolved, settings.WatchedDirectory) &&
-                !IsWithin(resolved, settings.DuplicateDirectory))
-            {
-                return false;
-            }
-
-            fullPath = resolved;
-            return true;
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Returns the physical path a (possibly linked) path ultimately refers to,
-    /// resolving each path segment from the root down. Segments that do not
-    /// exist, or are not links, are kept verbatim.
-    /// </summary>
-    private static string ResolveRealPath(string fullPath)
-    {
-        var parent = Path.GetDirectoryName(fullPath);
-        if (string.IsNullOrEmpty(parent))
-        {
-            // Root of the volume: nothing above it can be a link.
-            return ResolveLinkTarget(fullPath) ?? fullPath;
-        }
-
-        var candidate = Path.Combine(ResolveRealPath(parent), Path.GetFileName(fullPath));
-        return ResolveLinkTarget(candidate) ?? candidate;
-    }
-
-    private static string? ResolveLinkTarget(string path)
-    {
-        try
-        {
-            FileSystemInfo? target = Directory.Exists(path)
-                ? Directory.ResolveLinkTarget(path, returnFinalTarget: true)
-                : File.Exists(path)
-                    ? File.ResolveLinkTarget(path, returnFinalTarget: true)
-                    : null;
-
-            return target is null ? null : Path.GetFullPath(target.FullName);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-        {
-            // Unresolvable (broken or cyclic link, or no permission): treat the
-            // path as-is; the containment check below still has to pass.
-            return null;
-        }
-    }
-
-    private static bool IsWithin(string fullPath, string? directory)
-    {
-        if (string.IsNullOrWhiteSpace(directory))
-        {
-            return false;
-        }
-
-        var root = ResolveRealPath(Path.GetFullPath(directory)).TrimEnd(Path.DirectorySeparatorChar);
-        return fullPath.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        var settings = _settings.CurrentValue;
+        return LibraryPathValidator.TryResolveWithin(
+            path,
+            out fullPath,
+            settings.WatchedDirectory,
+            settings.DuplicateDirectory);
     }
 
     private void CleanupTemporaryAttachment(string? attachmentPath)

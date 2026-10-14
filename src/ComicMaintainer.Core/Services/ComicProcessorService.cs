@@ -105,6 +105,12 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     {
         try
         {
+            if (!IsPathWithinAllowedDirectories(filePath))
+            {
+                _logger.LogWarning("ProcessFileAsync: File is outside the allowed directories: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                return false;
+            }
+
             _logger.LogInformation("ProcessFileAsync: Starting processing for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
 
             // Skip files that the database already considers fully processed, preventing
@@ -1285,6 +1291,9 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     {
         try
         {
+            if (!IsPathWithinAllowedDirectories(filePath))
+                return Task.FromResult<ComicMetadata?>(null);
+
             if (!File.Exists(filePath) || !IsComicArchive(filePath))
                 return Task.FromResult<ComicMetadata?>(null);
 
@@ -1388,6 +1397,14 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
     {
         try
         {
+            if (!IsPathWithinAllowedDirectories(filePath))
+            {
+                _logger.LogWarning(
+                    "Cannot update metadata: file is outside the allowed directories: {FilePath}",
+                    LoggingHelper.SanitizePathForLog(filePath));
+                return false;
+            }
+
             if (!File.Exists(filePath))
             {
                 _logger.LogWarning(
@@ -1998,7 +2015,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
 
         _logger.LogWarning(
             "Chapter number '{Chapter}' would be lost from filename during rename of {OriginalPath}; appending it to preserve the chapter.",
-            chapterToPreserve,
+            LoggingHelper.SanitizeForLog(chapterToPreserve),
             LoggingHelper.SanitizePathForLog(originalPath));
 
         var separator = string.IsNullOrEmpty(filenameStem) ? string.Empty : " - ";
@@ -2029,6 +2046,41 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
         }
 
         return integerFormatted;
+    }
+
+    private bool IsPathWithinAllowedDirectories(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+            return false;
+
+        try
+        {
+            var fullPath = Path.GetFullPath(filePath);
+            foreach (var allowedDirectory in new[]
+                     {
+                         _settings.WatchedDirectory,
+                         _settings.DuplicateDirectory
+                     })
+            {
+                if (string.IsNullOrWhiteSpace(allowedDirectory))
+                    continue;
+
+                var fullAllowedDirectory = Path.GetFullPath(allowedDirectory);
+                var relativePath = Path.GetRelativePath(fullAllowedDirectory, fullPath);
+                if (!Path.IsPathRooted(relativePath)
+                    && relativePath != ".."
+                    && !relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private bool TargetFileExists(string targetPath, string? sourcePath = null)

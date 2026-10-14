@@ -74,9 +74,15 @@ public class FilesController : ControllerBase
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(filePath))
+                return false;
+
             var fullPath = Path.GetFullPath(filePath);
             var watchedDir = Path.GetFullPath(_settings.CurrentValue.WatchedDirectory);
-            return fullPath.StartsWith(watchedDir, StringComparison.OrdinalIgnoreCase);
+            var relativePath = Path.GetRelativePath(watchedDir, fullPath);
+            return !Path.IsPathRooted(relativePath)
+                && relativePath != ".."
+                && !relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal);
         }
         catch
         {
@@ -2044,7 +2050,7 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting metadata for {FilePath}", filePath);
+            _logger.LogError(ex, "Error getting metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, "Error retrieving metadata");
         }
     }
@@ -2153,7 +2159,7 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating metadata for {FilePath}", filePath);
+            _logger.LogError(ex, "Error updating metadata for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             await LogHistoryAsync(filePath, "Update Metadata", false, ex.Message);
             return StatusCode(500, "Error updating metadata");
         }
@@ -2265,7 +2271,7 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing file {FilePath}", filePath);
+            _logger.LogError(ex, "Error processing file {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, "Error processing file");
         }
     }
@@ -2513,7 +2519,7 @@ public class FilesController : ControllerBase
             // Validate path is within watched directory to prevent path traversal attacks
             if (!IsPathSafe(filePath))
             {
-                _logger.LogWarning("Attempt to delete file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
+                _logger.LogWarning("Attempt to delete file outside watched directory");
                 return BadRequest("File path is outside the allowed directory");
             }
 
@@ -2533,8 +2539,7 @@ public class FilesController : ControllerBase
         }
         catch (Exception ex)
         {
-            var sanitizedPath = LoggingHelper.SanitizePathForLog(filePath);
-            _logger.LogError(ex, "Error deleting file {FilePath}", sanitizedPath);
+            _logger.LogError(ex, "Error deleting file");
             
             // Log to processing history
             await LogHistoryAsync(filePath, "Delete", false, ex.Message);

@@ -92,25 +92,10 @@ public class LogsController : ControllerBase
             
             if (!string.IsNullOrEmpty(filename))
             {
-                // Use specific filename if provided
-                // Sanitize filename to prevent directory traversal
+                // Limit requested files to the configured log type and resolve
+                // the path from the directory listing, never from request data.
                 var sanitizedFilename = Path.GetFileName(filename);
-                logFilePath = Path.Combine(configDir, sanitizedFilename);
-                
-                // Verify the file exists and matches the pattern
-                if (!System.IO.File.Exists(logFilePath))
-                {
-                    return Ok(new
-                    {
-                        content = $"Log file not found: {sanitizedFilename}",
-                        total_lines = 0,
-                        shown_lines = 0,
-                        filename = (string?)null
-                    });
-                }
-                
-                // Verify filename matches the expected pattern for the type
-                var filenameOnly = Path.GetFileName(logFilePath);
+                var filenameOnly = sanitizedFilename;
                 var matchesPattern = type.ToLower() switch
                 {
                     "app" => filenameOnly.StartsWith("app") && filenameOnly.EndsWith(".log"),
@@ -131,6 +116,25 @@ public class LogsController : ControllerBase
                         filename = (string?)null
                     });
                 }
+
+                var matchingLogFile = Directory.GetFiles(configDir, logFilePattern)
+                    .FirstOrDefault(path => string.Equals(
+                        Path.GetFileName(path),
+                        sanitizedFilename,
+                        StringComparison.OrdinalIgnoreCase));
+
+                if (matchingLogFile is null)
+                {
+                    return Ok(new
+                    {
+                        content = $"Log file not found: {sanitizedFilename}",
+                        total_lines = 0,
+                        shown_lines = 0,
+                        filename = (string?)null
+                    });
+                }
+
+                logFilePath = matchingLogFile;
             }
             else
             {

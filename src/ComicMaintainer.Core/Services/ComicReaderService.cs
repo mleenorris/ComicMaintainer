@@ -114,7 +114,7 @@ public class ComicReaderService : IComicReaderService
     {
         return await Task.Run(() =>
         {
-            using var archive = RarArchive.Open(filePath);
+            using var archive = RarArchive.OpenArchive(filePath);
             return archive.Entries
                 .Where(e => !e.IsDirectory && IsImageFile(e.Key ?? ""))
                 .OrderBy(e => e.Key, new NaturalStringComparer())
@@ -153,7 +153,7 @@ public class ComicReaderService : IComicReaderService
     {
         return await Task.Run<(byte[] Data, string ContentType)?>(() =>
         {
-            using var archive = RarArchive.Open(filePath);
+            using var archive = RarArchive.OpenArchive(filePath);
             var imageEntries = archive.Entries
                 .Where(e => !e.IsDirectory && IsImageFile(e.Key ?? ""))
                 .OrderBy(e => e.Key, new NaturalStringComparer())

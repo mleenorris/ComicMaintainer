@@ -637,8 +637,8 @@ public class EpubConversionService : IEpubConversionService
         var normalized = ComicFileExtensions.NormalizeExtension(Path.GetExtension(comicFilePath).ToLowerInvariant());
         return normalized switch
         {
-            ".cbz" => SharpCompress.Archives.Zip.ZipArchive.Open(comicFilePath),
-            ".cbr" => RarArchive.Open(comicFilePath),
+            ".cbz" => SharpCompress.Archives.Zip.ZipArchive.OpenArchive(comicFilePath),
+            ".cbr" => RarArchive.OpenArchive(comicFilePath),
             _ => throw new NotSupportedException($"Unsupported comic format: {normalized}")
         };
     }

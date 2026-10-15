@@ -12,6 +12,7 @@ using SharpCompress.Archives;
 using SharpCompress.Archives.Zip;
 using SharpCompress.Common;
 using SharpCompress.Writers;
+using SharpCompress.Writers.Zip;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -1297,7 +1298,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             if (!File.Exists(resolvedPath) || !IsComicArchive(resolvedPath))
                 return Task.FromResult<ComicMetadata?>(null);
 
-            using var archive = ArchiveFactory.Open(resolvedPath);
+            using var archive = ArchiveFactory.OpenArchive(resolvedPath);
             
             // Look for ComicInfo.xml
             var comicInfoEntry = archive.Entries.FirstOrDefault(e => 
@@ -1330,7 +1331,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
             if (!File.Exists(filePath) || !IsComicArchive(filePath))
                 return Task.FromResult<SeriesMetadata?>(null);
 
-            using var archive = ArchiveFactory.Open(filePath);
+            using var archive = ArchiveFactory.OpenArchive(filePath);
             var comicInfoEntry = archive.Entries.FirstOrDefault(e =>
                 e.Key?.Equals("ComicInfo.xml", StringComparison.OrdinalIgnoreCase) == true);
 
@@ -1445,8 +1446,8 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                 // Create new archive with updated metadata in a separate scope
                 // to ensure all file handles are released before file replacement
                 {
-                    using var sourceArchive = ArchiveFactory.Open(filePath);
-                    using var writer = ZipArchive.Create();
+                    using var sourceArchive = ArchiveFactory.OpenArchive(filePath);
+                    using var writer = ZipArchive.CreateArchive();
                     
                     // Add all existing entries except ComicInfo.xml
                     foreach (var entry in sourceArchive.Entries.Where(e => !e.IsDirectory))
@@ -1477,7 +1478,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                     writer.AddEntry("ComicInfo.xml", xmlStream, true);
                     
                     // Save to temp file
-                    writer.SaveTo(tempFile, new WriterOptions(CompressionType.Deflate));
+                    writer.SaveTo(tempFile, new ZipWriterOptions(CompressionType.Deflate));
                 }
                 
                 // Give a brief moment for any file handles to be fully released
@@ -1562,8 +1563,8 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                 // Rewrite the archive without ComicInfo.xml in a separate scope so all
                 // file handles are released before File.Replace.
                 {
-                    using var sourceArchive = ArchiveFactory.Open(filePath);
-                    using var writer = ZipArchive.Create();
+                    using var sourceArchive = ArchiveFactory.OpenArchive(filePath);
+                    using var writer = ZipArchive.CreateArchive();
 
                     foreach (var entry in sourceArchive.Entries.Where(e => !e.IsDirectory))
                     {
@@ -1594,7 +1595,7 @@ public class ComicProcessorService : IComicProcessorService, IDisposable
                         writer.AddEntry(entry.Key, memStream, true, entry.Size, entry.LastModifiedTime);
                     }
 
-                    writer.SaveTo(tempFile, new WriterOptions(CompressionType.Deflate));
+                    writer.SaveTo(tempFile, new ZipWriterOptions(CompressionType.Deflate));
                 }
 
                 await Task.Delay(FileHandleReleaseDelayMs, cancellationToken);

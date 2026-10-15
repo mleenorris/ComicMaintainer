@@ -8,6 +8,7 @@ using SharpCompress.Archives.Zip;
 using SharpCompress.Archives.Rar;
 using SharpCompress.Common;
 using SharpCompress.Writers;
+using SharpCompress.Writers.Zip;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -41,11 +42,11 @@ public class ComicArchive : IDisposable
         var normalizedExt = ComicFileExtensions.NormalizeExtension(extension);
         if (normalizedExt == ".cbz")
         {
-            _archive = ZipArchive.Open(filePath);
+            _archive = ZipArchive.OpenArchive(filePath);
         }
         else if (normalizedExt == ".cbr")
         {
-            _archive = RarArchive.Open(filePath);
+            _archive = RarArchive.OpenArchive(filePath);
         }
         else
         {
@@ -126,7 +127,7 @@ public class ComicArchive : IDisposable
             try
             {
                 // Create new archive with updated ComicInfo.xml
-                using (var newArchive = ZipArchive.Create())
+                using (var newArchive = ZipArchive.CreateArchive())
                 {
                     // Add ComicInfo.xml
                     var comicInfoBytes = Encoding.UTF8.GetBytes(xmlContent);
@@ -154,7 +155,7 @@ public class ComicArchive : IDisposable
 
                     // Save to temp file
                     using var fileStream = File.OpenWrite(tempFile);
-                    newArchive.SaveTo(fileStream, new WriterOptions(CompressionType.Deflate)
+                    newArchive.SaveTo(fileStream, new ZipWriterOptions(CompressionType.Deflate)
                     {
                         LeaveStreamOpen = false
                     });
@@ -176,7 +177,7 @@ public class ComicArchive : IDisposable
                 File.Move(tempFile, _filePath);
 
                 // Reopen archive
-                _archive = ZipArchive.Open(_filePath);
+                _archive = ZipArchive.OpenArchive(_filePath);
             }
             finally
             {

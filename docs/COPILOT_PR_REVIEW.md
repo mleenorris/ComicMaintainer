@@ -12,8 +12,7 @@ No repository files are involved — this is configured in GitHub settings:
 2. Target the default branch (`dotnet` in this repository — it does **not** use
    `main`/`master`), or target all branches to cover every pull request base.
 3. Set **Enforcement status** to **Active**.
-4. Under **Branch rules**, enable **Require a pull request before merging** and
-   check **Request pull request review from Copilot**.
+4. Under **Branch rules**, enable **Automatically request Copilot code review**.
 
 Copilot is then added as a reviewer on every pull request targeting the selected
 branches, including Dependabot pull requests. Draft pull requests are reviewed

@@ -8,6 +8,7 @@ using SharpCompress.Archives;
 using SharpCompress.Archives.Zip;
 using SharpCompress.Common;
 using SharpCompress.Writers;
+using SharpCompress.Writers.Zip;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -244,7 +245,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
         Action? onBeforeReplace = null,
         Action? onAfterReplace = null)
     {
-        using var source = ZipArchive.Open(archivePath);
+        using var source = ZipArchive.OpenArchive(archivePath);
 
         var existingCoverEntries = source.Entries
             .Where(e => !e.IsDirectory && IsManagedCoverEntry(e.Key))
@@ -270,7 +271,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
         var tempFile = archivePath + ".cover.tmp";
         try
         {
-            using (var newArchive = ZipArchive.Create())
+            using (var newArchive = ZipArchive.CreateArchive())
             {
                 var entryStreams = new List<MemoryStream>();
 
@@ -300,7 +301,7 @@ public class SeriesArchiveCoverWriter : ISeriesArchiveCoverWriter
 
                 using (var fileStream = File.Create(tempFile))
                 {
-                    newArchive.SaveTo(fileStream, new WriterOptions(CompressionType.Deflate)
+                    newArchive.SaveTo(fileStream, new ZipWriterOptions(CompressionType.Deflate)
                     {
                         LeaveStreamOpen = false
                     });

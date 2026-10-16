@@ -1961,12 +1961,12 @@
                         // progress view), so the swap is deferred until the user
                         // asks for it.
                         //
-                        // The reload itself is still driven by 'controllerchange'
+                        // The reload is normally driven by 'controllerchange'
                         // below, which is the documented signal that the new
-                        // worker is in control. Reloading earlier (e.g. straight
-                        // after 'installed') is racy: the reload would be served
-                        // by the OLD worker and the user would still see stale
-                        // assets, forcing a hard refresh.
+                        // worker is in control, so the reloaded page is served by
+                        // it. applyServiceWorkerUpdate() only reloads without that
+                        // signal as a last resort, when another tab keeps the old
+                        // worker busy.
                         if (registration.waiting && navigator.serviceWorker.controller) {
                             // A new version finished installing during a previous
                             // visit and has been waiting ever since.

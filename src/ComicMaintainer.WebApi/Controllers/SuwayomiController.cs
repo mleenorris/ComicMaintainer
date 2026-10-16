@@ -92,6 +92,7 @@ public class SuwayomiController : ControllerBase
                 request.SeriesTitle,
                 request.IssueNumbers,
                 request.SuwayomiSeriesId,
+                request.AlternateTitles,
                 cancellationToken);
 
             _logger.LogInformation(
@@ -112,6 +113,12 @@ public class SuwayomiController : ControllerBase
     {
         /// <summary>Local series title, used to match a Suwayomi library entry.</summary>
         public string? SeriesTitle { get; set; }
+
+        /// <summary>
+        /// Other titles of the local series (canonical title, aliases), tried
+        /// because Suwayomi may list the series under a different name.
+        /// </summary>
+        public List<string>? AlternateTitles { get; set; }
 
         /// <summary>Optional explicit Suwayomi series id, bypassing title matching.</summary>
         public int? SuwayomiSeriesId { get; set; }

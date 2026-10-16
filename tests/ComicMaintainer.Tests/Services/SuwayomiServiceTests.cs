@@ -70,6 +70,35 @@ public class SuwayomiServiceTests
         Content = new StringContent(body, Encoding.UTF8, "application/json")
     };
 
+    /// <summary>
+    /// A server whose library holds <paramref name="library"/> and whose series
+    /// have no chapters, for tests about which series a title resolves to.
+    /// Request bodies are recorded in <paramref name="requests"/> when given.
+    /// </summary>
+    private static StubHttpMessageHandler LibraryWithoutChapters(
+        (int Id, string Title)[] library,
+        List<string>? requests = null)
+    {
+        var libraryResponse = JsonSerializer.Serialize(new
+        {
+            data = new
+            {
+                mangas = new
+                {
+                    nodes = library.Select(series => new { id = series.Id, title = series.Title, inLibrary = true }),
+                    pageInfo = new { hasNextPage = false, endCursor = (string?)null }
+                }
+            }
+        });
+
+        return new StubHttpMessageHandler(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            requests?.Add(body);
+            return Json(body.Contains("mangas(") ? libraryResponse : """{"data":{"chapters":{"nodes":[]}}}""");
+        });
+    }
+
     [Fact]
     public async Task GetStatusAsync_ReportsDisabledWithoutCallingTheServer()
     {
@@ -433,6 +462,98 @@ public class SuwayomiServiceTests
         var exception = await Assert.ThrowsAsync<SuwayomiException>(
             () => service.DownloadMissingIssuesAsync("Solo Leveling", new[] { 1 }));
         Assert.Contains("Solo Leveling", exception.Message);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_FallsBackToTheSeriesOtherTitlesWhenItsTitleIsNotFound()
+    {
+        var requests = new List<string>();
+        var service = CreateService(
+            LibraryWithoutChapters(new[] { (5, "Na Honjaman Level Up"), (4, "Ore dake Level Up na Ken") }, requests),
+            EnabledSettings());
+
+        var result = await service.DownloadMissingIssuesAsync(
+            "Solo Leveling",
+            new[] { 1 },
+            alternateTitles: new[] { "I Level Up Alone", "Ore dake Level Up na Ken", "Na Honjaman Level Up" });
+
+        // The other titles are tried in the order given, and the library is
+        // listed once rather than once per title.
+        Assert.Equal(4, result.Series!.Id);
+        Assert.Single(requests, body => body.Contains("mangas("));
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_PrefersAnExactMatchOnAnotherTitleToAPartialMatchOnItsTitle()
+    {
+        // The shown title is only part of the sequel's title, while Suwayomi
+        // lists the series itself under one of its other titles.
+        var service = CreateService(
+            LibraryWithoutChapters(new[] { (3, "Solo Leveling: Ragnarok"), (4, "Ore dake Level Up na Ken") }),
+            EnabledSettings());
+
+        var result = await service.DownloadMissingIssuesAsync(
+            "Solo Leveling", new[] { 1 }, alternateTitles: new[] { "Ore dake Level Up na Ken" });
+
+        Assert.Equal(4, result.Series!.Id);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_PrefersItsTitleWhenSeveralOfItsTitlesAreFound()
+    {
+        var service = CreateService(
+            LibraryWithoutChapters(new[] { (1, "Only I Level Up"), (2, "Solo Leveling!") }),
+            EnabledSettings());
+
+        var result = await service.DownloadMissingIssuesAsync(
+            "Solo Leveling", new[] { 1 }, alternateTitles: new[] { "Only I Level Up" });
+
+        Assert.Equal(2, result.Series!.Id);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_StillMatchesItsTitlePartiallyWhenNoTitleIsFoundExactly()
+    {
+        var service = CreateService(
+            LibraryWithoutChapters(new[] { (3, "Solo Leveling (Official)") }),
+            EnabledSettings());
+
+        var result = await service.DownloadMissingIssuesAsync(
+            "Solo Leveling", new[] { 1 }, alternateTitles: new[] { "Na Honjaman Level Up" });
+
+        Assert.Equal(3, result.Series!.Id);
+    }
+
+    [Theory]
+    [InlineData(new[] { "SL" }, "No series matching 'Solo Leveling' or its other title 'SL' was found in the Suwayomi library.")]
+    [InlineData(new[] { "SL", " sl ", "Na Honjaman Level Up" }, "No series matching 'Solo Leveling' or any of its 2 other titles was found in the Suwayomi library.")]
+    public async Task DownloadMissingIssuesAsync_DoesNotMatchTheOtherTitlesPartially(string[] alternateTitles, string expectedMessage)
+    {
+        // Short titles such as acronyms are part of many others ("SL" of
+        // "Slime"), so a partial match on one would queue an unrelated series.
+        var service = CreateService(
+            LibraryWithoutChapters(new[] { (9, "That Time I Got Reincarnated as a Slime"), (10, "Level Up") }),
+            EnabledSettings());
+
+        var exception = await Assert.ThrowsAsync<SuwayomiException>(
+            () => service.DownloadMissingIssuesAsync("Solo Leveling", new[] { 1 }, alternateTitles: alternateTitles));
+
+        Assert.Equal(expectedMessage, exception.Message);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_DoesNotMatchEverySeriesByATitleWithoutLettersOrDigits()
+    {
+        // Such a title normalizes to nothing, so it used to resolve to the
+        // first series in the library and queue that series' chapters.
+        var service = CreateService(LibraryWithoutChapters(new[] { (1, "Solo Leveling") }), EnabledSettings());
+
+        await Assert.ThrowsAsync<SuwayomiException>(
+            () => service.DownloadMissingIssuesAsync("???", new[] { 1 }));
+
+        var result = await service.DownloadMissingIssuesAsync(
+            "???", new[] { 1 }, alternateTitles: new[] { "Solo Leveling" });
+        Assert.Equal(1, result.Series!.Id);
     }
 
     [Fact]

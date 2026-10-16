@@ -77,9 +77,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refusal was turned into a message for the browser without being logged, and automated error
   reporting only sees what is logged at `Error` and above. A query that Suwayomi refuses outright
   — a GraphQL error without a field `path`, so nothing ran — is now logged at `Error`, because
-  ComicMaintainer's queries are fixed strings and only a defect in them can cause one. Errors
-  raised while a query runs, such as an unauthorized account, and an unreachable server are
-  still only shown to the user.
+  ComicMaintainer's queries are fixed strings and only a defect in them can cause one. The log
+  names the rejected query and lists every error the server gave, so each query that breaks
+  files its own issue instead of being folded into the first one filed. Errors raised while a
+  query runs, such as an unauthorized account, and an unreachable server are still only shown
+  to the user.
 
 - **Condensed downloads no longer die at 30 seconds, and a timeout now files an issue.** Every
   request in the application was capped by a 30 second default timeout policy, and because the

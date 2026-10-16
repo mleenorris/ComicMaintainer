@@ -80,6 +80,7 @@ public class SuwayomiService : ISuwayomiService
         try
         {
             using var document = await ExecuteAsync(
+                "AboutServer",
                 "query { aboutServer { name version } }",
                 null,
                 cancellationToken);
@@ -147,6 +148,7 @@ public class SuwayomiService : ISuwayomiService
             """;
 
         using var document = await ExecuteAsync(
+            "Chapters",
             queryText,
             new Dictionary<string, object?> { ["id"] = seriesId },
             cancellationToken);
@@ -255,6 +257,7 @@ public class SuwayomiService : ISuwayomiService
             """;
 
         using var _ = await ExecuteAsync(
+            "Enqueue",
             mutation,
             new Dictionary<string, object?> { ["ids"] = chapterIds },
             cancellationToken);
@@ -311,6 +314,7 @@ public class SuwayomiService : ISuwayomiService
             """;
 
         using var document = await ExecuteAsync(
+            "Manga",
             queryText,
             new Dictionary<string, object?> { ["id"] = seriesId },
             cancellationToken);
@@ -355,6 +359,7 @@ public class SuwayomiService : ISuwayomiService
         while (true)
         {
             using var document = await ExecuteAsync(
+                "Library",
                 queryText,
                 new Dictionary<string, object?>
                 {
@@ -422,9 +427,11 @@ public class SuwayomiService : ISuwayomiService
     /// Posts a GraphQL document to the configured server and returns the parsed
     /// response. Throws <see cref="SuwayomiException"/> for every failure mode
     /// (disabled, misconfigured, transport error, HTTP error, GraphQL errors)
-    /// so callers have a single thing to catch.
+    /// so callers have a single thing to catch. <paramref name="operationName"/>
+    /// identifies the document in the error logged if Suwayomi rejects it.
     /// </summary>
     private async Task<JsonDocument> ExecuteAsync(
+        string operationName,
         string query,
         IDictionary<string, object?>? variables,
         CancellationToken cancellationToken)
@@ -519,9 +526,26 @@ public class SuwayomiService : ISuwayomiService
                         // not a problem with the user's server or settings.
                         // Logged at Error so automated error reporting files it;
                         // the exception alone is only shown to the user.
+                        //
+                        // The operation is spliced into the template rather than
+                        // passed as an argument so that each document
+                        // fingerprints, and is filed, separately: with one shared
+                        // template a later mismatch in another document would
+                        // only bump the first issue ever filed. Operation names
+                        // are GraphQL names, so they hold no template braces.
+                        // Every error is kept, not just the first, because
+                        // validation reports all of them at once.
+                        var details = string.Join(
+                            " | ",
+                            errors.EnumerateArray()
+                                .Select(e => GetStringOrNull(e, "message"))
+                                .Where(m => !string.IsNullOrWhiteSpace(m))
+                                .Distinct(StringComparer.Ordinal));
+
                         _logger.LogError(
-                            "Suwayomi rejected a GraphQL request before running it; the query does not match the server's schema: {GraphQLError}",
-                            LoggingHelper.SanitizeForLog(message));
+                            "Suwayomi rejected the " + operationName
+                                + " GraphQL request before running it; the query does not match the server's schema: {GraphQLErrors}",
+                            LoggingHelper.SanitizeForLog(details.Length > 0 ? details : message));
                     }
 
                     throw new SuwayomiException($"The Suwayomi server rejected the request: {message}");

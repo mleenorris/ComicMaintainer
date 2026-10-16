@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
+using ComicMaintainer.Core.ErrorReporting;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using Microsoft.Extensions.Logging;
@@ -44,6 +45,19 @@ public class SuwayomiServiceTests
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             times);
     }
+
+    /// <summary>
+    /// Message templates of the Error entries logged so far. An error report is
+    /// fingerprinted from its template, not the rendered message, so distinct
+    /// templates are what make failures file as distinct issues.
+    /// </summary>
+    private static List<string?> ErrorTemplates(Mock<ILogger<SuwayomiService>> logger)
+        => logger.Invocations
+            .Where(invocation => invocation.Method.Name == nameof(ILogger.Log)
+                && invocation.Arguments[0] is LogLevel.Error)
+            .Select(invocation => (invocation.Arguments[2] as IEnumerable<KeyValuePair<string, object?>>)?
+                .FirstOrDefault(property => property.Key == "{OriginalFormat}").Value as string)
+            .ToList();
 
     private static AppSettings EnabledSettings() => new()
     {
@@ -209,6 +223,58 @@ public class SuwayomiServiceTests
 
         Assert.Contains("VariableTypeMismatch", exception.Message);
         VerifyErrorLogged(logger, Times.Once(), containing: "VariableTypeMismatch");
+        VerifyErrorLogged(logger, Times.Once(), containing: "rejected the Library GraphQL request");
+    }
+
+    [Fact]
+    public async Task SearchSeriesAsync_ReportsEveryErrorInASchemaRejection()
+    {
+        // Validation lists every mismatch in a document at once. An issue that
+        // showed only the first would invite a partial fix, after which the rest
+        // would merely bump that closed issue instead of being seen.
+        var handler = new StubHttpMessageHandler(_ => Json("""
+            {"errors":[
+              {"message":"Validation error (VariableTypeMismatch@[mangas]) : Variable 'after' of type 'String' used in position expecting type 'Cursor'","locations":[{"line":1,"column":69}]},
+              {"message":"Validation error (FieldUndefined@[mangas/nodes/thumbnailUrl]) : Field 'thumbnailUrl' in type 'MangaType' is undefined","locations":[{"line":3,"column":35}]}
+            ]}
+            """));
+        var logger = new Mock<ILogger<SuwayomiService>>();
+
+        var service = CreateService(handler, EnabledSettings(), logger.Object);
+
+        var exception = await Assert.ThrowsAsync<SuwayomiException>(
+            () => service.SearchSeriesAsync("Solo Leveling"));
+
+        Assert.Contains("VariableTypeMismatch", exception.Message);
+        VerifyErrorLogged(logger, Times.Once(), containing: "VariableTypeMismatch");
+        VerifyErrorLogged(logger, Times.Once(), containing: "FieldUndefined");
+    }
+
+    [Fact]
+    public async Task SchemaRejectionsOfDifferentDocumentsAreFiledAsSeparateIssues()
+    {
+        // With one template for every rejection, a later mismatch in another
+        // document would share the first report's fingerprint and only bump that
+        // issue instead of opening its own. Repeats of one document must still
+        // share a fingerprint so they count as recurrences, not new issues.
+        var handler = new StubHttpMessageHandler(_ => Json("""
+            {"errors":[{"message":"Validation error (FieldUndefined@[chapters/nodes/isDownloaded]) : Field 'isDownloaded' is undefined","locations":[{"line":3,"column":40}]}]}
+            """));
+        var logger = new Mock<ILogger<SuwayomiService>>();
+
+        var service = CreateService(handler, EnabledSettings(), logger.Object);
+
+        await Assert.ThrowsAsync<SuwayomiException>(() => service.SearchSeriesAsync("Solo Leveling"));
+        await Assert.ThrowsAsync<SuwayomiException>(() => service.GetChaptersAsync(1));
+        await Assert.ThrowsAsync<SuwayomiException>(() => service.SearchSeriesAsync("Solo Leveling"));
+
+        var fingerprints = ErrorTemplates(logger)
+            .Select(template => ErrorReportFingerprint.Compute(null, null, template, typeof(SuwayomiService).FullName))
+            .ToList();
+
+        Assert.Equal(3, fingerprints.Count);
+        Assert.NotEqual(fingerprints[0], fingerprints[1]);
+        Assert.Equal(fingerprints[0], fingerprints[2]);
     }
 
     [Fact]
@@ -226,6 +292,7 @@ public class SuwayomiServiceTests
         Assert.False(status.Connected);
         Assert.Contains("FieldUndefined", status.Error);
         VerifyErrorLogged(logger, Times.Once(), containing: "FieldUndefined");
+        VerifyErrorLogged(logger, Times.Once(), containing: "rejected the AboutServer GraphQL request");
     }
 
     [Fact]

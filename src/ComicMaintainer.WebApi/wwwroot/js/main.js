@@ -1815,6 +1815,56 @@
         // 'updatefound' events don't stack up multiple banners.
         let pendingServiceWorkerUpdate = null;
 
+        // How long the update banner's Reload button waits for the new worker
+        // to take control before reloading anyway.
+        const SW_UPDATE_RELOAD_TIMEOUT_MS = 5000;
+
+        let serviceWorkerReloadStarted = false;
+
+        // Reload onto a new version, at most once: when the update banner gives
+        // up waiting, or on 'controllerchange' (the new worker is in control,
+        // so it serves the reloaded page).
+        function reloadForServiceWorkerUpdate(reason) {
+            if (serviceWorkerReloadStarted) return;
+            serviceWorkerReloadStarted = true;
+            console.log(`PWA: ${reason}, reloading page...`);
+            window.location.reload();
+        }
+
+        /**
+         * Ask a waiting service worker to take over, then reload. The browser
+         * only swaps workers once the current one is idle, so SKIP_WAITING alone
+         * can wait indefinitely; this must always end in a reload.
+         */
+        function applyServiceWorkerUpdate(worker) {
+            // A worker from an older release still proxies the real-time event
+            // stream. That request never finishes, so while this tab holds it
+            // open the current worker is never idle and cannot be replaced.
+            cleanupEventSource();
+
+            if (worker.state === 'activated' || worker.state === 'redundant') {
+                // Already in control, or replaced by an even newer version:
+                // there is nothing left to wait for.
+                reloadForServiceWorkerUpdate(`Service worker is ${worker.state}`);
+                return;
+            }
+
+            worker.addEventListener('statechange', () => {
+                if (worker.state === 'activated' || worker.state === 'redundant') {
+                    reloadForServiceWorkerUpdate(`Service worker is ${worker.state}`);
+                }
+            });
+            worker.postMessage({ type: 'SKIP_WAITING' });
+
+            // Another tab can still be keeping the old worker busy. Reload
+            // anyway rather than leave the button on "Reloading…": documents
+            // are fetched network-first and assets carry the version in their
+            // URL, so the reloaded page runs the new release regardless.
+            setTimeout(() => {
+                reloadForServiceWorkerUpdate('New service worker did not take control in time');
+            }, SW_UPDATE_RELOAD_TIMEOUT_MS);
+        }
+
         /**
          * Show a dismissible banner offering to activate a newly installed
          * service worker. Activation (and the reload that follows it via
@@ -1848,7 +1898,7 @@
             reloadBtn.addEventListener('click', () => {
                 reloadBtn.disabled = true;
                 reloadBtn.textContent = 'Reloading…';
-                worker.postMessage({ type: 'SKIP_WAITING' });
+                applyServiceWorkerUpdate(worker);
             });
 
             const dismissBtn = document.createElement('button');
@@ -1955,15 +2005,9 @@
 
                 // Reload exactly once the new service worker has taken control,
                 // so the reloaded page is served by the NEW worker (and thus the
-                // new cached assets). Guarded to avoid reload loops.
-                let reloading = false;
+                // new cached assets).
                 navigator.serviceWorker.addEventListener('controllerchange', () => {
-                    if (reloading) {
-                        return;
-                    }
-                    reloading = true;
-                    console.log('PWA: New service worker took control, reloading page...');
-                    window.location.reload();
+                    reloadForServiceWorkerUpdate('New service worker took control');
                 });
             });
         }

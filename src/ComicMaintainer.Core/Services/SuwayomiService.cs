@@ -80,6 +80,7 @@ public class SuwayomiService : ISuwayomiService
         try
         {
             using var document = await ExecuteAsync(
+                "AboutServer",
                 "query { aboutServer { name version } }",
                 null,
                 cancellationToken);
@@ -147,6 +148,7 @@ public class SuwayomiService : ISuwayomiService
             """;
 
         using var document = await ExecuteAsync(
+            "Chapters",
             queryText,
             new Dictionary<string, object?> { ["id"] = seriesId },
             cancellationToken);
@@ -255,6 +257,7 @@ public class SuwayomiService : ISuwayomiService
             """;
 
         using var _ = await ExecuteAsync(
+            "Enqueue",
             mutation,
             new Dictionary<string, object?> { ["ids"] = chapterIds },
             cancellationToken);
@@ -311,6 +314,7 @@ public class SuwayomiService : ISuwayomiService
             """;
 
         using var document = await ExecuteAsync(
+            "Manga",
             queryText,
             new Dictionary<string, object?> { ["id"] = seriesId },
             cancellationToken);
@@ -338,8 +342,11 @@ public class SuwayomiService : ISuwayomiService
 
     private async Task<IReadOnlyList<SuwayomiSeries>> GetLibrarySeriesAsync(CancellationToken cancellationToken)
     {
+        // Suwayomi types pagination cursors with its own `Cursor` scalar, and
+        // GraphQL validation rejects a `String` variable in that position before
+        // the query runs. The cursor still travels as a plain JSON string.
         const string queryText = """
-            query Library($first: Int!, $after: String) {
+            query Library($first: Int!, $after: Cursor) {
               mangas(condition: { inLibrary: true }, first: $first, after: $after) {
                 nodes { id title inLibrary thumbnailUrl }
                 pageInfo { hasNextPage endCursor }
@@ -352,6 +359,7 @@ public class SuwayomiService : ISuwayomiService
         while (true)
         {
             using var document = await ExecuteAsync(
+                "Library",
                 queryText,
                 new Dictionary<string, object?>
                 {
@@ -419,9 +427,11 @@ public class SuwayomiService : ISuwayomiService
     /// Posts a GraphQL document to the configured server and returns the parsed
     /// response. Throws <see cref="SuwayomiException"/> for every failure mode
     /// (disabled, misconfigured, transport error, HTTP error, GraphQL errors)
-    /// so callers have a single thing to catch.
+    /// so callers have a single thing to catch. <paramref name="operationName"/>
+    /// identifies the document in the error logged if Suwayomi rejects it.
     /// </summary>
     private async Task<JsonDocument> ExecuteAsync(
+        string operationName,
         string query,
         IDictionary<string, object?>? variables,
         CancellationToken cancellationToken)
@@ -508,6 +518,36 @@ public class SuwayomiService : ISuwayomiService
                         .Select(e => GetStringOrNull(e, "message"))
                         .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m))
                         ?? "unknown error";
+
+                    if (IsRequestRejection(errors))
+                    {
+                        // The documents sent from here are fixed strings, so the
+                        // server refusing one is a defect in this integration,
+                        // not a problem with the user's server or settings.
+                        // Logged at Error so automated error reporting files it;
+                        // the exception alone is only shown to the user.
+                        //
+                        // The operation is spliced into the template rather than
+                        // passed as an argument so that each document
+                        // fingerprints, and is filed, separately: with one shared
+                        // template a later mismatch in another document would
+                        // only bump the first issue ever filed. Operation names
+                        // are GraphQL names, so they hold no template braces.
+                        // Every error is kept, not just the first, because
+                        // validation reports all of them at once.
+                        var details = string.Join(
+                            " | ",
+                            errors.EnumerateArray()
+                                .Select(e => GetStringOrNull(e, "message"))
+                                .Where(m => !string.IsNullOrWhiteSpace(m))
+                                .Distinct(StringComparer.Ordinal));
+
+                        _logger.LogError(
+                            "Suwayomi rejected the " + operationName
+                                + " GraphQL request before running it; the query does not match the server's schema: {GraphQLErrors}",
+                            LoggingHelper.SanitizeForLog(details.Length > 0 ? details : message));
+                    }
+
                     throw new SuwayomiException($"The Suwayomi server rejected the request: {message}");
                 }
 
@@ -526,6 +566,27 @@ public class SuwayomiService : ISuwayomiService
             return document;
         }
     }
+
+    /// <summary>
+    /// True when the server refused the GraphQL document itself (it failed to
+    /// parse or validate, so nothing ran) rather than failing while resolving
+    /// a field.
+    /// </summary>
+    /// <remarks>
+    /// The GraphQL spec gives every error tied to a response field a
+    /// <c>path</c>, and Suwayomi raises all resolver failures that way,
+    /// including its Unauthorized/Forbidden rejections. An error without one
+    /// was raised before execution began, which the spec attributes to the
+    /// client: a query in this class that the server's schema does not accept,
+    /// such as a cursor variable declared as <c>String</c> where Suwayomi
+    /// expects its <c>Cursor</c> scalar.
+    /// </remarks>
+    private static bool IsRequestRejection(JsonElement errors)
+        => errors.EnumerateArray().Any(error =>
+            error.ValueKind == JsonValueKind.Object
+            && !(error.TryGetProperty("path", out var path)
+                && path.ValueKind == JsonValueKind.Array
+                && path.GetArrayLength() > 0));
 
     /// <summary>
     /// Builds the GraphQL endpoint for a configured base URL. Only absolute

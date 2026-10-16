@@ -338,8 +338,11 @@ public class SuwayomiService : ISuwayomiService
 
     private async Task<IReadOnlyList<SuwayomiSeries>> GetLibrarySeriesAsync(CancellationToken cancellationToken)
     {
+        // Suwayomi types pagination cursors with its own `Cursor` scalar, and
+        // GraphQL validation rejects a `String` variable in that position before
+        // the query runs. The cursor still travels as a plain JSON string.
         const string queryText = """
-            query Library($first: Int!, $after: String) {
+            query Library($first: Int!, $after: Cursor) {
               mangas(condition: { inLibrary: true }, first: $first, after: $after) {
                 nodes { id title inLibrary thumbnailUrl }
                 pageInfo { hasNextPage endCursor }
@@ -508,6 +511,19 @@ public class SuwayomiService : ISuwayomiService
                         .Select(e => GetStringOrNull(e, "message"))
                         .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m))
                         ?? "unknown error";
+
+                    if (IsRequestRejection(errors))
+                    {
+                        // The documents sent from here are fixed strings, so the
+                        // server refusing one is a defect in this integration,
+                        // not a problem with the user's server or settings.
+                        // Logged at Error so automated error reporting files it;
+                        // the exception alone is only shown to the user.
+                        _logger.LogError(
+                            "Suwayomi rejected a GraphQL request before running it; the query does not match the server's schema: {GraphQLError}",
+                            LoggingHelper.SanitizeForLog(message));
+                    }
+
                     throw new SuwayomiException($"The Suwayomi server rejected the request: {message}");
                 }
 
@@ -526,6 +542,27 @@ public class SuwayomiService : ISuwayomiService
             return document;
         }
     }
+
+    /// <summary>
+    /// True when the server refused the GraphQL document itself (it failed to
+    /// parse or validate, so nothing ran) rather than failing while resolving
+    /// a field.
+    /// </summary>
+    /// <remarks>
+    /// The GraphQL spec gives every error tied to a response field a
+    /// <c>path</c>, and Suwayomi raises all resolver failures that way,
+    /// including its Unauthorized/Forbidden rejections. An error without one
+    /// was raised before execution began, which the spec attributes to the
+    /// client: a query in this class that the server's schema does not accept,
+    /// such as a cursor variable declared as <c>String</c> where Suwayomi
+    /// expects its <c>Cursor</c> scalar.
+    /// </remarks>
+    private static bool IsRequestRejection(JsonElement errors)
+        => errors.EnumerateArray().Any(error =>
+            error.ValueKind == JsonValueKind.Object
+            && !(error.TryGetProperty("path", out var path)
+                && path.ValueKind == JsonValueKind.Array
+                && path.GetArrayLength() > 0));
 
     /// <summary>
     /// Builds the GraphQL endpoint for a configured base URL. Only absolute

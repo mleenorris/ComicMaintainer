@@ -12,7 +12,10 @@ namespace ComicMaintainer.Tests.Services;
 
 public class SuwayomiServiceTests
 {
-    private static SuwayomiService CreateService(StubHttpMessageHandler handler, AppSettings settings)
+    private static SuwayomiService CreateService(
+        StubHttpMessageHandler handler,
+        AppSettings settings,
+        ILogger<SuwayomiService>? logger = null)
     {
         var httpClientFactory = new Mock<IHttpClientFactory>();
         httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient(handler));
@@ -23,7 +26,23 @@ public class SuwayomiServiceTests
         return new SuwayomiService(
             httpClientFactory.Object,
             optionsMonitor.Object,
-            Mock.Of<ILogger<SuwayomiService>>());
+            logger ?? Mock.Of<ILogger<SuwayomiService>>());
+    }
+
+    /// <summary>
+    /// Error-level logs are what raise an automated error report, so this is
+    /// how a test tells "filed as a defect" apart from "shown to the user only".
+    /// </summary>
+    private static void VerifyErrorLogged(Mock<ILogger<SuwayomiService>> logger, Times times, string containing = "")
+    {
+        logger.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state != null && state.ToString()!.Contains(containing)),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            times);
     }
 
     private static AppSettings EnabledSettings() => new()
@@ -147,6 +166,86 @@ public class SuwayomiServiceTests
         Assert.Single(results);
         Assert.Equal(2, results[0].Id);
         Assert.Equal(new string?[] { null, "next-page" }, afterValues);
+    }
+
+    [Fact]
+    public async Task SearchSeriesAsync_DeclaresTheLibraryCursorAsSuwayomisCursorScalar()
+    {
+        // Suwayomi types `mangas(after:)` with its own nullable `Cursor` scalar.
+        // A `String` variable there fails validation before the query runs, and a
+        // non-null one would reject the first page, which has no cursor yet.
+        string? query = null;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            using var document = JsonDocument.Parse(body);
+            query = document.RootElement.GetProperty("query").GetString();
+            return Json("""{"data":{"mangas":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}""");
+        });
+
+        var service = CreateService(handler, EnabledSettings());
+
+        await service.SearchSeriesAsync("Solo Leveling");
+
+        Assert.NotNull(query);
+        Assert.Matches(@"\$after\s*:\s*Cursor\s*[,)]", query);
+        Assert.Contains("after: $after", query);
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_LogsSchemaRejectionsAsErrorsSoTheyAreReported()
+    {
+        // What Suwayomi returns when validation fails: no data, and an error
+        // without a `path` because nothing was executed.
+        var handler = new StubHttpMessageHandler(_ => Json("""
+            {"errors":[{"message":"Validation error (VariableTypeMismatch@[mangas]) : Variable 'after' of type 'String' used in position expecting type 'Cursor'","locations":[{"line":1,"column":69}],"extensions":{}}]}
+            """));
+        var logger = new Mock<ILogger<SuwayomiService>>();
+
+        var service = CreateService(handler, EnabledSettings(), logger.Object);
+
+        var exception = await Assert.ThrowsAsync<SuwayomiException>(
+            () => service.DownloadMissingIssuesAsync("Solo Leveling", new[] { 1 }));
+
+        Assert.Contains("VariableTypeMismatch", exception.Message);
+        VerifyErrorLogged(logger, Times.Once(), containing: "VariableTypeMismatch");
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_StillReportsSchemaRejectionsAlthoughItDoesNotThrow()
+    {
+        var handler = new StubHttpMessageHandler(_ => Json("""
+            {"errors":[{"message":"Validation error (FieldUndefined@[aboutServer/name]) : Field 'name' in type 'AboutServerPayload' is undefined","locations":[{"line":1,"column":23}]}]}
+            """));
+        var logger = new Mock<ILogger<SuwayomiService>>();
+
+        var service = CreateService(handler, EnabledSettings(), logger.Object);
+
+        var status = await service.GetStatusAsync();
+
+        Assert.False(status.Connected);
+        Assert.Contains("FieldUndefined", status.Error);
+        VerifyErrorLogged(logger, Times.Once(), containing: "FieldUndefined");
+    }
+
+    [Fact]
+    public async Task DownloadMissingIssuesAsync_DoesNotReportFieldErrorsSuchAsUnauthorized()
+    {
+        // Suwayomi raises resolver failures, its auth rejections included, as
+        // field errors that carry a `path`. Those are for the user to fix on
+        // their server, not defects to file against this project.
+        var handler = new StubHttpMessageHandler(_ => Json("""
+            {"errors":[{"message":"Exception while fetching data (/mangas) : Unauthorized","locations":[{"line":2,"column":3}],"path":["mangas"]}]}
+            """));
+        var logger = new Mock<ILogger<SuwayomiService>>();
+
+        var service = CreateService(handler, EnabledSettings(), logger.Object);
+
+        var exception = await Assert.ThrowsAsync<SuwayomiException>(
+            () => service.DownloadMissingIssuesAsync("Solo Leveling", new[] { 1 }));
+
+        Assert.Contains("Unauthorized", exception.Message);
+        VerifyErrorLogged(logger, Times.Never());
     }
 
     [Fact]

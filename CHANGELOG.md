@@ -68,6 +68,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so free disk space read as "84258.8 MB".
 
 ### Fixed
+- **Downloading missing issues from Suwayomi works again, and a rejected request now files an
+  issue.** The query that lists the Suwayomi library declared its pagination cursor as a GraphQL
+  `String`, but Suwayomi types that argument with its own `Cursor` scalar and refuses the whole
+  query before running it, so every series search and every download of missing issues failed
+  with "Variable 'after' of type 'String' used in position expecting type 'Cursor'". The cursor
+  is now declared as `Cursor`. The failure was also never filed automatically: the server's
+  refusal was turned into a message for the browser without being logged, and automated error
+  reporting only sees what is logged at `Error` and above. A query that Suwayomi refuses outright
+  — a GraphQL error without a field `path`, so nothing ran — is now logged at `Error`, because
+  ComicMaintainer's queries are fixed strings and only a defect in them can cause one. Errors
+  raised while a query runs, such as an unauthorized account, and an unreachable server are
+  still only shown to the user.
+
 - **Condensed downloads no longer die at 30 seconds, and a timeout now files an issue.** Every
   request in the application was capped by a 30 second default timeout policy, and because the
   timeout middleware ran *before* routing it could never see an endpoint's own policy — so the

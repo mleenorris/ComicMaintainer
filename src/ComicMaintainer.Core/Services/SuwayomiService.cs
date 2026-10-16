@@ -122,16 +122,8 @@ public class SuwayomiService : ISuwayomiService
             return library.Take(limit).ToList();
         }
 
-        // Rank exact normalized matches first, then prefix matches, then any
-        // series whose normalized title contains the query (or vice versa, so
-        // "Series Name Vol. 1" still matches the Suwayomi entry "Series Name").
-        return library
-            .Select(series => new { series, score = MatchScore(Normalize(series.Title), normalizedQuery) })
-            .Where(x => x.score > 0)
-            .OrderByDescending(x => x.score)
-            .ThenBy(x => x.series.Title, StringComparer.OrdinalIgnoreCase)
+        return RankMatches(library, normalizedQuery)
             .Take(limit)
-            .Select(x => x.series)
             .ToList();
     }
 
@@ -188,6 +180,7 @@ public class SuwayomiService : ISuwayomiService
         string? seriesTitle,
         IEnumerable<int> issueNumbers,
         int? seriesId = null,
+        IEnumerable<string>? alternateTitles = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(issueNumbers);
@@ -203,7 +196,7 @@ public class SuwayomiService : ISuwayomiService
             throw new SuwayomiException("No missing issue numbers were supplied.");
         }
 
-        var series = await ResolveSeriesAsync(seriesTitle, seriesId, cancellationToken);
+        var series = await ResolveSeriesAsync(seriesTitle, alternateTitles, seriesId, cancellationToken);
         var chapters = await GetChaptersAsync(series.Id, cancellationToken);
 
         var result = new SuwayomiDownloadResult { Series = series };
@@ -273,6 +266,7 @@ public class SuwayomiService : ISuwayomiService
 
     private async Task<SuwayomiSeries> ResolveSeriesAsync(
         string? seriesTitle,
+        IEnumerable<string>? alternateTitles,
         int? seriesId,
         CancellationToken cancellationToken)
     {
@@ -295,14 +289,57 @@ public class SuwayomiService : ISuwayomiService
             throw new SuwayomiException("A series title or Suwayomi series id is required.");
         }
 
-        var matches = await SearchSeriesAsync(seriesTitle, limit: 1, cancellationToken);
-        if (matches.Count == 0)
+        // Suwayomi lists a series under its source's title, which can differ
+        // from the one shown here (a localized or romanized title, say), so the
+        // series' other titles are tried as well. An exact match on any of them
+        // is better evidence than a partial match on the shown title, which is
+        // often a sequel or spin-off ("Solo Leveling: Ragnarok"), so every title
+        // is tried exactly before the shown title's partial matches. The other
+        // titles are never matched partially: a series can have dozens, and
+        // short ones such as acronyms would match unrelated series and queue
+        // their chapters.
+        var normalizedTitle = Normalize(seriesTitle);
+        var otherTitles = (alternateTitles ?? Enumerable.Empty<string>())
+            .Where(title => !string.IsNullOrWhiteSpace(title))
+            .Select(title => (Title: title.Trim(), Key: Normalize(title)))
+            .Where(other => other.Key.Length > 0 && other.Key != normalizedTitle)
+            .DistinctBy(other => other.Key)
+            .ToList();
+
+        var librarySeries = await GetLibrarySeriesAsync(cancellationToken);
+        var byTitle = IndexByNormalizedTitle(librarySeries);
+        if (byTitle.TryGetValue(normalizedTitle, out var match))
         {
-            throw new SuwayomiException(
-                $"No series matching '{seriesTitle}' was found in the Suwayomi library.");
+            return match;
         }
 
-        return matches[0];
+        foreach (var other in otherTitles)
+        {
+            if (byTitle.TryGetValue(other.Key, out match))
+            {
+                _logger.LogInformation(
+                    "Matched Suwayomi series {SeriesId} ({SuwayomiTitle}) for {SeriesTitle} by its other title {OtherTitle}",
+                    match.Id,
+                    LoggingHelper.SanitizeForLog(match.Title),
+                    LoggingHelper.SanitizeForLog(seriesTitle),
+                    LoggingHelper.SanitizeForLog(other.Title));
+                return match;
+            }
+        }
+
+        var partial = RankMatches(librarySeries, normalizedTitle).FirstOrDefault();
+        if (partial is not null)
+        {
+            return partial;
+        }
+
+        var searched = otherTitles.Count switch
+        {
+            0 => $"'{seriesTitle}'",
+            1 => $"'{seriesTitle}' or its other title '{otherTitles[0].Title}'",
+            _ => $"'{seriesTitle}' or any of its {otherTitles.Count} other titles"
+        };
+        throw new SuwayomiException($"No series matching {searched} was found in the Suwayomi library.");
     }
 
     private async Task<SuwayomiSeries> GetSeriesByIdAsync(int seriesId, CancellationToken cancellationToken)
@@ -617,12 +654,49 @@ public class SuwayomiService : ISuwayomiService
     }
 
     /// <summary>
+    /// Library series whose title matches <paramref name="normalizedQuery"/>,
+    /// best first: exact normalized matches, then prefix matches, then any
+    /// series whose normalized title contains the query (or vice versa, so
+    /// "Series Name Vol. 1" still matches the Suwayomi entry "Series Name").
+    /// </summary>
+    private static IEnumerable<SuwayomiSeries> RankMatches(
+        IEnumerable<SuwayomiSeries> library,
+        string normalizedQuery)
+        => library
+            .Select(series => new { series, score = MatchScore(Normalize(series.Title), normalizedQuery) })
+            .Where(x => x.score > 0)
+            .OrderByDescending(x => x.score)
+            .ThenBy(x => x.series.Title, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.series);
+
+    /// <summary>
+    /// Maps each normalized library title to its series, for exact lookups.
+    /// When several share a title (one series added from two sources), the
+    /// one <see cref="RankMatches"/> would put first is kept.
+    /// </summary>
+    private static Dictionary<string, SuwayomiSeries> IndexByNormalizedTitle(IEnumerable<SuwayomiSeries> library)
+    {
+        var index = new Dictionary<string, SuwayomiSeries>(StringComparer.Ordinal);
+        foreach (var series in library.OrderBy(s => s.Title, StringComparer.OrdinalIgnoreCase))
+        {
+            var key = Normalize(series.Title);
+            if (key.Length > 0)
+            {
+                index.TryAdd(key, series);
+            }
+        }
+
+        return index;
+    }
+
+    /// <summary>
     /// Scores how well a Suwayomi title matches the requested one. Higher is
-    /// better; 0 means "not a match".
+    /// better; 0 means "not a match". An empty query (a title with no letters
+    /// or digits) matches nothing rather than prefixing every title.
     /// </summary>
     private static int MatchScore(string candidate, string query)
     {
-        if (candidate.Length == 0)
+        if (candidate.Length == 0 || query.Length == 0)
         {
             return 0;
         }

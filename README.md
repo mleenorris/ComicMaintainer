@@ -496,6 +496,7 @@ ComicMaintainer can connect to a [Suwayomi](https://github.com/Suwayomi/Suwayomi
 How matching works:
 
 - The local series title is matched against the titles in the **Suwayomi library** (exact match first, then prefix/substring, ignoring punctuation and case). Only library entries are considered, because Suwayomi only tracks chapters for series that have been added to its library.
+- Suwayomi names a series after its source, which may differ from the title shown here, so the series' other titles — its canonical title and its aliases (provider-supplied or added under **🏷️ Manage Names**) — are tried as well. An exact match on the shown title wins, then an exact match on one of the other titles (in that order), and only then a prefix/substring match on the shown title, which is often a sequel or spin-off. The other titles are only matched exactly, so a short alias such as an acronym cannot pick an unrelated series; if a series is still not found, add the title Suwayomi uses as an alias.
 - Each missing whole issue number is matched to a chapter whose chapter number floors to it (so `3.5` can satisfy issue `3`). Chapters Suwayomi has already downloaded are skipped, and issue numbers with no chapter at all are reported back as unmatched.
 - Matched chapters are added to Suwayomi's download queue (`enqueueChapterDownloads`). Suwayomi writes the files into **its own** download directory, so mount that directory inside ComicMaintainer's watched directory for the new files to be picked up and processed automatically.
 
@@ -517,7 +518,7 @@ Settings are editable in **Settings → Suwayomi Downloads**, which also has a *
 | `GET` | `/api/suwayomi/status` | Probe the configured server. |
 | `GET` | `/api/suwayomi/series?query=` | Search the Suwayomi library. |
 | `GET` | `/api/suwayomi/series/{id}/chapters` | List the chapters of a Suwayomi series. |
-| `POST` | `/api/suwayomi/download-missing` | Queue downloads for `{ seriesTitle, suwayomiSeriesId?, issueNumbers[] }`. |
+| `POST` | `/api/suwayomi/download-missing` | Queue downloads for `{ seriesTitle, alternateTitles?, suwayomiSeriesId?, issueNumbers[] }`. |
 
 ### External Series Images
 

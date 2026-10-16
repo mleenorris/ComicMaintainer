@@ -38,6 +38,23 @@ public class SuwayomiUiTests
     }
 
     [Fact]
+    public void DownloadMissingIssues_SendsTheSeriesOtherTitlesForSuwayomiToFallBackOn()
+    {
+        var contents = ReadMainJs();
+        var downloadAction = Regex.Match(
+            contents,
+            @"async function downloadMissingIssuesFromSuwayomi\(seriesId, seriesTitle\) \{.*?(?=\n        // Render a small banner)",
+            RegexOptions.Singleline);
+
+        Assert.True(downloadAction.Success, "Expected to find the Suwayomi download action.");
+        // Suwayomi may list the series under its canonical title or an alias
+        // rather than the title shown here.
+        Assert.Contains("data.canonical_title", downloadAction.Value);
+        Assert.Contains("data.aliases", downloadAction.Value);
+        Assert.Matches(@"alternateTitles:\s*titles\.slice\(1\)", downloadAction.Value);
+    }
+
+    [Fact]
     public void SavingSuwayomiSettings_InvalidatesAndRefreshesTheStatusProbe()
     {
         var contents = ReadMainJs();

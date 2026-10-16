@@ -505,12 +505,15 @@ Queue downloads for the issue numbers a series is missing locally.
 ```json
 {
   "seriesTitle": "Solo Leveling",
+  "alternateTitles": ["Ore dake Level Up na Ken", "Na Honjaman Level Up"],
   "suwayomiSeriesId": 4,
   "issueNumbers": [2, 3]
 }
 ```
 
 `suwayomiSeriesId` is optional; when omitted the series is resolved by matching `seriesTitle` against the Suwayomi library.
+
+`alternateTitles` is optional too: the series' other titles (the web UI sends its canonical title and aliases), for when Suwayomi lists the series under a different name. Without `suwayomiSeriesId` the series is resolved by, in order, an exact match on `seriesTitle`, an exact match on each of `alternateTitles` in the order given, and a prefix/substring match on `seriesTitle`. Matching ignores punctuation and case, and `alternateTitles` are never matched partially. Both title fields are ignored when `suwayomiSeriesId` is given.
 
 **Response:**
 ```json

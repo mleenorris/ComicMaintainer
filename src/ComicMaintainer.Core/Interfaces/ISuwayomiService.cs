@@ -35,15 +35,23 @@ public interface ISuwayomiService
     /// <summary>
     /// Queues downloads on the Suwayomi server for the given issue numbers of
     /// a series. When <paramref name="seriesId"/> is null the series is
-    /// resolved from <paramref name="seriesTitle"/> by matching the Suwayomi
-    /// library.
+    /// resolved by matching the Suwayomi library against
+    /// <paramref name="seriesTitle"/> and, because Suwayomi may list the
+    /// series under another name, <paramref name="alternateTitles"/>.
     /// </summary>
     /// <param name="seriesTitle">Local series title, used to match a Suwayomi library entry.</param>
     /// <param name="issueNumbers">Whole issue/chapter numbers that are missing locally.</param>
     /// <param name="seriesId">Optional explicit Suwayomi series id, bypassing title matching.</param>
+    /// <param name="alternateTitles">
+    /// Other titles of the local series (canonical title, aliases). They only
+    /// count when one equals a Suwayomi title, ignoring case and punctuation,
+    /// and such an exact match wins over a partial match on
+    /// <paramref name="seriesTitle"/>.
+    /// </param>
     Task<SuwayomiDownloadResult> DownloadMissingIssuesAsync(
         string? seriesTitle,
         IEnumerable<int> issueNumbers,
         int? seriesId = null,
+        IEnumerable<string>? alternateTitles = null,
         CancellationToken cancellationToken = default);
 }

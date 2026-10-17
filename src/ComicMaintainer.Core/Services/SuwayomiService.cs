@@ -109,7 +109,7 @@ public class SuwayomiService : ISuwayomiService
         CancellationToken cancellationToken = default)
     {
         limit = Math.Clamp(limit, 1, 100);
-        var library = await GetLibrarySeriesAsync(cancellationToken);
+        var library = (await GetLibrarySeriesAsync(cancellationToken)).Series;
 
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -125,6 +125,30 @@ public class SuwayomiService : ISuwayomiService
         return RankMatches(library, normalizedQuery)
             .Take(limit)
             .ToList();
+    }
+
+    public async Task<SuwayomiLibrarySnapshot> GetLibrarySeriesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var series = await GetLibrarySeriesInternalAsync(cancellationToken);
+        var normalizedSeries = series
+            .Select(item => (Series: item, NormalizedTitle: Normalize(item.Title)))
+            .ToList();
+        var titleIndex = new Dictionary<string, SuwayomiSeries>(StringComparer.Ordinal);
+        foreach (var item in normalizedSeries.OrderBy(item => item.Series.Title, StringComparer.OrdinalIgnoreCase))
+        {
+            if (item.NormalizedTitle.Length > 0)
+            {
+                titleIndex.TryAdd(item.NormalizedTitle, item.Series);
+            }
+        }
+
+        return new SuwayomiLibrarySnapshot
+        {
+            Series = series,
+            NormalizedTitleIndex = titleIndex,
+            NormalizedSeries = normalizedSeries
+        };
     }
 
     public async Task<IReadOnlyList<SuwayomiChapter>> GetChaptersAsync(
@@ -183,6 +207,30 @@ public class SuwayomiService : ISuwayomiService
         IEnumerable<string>? alternateTitles = null,
         CancellationToken cancellationToken = default)
     {
+        return await DownloadMissingIssuesCoreAsync(
+            seriesTitle, issueNumbers, seriesId, alternateTitles, librarySnapshot: null, cancellationToken);
+    }
+
+    public async Task<SuwayomiDownloadResult> DownloadMissingIssuesFromSnapshotAsync(
+        string? seriesTitle,
+        IEnumerable<int> issueNumbers,
+        SuwayomiLibrarySnapshot librarySnapshot,
+        IEnumerable<string>? alternateTitles = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(librarySnapshot);
+        return await DownloadMissingIssuesCoreAsync(
+            seriesTitle, issueNumbers, seriesId: null, alternateTitles, librarySnapshot, cancellationToken);
+    }
+
+    private async Task<SuwayomiDownloadResult> DownloadMissingIssuesCoreAsync(
+        string? seriesTitle,
+        IEnumerable<int> issueNumbers,
+        int? seriesId,
+        IEnumerable<string>? alternateTitles,
+        SuwayomiLibrarySnapshot? librarySnapshot,
+        CancellationToken cancellationToken)
+    {
         ArgumentNullException.ThrowIfNull(issueNumbers);
 
         var requested = issueNumbers
@@ -196,7 +244,8 @@ public class SuwayomiService : ISuwayomiService
             throw new SuwayomiException("No missing issue numbers were supplied.");
         }
 
-        var series = await ResolveSeriesAsync(seriesTitle, alternateTitles, seriesId, cancellationToken);
+        var series = await ResolveSeriesAsync(
+            seriesTitle, alternateTitles, seriesId, librarySnapshot, cancellationToken);
         var chapters = await GetChaptersAsync(series.Id, cancellationToken);
 
         var result = new SuwayomiDownloadResult { Series = series };
@@ -268,15 +317,22 @@ public class SuwayomiService : ISuwayomiService
         string? seriesTitle,
         IEnumerable<string>? alternateTitles,
         int? seriesId,
+        SuwayomiLibrarySnapshot? librarySnapshot,
         CancellationToken cancellationToken)
     {
         if (seriesId is > 0)
         {
-            var library = await GetLibrarySeriesAsync(cancellationToken);
+            var library = librarySnapshot?.Series
+                          ?? (await GetLibrarySeriesAsync(cancellationToken)).Series;
             var byId = library.FirstOrDefault(s => s.Id == seriesId.Value);
             if (byId is not null)
             {
                 return byId;
+            }
+
+            if (librarySnapshot is not null)
+            {
+                throw new SuwayomiException($"Suwayomi has no series with id {seriesId.Value} in the supplied library snapshot.");
             }
 
             // The id may belong to a series that is not in the library (or the
@@ -306,8 +362,8 @@ public class SuwayomiService : ISuwayomiService
             .DistinctBy(other => other.Key)
             .ToList();
 
-        var librarySeries = await GetLibrarySeriesAsync(cancellationToken);
-        var byTitle = IndexByNormalizedTitle(librarySeries);
+        librarySnapshot ??= await GetLibrarySeriesAsync(cancellationToken);
+        var byTitle = librarySnapshot.NormalizedTitleIndex;
         if (byTitle.TryGetValue(normalizedTitle, out var match))
         {
             return match;
@@ -327,7 +383,7 @@ public class SuwayomiService : ISuwayomiService
             }
         }
 
-        var partial = RankMatches(librarySeries, normalizedTitle).FirstOrDefault();
+        var partial = RankMatches(librarySnapshot, normalizedTitle).FirstOrDefault();
         if (partial is not null)
         {
             return partial;
@@ -377,7 +433,7 @@ public class SuwayomiService : ISuwayomiService
         return series;
     }
 
-    private async Task<IReadOnlyList<SuwayomiSeries>> GetLibrarySeriesAsync(CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<SuwayomiSeries>> GetLibrarySeriesInternalAsync(CancellationToken cancellationToken)
     {
         // Suwayomi types pagination cursors with its own `Cursor` scalar, and
         // GraphQL validation rejects a `String` variable in that position before
@@ -669,26 +725,21 @@ public class SuwayomiService : ISuwayomiService
             .ThenBy(x => x.series.Title, StringComparer.OrdinalIgnoreCase)
             .Select(x => x.series);
 
-    /// <summary>
-    /// Maps each normalized library title to its series, for exact lookups.
-    /// When several share a title (one series added from two sources), the
-    /// one <see cref="RankMatches"/> would put first is kept.
-    /// </summary>
-    private static Dictionary<string, SuwayomiSeries> IndexByNormalizedTitle(IEnumerable<SuwayomiSeries> library)
-    {
-        var index = new Dictionary<string, SuwayomiSeries>(StringComparer.Ordinal);
-        foreach (var series in library.OrderBy(s => s.Title, StringComparer.OrdinalIgnoreCase))
-        {
-            var key = Normalize(series.Title);
-            if (key.Length > 0)
+    private static IEnumerable<SuwayomiSeries> RankMatches(
+        SuwayomiLibrarySnapshot library,
+        string normalizedQuery)
+        => library.NormalizedSeries
+            .Select(item => new
             {
-                index.TryAdd(key, series);
-            }
-        }
+                item.Series,
+                score = MatchScore(item.NormalizedTitle, normalizedQuery)
+            })
+            .Where(item => item.score > 0)
+            .OrderByDescending(item => item.score)
+            .ThenBy(item => item.Series.Title, StringComparer.OrdinalIgnoreCase)
+            .Select(item => item.Series);
 
-        return index;
-    }
-
+    /// <summary>
     /// <summary>
     /// Scores how well a Suwayomi title matches the requested one. Higher is
     /// better; 0 means "not a match". An empty query (a title with no letters

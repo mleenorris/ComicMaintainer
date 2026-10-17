@@ -251,7 +251,7 @@ public class MissingIssuesCheckJobHandler : IScheduledJobHandler
                 outcomes.Add($"{downloadFailures} series could not be downloaded");
             }
         }
-        else if (autoDownloadRequested)
+        else if (autoDownloadRequested && !downloadEnabled)
         {
             outcomes.Add("autoDownload is enabled but the Suwayomi integration is not configured");
         }

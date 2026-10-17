@@ -185,6 +185,19 @@ public class MissingIssuesCheckJobHandlerTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_AutoDownloadConfiguredWithNoGaps_DoesNotReportIntegrationUnconfigured()
+    {
+        SetupCandidates(("a", "Alpha"));
+        SetupSeries("a", "Alpha", "1", "2");
+        _suwayomi.SetupGet(s => s.IsConfigured).Returns(true);
+
+        var summary = await BuildHandler().ExecuteAsync("""{"autoDownload":true}""", CancellationToken.None);
+
+        Assert.Equal("Checked 1 series: none are missing issues.", summary);
+        _suwayomi.Verify(s => s.GetLibrarySeriesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_OversizedIssueRange_IsReportedAsSkipped()
     {
         SetupCandidates(("a", "Alpha"));

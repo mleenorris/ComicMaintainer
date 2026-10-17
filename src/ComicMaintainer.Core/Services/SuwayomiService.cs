@@ -135,12 +135,11 @@ public class SuwayomiService : ISuwayomiService
             .Select(item => (Series: item, NormalizedTitle: Normalize(item.Title)))
             .ToList();
         var titleIndex = new Dictionary<string, SuwayomiSeries>(StringComparer.Ordinal);
-        foreach (var item in normalizedSeries.OrderBy(item => item.Series.Title, StringComparer.OrdinalIgnoreCase))
+        foreach (var item in normalizedSeries
+                     .Where(item => item.NormalizedTitle.Length > 0)
+                     .OrderBy(item => item.Series.Title, StringComparer.OrdinalIgnoreCase))
         {
-            if (item.NormalizedTitle.Length > 0)
-            {
-                titleIndex.TryAdd(item.NormalizedTitle, item.Series);
-            }
+            titleIndex.TryAdd(item.NormalizedTitle, item.Series);
         }
 
         return new SuwayomiLibrarySnapshot

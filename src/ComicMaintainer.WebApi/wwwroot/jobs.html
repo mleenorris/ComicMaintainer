@@ -112,6 +112,7 @@
             const isMetadataAudit = job.jobKey === 'metadata-audit';
             const isSeriesLanguageAudit = job.jobKey === 'series-language-audit';
             const isFileNamingAudit = job.jobKey === 'file-naming-audit';
+            const isMissingIssuesCheck = job.jobKey === 'missing-issues-check';
             const findingsId = 'findings-' + job.jobKey.replace(/[^a-z0-9]/gi, '-');
             return `
                 <div class="jobs-card" data-key="${escapeHtml(job.jobKey)}">
@@ -163,6 +164,14 @@
                             <label class="toggle">
                                 <input type="checkbox" data-option="forceReprocess" ${opts.forceReprocess ? 'checked' : ''}>
                                 <span>Force reprocess (include files already marked as renamed)</span>
+                            </label>
+                        </div>
+                    ` : ''}
+                    ${isMissingIssuesCheck ? `
+                        <div class="jobs-row">
+                            <label class="toggle">
+                                <input type="checkbox" data-option="autoDownload" ${opts.autoDownload ? 'checked' : ''}>
+                                <span>Auto-download missing issues from Suwayomi (requires the Suwayomi integration)</span>
                             </label>
                         </div>
                     ` : ''}

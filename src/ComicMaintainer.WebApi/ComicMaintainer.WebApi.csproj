@@ -4,9 +4,9 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Version>2.0.337</Version>
-    <AssemblyVersion>2.0.337.0</AssemblyVersion>
-    <FileVersion>2.0.337.0</FileVersion>
+    <Version>2.0.338</Version>
+    <AssemblyVersion>2.0.338.0</AssemblyVersion>
+    <FileVersion>2.0.338.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

@@ -357,6 +357,14 @@ async function offlineFallbackResponse() {
 }
 
 // Install event - cache essential resources
+//
+// An update deliberately does not call skipWaiting() here. It waits until the
+// user accepts the "new version available" banner in main.js, which sends
+// SKIP_WAITING (see the message handler below). Taking over straight away
+// would swap the worker under an open page and reload it via
+// 'controllerchange' without warning, interrupting work in progress. The very
+// first install is unaffected: with no active worker to replace, it activates
+// immediately.
 self.addEventListener('install', (event) => {
   console.log('Service Worker: Installing...');
   event.waitUntil(
@@ -366,7 +374,6 @@ self.addEventListener('install', (event) => {
         console.log('Service Worker: Caching essential files with cache name:', CACHE_NAME);
         return cache.addAll(urlsToCache);
       })
-      .then(() => self.skipWaiting())
   );
 });
 
@@ -419,6 +426,16 @@ self.addEventListener('fetch', (event) => {
   // handled by the offline-HTML fallback instead of being allowed to fail
   // normally.
   if (url.pathname.startsWith('/api/') && request.method !== 'GET') {
+    return;
+  }
+
+  // Server-sent event streams (the page's real-time /api/events/stream
+  // connection) are likewise left to the browser. A proxied stream stays open
+  // for as long as the page does, and a worker with a response still in flight
+  // is never idle, so the browser would not let a waiting update take over:
+  // the "new version" banner's Reload button would sit on "Reloading…". A live
+  // stream has nothing to cache or replay anyway.
+  if (request.headers.get('Accept')?.includes('text/event-stream')) {
     return;
   }
 

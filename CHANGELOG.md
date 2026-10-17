@@ -68,6 +68,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so free disk space read as "84258.8 MB".
 
 ### Fixed
+- **The Reload button on the "new version available" banner reloads the page again.** The
+  service worker relayed the page's live-update event stream, which stays open indefinitely, so
+  the old worker always had a request in flight. Chrome does not let a waiting service worker
+  take over while that is true, so the button stayed on "Reloading…" until Chrome stopped waiting,
+  five minutes after the update arrived. The event stream now goes straight to the browser
+  without passing through the service worker. A downloaded update also no longer activates by
+  itself. Before, the page could reload with no click at all whenever nothing kept the old worker
+  busy, which is one reason the button got stuck only some of the time. The update now waits until
+  Reload is clicked. The button closes the tab's event stream before asking for the switch, and it
+  reloads straight away if the new version has already taken over. If another tab still holds the
+  old worker, the page reloads anyway after five seconds and loads the new version from the
+  network.
 - **Downloading missing issues from Suwayomi finds a series Suwayomi lists under another
   title.** Suwayomi names a series after its source, which is often a romanized or localized
   title rather than the one shown in the library, so the download failed with "No series

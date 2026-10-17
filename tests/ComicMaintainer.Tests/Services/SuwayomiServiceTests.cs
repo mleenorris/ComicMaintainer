@@ -524,6 +524,24 @@ public class SuwayomiServiceTests
         Assert.Equal(3, result.Series!.Id);
     }
 
+    [Fact]
+    public async Task DownloadMissingIssuesFromSnapshotAsync_DoesNotReloadLibraryForEachSeries()
+    {
+        var requests = new List<string>();
+        var service = CreateService(
+            LibraryWithoutChapters(new[] { (1, "Solo Leveling") }, requests),
+            EnabledSettings());
+        var library = await service.GetLibrarySeriesAsync();
+        requests.Clear();
+
+        var result = await service.DownloadMissingIssuesFromSnapshotAsync(
+            "Solo Leveling", new[] { 1 }, library);
+
+        Assert.Equal(1, result.Series!.Id);
+        Assert.Single(requests);
+        Assert.DoesNotContain("mangas(", requests[0]);
+    }
+
     [Theory]
     [InlineData(new[] { "SL" }, "No series matching 'Solo Leveling' or its other title 'SL' was found in the Suwayomi library.")]
     [InlineData(new[] { "SL", " sl ", "Na Honjaman Level Up" }, "No series matching 'Solo Leveling' or any of its 2 other titles was found in the Suwayomi library.")]

@@ -511,6 +511,8 @@ How matching works:
 
 Settings are editable in **Settings → Suwayomi Downloads**, which also has a **Test Connection** button.
 
+**Automatic missing-issue checks:** the **Missing Issues Check** scheduled job (`missing-issues-check`, on the **Scheduled Jobs** page) scans the whole library for series with gaps in their issue numbering — the same gaps the series detail view shows — and lists them in the job's last-run summary. It is disabled by default and runs daily once enabled. Turn on its **Auto-download missing issues from Suwayomi** option (`autoDownload`) to also queue each series' missing issues on Suwayomi automatically, exactly as the **⬇️ Download from Suwayomi** button does; a series Suwayomi can't match is skipped without stopping the run.
+
 **API endpoints** (see [API Documentation](docs/API.md)):
 
 | Method | Endpoint | Description |

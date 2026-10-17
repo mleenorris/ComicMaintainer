@@ -27,6 +27,10 @@ public interface ISuwayomiService
         int limit = 20,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Returns the series currently in the Suwayomi library.</summary>
+    Task<SuwayomiLibrarySnapshot> GetLibrarySeriesAsync(
+        CancellationToken cancellationToken = default);
+
     /// <summary>Returns the chapters Suwayomi knows about for a series.</summary>
     Task<IReadOnlyList<SuwayomiChapter>> GetChaptersAsync(
         int seriesId,
@@ -52,6 +56,17 @@ public interface ISuwayomiService
         string? seriesTitle,
         IEnumerable<int> issueNumbers,
         int? seriesId = null,
+        IEnumerable<string>? alternateTitles = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Queues downloads using a previously fetched library snapshot, avoiding
+    /// a fresh paginated library request for each series in a batch.
+    /// </summary>
+    Task<SuwayomiDownloadResult> DownloadMissingIssuesFromSnapshotAsync(
+        string? seriesTitle,
+        IEnumerable<int> issueNumbers,
+        SuwayomiLibrarySnapshot librarySnapshot,
         IEnumerable<string>? alternateTitles = null,
         CancellationToken cancellationToken = default);
 }

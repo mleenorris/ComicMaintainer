@@ -41,6 +41,14 @@ public interface ISeriesLibraryService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Returns full issue lists for the requested series ids, building the
+    /// library grouping once for the entire request.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, SeriesIssuesResult>> GetSeriesIssuesForIdsAsync(
+        IEnumerable<string> seriesIds,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Resolves the canonical title + alias set associated with a series card
     /// id, so callers (e.g. metadata refresh) can act on every title that maps
     /// to that card. Returns an empty list if the id is not present.
@@ -120,4 +128,3 @@ public interface ISeriesLibraryService
     Task<IReadOnlyList<SeriesOverviewEntry>> GetSeriesOverviewEntriesAsync(
         CancellationToken cancellationToken = default);
 }
-

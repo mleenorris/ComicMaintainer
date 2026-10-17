@@ -410,6 +410,38 @@ public class SeriesLibraryService : ISeriesLibraryService
                 };
         }
 
+        return await BuildSeriesIssuesResultAsync(accumulator, page, perPage, cancellationToken);
+    }
+
+    public async Task<IReadOnlyDictionary<string, SeriesIssuesResult>> GetSeriesIssuesForIdsAsync(
+        IEnumerable<string> seriesIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(seriesIds);
+
+        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken);
+        var results = new Dictionary<string, SeriesIssuesResult>(StringComparer.Ordinal);
+        foreach (var seriesId in seriesIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!TryResolveGroup(groups, seriesId, out var accumulator))
+            {
+                continue;
+            }
+
+            results[seriesId] = await BuildSeriesIssuesResultAsync(
+                accumulator, page: 1, perPage: -1, cancellationToken);
+        }
+
+        return results;
+    }
+
+    private async Task<SeriesIssuesResult> BuildSeriesIssuesResultAsync(
+        SeriesAccumulator accumulator,
+        int page,
+        int perPage,
+        CancellationToken cancellationToken)
+    {
         // Best-effort upgrade: for issues with empty title metadata, try the
         // archive on disk. Bounded to the requested page so we never read more
         // archives than the user actually sees.
@@ -1953,6 +1985,4 @@ public class SeriesLibraryService : ISeriesLibraryService
         return $"/api/series-images/{Uri.EscapeDataString(accumulator.ImageNormalizedKey)}";
     }
 }
-
-
 

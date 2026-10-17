@@ -80,6 +80,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reloads straight away if the new version has already taken over. If another tab still holds the
   old worker, the page reloads anyway after five seconds and loads the new version from the
   network.
+- **Downloading missing issues from Suwayomi finds a series Suwayomi lists under another
+  title.** Suwayomi names a series after its source, which is often a romanized or localized
+  title rather than the one shown in the library, so the download failed with "No series
+  matching '…' was found in the Suwayomi library" although the series was there. The request
+  now also sends the series' canonical title and aliases, and when the shown title has no
+  exact match the server tries each of them in turn. An exact match on any title is preferred
+  to a partial match on the shown one, so "Solo Leveling" no longer picks "Solo Leveling:
+  Ragnarok" when the series itself is listed as "Ore dake Level Up na Ken". The other titles
+  are only matched exactly, because a short alias such as an acronym would otherwise pick an
+  unrelated series and queue its chapters. The confirmation names the Suwayomi series when it
+  was found under a different title, and a title made only of punctuation no longer matches
+  whichever series comes first in the Suwayomi library.
+
 - **Downloading missing issues from Suwayomi works again, and a rejected request now files an
   issue.** The query that lists the Suwayomi library declared its pagination cursor as a GraphQL
   `String`, but Suwayomi types that argument with its own `Cursor` scalar and refuses the whole
@@ -2616,6 +2629,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [2.0.335] - 2026-10-16
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.336] - 2026-10-16
+
+### Changed
+- Automatic version bump on merge to master
+
+
+## [2.0.337] - 2026-10-17
 
 ### Changed
 - Automatic version bump on merge to master

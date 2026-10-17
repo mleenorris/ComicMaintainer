@@ -4103,6 +4103,10 @@
         // the watcher picks up once it is visible to this service.
         async function downloadMissingIssuesFromSuwayomi(seriesId, seriesTitle) {
             let issues;
+            // Every title the library knows the series by, the shown one first:
+            // Suwayomi may list it under another of them, so the server falls
+            // back to the rest when the shown title has no exact match.
+            const titles = [];
             try {
                 const response = await fetch(
                     apiUrl(`/api/files/series/${encodeURIComponent(seriesId)}/issues?per_page=${SERIES_ISSUES_LOAD_ALL}&page=1`),
@@ -4117,6 +4121,14 @@
                 }
                 const data = await response.json();
                 issues = Array.isArray(data.issues) ? data.issues : [];
+                const seenTitles = new Set();
+                for (const title of [seriesTitle, data.title, data.canonical_title, ...(Array.isArray(data.aliases) ? data.aliases : [])]) {
+                    const key = normalizeSeriesTitleKey(title);
+                    if (key && !seenTitles.has(key)) {
+                        seenTitles.add(key);
+                        titles.push(title.trim());
+                    }
+                }
             } catch (err) {
                 console.error('Could not load the full issue list for Suwayomi', err);
                 showMessage('Could not load the full issue list for Suwayomi.', 'error');
@@ -4138,7 +4150,7 @@
                         ...getAuthHeaders()
                     },
                     credentials: 'same-origin',
-                    body: JSON.stringify({ seriesTitle: seriesTitle || '', issueNumbers: missing })
+                    body: JSON.stringify({ seriesTitle: titles[0] || '', alternateTitles: titles.slice(1), issueNumbers: missing })
                 });
                 if (handleAuthError(response)) return;
                 if (!response.ok) {
@@ -4155,9 +4167,15 @@
                 const result = await response.json();
                 const queued = (result.queuedChapters || result.queued_chapters || []).length;
                 const unmatched = (result.unmatchedIssueNumbers || result.unmatched_issue_numbers || []).length;
+                // Name the Suwayomi series when it goes by another title, so a
+                // match made through one of the other titles is visible.
+                const matchedTitle = result.series && typeof result.series.title === 'string' ? result.series.title : '';
+                const listedAs = matchedTitle && normalizeSeriesTitleKey(matchedTitle) !== normalizeSeriesTitleKey(titles[0])
+                    ? ` (listed there as "${matchedTitle}")`
+                    : '';
                 let message = queued
-                    ? `Queued ${queued} chapter${queued === 1 ? '' : 's'} on Suwayomi.`
-                    : 'Nothing was queued on Suwayomi.';
+                    ? `Queued ${queued} chapter${queued === 1 ? '' : 's'} on Suwayomi${listedAs}.`
+                    : `Nothing was queued on Suwayomi${listedAs}.`;
                 if (unmatched) {
                     message += ` ${unmatched} issue${unmatched === 1 ? ' has' : 's have'} no matching chapter.`;
                 }

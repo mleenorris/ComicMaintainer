@@ -27,6 +27,10 @@ public interface ISuwayomiService
         int limit = 20,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Returns the series currently in the Suwayomi library.</summary>
+    Task<SuwayomiLibrarySnapshot> GetLibrarySeriesAsync(
+        CancellationToken cancellationToken = default);
+
     /// <summary>Returns the chapters Suwayomi knows about for a series.</summary>
     Task<IReadOnlyList<SuwayomiChapter>> GetChaptersAsync(
         int seriesId,
@@ -35,15 +39,34 @@ public interface ISuwayomiService
     /// <summary>
     /// Queues downloads on the Suwayomi server for the given issue numbers of
     /// a series. When <paramref name="seriesId"/> is null the series is
-    /// resolved from <paramref name="seriesTitle"/> by matching the Suwayomi
-    /// library.
+    /// resolved by matching the Suwayomi library against
+    /// <paramref name="seriesTitle"/> and, because Suwayomi may list the
+    /// series under another name, <paramref name="alternateTitles"/>.
     /// </summary>
     /// <param name="seriesTitle">Local series title, used to match a Suwayomi library entry.</param>
     /// <param name="issueNumbers">Whole issue/chapter numbers that are missing locally.</param>
     /// <param name="seriesId">Optional explicit Suwayomi series id, bypassing title matching.</param>
+    /// <param name="alternateTitles">
+    /// Other titles of the local series (canonical title, aliases). They only
+    /// count when one equals a Suwayomi title, ignoring case and punctuation,
+    /// and such an exact match wins over a partial match on
+    /// <paramref name="seriesTitle"/>.
+    /// </param>
     Task<SuwayomiDownloadResult> DownloadMissingIssuesAsync(
         string? seriesTitle,
         IEnumerable<int> issueNumbers,
         int? seriesId = null,
+        IEnumerable<string>? alternateTitles = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Queues downloads using a previously fetched library snapshot, avoiding
+    /// a fresh paginated library request for each series in a batch.
+    /// </summary>
+    Task<SuwayomiDownloadResult> DownloadMissingIssuesFromSnapshotAsync(
+        string? seriesTitle,
+        IEnumerable<int> issueNumbers,
+        SuwayomiLibrarySnapshot librarySnapshot,
+        IEnumerable<string>? alternateTitles = null,
         CancellationToken cancellationToken = default);
 }

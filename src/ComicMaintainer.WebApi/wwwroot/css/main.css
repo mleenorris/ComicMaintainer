@@ -1,119 +1,206 @@
-        :root {
-            --bg-primary: #f5f5f5;
-            --bg-secondary: #f5f5f5;
-            --bg-tertiary: #f5f5f5;
-            --bg-header: #2c3e50;
-            --bg-hover: #e8e8e8;
-            --bg-hover-alt: #e0e0e0;
-            --bg-indented: #f5f5f5;
-            --bg-indented-hover: #e8e8e8;
+:root {
+            /* ── Design tokens ─────────────────────────────────────────────
+               A warm, comic-book inspired palette: cream "paper" surfaces,
+               warm ink text, a comic-red brand accent and a highlighter
+               yellow. Components consume the semantic aliases further down
+               (--bg-*, --text-*, --border-*, ...) rather than raw values. */
+
+            /* Brand */
+            --brand-red: #c9302c;
+            --brand-red-strong: #a8241f;
+            --brand-yellow: #ffc845;
+            --brand-yellow-soft: #fff1c7;
+            --brand-blue: #2563a8;
+            --brand-ink: #241c17;
+
+            /* Typography */
+            --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            --font-display: 'Avenir Next Condensed', 'Roboto Condensed', 'Arial Narrow', system-ui, -apple-system, 'Segoe UI', sans-serif;
+            --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+            --text-xs: 11px;
+            --text-sm: 13px;
+            --text-md: 14px;
+            --text-lg: 16px;
+            --text-xl: 20px;
+            --text-2xl: 26px;
+            --text-3xl: 34px;
+
+            /* Spacing (4px grid) */
+            --space-1: 4px;
+            --space-2: 8px;
+            --space-3: 12px;
+            --space-4: 16px;
+            --space-5: 20px;
+            --space-6: 24px;
+            --space-8: 32px;
+
+            /* Shape */
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --radius-pill: 999px;
+
+            /* Motion */
+            --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+            --duration-fast: 120ms;
+            --duration-base: 200ms;
+
+            /* Layout */
+            --sidebar-width: 248px;
+            --control-height: 36px;
+
+            /* Surfaces: page < panel < raised, so cards separate from the page */
+            --bg-primary: #f7f1e6;
+            --bg-secondary: #fffdf8;
+            --bg-tertiary: #fbf6ec;
+            --bg-raised: #ffffff;
+            --bg-header: #2a211b;
+            --bg-sidebar: #241c17;
+            --bg-hover: #f1e8d8;
+            --bg-hover-alt: #eadfcb;
+            --bg-indented: #fbf6ec;
+            --bg-indented-hover: #f1e8d8;
             
-            --text-primary: #333;
-            --text-secondary: #2c3e50;
-            /* 5:1 on the page colour; the old #7f8c8d was ~3:1. */
-            --text-muted: #5f6b6d;
-            --text-light: #95a5a6;
-            --text-header: white;
+            --text-primary: #2a221d;
+            --text-secondary: #3d322a;
+            /* AA (>4.5:1) on both the page and panel surfaces. */
+            --text-muted: #6a5c50;
+            --text-light: #8c7d70;
+            --text-header: #fbf3e4;
+            --text-on-accent: #ffffff;
             
-            --border-primary: #ecf0f1;
-            --border-secondary: #bdc3c7;
-            --border-tertiary: #e0e0e0;
-            --border-input: #bdc3c7;
+            --border-primary: #ece2d1;
+            --border-secondary: #ddd0bb;
+            --border-tertiary: #e6dccb;
+            --border-input: #cdbfa8;
+            --border-strong: #2a221d;
             
-            --shadow-sm: 0 2px 4px rgba(0,0,0,0.1);
-            --shadow-md: 0 4px 20px rgba(0,0,0,0.3);
+            --shadow-sm: 0 1px 2px rgba(42, 34, 29, 0.06), 0 1px 3px rgba(42, 34, 29, 0.08);
+            --shadow-md: 0 10px 30px rgba(42, 34, 29, 0.16), 0 2px 6px rgba(42, 34, 29, 0.08);
+            --shadow-lg: 0 24px 60px rgba(42, 34, 29, 0.24);
+            /* The comic "pop": a hard offset ink shadow used sparingly on hover */
+            --shadow-pop: 3px 3px 0 rgba(42, 34, 29, 0.9);
             
-            --modal-overlay: rgba(0,0,0,0.5);
+            --modal-overlay: rgba(36, 28, 23, 0.55);
             
             /* Status background colors */
-            --status-marked: #d4edda;
-            --status-marked-hover: #c3e6cb;
-            --status-unmarked: #fff3cd;
-            --status-unmarked-hover: #ffeaa7;
-            --status-duplicate: #ffe5cc;
-            --status-duplicate-hover: #ffd9b3;
-            --status-renamed: #cce5ff;
-            --status-renamed-hover: #b3d9ff;
-            --status-normalized: #ffcccc;
-            --status-normalized-hover: #ffb3b3;
+            --status-marked: #e3f2df;
+            --status-marked-hover: #d3ebcd;
+            --status-unmarked: #fff3d1;
+            --status-unmarked-hover: #ffe9ad;
+            --status-duplicate: #ffe4cc;
+            --status-duplicate-hover: #ffd6b0;
+            --status-renamed: #dbe8f7;
+            --status-renamed-hover: #c8dbf2;
+            --status-normalized: #fadcd9;
+            --status-normalized-hover: #f6c9c4;
 
             /* Diagnostics status pill text colours (see .diagnostics-status) */
-            --status-ok-text: #1e8449;
-            --status-warn-text: #b9770e;
-            --status-bad-text: #c0392b;
+            --status-ok-text: #2c6e2f;
+            --status-warn-text: #8a5a00;
+            --status-bad-text: #b0261f;
 
             /* Accent for active/selected states and primary actions. Shared by
                both themes; it matches .btn-primary. */
-            --accent-primary: #3498db;
-            --accent-primary-hover: #2980b9;
+            --accent-primary: #c9302c;
+            --accent-primary-hover: #a8241f;
+            --accent-primary-soft: rgba(201, 48, 44, 0.1);
             /* Accent-coloured text (links) needs a darker shade than fills to
                stay readable on the light page. */
-            --accent-text: #2471a3;
+            --accent-text: #a8241f;
+            --accent-highlight: #ffc845;
+
+            /* Semantic action colours */
+            --color-success: #2f7d32;
+            --color-success-hover: #256628;
+            --color-warning: #c77800;
+            --color-warning-hover: #a86500;
+            --color-info: #2563a8;
+            --color-info-hover: #1d4f87;
+            --color-purple: #7b4bb0;
+            --color-purple-hover: #663b95;
+            --color-teal: #11806f;
+            --color-teal-hover: #0c6a5c;
+            --color-danger: #a3201b;
+            --color-danger-hover: #841814;
 
             /* Inline error / warning text */
-            --text-error: #c0392b;
-            --text-warning: #b9770e;
-            --danger: #c0392b;
+            --text-error: #b0261f;
+            --text-warning: #8a5a00;
+            --danger: #b0261f;
 
             /* Neutral (secondary) buttons: a .btn without a colour modifier */
-            --btn-neutral-bg: #e3e7ea;
-            --btn-neutral-hover: #d5dadf;
+            --btn-neutral-bg: #efe6d6;
+            --btn-neutral-hover: #e5d9c4;
+
+            --focus-ring: 0 0 0 3px rgba(255, 200, 69, 0.85), 0 0 0 5px rgba(42, 34, 29, 0.85);
+
+            /* Halftone dots used as a subtle comic texture on brand surfaces */
+            --halftone: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1.4px);
 
             /* Native controls (checkboxes, selects, scrollbars) follow the theme */
             color-scheme: light;
         }
         
         [data-theme="dark"] {
-            --bg-primary: #1a1a1a;
-            --bg-secondary: #1a1a1a;
-            --bg-tertiary: #1a1a1a;
-            --bg-header: #1f2937;
-            --bg-hover: #252525;
-            --bg-hover-alt: #2d2d2d;
-            --bg-indented: #1a1a1a;
-            --bg-indented-hover: #252525;
+            --bg-primary: #16120f;
+            --bg-secondary: #201a16;
+            --bg-tertiary: #1b1612;
+            --bg-raised: #29221c;
+            --bg-header: #1d1713;
+            --bg-sidebar: #120e0b;
+            --bg-hover: #2c241e;
+            --bg-hover-alt: #352b24;
+            --bg-indented: #1b1612;
+            --bg-indented-hover: #2c241e;
             
-            --text-primary: #e5e5e5;
-            --text-secondary: #d1d5db;
-            --text-muted: #9ca3af;
-            --text-light: #6b7280;
-            --text-header: white;
+            --text-primary: #f2e9dc;
+            --text-secondary: #ddd1c1;
+            --text-muted: #b2a493;
+            --text-light: #8a7d6f;
+            --text-header: #fbf3e4;
             
-            --border-primary: #404040;
-            --border-secondary: #4a4a4a;
-            --border-tertiary: #3a3a3a;
-            --border-input: #4a4a4a;
+            --border-primary: #352c25;
+            --border-secondary: #43382f;
+            --border-tertiary: #3a3029;
+            --border-input: #4d4137;
+            --border-strong: #f2e9dc;
             
-            --shadow-sm: 0 2px 4px rgba(0,0,0,0.3);
-            --shadow-md: 0 4px 20px rgba(0,0,0,0.5);
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+            --shadow-md: 0 12px 32px rgba(0, 0, 0, 0.55);
+            --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.6);
+            --shadow-pop: 3px 3px 0 rgba(0, 0, 0, 0.85);
             
-            --modal-overlay: rgba(0,0,0,0.7);
+            --modal-overlay: rgba(0, 0, 0, 0.7);
             
             /* Status background colors for dark theme */
-            --status-marked: #1a3a1a;
-            --status-marked-hover: #234d23;
-            --status-unmarked: #3d3419;
-            --status-unmarked-hover: #4d4320;
-            --status-duplicate: #3d2b1a;
-            --status-duplicate-hover: #4d3720;
-            --status-renamed: #1a2a3d;
-            --status-renamed-hover: #203548;
-            --status-normalized: #3d1a1a;
-            --status-normalized-hover: #4d2020;
+            --status-marked: #1d3320;
+            --status-marked-hover: #254128;
+            --status-unmarked: #3a3118;
+            --status-unmarked-hover: #4a3f1e;
+            --status-duplicate: #3d2a19;
+            --status-duplicate-hover: #4c3520;
+            --status-renamed: #1b2a3c;
+            --status-renamed-hover: #22354b;
+            --status-normalized: #3d1d1b;
+            --status-normalized-hover: #4c2421;
 
             /* Lightened so the pill text keeps AA contrast on a dark surface */
-            --status-ok-text: #6ee7a8;
+            --status-ok-text: #8fd694;
             --status-warn-text: #f4c26b;
             --status-bad-text: #f4a09c;
+
+            --accent-primary-soft: rgba(239, 90, 79, 0.16);
+            --accent-text: #ff8f84;
 
             --text-error: #f4a09c;
             --text-warning: #f4c26b;
             --danger: #f4a09c;
 
-            --accent-text: #5dade2;
+            --btn-neutral-bg: #2f2721;
+            --btn-neutral-hover: #3b3129;
 
-            --btn-neutral-bg: #2f2f2f;
-            --btn-neutral-hover: #3b3b3b;
+            --focus-ring: 0 0 0 3px rgba(255, 200, 69, 0.9), 0 0 0 5px rgba(0, 0, 0, 0.9);
 
             color-scheme: dark;
         }
@@ -147,9 +234,28 @@
         html {
             overflow-x: hidden;
         }
+
+        /* Headings use a condensed, heavy display face for the comic-book
+           masthead feel; body copy stays on the system UI font. */
+        h1, h2, h3,
+        .modal-header h2 {
+            font-family: var(--font-display);
+            font-weight: 800;
+            letter-spacing: -0.01em;
+            line-height: 1.2;
+        }
+
+        ::selection {
+            background: var(--brand-yellow);
+            color: var(--brand-ink);
+        }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            font-family: var(--font-sans);
+            font-size: var(--text-md);
+            line-height: 1.45;
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
             background: var(--bg-primary);
             color: var(--text-primary);
             accent-color: var(--accent-primary);
@@ -439,7 +545,7 @@
         }
         
         .header-dropdown-item.active {
-            background: #3498db;
+            background: var(--accent-primary);
             color: white;
             font-weight: 500;
         }
@@ -737,7 +843,7 @@
         
         .search-bar input:focus {
             outline: none;
-            border-color: #3498db;
+            border-color: var(--accent-primary);
         }
         
         .filter-dropdown {
@@ -764,7 +870,7 @@
         
         .filter-dropdown-toggle:hover {
             background: var(--bg-hover);
-            border-color: #3498db;
+            border-color: var(--accent-primary);
         }
         
         .filter-dropdown-toggle::after {
@@ -812,7 +918,7 @@
         }
         
         .filter-dropdown-item.active {
-            background: #3498db;
+            background: var(--accent-primary);
             color: white;
             font-weight: 500;
         }
@@ -837,57 +943,57 @@
         }
         
         .btn-primary {
-            background: #3498db;
+            background: var(--accent-primary);
             color: white;
         }
         
         .btn-primary:hover {
-            background: #2980b9;
+            background: var(--accent-primary-hover);
         }
         
         .btn-success {
-            background: #27ae60;
+            background: var(--color-success);
             color: white;
         }
         
         .btn-success:hover {
-            background: #229954;
+            background: var(--color-success-hover);
         }
         
         .btn-warning {
-            background: #f39c12;
+            background: var(--color-warning);
             color: white;
         }
         
         .btn-warning:hover {
-            background: #d68910;
+            background: var(--color-warning-hover);
         }
         
         .btn-danger {
-            background: #e74c3c;
+            background: var(--color-danger);
             color: white;
         }
         
         .btn-danger:hover {
-            background: #c0392b;
+            background: var(--color-danger-hover);
         }
         
         .btn-rename {
-            background: #9b59b6;
+            background: var(--color-purple);
             color: white;
         }
         
         .btn-rename:hover {
-            background: #8e44ad;
+            background: var(--color-purple-hover);
         }
         
         .btn-normalize {
-            background: #16a085;
+            background: var(--color-teal);
             color: white;
         }
         
         .btn-normalize:hover {
-            background: #138d75;
+            background: var(--color-teal-hover);
         }
         
         /* Disabled buttons turn neutral instead of a faded copy of their colour,
@@ -947,35 +1053,35 @@
         }
         
         .action-dropdown-toggle.process {
-            background: #27ae60;
+            background: var(--color-success);
         }
         
         .action-dropdown-toggle.process:hover {
-            background: #229954;
+            background: var(--color-success-hover);
         }
         
         .action-dropdown-toggle.rename {
-            background: #9b59b6;
+            background: var(--color-purple);
         }
         
         .action-dropdown-toggle.rename:hover {
-            background: #8e44ad;
+            background: var(--color-purple-hover);
         }
         
         .action-dropdown-toggle.normalize {
-            background: #16a085;
+            background: var(--color-teal);
         }
         
         .action-dropdown-toggle.normalize:hover {
-            background: #138d75;
+            background: var(--color-teal-hover);
         }
         
         .action-dropdown-toggle.mark {
-            background: #3498db;
+            background: var(--accent-primary);
         }
         
         .action-dropdown-toggle.mark:hover {
-            background: #2980b9;
+            background: var(--accent-primary-hover);
         }
         
         .action-dropdown-toggle:disabled,
@@ -1060,7 +1166,7 @@
             padding: 8px 16px;
             border: none;
             border-radius: 5px;
-            background: #3498db;
+            background: var(--accent-primary);
             color: white;
             cursor: pointer;
             font-size: 13px;
@@ -1074,7 +1180,7 @@
         }
         
         .progress-indicator-btn:hover {
-            background: #2980b9;
+            background: var(--accent-primary-hover);
             transform: scale(1.05);
         }
 
@@ -1157,7 +1263,7 @@
         /* ── Series selection (series list view) ──────────────────────────── */
         .series-card--selected,
         .series-list-row--selected {
-            outline: 2px solid var(--accent-primary, #4a90d9);
+            outline: 2px solid var(--accent-primary);
             outline-offset: -2px;
         }
 
@@ -1188,13 +1294,13 @@
         }
 
         .series-select-box:focus-visible {
-            outline: 2px solid var(--accent-primary, #4a90d9);
+            outline: 2px solid var(--accent-primary);
             outline-offset: 2px;
         }
 
         .series-select-box--checked {
-            background: var(--accent-primary, #4a90d9);
-            border-color: var(--accent-primary, #4a90d9);
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
         }
 
         /* On the list-row layout the row is a flex container; the absolutely
@@ -1214,8 +1320,8 @@
         }
 
         .series-list-row .series-select-box--checked {
-            background: var(--accent-primary, #4a90d9);
-            border-color: var(--accent-primary, #4a90d9);
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
             color: #fff;
         }
 
@@ -1430,7 +1536,7 @@
             padding: 6px 8px;
             border: none;
             border-radius: 8px;
-            background: var(--accent-primary, #4a90d9);
+            background: var(--accent-primary);
             color: #fff;
             font-size: 12px;
             font-weight: 600;
@@ -1594,14 +1700,14 @@
         /* Duplicate issue: distinct orange outline so it's obvious at a glance
            alongside the existing status icon in the actions menu. */
         .series-issue-card--duplicate {
-            border-color: #e67e22;
-            box-shadow: 0 0 0 1px #e67e22, var(--shadow-md);
+            border-color: var(--color-warning);
+            box-shadow: 0 0 0 1px var(--color-warning), var(--shadow-md);
         }
 
         .series-issue-card--duplicate.series-issue-card--selected {
             /* When a duplicate is also selected, keep the duplicate outline
                but layer the accent ring on top so both are visible. */
-            box-shadow: 0 0 0 1px var(--accent-primary), 0 0 0 3px #e67e22, var(--shadow-md);
+            box-shadow: 0 0 0 1px var(--accent-primary), 0 0 0 3px var(--color-warning), var(--shadow-md);
         }
 
         /* Placeholder card for a missing issue — gives the user a visible gap
@@ -1645,7 +1751,7 @@
             padding: 10px 14px;
             margin: 8px 0;
             background: var(--status-duplicate);
-            border-left: 4px solid #e67e22;
+            border-left: 4px solid var(--color-warning);
             border-radius: 6px;
             font-size: 14px;
             color: var(--text-primary);
@@ -1675,7 +1781,7 @@
             border-radius: 999px;
             font-size: 11px;
             font-weight: 600;
-            background: #e67e22;
+            background: var(--color-warning);
             color: #fff;
             box-shadow: var(--shadow-sm);
             pointer-events: none;
@@ -1703,7 +1809,7 @@
         }
 
         .series-issue-read-corner--read {
-            background: #2ea44f;
+            background: var(--color-success);
         }
 
         .series-issue-read-corner--read::after {
@@ -1713,7 +1819,7 @@
         }
 
         .series-issue-read-corner--unread {
-            background: var(--accent-primary, #4a90d9);
+            background: var(--accent-primary);
         }
 
         .series-issue-read-corner--unread::after {
@@ -2317,7 +2423,7 @@
         .file-item.status-duplicate,
         .file-item.indented.status-duplicate {
             background: var(--status-duplicate);
-            border-left: 4px solid #e67e22;
+            border-left: 4px solid var(--color-warning);
         }
         
         .file-item.status-duplicate:hover,
@@ -2504,7 +2610,7 @@
             margin-top: 18px;
             padding: 14px;
             background: rgba(243, 156, 18, 0.12);
-            border-left: 4px solid #f39c12;
+            border-left: 4px solid var(--color-warning);
             border-radius: 8px;
         }
 
@@ -2606,11 +2712,11 @@
         }
 
         .progress-result-item.success {
-            border-left: 4px solid #27ae60;
+            border-left: 4px solid var(--color-success);
         }
 
         .progress-result-item.error {
-            border-left: 4px solid #e74c3c;
+            border-left: 4px solid var(--brand-red);
         }
 
         .progress-result-status {
@@ -2773,7 +2879,7 @@
         }
 
         .combine-folder-card.selected {
-            border-color: var(--accent, #3498db);
+            border-color: var(--accent, var(--accent-primary));
             background: var(--bg-secondary);
         }
 
@@ -2863,7 +2969,7 @@
         }
 
         .combine-folders-preview .conflict {
-            color: #d35400;
+            color: var(--color-warning-hover);
         }
 
         .combine-folders-preview .skipped {
@@ -3041,7 +3147,7 @@
             background: var(--bg-hover);
             padding: 2px 6px;
             border-radius: 3px;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+            font-family: var(--font-mono);
             font-size: 13px;
             color: var(--text-secondary);
         }
@@ -3056,7 +3162,7 @@
         
         .error-message {
             background: #fee;
-            color: #e74c3c;
+            color: var(--brand-red);
             padding: 12px;
             border-radius: 6px;
             margin-bottom: 15px;
@@ -3071,7 +3177,7 @@
         
         .success-message {
             background: #efe;
-            color: #27ae60;
+            color: var(--color-success);
             padding: 12px;
             border-radius: 6px;
             margin-bottom: 15px;
@@ -3092,7 +3198,7 @@
         
         .spinner {
             border: 3px solid #f3f3f3;
-            border-top: 3px solid #3498db;
+            border-top: 3px solid var(--accent-primary);
             border-radius: 50%;
             width: 40px;
             height: 40px;
@@ -3116,7 +3222,7 @@
         
         .progress-bar-fill {
             height: 100%;
-            background: linear-gradient(90deg, #3498db, #2ecc71);
+            background: linear-gradient(90deg, var(--accent-primary), var(--color-success));
             border-radius: 12px;
             transition: width 0.3s ease;
             width: 0%;
@@ -4009,15 +4115,15 @@
             pointer-events: auto;
             z-index: 2;
         }
-        .series-lookup-badge--success   { background: #2ea44f; }
-        .series-lookup-badge--warn      { background: #d4a017; }
-        .series-lookup-badge--error     { background: #cb2431; }
+        .series-lookup-badge--success   { background: var(--color-success); }
+        .series-lookup-badge--warn      { background: var(--color-warning); }
+        .series-lookup-badge--error     { background: var(--brand-red); }
         /* "Unmatched" = no external lookup has been performed yet. Use a
            saturated colour (not a near-invisible grey) so users can spot
            which series still need attention. */
-        .series-lookup-badge--unmatched { background: #6e7681; }
+        .series-lookup-badge--unmatched { background: var(--text-light); }
         /* Legacy class name kept for backwards compatibility with any cached HTML. */
-        .series-lookup-badge--none      { background: #6e7681; color: #fff; }
+        .series-lookup-badge--none      { background: var(--text-light); color: #fff; }
 
         /* When the badge is rendered inside the series List row's aside, it
            must flow in line with the issue count and chevron — not be
@@ -4072,9 +4178,9 @@
             border-radius: 50%;
             background: #888;
         }
-        .provider-health-pill--ok       .provider-health-dot { background: #2ea44f; }
-        .provider-health-pill--warn     .provider-health-dot { background: #d4a017; }
-        .provider-health-pill--error    .provider-health-dot { background: #cb2431; }
+        .provider-health-pill--ok       .provider-health-dot { background: var(--color-success); }
+        .provider-health-pill--warn     .provider-health-dot { background: var(--color-warning); }
+        .provider-health-pill--error    .provider-health-dot { background: var(--brand-red); }
         .provider-health-pill--disabled .provider-health-dot { background: #999; }
         .btn-tiny { padding: 1px 6px; font-size: 12px; line-height: 1.2; }
 
@@ -4112,10 +4218,10 @@
             border-radius: 8px;
             background: rgba(0,0,0,0.08);
         }
-        .metadata-refresh-toast-status--running { background: #d4a017; color: #fff; }
-        .metadata-refresh-toast-status--completed { background: #2ea44f; color: #fff; }
+        .metadata-refresh-toast-status--running { background: var(--color-warning); color: #fff; }
+        .metadata-refresh-toast-status--completed { background: var(--color-success); color: #fff; }
         .metadata-refresh-toast-status--failed,
-        .metadata-refresh-toast-status--cancelled { background: #cb2431; color: #fff; }
+        .metadata-refresh-toast-status--cancelled { background: var(--brand-red); color: #fff; }
         .metadata-refresh-toast-bar {
             height: 4px;
             background: rgba(0,0,0,0.08);
@@ -4125,7 +4231,7 @@
         }
         .metadata-refresh-toast-bar-fill {
             height: 100%;
-            background: #2ea44f;
+            background: var(--color-success);
             transition: width 200ms linear;
         }
         .metadata-refresh-toast-meta { opacity: 0.8; }
@@ -4450,7 +4556,7 @@ kbd {
     border-radius: 4px;
     background: var(--bg-secondary);
     color: var(--text-primary);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     text-align: center;
     white-space: nowrap;
@@ -4528,7 +4634,7 @@ select:focus-visible,
 textarea:focus-visible,
 summary:focus-visible,
 [tabindex]:not([tabindex="-1"]):focus-visible {
-    outline: 2px solid var(--accent-primary, #4a90d9);
+    outline: 2px solid var(--accent-primary);
     outline-offset: 2px;
     border-radius: 4px;
 }

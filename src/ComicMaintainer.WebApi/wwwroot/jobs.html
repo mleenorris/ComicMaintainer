@@ -11,30 +11,46 @@
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
     <link rel="stylesheet" href="/css/main.css?v=__APP_VERSION__">
+    <script>
+        // Follow the OS theme before first paint; the saved preference is
+        // applied by applySavedTheme() below, as on the main page.
+        document.documentElement.setAttribute('data-theme',
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    </script>
     <style>
         body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         .jobs-page { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
-        .jobs-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        .jobs-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem 1rem; margin-bottom: 1rem; }
         .jobs-header h1 { margin: 0; font-size: 1.5rem; }
-        .jobs-header a { color: var(--primary-color, #3498db); text-decoration: none; }
+        .jobs-header a { color: var(--accent-text, #2471a3); text-decoration: none; font-weight: 500; white-space: nowrap; }
+        .jobs-header a:hover { text-decoration: underline; }
         .jobs-card { background: var(--bg-secondary, #fff); border: 1px solid var(--border-input, #e1e4e8); border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
         .jobs-card h2 { margin: 0 0 0.25rem 0; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem; }
         .jobs-card .desc { color: var(--text-muted, #6a737d); margin-bottom: 0.75rem; }
         .jobs-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem 1rem; align-items: end; margin-top: 0.5rem; }
         .jobs-row label { display: flex; flex-direction: column; font-size: 0.85rem; color: var(--text-muted, #6a737d); gap: 0.25rem; }
+        /* Checkbox options read as one line: box, then its label. */
+        .jobs-row label.toggle { flex-direction: row; align-items: center; min-height: 2.1rem; color: var(--text-primary, #222); font-size: 0.9rem; }
+        .jobs-row label.toggle input { width: 16px; height: 16px; margin: 0; flex-shrink: 0; }
         .jobs-row input[type="number"] { padding: 0.4rem 0.5rem; font-size: 0.95rem; border: 1px solid var(--border-input, #ccc); border-radius: 4px; background: var(--bg-primary, #fff); color: var(--text-primary, #222); }
         .jobs-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
-        .jobs-actions button { padding: 0.45rem 0.9rem; font-size: 0.9rem; border-radius: 4px; cursor: pointer; border: 1px solid transparent; }
-        .btn-primary { background: var(--primary-color, #3498db); color: #fff; }
-        .btn-primary:hover { background: var(--primary-hover, #2980b9); }
-        .btn-secondary { background: transparent; border-color: var(--border-input, #ccc); color: var(--text-primary, #222); }
-        .btn-secondary:hover { background: rgba(0,0,0,0.04); }
-        .status-pill { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+        .jobs-actions button { padding: 0.45rem 0.9rem; font-size: 0.9rem; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+        .jobs-actions button:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-primary { background: var(--accent-primary, #3498db); color: #fff; }
+        .btn-primary:hover { background: var(--accent-primary-hover, #2980b9); }
+        .jobs-actions .btn-secondary { background: transparent; border-color: var(--border-input, #ccc); color: var(--text-primary, #222); }
+        .jobs-actions .btn-secondary:hover { background: var(--bg-hover, rgba(0,0,0,0.04)); }
+        .status-pill { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
         .status-success { background: #d4edda; color: #155724; }
         .status-failed { background: #f8d7da; color: #721c24; }
         .status-running { background: #fff3cd; color: #856404; }
         .status-skipped, .status-cancelled { background: #e2e3e5; color: #383d41; }
         .status-neverrun { background: #d1ecf1; color: #0c5460; }
+        [data-theme="dark"] .status-success { background: rgba(46, 204, 113, 0.15); color: var(--status-ok-text); }
+        [data-theme="dark"] .status-failed { background: rgba(231, 76, 60, 0.18); color: var(--status-bad-text); }
+        [data-theme="dark"] .status-running { background: rgba(243, 156, 18, 0.18); color: var(--status-warn-text); }
+        [data-theme="dark"] .status-skipped, [data-theme="dark"] .status-cancelled { background: var(--bg-hover-alt); color: var(--text-secondary); }
+        [data-theme="dark"] .status-neverrun { background: rgba(52, 152, 219, 0.18); color: #8cc8f0; }
         .meta { font-size: 0.8rem; color: var(--text-muted, #6a737d); }
         .findings { margin-top: 0.75rem; }
         .findings-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
@@ -80,6 +96,23 @@
             return resp;
         }
 
+        async function applySavedTheme() {
+            try {
+                const resp = await fetch(apiUrl('/api/preferences'), { credentials: 'include', headers: authHeaders() });
+                if (!resp.ok) return;
+                const prefs = await resp.json();
+                if (prefs && (prefs.theme === 'dark' || prefs.theme === 'light')) {
+                    document.documentElement.setAttribute('data-theme', prefs.theme);
+                }
+            } catch { /* keep the OS theme */ }
+        }
+
+        // "NeverRun" -> "Never run"
+        function statusLabel(status) {
+            const s = String(status || 'NeverRun').replace(/([a-z])([A-Z])/g, '$1 $2');
+            return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+        }
+
         function statusClass(status) {
             const s = (status || '').toLowerCase();
             return 'status-' + (s || 'neverrun');
@@ -118,7 +151,7 @@
                 <div class="jobs-card" data-key="${escapeHtml(job.jobKey)}">
                     <h2>
                         ${escapeHtml(job.displayName)}
-                        <span class="status-pill ${statusClass(job.lastStatus)}">${escapeHtml(job.lastStatus || 'NeverRun')}</span>
+                        <span class="status-pill ${statusClass(job.lastStatus)}">${escapeHtml(statusLabel(job.lastStatus))}</span>
                     </h2>
                     <div class="desc">${escapeHtml(job.description)}</div>
                     <div class="jobs-row">
@@ -132,11 +165,11 @@
                         </label>
                         <label>
                             Last run
-                            <span class="meta">${formatDate(job.lastRunUtc)} · ${formatDuration(job.lastDurationMs)}</span>
+                            <span class="meta">${job.lastRunUtc ? escapeHtml(formatDate(job.lastRunUtc)) + (job.lastDurationMs != null ? ' · ' + formatDuration(job.lastDurationMs) : '') : 'Never'}</span>
                         </label>
                         <label>
                             Next run
-                            <span class="meta">${formatDate(job.nextRunUtc)}</span>
+                            <span class="meta">${job.nextRunUtc ? escapeHtml(formatDate(job.nextRunUtc)) : 'Not scheduled'}</span>
                         </label>
                     </div>
                     ${isMetadataAudit ? `
@@ -178,7 +211,7 @@
                     ${job.lastMessage ? `<div class="meta" style="margin-top:0.5rem;">Last message: ${escapeHtml(job.lastMessage)}</div>` : ''}
                     <div class="jobs-actions">
                         <button class="btn-primary" data-action="save">💾 Save</button>
-                        <button class="btn-primary" data-action="run">▶ Run now</button>
+                        <button class="btn-secondary" data-action="run">▶ Run now</button>
                         ${isMetadataAudit ? `<button class="btn-secondary" data-action="findings">📋 View findings</button>` : ''}
                     </div>
                     ${isMetadataAudit ? `<div class="findings" id="${findingsId}"></div>` : ''}
@@ -308,6 +341,7 @@
         }
 
         // Auto-refresh every 30s so timer-based status changes show up without manual reloads.
+        applySavedTheme();
         loadJobs();
         setInterval(loadJobs, 30000);
     </script>

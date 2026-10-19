@@ -235,6 +235,27 @@
             overflow-x: hidden;
         }
 
+        /* ── Icons ── the inline sprite in index.html defines outline icons
+           that inherit the text colour. */
+        .icon-sprite {
+            position: absolute;
+            width: 0;
+            height: 0;
+            overflow: hidden;
+        }
+
+        .icon {
+            width: 1.15em;
+            height: 1.15em;
+            flex-shrink: 0;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            vertical-align: -0.2em;
+        }
+
         /* Headings use a condensed, heavy display face for the comic-book
            masthead feel; body copy stays on the system UI font. */
         h1, h2, h3,
@@ -391,9 +412,19 @@
             min-width: 200px;
         }
         
+        .header-search-icon {
+            position: absolute;
+            left: 11px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-header);
+            opacity: 0.65;
+            pointer-events: none;
+        }
+
         .header-search input {
             height: 36px;
-            padding: 8px 32px 8px 12px;
+            padding: 8px 32px 8px 34px;
             border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 8px;
             background: rgba(255, 255, 255, 0.1);
@@ -576,8 +607,24 @@
             border-color: rgba(231, 76, 60, 0.4);
         }
         
+        /* Status dot: grey while unknown, green when running, red when stopped. */
         .watcher-status-indicator .watcher-icon {
-            font-size: 16px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            background: #a89a8a;
+            box-shadow: 0 0 0 3px rgba(168, 154, 138, 0.25);
+        }
+
+        .watcher-status-indicator.running .watcher-icon {
+            background: #4cc35a;
+            box-shadow: 0 0 0 3px rgba(76, 195, 90, 0.25);
+        }
+
+        .watcher-status-indicator.stopped .watcher-icon {
+            background: #ef5a4f;
+            box-shadow: 0 0 0 3px rgba(239, 90, 79, 0.25);
         }
         
         .watcher-status-indicator .watcher-text {
@@ -1221,6 +1268,16 @@
             white-space: nowrap;
             animation: pulse 2s infinite;
         }
+
+        .progress-indicator-btn::before {
+            content: '';
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.45);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
         
         .progress-indicator-btn:hover {
             background: var(--accent-primary-hover);
@@ -1528,9 +1585,27 @@
         }
 
         .overview-row-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
             margin: 0;
-            font-size: 18px;
-            font-weight: 700;
+            font-size: var(--text-xl);
+            font-weight: 800;
+        }
+
+        /* Small yellow "caption box" badge holding the row icon. */
+        .overview-row-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 30px;
+            height: 30px;
+            border-radius: var(--radius-sm);
+            background: var(--brand-yellow);
+            color: var(--brand-ink);
+            border: 2px solid var(--brand-ink);
+            box-shadow: 2px 2px 0 var(--brand-ink);
+            font-size: 15px;
         }
 
         .overview-see-all {
@@ -3074,7 +3149,9 @@
             background: none;
             width: 100%;
             text-align: left;
-            font-size: 12px;
+            font-size: var(--text-sm);
+            font-family: inherit;
+            border-radius: var(--radius-sm);
             color: var(--text-primary);
             transition: background 0.2s;
             display: flex;
@@ -3621,7 +3698,7 @@
             
             .header-search input {
                 width: 100%;
-                padding: 8px 30px 8px 10px;
+                padding: 8px 30px 8px 32px;
                 /* At least 16px, or iOS Safari zooms the page on focus. */
                 font-size: 16px;
             }
@@ -3634,13 +3711,10 @@
                 justify-content: center;
             }
             
-            /* Show only the emoji (first 2 characters to account for emoji length) in mobile */
+            /* Icon-only on phones; the toggle keeps its aria-label. */
             .header-filter-toggle span,
             .header-sort-toggle span {
-                display: inline-block;
-                max-width: 1.2em;
-                overflow: hidden;
-                white-space: nowrap;
+                display: none;
             }
             
             .header-filter-toggle::after,

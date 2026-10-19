@@ -157,6 +157,17 @@
             return { [TRUSTED_HTML]: true, value: String(value ?? '') };
         }
 
+        /**
+         * Markup for an icon from the inline sprite in index.html. Usable both
+         * inside html`` (it is trusted markup) and in plain template strings
+         * (it stringifies to the same markup). `name` must be a sprite id
+         * literal from this file, never user data.
+         */
+        function uiIcon(name) {
+            const markup = `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+            return { ...rawHtml(markup), toString: () => markup };
+        }
+
         function isTrustedHtml(value) {
             return !!value && typeof value === 'object' && value[TRUSTED_HTML] === true;
         }
@@ -554,17 +565,17 @@
         // label stays correct for every filter mode (previously the restore path
         // omitted renamed/normalized/read/unread and showed a blank label).
         const FILTER_LABELS = {
-            'all': '📚 All',
-            'unmarked': '⚠️ Unmarked',
-            'marked': '✅ Marked',
-            'duplicates': '🔁 Duplicates',
-            'renamed': '📝 Renamed',
-            'normalized': '📋 Normalized',
-            'read': '👁️ Read',
-            'unread': '📚 Unread',
-            'matched': '🔗 Matched',
-            'unmatched': '❓ Not Matched',
-            'missing': '🧩 Missing Issues'
+            'all': 'All',
+            'unmarked': 'Unmarked',
+            'marked': 'Marked',
+            'duplicates': 'Duplicates',
+            'renamed': 'Renamed',
+            'normalized': 'Normalized',
+            'read': 'Read',
+            'unread': 'Unread',
+            'matched': 'Matched',
+            'unmatched': 'Not Matched',
+            'missing': 'Missing Issues'
         };
         let libraryViewMode = 'series';
         // Series layout: null = auto (list on mobile portrait, compact otherwise),
@@ -2223,9 +2234,9 @@
             }
             overviewLoaded = true;
             const rows = [
-                { title: '📖 Continue Reading', items: data.continue_reading || [], empty: 'Nothing in progress yet.', resume: true, seeAll: false },
-                { title: '🆕 Series Updates', items: data.series_updates || [], empty: 'No new files in the last 30 days.', resume: false, seeAll: true },
-                { title: '✨ Newly Added Series', items: data.newly_added_series || [], empty: 'No new series in the last 30 days.', resume: false, seeAll: true }
+                { title: 'Continue Reading', icon: 'book-open', items: data.continue_reading || [], empty: 'Nothing in progress yet.', resume: true, seeAll: false },
+                { title: 'Series Updates', icon: 'refresh', items: data.series_updates || [], empty: 'No new files in the last 30 days.', resume: false, seeAll: true },
+                { title: 'Newly Added Series', icon: 'plus', items: data.newly_added_series || [], empty: 'No new series in the last 30 days.', resume: false, seeAll: true }
             ];
             renderHtml(container, rawHtml(rows.map(renderOverviewRow).join('')));
             hydrateProtectedImages(container);
@@ -2238,7 +2249,7 @@
             return `
                 <section class="overview-row">
                     <div class="overview-row-header">
-                        <h2 class="overview-row-title">${escapeHtml(row.title)}</h2>
+                        <h2 class="overview-row-title"><span class="overview-row-icon">${uiIcon(row.icon)}</span>${escapeHtml(row.title)}</h2>
                         ${row.seeAll && row.items.length ? `<button type="button" class="overview-see-all" onclick="navigate('#/library')">See all →</button>` : ''}
                     </div>
                     <div class="overview-carousel">${cards}</div>
@@ -2250,7 +2261,7 @@
             const cover = series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path;
             const fallback = series.has_external_image && series.external_image_url ? series.cover_file_path : '';
             const resumeBtn = (resume && series.resume_file_path)
-                ? `<button type="button" class="overview-resume-btn" onclick="event.stopPropagation(); readComic('${escapeJs(series.resume_file_path)}')">▶ Resume</button>`
+                ? `<button type="button" class="overview-resume-btn" onclick="event.stopPropagation(); readComic('${escapeJs(series.resume_file_path)}')">${uiIcon('play')} Resume</button>`
                 : '';
             return `
                 <div class="overview-card">
@@ -2905,9 +2916,9 @@
         // restore path so both stay in sync.
         function applySortUi() {
             const sortLabels = {
-                'name': '🔤 Name',
-                'date': '📅 Date',
-                'size': '💾 Size'
+                'name': 'Name',
+                'date': 'Date',
+                'size': 'Size'
             };
 
             const arrow = sortDirection === 'asc' ? '↑' : '↓';
@@ -4213,7 +4224,7 @@
             const seriesId = series && series.id ? series.id : '';
             const seriesTitle = series && (series.title || series.canonical_title) ? (series.title || series.canonical_title) : '';
             const action = seriesId && suwayomiAvailable
-                ? `<button type="button" class="btn btn-small" data-requires-write onclick="downloadMissingIssuesFromSuwayomi('${escapeJs(seriesId)}','${escapeJs(seriesTitle)}')" title="Ask the configured Suwayomi server to download these issues">⬇️ Download from Suwayomi</button>`
+                ? `<button type="button" class="btn btn-small" data-requires-write onclick="downloadMissingIssuesFromSuwayomi('${escapeJs(seriesId)}','${escapeJs(seriesTitle)}')" title="Ask the configured Suwayomi server to download these issues">${uiIcon('download')} Download from Suwayomi</button>`
                 : '';
             return `
                 <div class="series-detail-missing-banner" role="status">
@@ -4268,52 +4279,52 @@
                                     </div>
                                     <div class="series-issue-actions file-actions-dropdown" onclick="event.stopPropagation()">
                                         <button type="button" class="dropdown-toggle series-issue-actions-toggle" aria-label="Issue actions" onclick="toggleDropdown(event, '${escapeJs(issue.file_path)}')">
-                                            <span aria-hidden="true">⋮</span>
+                                            ${uiIcon('more')}
                                         </button>
                                         <div class="dropdown-menu" id="${getDropdownId(issue.file_path)}">
                                             <button class="dropdown-item" onclick="showFileInfo('${escapeJs(issue.file_path)}', '${escapeJs(issue.file_name)}'); closeAllDropdowns();">
-                                                ℹ️ Info
+                                                ${uiIcon('info')} Info
                                             </button>
                                             <button class="dropdown-item" onclick="viewTags('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                👁️ View/Edit
+                                                ${uiIcon('eye')} View/Edit
                                             </button>
                                             <button class="dropdown-item" onclick="readComic('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                📖 Read Comic
+                                                ${uiIcon('book-open')} Read Comic
                                             </button>
                                             <button class="dropdown-item" data-requires-write onclick="openEmailSendModalForFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                📧 Email to Ereader…
+                                                ${uiIcon('mail')} Email to Ereader…
                                             </button>
                                             ${issue.duplicate
                                                 ? `<button class="dropdown-item" onclick="openDuplicateReviewModal('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                    🔁 Review Duplicate
+                                                    ${uiIcon('copy')} Review Duplicate
                                                 </button>`
                                                 : ''
                                             }
                                             <div class="dropdown-divider"></div>
                                             ${issue.read
                                                 ? `<button class="dropdown-item" onclick="markFileUnread('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                    📚 Mark Unread
+                                                    ${uiIcon('library')} Mark Unread
                                                 </button>`
                                                 : `<button class="dropdown-item" onclick="markFileRead('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                    ✅ Mark Read
+                                                    ${uiIcon('check-circle')} Mark Read
                                                 </button>`
                                             }
                                             <div class="dropdown-divider"></div>
                                             <button class="dropdown-item" onclick="processSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                🚀 Process
+                                                ${uiIcon('play')} Process
                                             </button>
                                             <button class="dropdown-item" onclick="renameSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                📝 Rename
+                                                ${uiIcon('pencil')} Rename
                                             </button>
                                             <button class="dropdown-item" onclick="normalizeSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                ✨ Normalize
+                                                ${uiIcon('tag')} Normalize
                                             </button>
                                             <button class="dropdown-item" onclick="removeFileMetadata('${escapeJs(issue.file_path)}'); closeAllDropdowns();" title="Open the archive, delete the embedded ComicInfo.xml, and mark the file as unprocessed so it can be re-processed.">
-                                                🧹 Remove Metadata
+                                                ${uiIcon('eraser')} Remove Metadata
                                             </button>
                                             <div class="dropdown-divider"></div>
                                             <button class="dropdown-item" onclick="deleteSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                🗑️ Delete
+                                                ${uiIcon('trash')} Delete
                                             </button>
                                         </div>
                                     </div>
@@ -4413,7 +4424,7 @@
             renderHtml(fileList, html`
                 <div class="series-detail" id="seriesDetailPanel">
                     <div class="series-detail-header">
-                        <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">← Back to Series</button>
+                        <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">${uiIcon('arrow-left')} Back to Series</button>
                         <div class="series-detail-summary">
                             <img class="series-detail-cover" data-protected-image="${series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path}" data-protected-image-fallback="${series.has_external_image && series.external_image_url ? series.cover_file_path : ''}" alt="${series.title} cover" loading="lazy" decoding="async" fetchpriority="low">
                             <div class="series-detail-summary-body">
@@ -4423,37 +4434,37 @@
                                 ${series.metadata_source ? html`<div class="series-detail-meta">Source: ${series.metadata_source}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
                                 ${rawHtml(renderSeriesSynopsis(series))}
                                 <div class="series-detail-actions">
-                                    ${issues.length ? html`<button type="button" class="btn btn-small btn-primary" onclick="readComic('${jsArg(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
+                                    ${issues.length ? html`<button type="button" class="btn btn-small btn-primary" onclick="readComic('${jsArg(issues[0].file_path)}')">${uiIcon('book-open')} Read First Issue</button>` : ''}
                                     <div class="file-actions-dropdown series-actions-dropdown">
                                         <button type="button" class="dropdown-toggle" onclick="toggleDropdown(event, '${jsArg(SERIES_ACTIONS_DROPDOWN_KEY)}')">
-                                            ⚙️ Actions
+                                            ${uiIcon('settings')} Actions
                                         </button>
                                         <div class="dropdown-menu" id="${getDropdownId(SERIES_ACTIONS_DROPDOWN_KEY)}">
                                             <button class="dropdown-item" onclick="openManageSeriesNamesModal('${jsArg(series.title)}'); closeAllDropdowns();">
-                                                🏷️ Manage Names
+                                                ${uiIcon('tag')} Manage Names
                                             </button>
                                             <button class="dropdown-item" onclick="openSeriesFoldersModal('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="See the on-disk folders contributing to this series and merge them into one">
-                                                📁 Manage Folders
+                                                ${uiIcon('folder')} Manage Folders
                                             </button>
                                             <div class="dropdown-divider"></div>
                                             <button class="dropdown-item" onclick="refreshSeriesMetadataDirect('${jsArg(series.title)}'); closeAllDropdowns();">
-                                                🌐 Refresh Metadata
+                                                ${uiIcon('globe')} Refresh Metadata
                                             </button>
                                             <button class="dropdown-item" onclick="refreshSeriesFolder('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Refresh metadata for every folder/alias that groups under this series">
-                                                📁 Refresh Folder
+                                                ${uiIcon('folder')} Refresh Folder
                                             </button>
                                             <button class="dropdown-item" onclick="updateSeriesCoversDirect('${jsArg(series.title)}'); closeAllDropdowns();" title="Re-apply the current cached series image to this series' cover sidecars and first-issue archive. This may rewrite the archive file.">
-                                                🖼️ Update Covers
+                                                ${uiIcon('image')} Update Covers
                                             </button>
                                             <button class="dropdown-item" data-requires-write onclick="openEmailSendModalForSeries('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();">
-                                                📧 Email All Issues
+                                                ${uiIcon('mail')} Email All Issues
                                             </button>
                                             <button class="dropdown-item" data-requires-write onclick="openEmailSubscriptionModal('${jsArg(series.title)}'); closeAllDropdowns();">
-                                                🔁 Auto-send New Issues
+                                                ${uiIcon('copy')} Auto-send New Issues
                                             </button>
                                             <div class="dropdown-divider"></div>
                                             <button class="dropdown-item" onclick="resetSeriesProcessedStatus('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
-                                                ♻️ Reset Processed Status
+                                                ${uiIcon('rotate-ccw')} Reset Processed Status
                                             </button>
                                         </div>
                                     </div>
@@ -4471,7 +4482,7 @@
                                 <span>Select all issues</span>
                             </label>
                             <span class="series-detail-selection-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} in this series${!allLoaded ? ` · showing ${issues.length}` : ''}</span>
-                            <button type="button" class="btn btn-small" data-requires-write onclick="openEmailSendModalForSelected()">📧 Email Selected</button>
+                            <button type="button" class="btn btn-small" data-requires-write onclick="openEmailSendModalForSelected()">${uiIcon('mail')} Email Selected</button>
                         </div>
                         ${rawHtml(renderMissingIssuesBanner(issues, series))}
                     ` : ''}
@@ -4574,48 +4585,48 @@
                             </button>
                             <div class="dropdown-menu" id="${getDropdownId(file.relative_path)}">
                                 <button class="dropdown-item" onclick="showFileInfo('${escapeJs(file.relative_path)}', '${escapeJs(file.name)}'); closeAllDropdowns();">
-                                    ℹ️ Info
+                                    ${uiIcon('info')} Info
                                 </button>
                                 <button class="dropdown-item" onclick="viewTags('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    👁️ View/Edit
+                                    ${uiIcon('eye')} View/Edit
                                 </button>
                                 <button class="dropdown-item" onclick="readComic('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    📖 Read Comic
+                                    ${uiIcon('book-open')} Read Comic
                                 </button>
                                 <button class="dropdown-item" data-requires-write onclick="openEmailSendModalForFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    📧 Email to Ereader…
+                                    ${uiIcon('mail')} Email to Ereader…
                                 </button>
                                 ${file.duplicate
                                     ? `<button class="dropdown-item" onclick="openDuplicateReviewModal('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                        🔁 Review Duplicate
+                                        ${uiIcon('copy')} Review Duplicate
                                     </button>`
                                     : ''
                                 }
                                 <div class="dropdown-divider"></div>
                                 ${file.read
                                     ? `<button class="dropdown-item" onclick="markFileUnread('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                        📚 Mark Unread
+                                        ${uiIcon('library')} Mark Unread
                                     </button>`
                                     : `<button class="dropdown-item" onclick="markFileRead('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                        ✅ Mark Read
+                                        ${uiIcon('check-circle')} Mark Read
                                     </button>`
                                 }
                                 <div class="dropdown-divider"></div>
                                 <button class="dropdown-item" onclick="processSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    🚀 Process
+                                    ${uiIcon('play')} Process
                                 </button>
                                 <button class="dropdown-item" onclick="renameSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    📝 Rename
+                                    ${uiIcon('pencil')} Rename
                                 </button>
                                 <button class="dropdown-item" onclick="normalizeSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    ✨ Normalize
+                                    ${uiIcon('tag')} Normalize
                                 </button>
                                 <button class="dropdown-item" onclick="removeFileMetadata('${escapeJs(file.relative_path)}'); closeAllDropdowns();" title="Open the archive, delete the embedded ComicInfo.xml, and mark the file as unprocessed so it can be re-processed.">
-                                    🧹 Remove Metadata
+                                    ${uiIcon('eraser')} Remove Metadata
                                 </button>
                                 <div class="dropdown-divider"></div>
                                 <button class="dropdown-item" onclick="deleteSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    🗑️ Delete
+                                    ${uiIcon('trash')} Delete
                                 </button>
                             </div>
                         </div>
@@ -8475,7 +8486,7 @@
                 modal.classList.remove('active');
                 setProgressIndicatorVisible(true);
                 const indicatorText = document.getElementById('progressIndicatorText');
-                indicatorText.textContent = `⏳ ${title}`;
+                indicatorText.textContent = title;
             } else {
                 // Show the full modal
                 modal.classList.add('active');
@@ -8504,7 +8515,7 @@
             const indicator = document.getElementById('progressIndicator');
             if (indicator.style.display !== 'none') {
                 const indicatorText = document.getElementById('progressIndicatorText');
-                indicatorText.textContent = `⏳ ${current} / ${total} files (${percent}%)`;
+                indicatorText.textContent = `${current} / ${total} files (${percent}%)`;
             }
         }
 
@@ -8643,7 +8654,7 @@
             // Show the indicator with current progress
             const percentText = document.getElementById('progressPercent').textContent;
             const progressText = document.getElementById('progressText').textContent;
-            indicatorText.textContent = `⏳ ${progressText} (${percentText})`;
+            indicatorText.textContent = `${progressText} (${percentText})`;
             setProgressIndicatorVisible(true);
             
             // Save minimized state to localStorage
@@ -10493,20 +10504,19 @@
             ].filter(Boolean);
             if (indicators.length === 0) return;
 
-            let icon, text, title, statusClass;
+            // The icon is a CSS status dot coloured by the running / stopped
+            // class, so only the text and tooltip change here.
+            let text, title, statusClass;
             if (running === null || enabled === null) {
                 // Unknown status
-                icon = '❓';
                 text = 'Status Unknown';
                 title = 'Unable to determine watcher status';
                 statusClass = null;
             } else if (running) {
-                icon = '✅';
                 text = 'Watcher Running';
                 title = 'File watcher is running and monitoring for changes';
                 statusClass = 'running';
             } else {
-                icon = '⛔';
                 text = 'Watcher Stopped';
                 title = enabled
                     ? 'File watcher is enabled but not running'
@@ -10517,9 +10527,7 @@
             indicators.forEach(statusIndicator => {
                 statusIndicator.classList.remove('running', 'stopped');
                 if (statusClass) statusIndicator.classList.add(statusClass);
-                const iconElement = statusIndicator.querySelector('.watcher-icon');
                 const textElement = statusIndicator.querySelector('.watcher-text');
-                if (iconElement) iconElement.textContent = icon;
                 if (textElement) textElement.textContent = text;
                 statusIndicator.title = title;
             });
@@ -11573,7 +11581,7 @@
                             </div>
                             <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Aliases: ${aliases}</div>
                             <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;">
-                                <button class="btn btn-small btn-primary" type="button" onclick="applySearchResultAsMatch(${idx})" title="Mark this candidate as the correct match for the series">✅ Use This Match</button>
+                                <button class="btn btn-small btn-primary" type="button" onclick="applySearchResultAsMatch(${idx})" title="Mark this candidate as the correct match for the series">${uiIcon('check-circle')} Use This Match</button>
                                 <button class="btn btn-small" type="button" onclick="adoptSearchResult(${idx}, 'canonical')">Adopt as Canonical</button>
                                 <button class="btn btn-small" type="button" onclick="adoptSearchResult(${idx}, 'aliases')">Add Aliases</button>
                             </div>

@@ -78,6 +78,64 @@
     </script>
 </head>
 <body>
+    <!-- Icon sprite. Every icon is a 24×24 outline drawn with currentColor, so
+         it follows the surrounding text colour in both themes. Use with
+         <svg class="icon" aria-hidden="true"><use href="#i-NAME"/></svg>. -->
+    <svg xmlns="http://www.w3.org/2000/svg" class="icon-sprite" aria-hidden="true" focusable="false">
+        <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></symbol>
+        <symbol id="i-library" viewBox="0 0 24 24"><rect x="3" y="4" width="4.5" height="16" rx="1"/><rect x="9.5" y="4" width="4.5" height="16" rx="1"/><path d="M16 5.6l3.4-.9 3.1 14.6-3.4.9z"/></symbol>
+        <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+        <symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/><path d="M12 8v4l3 2"/></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.4-4.6L4 8"/><path d="M4 3.5V8h4.5"/><path d="M4 13a8 8 0 0 0 14.4 4.6L20 16"/><path d="M20 20.5V16h-4.5"/></symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+        <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+        <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></symbol>
+        <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9s1.3-6.3 3.8-9z"/></symbol>
+        <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+        <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></symbol>
+        <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4z"/></symbol>
+        <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 13.5A8.5 8.5 0 1 1 10.5 3.5a6.5 6.5 0 0 0 10 10z"/></symbol>
+        <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></symbol>
+        <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3L20 3"/><path d="M15.5 7.5l3 3"/><path d="M18 5l2 2"/></symbol>
+        <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></symbol>
+        <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+        <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></symbol>
+        <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+        <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5l12 7.5-12 7.5z"/></symbol>
+        <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></symbol>
+        <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></symbol>
+        <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.5"/></symbol>
+        <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+        <symbol id="i-book-open" viewBox="0 0 24 24"><path d="M2 5h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z"/><path d="M22 5h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/></symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></symbol>
+        <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+        <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="11" rx="1"/><rect x="13.5" y="3" width="7.5" height="11" rx="1"/><path d="M3 18h7.5M13.5 18h7.5M3 21h5M13.5 21h5"/></symbol>
+        <symbol id="i-compact" viewBox="0 0 24 24"><rect x="3" y="3" width="5" height="8" rx="1"/><rect x="9.5" y="3" width="5" height="8" rx="1"/><rect x="16" y="3" width="5" height="8" rx="1"/><rect x="3" y="13" width="5" height="8" rx="1"/><rect x="9.5" y="13" width="5" height="8" rx="1"/><rect x="16" y="13" width="5" height="8" rx="1"/></symbol>
+        <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></symbol>
+        <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16M3 16l4 4 4-4"/><path d="M17 20V4M13 8l4-4 4 4"/></symbol>
+        <symbol id="i-more" viewBox="0 0 24 24"><path d="M12 5h.01M12 12h.01M12 19h.01" stroke-width="3"/></symbol>
+        <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+        <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></symbol>
+        <symbol id="i-eraser" viewBox="0 0 24 24"><path d="M7 21h13"/><path d="M4.5 15.5l9-9a2 2 0 0 1 2.8 0l3.2 3.2a2 2 0 0 1 0 2.8L13 19H8.5z"/><path d="M9 11l5.5 5.5"/></symbol>
+        <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+        <symbol id="i-unlink" viewBox="0 0 24 24"><path d="M15.7 14l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M8.3 10l-3 3a4 4 0 0 0 5.7 5.7l1-1"/><path d="M4 4l16 16"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+        <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></symbol>
+        <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/></symbol>
+        <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5l9.5 16.5h-19z"/><path d="M12 10v4.5M12 17.5h.01"/></symbol>
+        <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M4 7h4a2 2 0 1 1 4 0h4v4a2 2 0 1 1 0 4v4h-4a2 2 0 1 0-4 0H4v-4a2 2 0 1 0 0-4z"/></symbol>
+        <symbol id="i-text" viewBox="0 0 24 24"><path d="M4 7V5h16v2"/><path d="M12 5v14"/><path d="M9 19h6"/></symbol>
+        <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+        <symbol id="i-hard-drive" viewBox="0 0 24 24"><path d="M3 14l3-9h12l3 9"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 17h.01M11 17h.01"/></symbol>
+        <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+        <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></symbol>
+        <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3 8a2 2 0 0 1 2-2h2.5l2-2.5h5l2 2.5H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+        <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+        <symbol id="i-smartphone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></symbol>
+    </svg>
     <a class="skip-to-content" href="#mainContent">Skip to main content</a>
     <div class="header">
         <div class="container">
@@ -123,163 +181,164 @@
                     <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
                 </svg>
                 <div class="watcher-status-indicator" id="watcherStatus" title="Watcher Status" role="status" aria-live="polite" aria-label="Watcher status">
-                    <span class="watcher-icon" aria-hidden="true">⚙️</span>
+                    <span class="watcher-icon" aria-hidden="true"></span>
                     <span class="watcher-text">Checking...</span>
                 </div>
                 <div class="settings-menu-wrapper">
                     <button type="button" class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle" aria-label="Open menu" aria-haspopup="true" aria-expanded="false" aria-controls="settingsDropdownMenu">
-                        ⋮
+                        <svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>
                     </button>
                     <div class="settings-dropdown-menu" id="settingsDropdownMenu">
                         <div class="settings-dropdown-brand">
                             <img src="icons/icon-192x192.png" alt="Comic Maintainer" class="settings-dropdown-brand-icon" width="32" height="32" />
                             <div class="watcher-status-indicator" id="watcherStatusMenu" title="Watcher Status">
-                                <span class="watcher-icon">⚙️</span>
+                                <span class="watcher-icon" aria-hidden="true"></span>
                                 <span class="watcher-text">Checking...</span>
                             </div>
                         </div>
                         <div class="settings-dropdown-item user-info-item" id="userInfo" style="display: none;">
-                            👤 <span id="usernameDisplay"></span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-user"/></svg> <span id="usernameDisplay"></span>
                         </div>
                         <div class="settings-dropdown-section-label">Library</div>
                         <button class="settings-dropdown-item" onclick="refreshFiles(); closeSettingsMenu();">
-                            🔄 Refresh
+                            <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh
                         </button>
                         <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
-                            🔍 Scan Unmarked
+                            <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg> Scan Unmarked
                         </button>
                         <button class="settings-dropdown-item" onclick="openDuplicateReviewModal(); closeSettingsMenu();">
-                            🔁 Review Duplicates
+                            <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg> Review Duplicates
                         </button>
                         <button class="settings-dropdown-item" onclick="openCombineFoldersModal(); closeSettingsMenu();">
-                            📁 Combine Folders
+                            <svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Combine Folders
                         </button>
                         <button class="settings-dropdown-item" onclick="openProcessingHistoryModal(); closeSettingsMenu();">
-                            📜 Processing History
+                            <svg class="icon" aria-hidden="true"><use href="#i-history"/></svg> Processing History
                         </button>
                         <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
-                            📋 View Logs
+                            <svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg> View Logs
                         </button>
                         <button class="settings-dropdown-item" onclick="openExternalProvidersModal(); closeSettingsMenu();">
-                            🌐 External Providers Status
+                            <svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg> External Providers Status
                         </button>
                         <button class="settings-dropdown-item" id="diagnosticsMenuItem" onclick="openDiagnosticsModal(); closeSettingsMenu();">
-                            🩺 System Diagnostics
+                            <svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg> System Diagnostics
                         </button>
                         <button class="settings-dropdown-item" onclick="openEmailDevicesModal(); closeSettingsMenu();">
-                            📧 Ereader Devices
+                            <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg> Ereader Devices
                         </button>
                         <button class="settings-dropdown-item" onclick="openEmailDeliveryHistoryModal(); closeSettingsMenu();">
-                            📨 Email Delivery History
+                            <svg class="icon" aria-hidden="true"><use href="#i-send"/></svg> Email Delivery History
                         </button>
                         <button class="settings-dropdown-item" onclick="window.location.href='/jobs.html'; closeSettingsMenu();">
-                            ⏰ Scheduled Jobs
+                            <svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg> Scheduled Jobs
                         </button>
                         <div class="settings-dropdown-section-label">View</div>
                         <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
-                            🌓 Toggle Theme
+                            <svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg> Toggle Theme
                         </button>
                         <button class="settings-dropdown-item" id="installAppButton" onclick="installApp(); closeSettingsMenu();" style="display: none;">
-                            📱 Install App
+                            <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Install App
                         </button>
                         <div class="settings-dropdown-section-label">Account</div>
                         <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
-                            ⚙️ Settings
+                            <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg> Settings
                         </button>
                         <button class="settings-dropdown-item" onclick="openChangePasswordModal(); closeSettingsMenu();">
-                            🔑 Change Password
+                            <svg class="icon" aria-hidden="true"><use href="#i-key"/></svg> Change Password
                         </button>
                         <button class="settings-dropdown-item settings-dropdown-item-logout" onclick="logout(); closeSettingsMenu();">
-                            🚪 Logout
+                            <svg class="icon" aria-hidden="true"><use href="#i-logout"/></svg> Logout
                         </button>
                         <div class="settings-dropdown-section-label">About</div>
                         <button class="settings-dropdown-item" onclick="openKeyboardShortcutsModal(); closeSettingsMenu();">
-                            ⌨️ Keyboard Shortcuts
+                            <svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg> Keyboard Shortcuts
                         </button>
                         <button class="settings-dropdown-item" onclick="openAboutModal(); closeSettingsMenu();">
-                            ℹ️ About
+                            <svg class="icon" aria-hidden="true"><use href="#i-info"/></svg> About
                         </button>
                     
                     </div>
                 </div>
                 <div class="header-controls">
                     <nav class="header-nav" id="headerNav" aria-label="Primary">
-                        <button type="button" class="header-nav-btn" id="navOverviewBtn" onclick="navigate('#/home')" title="Overview">🏠<span class="header-nav-label"> Overview</span></button>
-                        <button type="button" class="header-nav-btn" id="navLibraryBtn" onclick="navigate('#/library')" title="Library">📚<span class="header-nav-label"> Library</span></button>
+                        <button type="button" class="header-nav-btn" id="navOverviewBtn" onclick="navigate('#/home')" title="Overview"><svg class="icon" aria-hidden="true"><use href="#i-home"/></svg> <span class="header-nav-label"> Overview</span></button>
+                        <button type="button" class="header-nav-btn" id="navLibraryBtn" onclick="navigate('#/library')" title="Library"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg> <span class="header-nav-label"> Library</span></button>
                     </nav>
                     <button type="button" id="progressIndicator" class="progress-indicator-btn" onclick="restoreProgressModal()" style="display: none;" title="Show progress" aria-label="Show processing progress">
-                        <span id="progressIndicatorText">⏳ Processing...</span>
+                        <span id="progressIndicatorText">Processing…</span>
                     </button>
                     <div class="header-search">
                         <label for="headerSearchInput" class="visually-hidden">Search files</label>
-                        <input type="text" id="headerSearchInput" name="headerSearch" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
+                        <svg class="icon header-search-icon" aria-hidden="true"><use href="#i-search"/></svg>
+                        <input type="text" id="headerSearchInput" name="headerSearch" placeholder="Search files…" oninput="debouncedFilterFiles()" />
                         <button type="button" class="header-search-clear" id="headerSearchClear" onclick="clearHeaderSearch()" aria-label="Clear search" title="Clear search (Esc)" hidden>&times;</button>
                     </div>
                     <div class="header-filter-dropdown">
                         <button type="button" class="header-filter-toggle" onclick="toggleHeaderFilterDropdown(event)" id="headerFilterToggle" aria-label="Filter files" aria-haspopup="true" aria-expanded="false" aria-controls="headerFilterMenu">
-                            <span id="headerFilterLabel">📚 All</span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-filter"/></svg><span id="headerFilterLabel">All</span>
                         </button>
                         <div class="header-dropdown-menu" id="headerFilterMenu">
                             <button class="header-dropdown-item active" onclick="setHeaderFilter('all')" data-filter="all">
-                                📚 All Files
+                                <svg class="icon" aria-hidden="true"><use href="#i-library"/></svg> All Files
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('unmarked')" data-filter="unmarked">
-                                ⚠️ Unmarked
+                                <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg> Unmarked
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('marked')" data-filter="marked">
-                                ✅ Marked
+                                <svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg> Marked
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('duplicates')" data-filter="duplicates">
-                                🔁 Duplicates
+                                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg> Duplicates
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('renamed')" data-filter="renamed">
-                                📝 Renamed
+                                <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> Renamed
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('normalized')" data-filter="normalized">
-                                📋 Normalized
+                                <svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg> Normalized
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('read')" data-filter="read">
-                                👁️ Read
+                                <svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> Read
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('unread')" data-filter="unread">
-                                📚 Unread
+                                <svg class="icon" aria-hidden="true"><use href="#i-library"/></svg> Unread
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('matched')" data-filter="matched">
-                                🔗 Provider Matched
+                                <svg class="icon" aria-hidden="true"><use href="#i-link"/></svg> Provider Matched
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('unmatched')" data-filter="unmatched">
-                                ❓ Not Matched
+                                <svg class="icon" aria-hidden="true"><use href="#i-unlink"/></svg> Not Matched
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('missing')" data-filter="missing">
-                                🧩 Missing Issues
+                                <svg class="icon" aria-hidden="true"><use href="#i-puzzle"/></svg> Missing Issues
                             </button>
                         </div>
                     </div>
                     <div class="header-sort-dropdown">
                         <button type="button" class="header-sort-toggle" onclick="toggleHeaderSortDropdown(event)" id="headerSortToggle" aria-label="Sort files" aria-haspopup="true" aria-expanded="false" aria-controls="headerSortMenu">
-                            <span id="headerSortLabel">🔤 Name</span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-sort"/></svg><span id="headerSortLabel">Name</span>
                         </button>
                         <div class="header-dropdown-menu" id="headerSortMenu">
                             <button class="header-dropdown-item active" onclick="setSort('name')" data-sort="name">
-                                🔤 Name
+                                <svg class="icon" aria-hidden="true"><use href="#i-text"/></svg> Name
                             </button>
                             <button class="header-dropdown-item" onclick="setSort('date')" data-sort="date">
-                                📅 Date
+                                <svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg> Date
                             </button>
                             <button class="header-dropdown-item" onclick="setSort('size')" data-sort="size">
-                                💾 Size
+                                <svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg> Size
                             </button>
                         </div>
                     </div>
                     <div class="header-view-toggle series-layout-toggle" id="seriesLayoutToggle" role="group" aria-label="Series layout">
                         <button type="button" class="header-view-btn" id="seriesLayoutListBtn" onclick="setSeriesLayout('list')" title="List view — best for phones in portrait" aria-label="List layout">
-                            ☰ List
+                            <svg class="icon" aria-hidden="true"><use href="#i-list"/></svg> List
                         </button>
                         <button type="button" class="header-view-btn" id="seriesLayoutGridBtn" onclick="setSeriesLayout('grid')" title="Grid view — cover with title below" aria-label="Grid layout">
-                            ▦ Grid
+                            <svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg> Grid
                         </button>
                         <button type="button" class="header-view-btn" id="seriesLayoutCompactBtn" onclick="setSeriesLayout('compact')" title="Compact view — cover-only with overlay title" aria-label="Compact layout">
-                            ⊞ Compact
+                            <svg class="icon" aria-hidden="true"><use href="#i-compact"/></svg> Compact
                         </button>
                     </div>
                 </div>
@@ -342,10 +401,10 @@
                  </button>
              </div>
              <div class="library-health-empty" id="libraryHealthEmpty" hidden>
-                 <div class="library-health-empty-icon">📚</div>
+                 <div class="library-health-empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg></div>
                  <h3>No files indexed yet</h3>
                  <p>Add comics to your watched folder, or use <strong>Scan Unmarked</strong> from the ⋮ menu to bring them in. Once files appear here, you'll see processing status, duplicates, and folders ready to combine.</p>
-                 <button class="btn btn-primary btn-small" onclick="scanUnmarkedFiles()" data-requires-write>🔍 Scan Unmarked</button>
+                 <button class="btn btn-primary btn-small" onclick="scanUnmarkedFiles()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg> Scan Unmarked</button>
              </div>
              <div class="controls-wrapper">
                  <div class="actions-bar">
@@ -353,20 +412,20 @@
                         <!-- Process Dropdown -->
                         <div class="action-dropdown" data-requires-write>
                             <button class="action-dropdown-toggle process" onclick="toggleActionDropdown(event, 'processDropdown')">
-                                🚀<span> Process</span>
+                                <svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> <span> Process</span>
                             </button>
                             <div class="action-dropdown-menu" id="processDropdown">
                                 <button class="action-dropdown-item" onclick="processAllFilesAsync(); closeAllActionDropdowns();">
-                                    🚀 Process All
+                                    <svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> Process All
                                 </button>
                                 <button class="action-dropdown-item" onclick="processUnmarkedFiles(); closeAllActionDropdowns();">
-                                    ⚠️ Process Unmarked
+                                    <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg> Process Unmarked
                                 </button>
                                 <button class="action-dropdown-item" id="processSelectedItem" onclick="processSelectedFilesAsync(); closeAllActionDropdowns();" disabled>
-                                    ⚡ Process Selected
+                                    <svg class="icon" aria-hidden="true"><use href="#i-zap"/></svg> Process Selected
                                 </button>
                                 <button class="action-dropdown-item" id="clearSelectedStatusItem" onclick="clearSelectedProcessedStatus(); closeAllActionDropdowns();" disabled title="Clear the renamed/normalized flags on the selected files so they can be re-processed">
-                                    ♻️ Clear Processed Status
+                                    <svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg> Clear Processed Status
                                 </button>
                             </div>
                         </div>
@@ -374,17 +433,17 @@
                     <!-- Rename Dropdown -->
                     <div class="action-dropdown" data-requires-write>
                         <button class="action-dropdown-toggle rename" onclick="toggleActionDropdown(event, 'renameDropdown')">
-                            📝<span> Rename</span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> <span> Rename</span>
                         </button>
                         <div class="action-dropdown-menu" id="renameDropdown">
                             <button class="action-dropdown-item" onclick="renameAllFiles(); closeAllActionDropdowns();">
-                                📝 Rename All
+                                <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> Rename All
                             </button>
                             <button class="action-dropdown-item" onclick="renameUnmarkedFiles(); closeAllActionDropdowns();">
-                                📝 Rename Unmarked
+                                <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> Rename Unmarked
                             </button>
                             <button class="action-dropdown-item" id="renameSelectedItem" onclick="renameSelectedFiles(); closeAllActionDropdowns();" disabled>
-                                📝 Rename Selected
+                                <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> Rename Selected
                             </button>
                         </div>
                     </div>
@@ -392,17 +451,17 @@
                     <!-- Normalize Dropdown -->
                     <div class="action-dropdown" data-requires-write>
                         <button class="action-dropdown-toggle normalize" onclick="toggleActionDropdown(event, 'normalizeDropdown')">
-                            🔧<span> Normalize</span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg> <span> Normalize</span>
                         </button>
                         <div class="action-dropdown-menu" id="normalizeDropdown">
                             <button class="action-dropdown-item" onclick="normalizeAllFiles(); closeAllActionDropdowns();">
-                                🔧 Normalize All
+                                <svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg> Normalize All
                             </button>
                             <button class="action-dropdown-item" onclick="normalizeUnmarkedFiles(); closeAllActionDropdowns();">
-                                🔧 Normalize Unmarked
+                                <svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg> Normalize Unmarked
                             </button>
                             <button class="action-dropdown-item" id="normalizeSelectedItem" onclick="normalizeSelectedFiles(); closeAllActionDropdowns();" disabled>
-                                🔧 Normalize Selected
+                                <svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg> Normalize Selected
                             </button>
                         </div>
                     </div>
@@ -410,20 +469,20 @@
                     <!-- Mark Read Dropdown -->
                     <div class="action-dropdown" data-requires-write>
                         <button class="action-dropdown-toggle mark" onclick="toggleActionDropdown(event, 'markDropdown')">
-                            👁️<span> Mark</span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> <span> Mark</span>
                         </button>
                         <div class="action-dropdown-menu" id="markDropdown">
                             <button class="action-dropdown-item" onclick="markAllFilesRead(); closeAllActionDropdowns();">
-                                ✅ Mark All Read
+                                <svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg> Mark All Read
                             </button>
                             <button class="action-dropdown-item" onclick="markAllFilesUnread(); closeAllActionDropdowns();">
-                                📚 Mark All Unread
+                                <svg class="icon" aria-hidden="true"><use href="#i-library"/></svg> Mark All Unread
                             </button>
                             <button class="action-dropdown-item" id="markSelectedReadItem" onclick="markSelectedFilesRead(); closeAllActionDropdowns();" disabled>
-                                ✅ Mark Selected Read
+                                <svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg> Mark Selected Read
                             </button>
                             <button class="action-dropdown-item" id="markSelectedUnreadItem" onclick="markSelectedFilesUnread(); closeAllActionDropdowns();" disabled>
-                                📚 Mark Selected Unread
+                                <svg class="icon" aria-hidden="true"><use href="#i-library"/></svg> Mark Selected Unread
                             </button>
                         </div>
                     </div>
@@ -431,40 +490,40 @@
                     <!-- Metadata Dropdown -->
                     <div class="action-dropdown" data-requires-write>
                         <button class="action-dropdown-toggle" onclick="toggleActionDropdown(event, 'metadataDropdown')">
-                            🌐<span> Metadata</span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg> <span> Metadata</span>
                         </button>
                         <div class="action-dropdown-menu" id="metadataDropdown">
                             <button class="action-dropdown-item" onclick="refreshAllExternalMetadata(); closeAllActionDropdowns();">
-                                🌐 Refresh All External Metadata
+                                <svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg> Refresh All External Metadata
                             </button>
                             <button class="action-dropdown-item" onclick="matchAllUnmatchedSeries(); closeAllActionDropdowns();">
-                                🔍 Match All Unmatched Series
+                                <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg> Match All Unmatched Series
                             </button>
                             <button class="action-dropdown-item" onclick="updateAllSeriesCovers(); closeAllActionDropdowns();" title="Re-apply the current cached series image to cover sidecars and first-issue archives for every series in the library.">
-                                🖼️ Update Covers All Series
+                                <svg class="icon" aria-hidden="true"><use href="#i-image"/></svg> Update Covers All Series
                             </button>
                             <button class="action-dropdown-item" id="updateSeriesCoversSelectedItem" onclick="updateSelectedSeriesCovers(); closeAllActionDropdowns();" disabled title="Re-apply the current cached series image to the selected series, or to the series you are currently viewing.">
-                                🖼️ Update Covers Selected Series
+                                <svg class="icon" aria-hidden="true"><use href="#i-image"/></svg> Update Covers Selected Series
                             </button>
                             <div class="dropdown-divider"></div>
                             <button class="action-dropdown-item" id="removeMetadataSelectedItem" onclick="removeMetadataSelected(); closeAllActionDropdowns();" disabled title="Strip the embedded ComicInfo.xml from each selected file and mark them unprocessed so they can be re-processed.">
-                                🧹 Remove Metadata Selected
+                                <svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Remove Metadata Selected
                             </button>
                             <button class="action-dropdown-item" id="emailSelectedItem" onclick="openEmailSendModalForSelected(); closeAllActionDropdowns();" disabled>
-                                📧 Email Selected to Ereader
+                                <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg> Email Selected to Ereader
                             </button>
                             <button class="action-dropdown-item" onclick="removeMetadataAll(); closeAllActionDropdowns();" title="Strip the embedded ComicInfo.xml from every file in the library and mark them unprocessed so they can be re-processed.">
-                                🧹 Remove Metadata All
+                                <svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Remove Metadata All
                             </button>
                         </div>
                     </div>
                     
-                    <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" data-requires-write disabled>✏️<span> Update</span></button>
-                    <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteSelectedBtn" data-requires-write disabled>🗑️<span> Delete</span></button>
-                    <button class="btn" onclick="refreshLibraryHealth()" aria-label="Refresh library health" title="Refresh">🔄<span class="btn-label"> Refresh</span></button>
-                    <button class="btn" onclick="refreshFiles()" aria-label="Refresh library" title="Refresh library">🔄<span class="btn-label"> Refresh Library</span></button>
-                    <button class="btn btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" data-requires-write hidden>🔁<span class="btn-label"> Review Duplicates</span></button>
-                    <button class="btn" id="combineFoldersBtn" onclick="openCombineFoldersModal()" data-requires-write hidden>📁<span class="btn-label"> Combine Folders</span></button>
+                    <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" data-requires-write disabled><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> <span> Update</span></button>
+                    <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteSelectedBtn" data-requires-write disabled><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> <span> Delete</span></button>
+                    <button class="btn" onclick="refreshLibraryHealth()" aria-label="Refresh library health" title="Refresh"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> <span class="btn-label"> Refresh</span></button>
+                    <button class="btn" onclick="refreshFiles()" aria-label="Refresh library" title="Refresh library"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> <span class="btn-label"> Refresh Library</span></button>
+                    <button class="btn btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" data-requires-write hidden><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg> <span class="btn-label"> Review Duplicates</span></button>
+                    <button class="btn" id="combineFoldersBtn" onclick="openCombineFoldersModal()" data-requires-write hidden><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> <span class="btn-label"> Combine Folders</span></button>
                 </div>
                 <span class="select-info" id="selectInfo">No files selected</span>
             </div>
@@ -476,13 +535,13 @@
             <div class="content-wrapper">
                 <div class="series-layout-toolbar-mobile" id="seriesLayoutToolbarMobile" role="group" aria-label="Series layout" hidden>
                     <button type="button" class="series-layout-mobile-btn" id="seriesLayoutListBtnMobile" onclick="setSeriesLayout('list')" aria-label="List layout">
-                        ☰ List
+                        <svg class="icon" aria-hidden="true"><use href="#i-list"/></svg> List
                     </button>
                     <button type="button" class="series-layout-mobile-btn" id="seriesLayoutGridBtnMobile" onclick="setSeriesLayout('grid')" aria-label="Grid layout">
-                        ▦ Grid
+                        <svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg> Grid
                     </button>
                     <button type="button" class="series-layout-mobile-btn" id="seriesLayoutCompactBtnMobile" onclick="setSeriesLayout('compact')" aria-label="Compact layout">
-                        ⊞ Compact
+                        <svg class="icon" aria-hidden="true"><use href="#i-compact"/></svg> Compact
                     </button>
                 </div>
                 <div class="file-list" id="fileList">
@@ -631,7 +690,7 @@
                  </div>
                  <div class="duplicate-review-callout" id="fileInfoDuplicateReview" style="display: none;">
                      <p>This file is currently flagged as a duplicate. Open the duplicate review flow to inspect it and take action.</p>
-                     <button class="btn btn-warning" id="fileInfoDuplicateReviewBtn" onclick="openDuplicateReviewFromFileInfo()">🔁 Review Duplicate</button>
+                     <button class="btn btn-warning" id="fileInfoDuplicateReviewBtn" onclick="openDuplicateReviewFromFileInfo()"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg> Review Duplicate</button>
                  </div>
              </div>
              <div class="modal-footer">
@@ -1001,7 +1060,7 @@
                 
                 <div class="form-group" style="margin-top: 15px;">
                     <button class="btn btn-primary" onclick="cleanupDatabaseNow()" style="width: 100%;">
-                        🧹 Clean Database Now
+                        <svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Clean Database Now
                     </button>
                     <small class="form-hint">
                         Manually trigger database cleanup to remove stale entries for files that no longer exist on disk.
@@ -1182,7 +1241,7 @@
                     </label>
                 </div>
                 <div class="form-group">
-                    <button class="btn" type="button" onclick="testSuwayomiConnection()">🔌 Test Connection</button>
+                    <button class="btn" type="button" onclick="testSuwayomiConnection()"><svg class="icon" aria-hidden="true"><use href="#i-plug"/></svg> Test Connection</button>
                     <small id="suwayomiStatusHint" class="form-hint">Save your settings before testing.</small>
                 </div>
                 
@@ -1201,7 +1260,7 @@
                         ⚠️ This action cannot be undone! Your actual comic files will NOT be deleted.
                     </p>
                     <button class="btn btn-danger" onclick="showResetConfirmation()" style="margin-top: 10px; font-weight: 600;">
-                        🗑️ Reset Database
+                        <svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Reset Database
                     </button>
                 </div>
             </div>
@@ -1276,7 +1335,7 @@
                         <option value="1000">Last 1000</option>
                         <option value="0">All</option>
                     </select>
-                    <button class="btn" onclick="loadLogs()" style="margin-left: auto;">🔄 Refresh</button>
+                    <button class="btn" onclick="loadLogs()" style="margin-left: auto;"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh</button>
                 </div>
                 <div id="logsLoadingIndicator" style="display: none; padding: 20px; text-align: center; color: var(--text-muted);">
                     Loading logs...
@@ -1310,7 +1369,7 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn" onclick="loadProviderHealth()">↻ Refresh</button>
+                <button class="btn" onclick="loadProviderHealth()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh</button>
                 <button class="btn" onclick="closeExternalProvidersModal()">Close</button>
             </div>
         </div>
@@ -1337,8 +1396,8 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn" onclick="loadDiagnostics()">↻ Refresh</button>
-                <button class="btn" id="copyDiagnosticsBtn" onclick="copyDiagnosticsReport()">📋 Copy report</button>
+                <button class="btn" onclick="loadDiagnostics()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh</button>
+                <button class="btn" id="copyDiagnosticsBtn" onclick="copyDiagnosticsReport()"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg> Copy report</button>
                 <button class="btn" onclick="closeDiagnosticsModal()">Close</button>
             </div>
         </div>
@@ -1539,7 +1598,7 @@
                     <!-- History items will be loaded here -->
                 </div>
                 <div id="historyPagination" style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-primary);">
-                    <button class="btn" id="historyPrevBtn" onclick="loadPreviousHistoryPage()" disabled>← Previous</button>
+                    <button class="btn" id="historyPrevBtn" onclick="loadPreviousHistoryPage()" disabled><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg> Previous</button>
                     <span id="historyPageInfo" style="color: var(--text-secondary); font-size: 14px;">Page 1</span>
                     <button class="btn" id="historyNextBtn" onclick="loadNextHistoryPage()" disabled>Next →</button>
                 </div>
@@ -1558,7 +1617,7 @@
              </div>
              <div class="modal-body">
                  <div class="duplicate-review-toolbar">
-                     <button class="btn btn-small" id="duplicateReviewPrevBtn" onclick="changeDuplicateReviewItem(-1)">← Previous</button>
+                     <button class="btn btn-small" id="duplicateReviewPrevBtn" onclick="changeDuplicateReviewItem(-1)"><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg> Previous</button>
                      <span id="duplicateReviewCounter">0 of 0</span>
                      <button class="btn btn-small" id="duplicateReviewNextBtn" onclick="changeDuplicateReviewItem(1)">Next →</button>
                  </div>
@@ -1586,12 +1645,12 @@
                          </div>
                      </div>
                      <div class="duplicate-review-actions">
-                         <button class="btn" onclick="openDuplicateInfo()">ℹ️ View Info</button>
-                         <button class="btn" onclick="openDuplicateTags()">👁️ View/Edit Tags</button>
-                         <button class="btn" onclick="openDuplicateReader()">📖 Read Comic</button>
-                         <button class="btn" id="duplicateReviewReadToggleBtn" onclick="toggleDuplicateReadStatus()">✅ Mark Read</button>
-                         <button class="btn btn-danger" onclick="deleteCurrentDuplicate()">🗑️ Delete Duplicate</button>
-                         <button class="btn btn-danger" id="duplicateReviewDeleteAllBtn" onclick="deleteAllDuplicates()" data-requires-write>🗑️ Delete All Duplicates</button>
+                         <button class="btn" onclick="openDuplicateInfo()"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg> View Info</button>
+                         <button class="btn" onclick="openDuplicateTags()"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> View/Edit Tags</button>
+                         <button class="btn" onclick="openDuplicateReader()"><svg class="icon" aria-hidden="true"><use href="#i-book-open"/></svg> Read Comic</button>
+                         <button class="btn" id="duplicateReviewReadToggleBtn" onclick="toggleDuplicateReadStatus()"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg> Mark Read</button>
+                         <button class="btn btn-danger" onclick="deleteCurrentDuplicate()"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete Duplicate</button>
+                         <button class="btn btn-danger" id="duplicateReviewDeleteAllBtn" onclick="deleteAllDuplicates()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete All Duplicates</button>
                      </div>
                      <div class="duplicate-review-tip">
                          Review duplicates one-by-one, inspect their metadata, and delete the copy you do not want to keep.
@@ -1613,7 +1672,7 @@
              </div>
              <div class="modal-body">
                  <div class="duplicate-review-toolbar">
-                     <button class="btn btn-small" id="combineFoldersPrevBtn" onclick="changeCombineFolderGroup(-1)">← Previous</button>
+                     <button class="btn btn-small" id="combineFoldersPrevBtn" onclick="changeCombineFolderGroup(-1)"><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg> Previous</button>
                      <span id="combineFoldersCounter">0 of 0</span>
                      <button class="btn btn-small" id="combineFoldersNextBtn" onclick="changeCombineFolderGroup(1)">Next →</button>
                  </div>
@@ -1634,8 +1693,8 @@
                  </div>
              </div>
              <div class="modal-footer">
-                 <button class="btn" id="combineFoldersPreviewBtn" onclick="previewCombineFolders()" disabled>👀 Preview Merge</button>
-                 <button class="btn btn-warning" id="combineFoldersConfirmBtn" onclick="confirmCombineFolders()" disabled>📁 Combine Folders</button>
+                 <button class="btn" id="combineFoldersPreviewBtn" onclick="previewCombineFolders()" disabled><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> Preview Merge</button>
+                 <button class="btn btn-warning" id="combineFoldersConfirmBtn" onclick="confirmCombineFolders()" disabled><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Combine Folders</button>
                  <button class="btn" onclick="closeCombineFoldersModal()">Close</button>
              </div>
          </div>
@@ -1659,7 +1718,7 @@
                  <div id="seriesFoldersMergeNote" class="duplicate-review-tip" style="display: none;"></div>
              </div>
              <div class="modal-footer">
-                 <button class="btn" id="seriesFoldersMergeBtn" onclick="openMergeForSeriesFolders()" disabled>📁 Merge Folders</button>
+                 <button class="btn" id="seriesFoldersMergeBtn" onclick="openMergeForSeriesFolders()" disabled><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Merge Folders</button>
                  <button class="btn" onclick="closeSeriesFoldersModal()">Close</button>
              </div>
          </div>
@@ -1707,7 +1766,7 @@
                      <div id="manageSeriesUserAliases" style="padding: 10px; background: var(--bg-hover); border-radius: 5px; margin-top: 5px; min-height: 36px;">None</div>
                      <div style="display: flex; gap: 8px; margin-top: 8px;">
                          <input type="text" id="manageSeriesNewAlias" placeholder="Add an alias (e.g. The Dark Knight)" autocomplete="off" style="flex: 1; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary);">
-                         <button class="btn btn-small" type="button" onclick="addManageSeriesAlias()">➕ Add</button>
+                         <button class="btn btn-small" type="button" onclick="addManageSeriesAlias()"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Add</button>
                      </div>
                  </div>
                  <div class="form-group">
@@ -1719,14 +1778,14 @@
                              <div id="manageSeriesImageStatus" style="font-size: 12px; color: var(--text-secondary);">No image cached.</div>
                              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                  <input type="file" id="manageSeriesImageInput" accept="image/jpeg,image/png,image/webp" style="display: none;" onchange="uploadManageSeriesImage()">
-                                 <button class="btn btn-small" type="button" onclick="document.getElementById('manageSeriesImageInput').click()">📷 Upload Image</button>
-                                 <button class="btn btn-small" type="button" onclick="openFetchSeriesImageFromProvider()" title="Search the configured external metadata providers for a cover image">🌐 Fetch from Provider</button>
-                                 <button class="btn btn-small" type="button" onclick="clearManageSeriesImage()">🗑️ Clear Image</button>
+                                 <button class="btn btn-small" type="button" onclick="document.getElementById('manageSeriesImageInput').click()"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg> Upload Image</button>
+                                 <button class="btn btn-small" type="button" onclick="openFetchSeriesImageFromProvider()" title="Search the configured external metadata providers for a cover image"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg> Fetch from Provider</button>
+                                 <button class="btn btn-small" type="button" onclick="clearManageSeriesImage()"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Clear Image</button>
                              </div>
                              <div id="manageSeriesImageProviderPanel" style="display: none; margin-top: 8px; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary);">
                                  <div style="display: flex; gap: 6px; align-items: center;">
                                      <input type="text" id="manageSeriesImageProviderQuery" placeholder="Search title..." autocomplete="off" style="flex: 1; padding: 6px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary);">
-                                     <button class="btn btn-small" type="button" onclick="searchSeriesImageCandidates()">🔍 Search</button>
+                                     <button class="btn btn-small" type="button" onclick="searchSeriesImageCandidates()"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg> Search</button>
                                      <button class="btn btn-small" type="button" onclick="closeFetchSeriesImageFromProvider()">Close</button>
                                  </div>
                                  <div id="manageSeriesImageProviderStatus" style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;"></div>
@@ -1740,16 +1799,16 @@
                      <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Query the configured external providers (ComicVine / MangaDex) for candidate matches and add their canonical title or known aliases.</p>
                      <div style="display: flex; gap: 8px; margin-top: 8px;">
                          <input type="text" id="manageSeriesSearchInput" placeholder="Search title..." autocomplete="off" style="flex: 1; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary);">
-                         <button class="btn btn-small" type="button" onclick="searchExternalSeries()">🔍 Search</button>
+                         <button class="btn btn-small" type="button" onclick="searchExternalSeries()"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg> Search</button>
                      </div>
                      <div id="manageSeriesSearchResults" style="margin-top: 10px;"></div>
                  </div>
              </div>
              <div class="modal-footer">
-                 <button class="btn btn-small" type="button" onclick="refreshSeriesMetadata()">🔄 Refresh from Provider</button>
-                 <button class="btn btn-small" type="button" onclick="clearSeriesExternalMetadata()" title="Remove cached provider aliases, source, and downloaded image for this series. User aliases and uploaded images are kept.">🧹 Clear External Metadata</button>
-                 <button class="btn btn-small" type="button" onclick="checkCombinableFoldersFromManageSeries()" title="Re-scan the library for folders that can now be merged with this series">📁 Check for Combinable Folders</button>
-                 <button class="btn btn-primary" type="button" onclick="saveManageSeriesNames()">💾 Save</button>
+                 <button class="btn btn-small" type="button" onclick="refreshSeriesMetadata()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh from Provider</button>
+                 <button class="btn btn-small" type="button" onclick="clearSeriesExternalMetadata()" title="Remove cached provider aliases, source, and downloaded image for this series. User aliases and uploaded images are kept."><svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Clear External Metadata</button>
+                 <button class="btn btn-small" type="button" onclick="checkCombinableFoldersFromManageSeries()" title="Re-scan the library for folders that can now be merged with this series"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Check for Combinable Folders</button>
+                 <button class="btn btn-primary" type="button" onclick="saveManageSeriesNames()"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg> Save</button>
                  <button class="btn" type="button" onclick="closeManageSeriesNamesModal()">Close</button>
              </div>
          </div>

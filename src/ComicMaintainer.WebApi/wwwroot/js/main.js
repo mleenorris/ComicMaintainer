@@ -2082,6 +2082,30 @@
         //   #/settings      → the settings page
         let currentView = 'home';           // 'home' | 'library' | 'series' | 'settings'
         let settingsReturnHash = '#/home';  // where leaving Settings goes back to
+        let lastRoutedPage = null;          // top-level page last shown (see enterPage)
+
+        // Overview, Library and Settings are separate pages that share one
+        // document. Give each its own tab title and, when the user moves to a
+        // different page, start it at the top and move focus to the content so
+        // assistive tech announces the change like a real navigation. Moving
+        // between the library and a series stays on the "library" page so its
+        // scroll position survives the round trip.
+        const PAGE_TITLES = { home: 'Overview', library: 'Library', settings: 'Settings' };
+        function enterPage(view) {
+            const page = view === 'series' ? 'library' : view;
+            document.title = (PAGE_TITLES[page] || 'Overview') + ' · Comic Maintainer';
+            const isInitialLoad = lastRoutedPage === null;
+            const changed = page !== lastRoutedPage;
+            lastRoutedPage = page;
+            if (isInitialLoad || !changed) return;
+            window.scrollTo(0, 0);
+            const settingsPage = document.getElementById('settingsView');
+            if (page === 'settings' && settingsPage) settingsPage.scrollTop = 0;
+            const main = document.getElementById('mainContent');
+            if (main && !main.contains(document.activeElement)) {
+                main.focus({ preventScroll: true });
+            }
+        }
         let seriesDetailOrigin = 'library'; // where the series "Back" returns to
         let overviewLoaded = false;
 
@@ -2117,6 +2141,7 @@
                 settingsReturnHash = window.location.hash || '#/home';
             }
             applyViewVisibility(route.view);
+            enterPage(route.view);
             if (route.view === 'settings') {
                 if (currentSeriesDetailId) {
                     disconnectSeriesIssuesObserver();

@@ -4903,6 +4903,12 @@ summary:focus-visible,
     border-radius: 4px;
 }
 
+/* The red accent ring disappears against the dark sidebar; use the brand
+   yellow there instead. */
+.app-sidebar :focus-visible {
+    outline-color: var(--brand-yellow);
+}
+
 /* ---------------------------------------------------------------------------
    Accessibility: respect the OS "reduce motion" preference
    ---------------------------------------------------------------------------
@@ -4928,9 +4934,19 @@ summary:focus-visible,
 
     .spinner,
     .reader-spinner,
-    .loading::before {
+    .loading::before,
+    .progress-indicator-btn::before {
         animation-duration: 1s !important;
         animation-iteration-count: infinite !important;
+    }
+
+    /* Hover "lift" effects move the element; keep the shadow, drop the move. */
+    .series-card:hover,
+    button.library-health-card:hover,
+    .overview-resume-btn:hover,
+    .overview-resume-btn:active,
+    .sidebar-brand:hover .brand-mark {
+        transform: none !important;
     }
 
     html {

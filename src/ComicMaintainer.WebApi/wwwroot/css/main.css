@@ -10,14 +10,15 @@
             
             --text-primary: #333;
             --text-secondary: #2c3e50;
-            --text-muted: #7f8c8d;
+            /* 5:1 on the page colour; the old #7f8c8d was ~3:1. */
+            --text-muted: #5f6b6d;
             --text-light: #95a5a6;
             --text-header: white;
             
             --border-primary: #ecf0f1;
             --border-secondary: #bdc3c7;
             --border-tertiary: #e0e0e0;
-            --border-input: #ddd;
+            --border-input: #bdc3c7;
             
             --shadow-sm: 0 2px 4px rgba(0,0,0,0.1);
             --shadow-md: 0 4px 20px rgba(0,0,0,0.3);
@@ -45,6 +46,9 @@
                both themes; it matches .btn-primary. */
             --accent-primary: #3498db;
             --accent-primary-hover: #2980b9;
+            /* Accent-coloured text (links) needs a darker shade than fills to
+               stay readable on the light page. */
+            --accent-text: #2471a3;
 
             /* Inline error / warning text */
             --text-error: #c0392b;
@@ -105,6 +109,8 @@
             --text-error: #f4a09c;
             --text-warning: #f4c26b;
             --danger: #f4a09c;
+
+            --accent-text: #5dade2;
 
             --btn-neutral-bg: #2f2f2f;
             --btn-neutral-hover: #3b3b3b;
@@ -250,6 +256,7 @@
 
         @media (max-width: 600px) {
             .header-nav-label { display: none; }
+            .header-nav-btn { font-size: 16px; padding: 0 10px; }
         }
 
         /* Between phones and wide desktops the one-row header ran out of room
@@ -584,7 +591,7 @@
             margin-top: 0;
         }
         .settings-dropdown-item-logout {
-            color: #c0392b;
+            color: var(--danger);
         }
 
         /* Mobile-only brand + watcher status block shown at the top of the
@@ -884,6 +891,7 @@
             background: var(--btn-neutral-bg);
             color: var(--text-muted);
             filter: grayscale(1);
+            opacity: 0.6;
             cursor: not-allowed;
         }
         
@@ -968,6 +976,7 @@
             background: var(--btn-neutral-bg);
             color: var(--text-muted);
             filter: grayscale(1);
+            opacity: 0.6;
             cursor: not-allowed;
         }
         
@@ -1191,9 +1200,9 @@
             position: static;
             align-self: center;
             flex: 0 0 auto;
-            background: var(--bg-hover);
+            background: var(--bg-secondary);
             color: var(--text-primary);
-            border-color: var(--border-primary);
+            border-color: var(--text-muted);
             box-shadow: none;
         }
 
@@ -1330,7 +1339,7 @@
             padding: 0;
             background: none;
             border: none;
-            color: var(--accent-primary, #4a90d9);
+            color: var(--accent-text);
             font-size: 12px;
             font-weight: 600;
             cursor: pointer;
@@ -1359,7 +1368,7 @@
             align-items: baseline;
             justify-content: space-between;
             gap: 12px;
-            padding: 0 4px;
+            padding: 0;
         }
 
         .overview-row-title {
@@ -1371,7 +1380,7 @@
         .overview-see-all {
             background: none;
             border: none;
-            color: var(--accent-primary, #4a90d9);
+            color: var(--accent-text);
             font-size: 13px;
             font-weight: 600;
             cursor: pointer;
@@ -1385,7 +1394,13 @@
             gap: 14px;
             overflow-x: auto;
             overflow-y: hidden;
+            /* The 4px padding keeps focus rings and shadows from being clipped;
+               the negative margin and matching scroll-padding keep the first
+               card on the page edge. Without scroll-padding, snapping scrolled
+               long rows by 4px so they no longer lined up with short ones. */
+            margin: 0 -4px;
             padding: 4px 4px 12px;
+            scroll-padding-inline: 4px;
             scroll-snap-type: x proximity;
             -webkit-overflow-scrolling: touch;
         }
@@ -1420,7 +1435,7 @@
         .overview-empty {
             color: var(--text-muted);
             font-size: 14px;
-            padding: 16px 8px;
+            padding: 16px 0;
         }
 
         @media (max-width: 600px) {
@@ -1432,6 +1447,7 @@
         @media (max-width: 768px) {
             .overview-row-header { padding: 0 12px; }
             .overview-carousel {
+                margin: 0;
                 padding: 4px 12px 12px;
                 scroll-padding-inline: 12px;
             }
@@ -2342,6 +2358,15 @@
             box-shadow: var(--shadow-sm);
             padding: 18px;
             margin-bottom: 16px;
+        }
+
+        /* The file actions toolbar sits inside this panel. Styled as its own
+           card it sat flush against the stat tiles with a band of dead space
+           (its bottom margin) underneath. */
+        .library-health-dashboard .actions-bar {
+            margin: 14px 0 0;
+            padding: 0;
+            box-shadow: none;
         }
 
         .library-health-header {

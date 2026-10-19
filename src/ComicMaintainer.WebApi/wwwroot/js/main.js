@@ -1781,8 +1781,10 @@
             // /api/diagnostics reports host paths, disk space and process
             // memory, so it is administrator-only. Hide the entry point rather
             // than let it open a panel that can only say "403".
-            const diagnosticsItem = document.getElementById('diagnosticsMenuItem');
-            if (diagnosticsItem) diagnosticsItem.hidden = !userCapabilities.canAdminister;
+            ['diagnosticsMenuItem', 'sidebarDiagnosticsItem'].forEach(id => {
+                const diagnosticsItem = document.getElementById(id);
+                if (diagnosticsItem) diagnosticsItem.hidden = !userCapabilities.canAdminister;
+            });
 
             // Server-wide settings are administrator-only; the personal
             // appearance preference stays editable for everyone.
@@ -2167,8 +2169,22 @@
         }
 
         function updateNavActiveState() {
-            document.getElementById('navOverviewBtn')?.classList.toggle('active', currentView === 'home');
-            document.getElementById('navLibraryBtn')?.classList.toggle('active', currentView === 'library' || currentView === 'series');
+            const activeByView = {
+                navOverviewBtn: currentView === 'home',
+                navLibraryBtn: currentView === 'library' || currentView === 'series',
+                sidebarOverviewBtn: currentView === 'home',
+                sidebarLibraryBtn: currentView === 'library' || currentView === 'series'
+            };
+            Object.entries(activeByView).forEach(([id, active]) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.classList.toggle('active', active);
+                if (active) {
+                    el.setAttribute('aria-current', 'page');
+                } else {
+                    el.removeAttribute('aria-current');
+                }
+            });
         }
 
         // Render the full library list (reuses the existing series grid/list).
@@ -2306,6 +2322,12 @@
                 if (userInfo && usernameDisplay) {
                     usernameDisplay.textContent = username;
                     userInfo.style.display = 'block';
+                }
+                const sidebarUser = document.getElementById('sidebarUser');
+                const sidebarUsername = document.getElementById('sidebarUsername');
+                if (sidebarUser && sidebarUsername) {
+                    sidebarUsername.textContent = username;
+                    sidebarUser.hidden = false;
                 }
             }
             
@@ -10500,7 +10522,8 @@
         function updateWatcherStatusDisplay(running, enabled) {
             const indicators = [
                 document.getElementById('watcherStatus'),
-                document.getElementById('watcherStatusMenu')
+                document.getElementById('watcherStatusMenu'),
+                document.getElementById('watcherStatusSidebar')
             ].filter(Boolean);
             if (indicators.length === 0) return;
 

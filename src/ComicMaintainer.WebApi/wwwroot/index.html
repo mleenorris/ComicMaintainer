@@ -137,6 +137,62 @@
         <symbol id="i-smartphone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></symbol>
     </svg>
     <a class="skip-to-content" href="#mainContent">Skip to main content</a>
+    <!-- Desktop sidebar: primary navigation, library tools and account
+         actions. Hidden below 1025px, where the header and its ⋮ menu carry
+         the same entries. -->
+    <aside class="app-sidebar" id="appSidebar" aria-label="Sidebar">
+        <a class="sidebar-brand" href="#/home" aria-label="Comic Maintainer – Overview">
+            <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+                <rect x="2" y="2" width="36" height="36" rx="9" fill="#c9302c"/>
+                <path d="M20 6.5l3.3 6.4 7-1.9-3.2 6.5 5.9 4.2-7.1 1.6.6 7.2L20 26.6l-6.5 3.9.6-7.2-7.1-1.6 5.9-4.2-3.2-6.5 7 1.9z" fill="#ffc845" stroke="#241c17" stroke-width="1.6" stroke-linejoin="round"/>
+                <text x="20" y="22.6" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="8.5" fill="#241c17">CM</text>
+            </svg>
+            <span class="sidebar-brand-text">
+                <span class="sidebar-brand-name">Comic</span>
+                <span class="sidebar-brand-name sidebar-brand-name--accent">Maintainer</span>
+            </span>
+        </a>
+        <div class="watcher-status-indicator sidebar-watcher" id="watcherStatusSidebar" title="Watcher Status">
+            <span class="watcher-icon" aria-hidden="true"></span>
+            <span class="watcher-text">Checking...</span>
+        </div>
+        <nav class="sidebar-nav" aria-label="Primary">
+            <button type="button" class="sidebar-link" id="sidebarOverviewBtn" onclick="navigate('#/home')"><svg class="icon" aria-hidden="true"><use href="#i-home"/></svg><span>Overview</span></button>
+            <button type="button" class="sidebar-link" id="sidebarLibraryBtn" onclick="navigate('#/library')"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg><span>Library</span></button>
+            <button type="button" class="sidebar-link" id="sidebarSettingsBtn" onclick="openSettings()"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
+            <a class="sidebar-link" href="/jobs.html"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><span>Scheduled Jobs</span></a>
+
+            <div class="sidebar-section-label">Library tools</div>
+            <button type="button" class="sidebar-link" onclick="scanUnmarkedFiles()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><span>Scan Unmarked</span></button>
+            <button type="button" class="sidebar-link" onclick="openDuplicateReviewModal()"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Review Duplicates</span></button>
+            <button type="button" class="sidebar-link" onclick="openCombineFoldersModal()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><span>Combine Folders</span></button>
+            <button type="button" class="sidebar-link" onclick="openProcessingHistoryModal()"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg><span>Processing History</span></button>
+            <button type="button" class="sidebar-link" onclick="refreshFiles()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg><span>Refresh Library</span></button>
+
+            <div class="sidebar-section-label">Delivery</div>
+            <button type="button" class="sidebar-link" onclick="openEmailDevicesModal()"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span>Ereader Devices</span></button>
+            <button type="button" class="sidebar-link" onclick="openEmailDeliveryHistoryModal()"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg><span>Delivery History</span></button>
+
+            <div class="sidebar-section-label">System</div>
+            <button type="button" class="sidebar-link" onclick="openLogsModal()"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg><span>Logs</span></button>
+            <button type="button" class="sidebar-link" onclick="openExternalProvidersModal()"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>External Providers</span></button>
+            <button type="button" class="sidebar-link" id="sidebarDiagnosticsItem" onclick="openDiagnosticsModal()"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg><span>Diagnostics</span></button>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="sidebar-user" id="sidebarUser" hidden>
+                <span class="sidebar-user-avatar" aria-hidden="true"><svg class="icon"><use href="#i-user"/></svg></span>
+                <span class="sidebar-user-name" id="sidebarUsername"></span>
+            </div>
+            <div class="sidebar-footer-actions">
+                <button type="button" class="sidebar-icon-btn" onclick="toggleTheme()" aria-label="Toggle theme" title="Toggle theme"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg></button>
+                <button type="button" class="sidebar-icon-btn" onclick="openKeyboardShortcutsModal()" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg></button>
+                <button type="button" class="sidebar-icon-btn" onclick="openChangePasswordModal()" aria-label="Change password" title="Change password"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg></button>
+                <button type="button" class="sidebar-icon-btn" onclick="openAboutModal()" aria-label="About" title="About"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg></button>
+                <button type="button" class="sidebar-icon-btn sidebar-icon-btn--danger" onclick="logout()" aria-label="Log out" title="Log out"><svg class="icon" aria-hidden="true"><use href="#i-logout"/></svg></button>
+            </div>
+        </div>
+    </aside>
+
     <div class="header">
         <div class="container">
             <div class="header-content">

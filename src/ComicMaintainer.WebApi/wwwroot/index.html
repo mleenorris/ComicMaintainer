@@ -783,77 +783,77 @@
                 <h3 style="margin-bottom: 10px; color: var(--text-secondary);">Appearance</h3>
                 <div class="form-group" data-user-setting>
                     <label for="themeSelect">Theme</label>
-                    <select id="themeSelect" name="theme" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);" onchange="updateThemeFromSettings()">
+                    <select id="themeSelect" name="theme" onchange="updateThemeFromSettings()">
                         <option value="light">Light Mode</option>
                         <option value="dark">Dark Mode</option>
                     </select>
                 </div>
                 <div class="form-group" style="margin-top: 15px;">
                     <label for="defaultLibraryViewSelect">Default library view</label>
-                    <select id="defaultLibraryViewSelect" name="defaultLibraryView" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);" onchange="updateDefaultLibraryViewFromSettings()">
+                    <select id="defaultLibraryViewSelect" name="defaultLibraryView" onchange="updateDefaultLibraryViewFromSettings()">
                         <option value="files">📄 Files (folder view)</option>
                         <option value="series">🖼️ Series</option>
                     </select>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <small class="form-hint">
                         Controls which view the library loads into when you first open the site.
                     </small>
                 </div>
 
                 <h3 style="margin: 20px 0 10px; color: var(--text-secondary);">Access</h3>
                 <div class="form-group">
-                    <label for="allowRegistrationCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="allowRegistrationCheckbox" name="allowRegistration" onchange="updateAllowRegistration()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                    <label for="allowRegistrationCheckbox" class="checkbox-label">
+                        <input type="checkbox" id="allowRegistrationCheckbox" name="allowRegistration" onchange="updateAllowRegistration()">
                         <span>Allow visitors to register their own account</span>
                     </label>
-                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                    <small class="form-hint form-hint--indent">
                         Disabled by default. When disabled, only an administrator can create accounts, so anyone who can reach this server cannot sign themselves up. Leave this off unless you intentionally want open sign-ups.
                     </small>
                 </div>
 
                 <div class="form-group" style="margin-top: 15px;">
                     <label for="defaultPreferredLanguageSelect">Default preferred series-name language</label>
-                    <select id="defaultPreferredLanguageSelect" name="defaultPreferredLanguage" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);" onchange="updateDefaultPreferredLanguageFromSettings()">
+                    <select id="defaultPreferredLanguageSelect" name="defaultPreferredLanguage" onchange="updateDefaultPreferredLanguageFromSettings()">
                         <option value="">None (use canonical title)</option>
                         <option value="en">English</option>
                         <option value="ja">Japanese (日本語)</option>
                         <option value="ko">Korean (한국어)</option>
                         <option value="zh">Chinese (中文)</option>
                     </select>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <small class="form-hint">
                         Used as a fallback when a series has no per-series language override. The library will prefer the first cached title or alias in this language. Changing this also enqueues a background job that rewrites every affected file's <code>ComicInfo.xml</code> <code>&lt;Series&gt;</code> to match (requires normalization to be enabled).
                     </small>
                 </div>
                 
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Watcher</h3>
                 <div class="form-group">
-                    <small style="display: block; margin-bottom: 15px; color: var(--text-muted);">
+                    <small class="form-hint form-hint--lead">
                         The file watcher automatically starts when either rename or normalize is enabled below. It monitors the directory for changes and automatically processes new or modified files based on your selected options.
                     </small>
                 </div>
                 
                 <div class="form-group">
-                    <label for="watcherEnableRenameCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="watcherEnableRenameCheckbox" name="watcherEnableRename" onchange="updateWatcherEnableRename()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                    <label for="watcherEnableRenameCheckbox" class="checkbox-label">
+                        <input type="checkbox" id="watcherEnableRenameCheckbox" name="watcherEnableRename" onchange="updateWatcherEnableRename()">
                         <span>Enable file rename (🔵 renamed indicator)</span>
                     </label>
-                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                    <small class="form-hint form-hint--indent">
                         When enabled, files will be renamed based on the filename template during processing.
                     </small>
                 </div>
                 
                 <div class="form-group" style="margin-top: 15px;">
-                    <label for="watcherEnableNormalizeCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="watcherEnableNormalizeCheckbox" name="watcherEnableNormalize" onchange="updateWatcherEnableNormalize()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                    <label for="watcherEnableNormalizeCheckbox" class="checkbox-label">
+                        <input type="checkbox" id="watcherEnableNormalizeCheckbox" name="watcherEnableNormalize" onchange="updateWatcherEnableNormalize()">
                         <span>Enable metadata normalize (🔴 normalized indicator)</span>
                     </label>
-                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                    <small class="form-hint form-hint--indent">
                         When enabled, metadata will be normalized during processing.
                     </small>
                 </div>
 
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Send to Ereader</h3>
                 <div class="form-group">
-                   <small id="emailStatusSummary" style="display: block; margin-bottom: 15px; color: var(--text-muted);">
+                   <small id="emailStatusSummary" class="form-hint form-hint--lead">
                        Configure SMTP delivery and saved ereader devices.
                    </small>
                    <button class="btn btn-small" type="button" data-requires-write onclick="openEmailDevicesModal()">Manage Ereader Devices</button>
@@ -874,29 +874,29 @@
                 <div class="form-group">
                    <label for="smtpPassword">SMTP Password</label>
                    <input type="password" id="smtpPassword" name="smtpPassword" autocomplete="new-password">
-                   <small id="smtpPasswordHint" style="display: block; margin-top: 5px; color: var(--text-muted);">
+                   <small id="smtpPasswordHint" class="form-hint">
                        Leave blank to keep the stored password.
                    </small>
-                   <label for="smtpClearPasswordCheckbox" style="display: flex; align-items: center; cursor: pointer; margin-top: 8px; font-weight: 400;">
-                       <input type="checkbox" id="smtpClearPasswordCheckbox" name="smtpClearPassword" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                   <label for="smtpClearPasswordCheckbox" class="checkbox-label checkbox-label--minor">
+                       <input type="checkbox" id="smtpClearPasswordCheckbox" name="smtpClearPassword">
                        <span>Clear stored SMTP password on save</span>
                    </label>
                 </div>
                 <div class="form-group">
-                   <label for="smtpUseSslCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                       <input type="checkbox" id="smtpUseSslCheckbox" name="smtpUseSsl" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                   <label for="smtpUseSslCheckbox" class="checkbox-label">
+                       <input type="checkbox" id="smtpUseSslCheckbox" name="smtpUseSsl">
                        <span>Use implicit TLS (SMTPS, usually port 465)</span>
                    </label>
-                   <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                   <small class="form-hint form-hint--indent">
                        Leave unchecked for the common submission port 587, which upgrades the connection with STARTTLS.
                    </small>
                 </div>
                 <div class="form-group">
-                   <label for="smtpAllowInsecureCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                       <input type="checkbox" id="smtpAllowInsecureCheckbox" name="smtpAllowInsecure" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                   <label for="smtpAllowInsecureCheckbox" class="checkbox-label">
+                       <input type="checkbox" id="smtpAllowInsecureCheckbox" name="smtpAllowInsecure">
                        <span>Allow insecure plaintext connection</span>
                    </label>
-                   <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                   <small class="form-hint form-hint--indent">
                        Only enable for a trusted local relay that offers no TLS. Credentials and attachments are sent unencrypted.
                    </small>
                 </div>
@@ -915,36 +915,36 @@
                  
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Automated Error Reporting</h3>
                 <div class="form-group">
-                   <small style="display: block; margin-bottom: 15px; color: var(--text-muted);">
+                   <small class="form-hint form-hint--lead">
                        When enabled, errors logged by this instance are deduplicated and filed as issues on the ComicMaintainer project repository, where they reach the people who develop it. Paths, email addresses and credentials are redacted before anything is sent. This is off by default; nothing leaves this machine until you turn it on and supply a token.
                    </small>
-                   <label for="errorReportingEnabledCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                       <input type="checkbox" id="errorReportingEnabledCheckbox" name="errorReportingEnabled" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                   <label for="errorReportingEnabledCheckbox" class="checkbox-label">
+                       <input type="checkbox" id="errorReportingEnabledCheckbox" name="errorReportingEnabled">
                        <span>File GitHub issues for errors</span>
                    </label>
                 </div>
                 <div class="form-group">
                    <label>Destination Repository</label>
                    <div id="errorReportingDestination" style="color: var(--text-secondary);"></div>
-                   <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                   <small class="form-hint">
                        Fixed: reports go to the project's own repository, which is the only place anyone can act on them.
                    </small>
                 </div>
                 <div class="form-group">
                    <label for="errorReportingToken">GitHub Token</label>
                    <input type="password" id="errorReportingToken" name="errorReportingToken" autocomplete="new-password">
-                   <small id="errorReportingTokenHint" style="display: block; margin-top: 5px; color: var(--text-muted);">
+                   <small id="errorReportingTokenHint" class="form-hint">
                        Use a fine-grained token with <code>issues: write</code> on that repository only.
                    </small>
-                   <label for="errorReportingClearTokenCheckbox" style="display: flex; align-items: center; cursor: pointer; margin-top: 8px; font-weight: 400;">
-                       <input type="checkbox" id="errorReportingClearTokenCheckbox" name="errorReportingClearToken" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                   <label for="errorReportingClearTokenCheckbox" class="checkbox-label checkbox-label--minor">
+                       <input type="checkbox" id="errorReportingClearTokenCheckbox" name="errorReportingClearToken">
                        <span>Clear stored token on save</span>
                    </label>
                 </div>
                 <div class="form-group">
                    <label for="errorReportingAssignee">Assign Issues To (optional)</label>
                    <input type="text" id="errorReportingAssignee" name="errorReportingAssignee" autocomplete="off" placeholder="copilot-swe-agent">
-                   <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                   <small class="form-hint">
                        GitHub login to assign new issues to. Set this to the coding agent's login to have it start work automatically. If the login cannot be assigned, the issue is still created unassigned.
                    </small>
                 </div>
@@ -955,19 +955,19 @@
                 <div class="form-group">
                    <label for="errorReportingDedupeHours">Recurrence Comment Interval (Hours)</label>
                    <input type="number" id="errorReportingDedupeHours" name="errorReportingDedupeHours" min="1" max="720" step="1" autocomplete="off" placeholder="24">
-                   <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                   <small class="form-hint">
                        An already-filed failure never gets a second issue. This is how long to wait before adding a "still happening" comment to the existing one.
                    </small>
                 </div>
                 <div class="form-group">
-                   <label for="errorReportingCommentCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                       <input type="checkbox" id="errorReportingCommentCheckbox" name="errorReportingComment" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                   <label for="errorReportingCommentCheckbox" class="checkbox-label">
+                       <input type="checkbox" id="errorReportingCommentCheckbox" name="errorReportingComment">
                        <span>Comment on existing issues when a failure recurs</span>
                    </label>
                 </div>
                 <div class="form-group">
                    <button class="btn btn-small" type="button" data-requires-write onclick="sendErrorReportingTest()">Send Test Report</button>
-                   <small id="errorReportingTestHint" style="display: block; margin-top: 5px; color: var(--text-muted);">
+                   <small id="errorReportingTestHint" class="form-hint">
                        Save your settings first, then send a harmless test report to confirm the token works.
                    </small>
                 </div>
@@ -978,11 +978,11 @@
                         Maximum Log File Size (MB)
                         <span class="setting-restart-badge" title="This setting is only applied when the service starts.">Restart required</span>
                     </label>
-                    <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="100" step="1" placeholder="5" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="100" step="1" placeholder="5" autocomplete="off">
+                    <small class="form-hint">
                         When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. The new size only takes effect after the service restarts — use <strong>Restart Service</strong> below to apply it immediately.
                     </small>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <small class="form-hint">
                         <strong>Note:</strong> Can also be configured via the <code>LOG_MAX_BYTES</code> environment variable (in bytes).
                     </small>
                 </div>
@@ -990,11 +990,11 @@
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Database Cleanup</h3>
                 <div class="form-group">
                     <label for="dbCleanupInterval">Cleanup Interval (Hours)</label>
-                    <input type="number" id="dbCleanupInterval" name="dbCleanupInterval" min="0" step="1" placeholder="12" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <input type="number" id="dbCleanupInterval" name="dbCleanupInterval" min="0" step="1" placeholder="12" autocomplete="off">
+                    <small class="form-hint">
                         How often the database should be cleaned of stale entries for files that no longer exist. Set to 0 to only run on startup. Changes take effect on restart.
                     </small>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <small class="form-hint">
                         <strong>Recommended:</strong> 12 hours (default) or 24 hours for less frequent cleanup.
                     </small>
                 </div>
@@ -1003,7 +1003,7 @@
                     <button class="btn btn-primary" onclick="cleanupDatabaseNow()" style="width: 100%;">
                         🧹 Clean Database Now
                     </button>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <small class="form-hint">
                         Manually trigger database cleanup to remove stale entries for files that no longer exist on disk.
                     </small>
                 </div>
@@ -1015,7 +1015,7 @@
                 <div class="form-group">
                     <label for="filenameFormat">Filename Template</label>
                     <input type="text" id="filenameFormat" name="filenameFormat" placeholder="{series} - Chapter {issue}" autocomplete="off">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <small class="form-hint">
                         Available placeholders:
                     </small>
                     <ul style="margin: 10px 0 10px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.6;">
@@ -1041,72 +1041,72 @@
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Issue Number Padding</h3>
                 <div class="form-group">
                     <label for="issueNumberPadding">Number of Digits for {issue} Placeholder</label>
-                    <input type="number" id="issueNumberPadding" name="issueNumberPadding" min="0" max="10" step="1" placeholder="4" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <input type="number" id="issueNumberPadding" name="issueNumberPadding" min="0" max="10" step="1" placeholder="4" autocomplete="off">
+                    <small class="form-hint">
                         Controls how many digits the <code>{issue}</code> placeholder uses (default: 4). For example, with padding set to 4, issue 5 becomes 0005, with padding 3 it becomes 005, and with padding 0 it remains 5.
                     </small>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <small class="form-hint">
                         <strong>Note:</strong> This only affects the <code>{issue}</code> placeholder. Use <code>{issue_no_pad}</code> for unpadded issue numbers regardless of this setting.
                     </small>
                 </div>
 
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Series Covers</h3>
                 <div class="form-group">
-                    <label for="writeCoverToFirstArchiveCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="writeCoverToFirstArchiveCheckbox" name="writeCoverToFirstArchive" onchange="updateWriteCoverToFirstArchive()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                    <label for="writeCoverToFirstArchiveCheckbox" class="checkbox-label">
+                        <input type="checkbox" id="writeCoverToFirstArchiveCheckbox" name="writeCoverToFirstArchive" onchange="updateWriteCoverToFirstArchive()">
                         <span>Embed series cover into first issue archive</span>
                     </label>
-                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                    <small class="form-hint form-hint--indent">
                         When enabled, the cached provider/user series image is also written into the first issue's archive as a <code>cover.&lt;ext&gt;</code> entry, so external readers (Komga, Kavita, etc.) show the same cover. This rewrites the comic archive in place; the write is idempotent and only targets writable CBZ archives. The cover shown throughout ComicMaintainer always uses the downloaded provider image regardless of this setting.
                     </small>
                 </div>
                 <div class="form-group">
-                    <label for="writeCoverToSeriesFolderCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="writeCoverToSeriesFolderCheckbox" name="writeCoverToSeriesFolder" onchange="updateWriteCoverToSeriesFolder()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                    <label for="writeCoverToSeriesFolderCheckbox" class="checkbox-label">
+                        <input type="checkbox" id="writeCoverToSeriesFolderCheckbox" name="writeCoverToSeriesFolder" onchange="updateWriteCoverToSeriesFolder()">
                         <span>Write series cover into each series folder</span>
                     </label>
-                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                    <small class="form-hint form-hint--indent">
                         When enabled, a copy of the cached series cover is written into every on-disk folder that contains files for the series as a <code>cover.&lt;ext&gt;</code> sidecar, so file managers and external readers can display it. Set to disabled to leave series folders untouched.
                     </small>
                 </div>
                 <div class="form-group">
-                    <label for="downloadExternalSeriesImagesCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="downloadExternalSeriesImagesCheckbox" name="downloadExternalSeriesImages" onchange="updateDownloadExternalSeriesImages()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                    <label for="downloadExternalSeriesImagesCheckbox" class="checkbox-label">
+                        <input type="checkbox" id="downloadExternalSeriesImagesCheckbox" name="downloadExternalSeriesImages" onchange="updateDownloadExternalSeriesImages()">
                         <span>Download series cover images from external providers</span>
                     </label>
-                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
+                    <small class="form-hint form-hint--indent">
                         When enabled, external metadata refreshes also try to download a series cover image from the chosen provider. Disable to keep metadata-only refreshes (e.g. for limited-bandwidth deployments).
                     </small>
                 </div>
                 <div class="form-group">
                     <label for="seriesImageMaxMB">Max Stored Cover Size (MB)</label>
-                    <input type="number" id="seriesImageMaxMB" name="seriesImageMaxMB" min="1" step="1" placeholder="5" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <input type="number" id="seriesImageMaxMB" name="seriesImageMaxMB" min="1" step="1" placeholder="5" autocomplete="off">
+                    <small class="form-hint">
                         Maximum size of a stored series cover image. Larger downloads are downscaled to fit under this limit. Default: 5 MB.
                     </small>
                 </div>
                 <div class="form-group">
                     <label for="seriesImageMaxDownloadMB">Max Download Size (MB)</label>
-                    <input type="number" id="seriesImageMaxDownloadMB" name="seriesImageMaxDownloadMB" min="1" step="1" placeholder="25" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <input type="number" id="seriesImageMaxDownloadMB" name="seriesImageMaxDownloadMB" min="1" step="1" placeholder="25" autocomplete="off">
+                    <small class="form-hint">
                         Hard ceiling for the raw payload fetched when downloading an external cover. Payloads above this are rejected; those between the stored limit and this ceiling are downscaled. Must be greater than or equal to the stored cover size. Default: 25 MB.
                     </small>
                 </div>
                 <div class="form-group">
                     <label for="seriesImageMaxDimension">Max Cover Dimension (px)</label>
-                    <input type="number" id="seriesImageMaxDimension" name="seriesImageMaxDimension" min="1" step="1" placeholder="2048" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <input type="number" id="seriesImageMaxDimension" name="seriesImageMaxDimension" min="1" step="1" placeholder="2048" autocomplete="off">
+                    <small class="form-hint">
                         Maximum width or height, in pixels, of a stored series cover image. Oversized downloads are resized (preserving aspect ratio) so their largest dimension is at most this value. Default: 2048.
                     </small>
                 </div>
 
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">External Series Metadata</h3>
                 <div class="form-group">
-                    <label for="enableExternalSeriesMetadata" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="enableExternalSeriesMetadata" name="enableExternalSeriesMetadata" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                    <label for="enableExternalSeriesMetadata" class="checkbox-label">
+                        <input type="checkbox" id="enableExternalSeriesMetadata" name="enableExternalSeriesMetadata">
                         <span>Enable external series metadata (alias grouping)</span>
                     </label>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <small class="form-hint">
                         Master switch. When enabled, ComicMaintainer can look up alternate series titles from the providers configured below so variants can be grouped together in the series library view. Lookups are <strong>manual</strong> — use the Library page's <em>Metadata → Refresh All External Metadata</em> button or the per-series <em>Manage Names</em> action to populate the cache. Changes take effect after restart.
                     </small>
                 </div>
@@ -1115,7 +1115,7 @@
                 <div class="form-group">
                     <label for="comicVineApiKey">ComicVine API Key</label>
                     <input type="password" id="comicVineApiKey" name="comicVineApiKey" placeholder="Enter ComicVine API key" autocomplete="off">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <small class="form-hint">
                         Leave blank to disable ComicVine lookups. The key is stored in user settings on this instance.
                     </small>
                 </div>
@@ -1126,11 +1126,11 @@
 
                 <h4 style="margin-bottom: 8px; margin-top: 18px; color: var(--text-secondary);">MangaDex (manga)</h4>
                 <div class="form-group">
-                    <label for="enableMangaDexMetadata" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="enableMangaDexMetadata" name="enableMangaDexMetadata" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                    <label for="enableMangaDexMetadata" class="checkbox-label">
+                        <input type="checkbox" id="enableMangaDexMetadata" name="enableMangaDexMetadata">
                         <span>Enable MangaDex provider</span>
                     </label>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <small class="form-hint">
                         Looks up canonical titles and alternate localizations from MangaDex. No API key required.
                     </small>
                 </div>
@@ -1141,11 +1141,11 @@
 
                 <h4 style="margin-bottom: 8px; margin-top: 18px; color: var(--text-secondary);">AniList</h4>
                 <div class="form-group">
-                    <label for="enableAniListMetadata" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="enableAniListMetadata" name="enableAniListMetadata" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                    <label for="enableAniListMetadata" class="checkbox-label">
+                        <input type="checkbox" id="enableAniListMetadata" name="enableAniListMetadata">
                         <span>Enable AniList provider</span>
                     </label>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <small class="form-hint">
                         Queries AniList for both Manga (Japanese origin) and Manhwa (Korean origin). No API key required.
                     </small>
                 </div>
@@ -1156,11 +1156,11 @@
 
                 <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Suwayomi Downloads</h3>
                 <div class="form-group">
-                    <label for="enableSuwayomiCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="enableSuwayomiCheckbox" name="enableSuwayomiCheckbox" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
+                    <label for="enableSuwayomiCheckbox" class="checkbox-label">
+                        <input type="checkbox" id="enableSuwayomiCheckbox" name="enableSuwayomiCheckbox">
                         <span>Enable Suwayomi integration</span>
                     </label>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                    <small class="form-hint">
                         Lets ComicMaintainer ask a <a href="https://github.com/Suwayomi/Suwayomi-Server" target="_blank" rel="noopener noreferrer">Suwayomi</a> server to download the issues a series is missing. Suwayomi saves them to its own download directory, so mount that directory inside the watched directory for the new files to be picked up.
                     </small>
                 </div>
@@ -1175,15 +1175,15 @@
                 <div class="form-group">
                     <label for="suwayomiPassword">Password (optional)</label>
                     <input type="password" id="suwayomiPassword" name="suwayomiPassword" placeholder="Enter password" autocomplete="new-password">
-                    <small id="suwayomiPasswordHint" style="display: block; margin-top: 5px; color: var(--text-muted);"></small>
-                    <label for="suwayomiClearPasswordCheckbox" style="display: flex; align-items: center; cursor: pointer; margin-top: 8px;">
-                        <input type="checkbox" id="suwayomiClearPasswordCheckbox" name="suwayomiClearPasswordCheckbox" style="margin-right: 10px; width: 16px; height: 16px; cursor: pointer;">
+                    <small id="suwayomiPasswordHint" class="form-hint"></small>
+                    <label for="suwayomiClearPasswordCheckbox" class="checkbox-label checkbox-label--minor">
+                        <input type="checkbox" id="suwayomiClearPasswordCheckbox" name="suwayomiClearPasswordCheckbox">
                         <span style="font-size: 13px; color: var(--text-muted);">Clear the stored password</span>
                     </label>
                 </div>
                 <div class="form-group">
                     <button class="btn" type="button" onclick="testSuwayomiConnection()">🔌 Test Connection</button>
-                    <small id="suwayomiStatusHint" style="display: block; margin-top: 5px; color: var(--text-muted);">Save your settings before testing.</small>
+                    <small id="suwayomiStatusHint" class="form-hint">Save your settings before testing.</small>
                 </div>
                 
                 <h3 style="margin-bottom: 10px; margin-top: 35px; color: #e74c3c; border-bottom: 2px solid #e74c3c; padding-bottom: 8px;">⚠️ Danger Zone</h3>
@@ -1396,7 +1396,7 @@
                 </div>
                 <div class="form-group">
                     <label for="emailDeviceFormat">Default Format</label>
-                    <select id="emailDeviceFormat" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="emailDeviceFormat">
                         <option value="original">Original archive</option>
                         <option value="epub">EPUB</option>
                         <option value="azw3">AZW3 (Kindle)</option>
@@ -1448,12 +1448,12 @@
                 </div>
                 <div class="form-group" id="emailSendDeviceGroup">
                     <label for="emailSendDeviceSelect">Device</label>
-                    <select id="emailSendDeviceSelect" onchange="refreshEmailCondensePlan()" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="emailSendDeviceSelect" onchange="refreshEmailCondensePlan()">
                     </select>
                 </div>
                 <div class="form-group">
                     <label for="emailSendFormatSelect">Format</label>
-                    <select id="emailSendFormatSelect" onchange="onEmailSendFormatChange()" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="emailSendFormatSelect" onchange="onEmailSendFormatChange()">
                         <option value="device">Device default</option>
                         <option value="original">Original archive</option>
                         <option value="epub">EPUB</option>
@@ -1463,7 +1463,7 @@
                 </div>
                 <div class="form-group">
                     <label for="emailCondenseModeSelect">Condense before sending</label>
-                    <select id="emailCondenseModeSelect" onchange="onEmailCondenseChange()" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="emailCondenseModeSelect" onchange="onEmailCondenseChange()">
                         <option value="none">Send each issue separately</option>
                         <option value="count">Combine every N issues into one book</option>
                         <option value="all">Combine all issues into one book</option>
@@ -1471,12 +1471,12 @@
                 </div>
                 <div class="form-group" id="emailCondenseCountGroup" hidden>
                     <label for="emailCondenseCountInput">Issues per book</label>
-                    <input type="number" id="emailCondenseCountInput" min="2" max="500" step="1" value="5" onchange="onEmailCondenseChange()" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <input type="number" id="emailCondenseCountInput" min="2" max="500" step="1" value="5" onchange="onEmailCondenseChange()">
                 </div>
                 <div id="emailCondensePlan" hidden style="margin-bottom: 12px; padding: 10px; border-radius: 5px; background: var(--bg-primary); color: var(--text-muted); font-size: 13px;"></div>
                 <div id="emailCondenseBuilds" hidden aria-live="polite" style="margin-bottom: 12px; padding: 10px; border-radius: 5px; background: var(--bg-primary); color: var(--text-muted); font-size: 13px;"></div>
-                <label for="emailSkipAlreadyDeliveredCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" id="emailSkipAlreadyDeliveredCheckbox" checked onchange="refreshEmailCondensePlan()" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                <label for="emailSkipAlreadyDeliveredCheckbox" class="checkbox-label">
+                    <input type="checkbox" id="emailSkipAlreadyDeliveredCheckbox" checked onchange="refreshEmailCondensePlan()">
                     <span>Skip files already sent to this device</span>
                 </label>
             </div>
@@ -1498,20 +1498,20 @@
                 <div id="emailSubscriptionsList" style="margin-bottom: 18px;"></div>
                 <div class="form-group">
                     <label for="emailSubscriptionDeviceSelect">Device</label>
-                    <select id="emailSubscriptionDeviceSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="emailSubscriptionDeviceSelect">
                     </select>
                 </div>
                 <div class="form-group">
                     <label for="emailSubscriptionFormatSelect">Format</label>
-                    <select id="emailSubscriptionFormatSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="emailSubscriptionFormatSelect">
                         <option value="device">Device default</option>
                         <option value="original">Original archive</option>
                         <option value="epub">EPUB</option>
                         <option value="azw3">AZW3 (Kindle)</option>
                     </select>
                 </div>
-                <label for="emailSubscriptionEnabledCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" id="emailSubscriptionEnabledCheckbox" checked style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                <label for="emailSubscriptionEnabledCheckbox" class="checkbox-label">
+                    <input type="checkbox" id="emailSubscriptionEnabledCheckbox" checked>
                     <span>Enable automatic delivery for new issues</span>
                 </label>
             </div>
@@ -1773,7 +1773,7 @@
                     <div class="form-group">
                         <label for="newPassword">New Password</label>
                         <input type="password" id="newPassword" name="newPassword" required autocomplete="new-password" minlength="8">
-                        <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <small class="form-hint">
                             Password must be at least 8 characters long
                         </small>
                     </div>

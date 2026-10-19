@@ -513,10 +513,11 @@
             top: calc(100% + 5px);
             background: var(--bg-secondary);
             border: 1px solid var(--border-secondary);
-            border-radius: 5px;
+            border-radius: var(--radius-md);
             box-shadow: var(--shadow-md);
             z-index: 1000;
-            min-width: 180px;
+            min-width: 200px;
+            padding: 4px;
             overflow: hidden;
         }
         
@@ -528,6 +529,7 @@
             padding: 10px 15px;
             cursor: pointer;
             border: none;
+            border-radius: var(--radius-sm);
             background: none;
             width: 100%;
             text-align: left;
@@ -545,9 +547,9 @@
         }
         
         .header-dropdown-item.active {
-            background: var(--accent-primary);
-            color: white;
-            font-weight: 500;
+            background: var(--accent-primary-soft);
+            color: var(--accent-text);
+            font-weight: 600;
         }
         
         .watcher-status-indicator {
@@ -622,10 +624,11 @@
             top: calc(100% + 6px);
             background: var(--bg-secondary);
             border: 1px solid var(--border-secondary);
-            border-radius: 8px;
+            border-radius: var(--radius-md);
             box-shadow: var(--shadow-md);
             z-index: 1000;
-            min-width: 240px;
+            min-width: 248px;
+            padding: 4px;
             /* The menu is taller than many viewports; scroll inside it rather
                than letting Logout and the About items fall off-screen. */
             max-height: calc(100vh - 80px);
@@ -654,6 +657,7 @@
             padding: 12px 15px;
             cursor: pointer;
             border: none;
+            border-radius: var(--radius-sm);
             background: none;
             width: 100%;
             text-align: left;
@@ -688,15 +692,14 @@
         }
 
         .settings-dropdown-section-label {
-            padding: 8px 15px 4px;
-            font-size: 11px;
+            padding: 10px 12px 4px;
+            font-size: var(--text-xs);
             font-weight: 700;
             text-transform: uppercase;
-            letter-spacing: 0.06em;
+            letter-spacing: 0.08em;
             color: var(--text-muted);
             border-top: 1px solid var(--border-primary);
             margin-top: 4px;
-            background: var(--bg-hover);
         }
         .settings-dropdown-section-label:first-child,
         .settings-dropdown-item.user-info-item + .settings-dropdown-section-label {
@@ -803,9 +806,10 @@
         
         .actions-bar {
             background: var(--bg-secondary);
-            padding: 15px;
+            padding: 12px;
             margin-bottom: 20px;
-            border-radius: 8px;
+            border: 1px solid var(--border-primary);
+            border-radius: var(--radius-md);
             box-shadow: var(--shadow-sm);
             display: flex;
             gap: 10px;
@@ -886,10 +890,11 @@
             top: calc(100% + 5px);
             background: var(--bg-secondary);
             border: 1px solid var(--border-secondary);
-            border-radius: 5px;
+            border-radius: var(--radius-md);
             box-shadow: var(--shadow-md);
             z-index: 1000;
-            min-width: 180px;
+            min-width: 200px;
+            padding: 4px;
             overflow: hidden;
         }
         
@@ -901,6 +906,7 @@
             padding: 12px 15px;
             cursor: pointer;
             border: none;
+            border-radius: var(--radius-sm);
             background: none;
             width: 100%;
             text-align: left;
@@ -918,19 +924,27 @@
         }
         
         .filter-dropdown-item.active {
-            background: var(--accent-primary);
-            color: white;
-            font-weight: 500;
+            background: var(--accent-primary-soft);
+            color: var(--accent-text);
+            font-weight: 600;
         }
         
         .btn {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-height: var(--control-height);
+            padding: 8px 16px;
+            border: 1px solid transparent;
+            border-radius: var(--radius-sm);
             cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.3s;
+            font-family: inherit;
+            font-size: var(--text-md);
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap;
+            transition: background-color var(--duration-fast) var(--ease-out), border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
             /* Neutral (secondary) look for buttons without a colour modifier.
                Without it they fall back to the browser's light-grey button,
                which glares in dark mode. The modifiers below override it. */
@@ -941,14 +955,27 @@
         .btn:hover {
             background: var(--btn-neutral-hover);
         }
+
+        .btn:active:not(:disabled) {
+            transform: translateY(1px);
+        }
         
         .btn-primary {
             background: var(--accent-primary);
             color: white;
+            border-color: var(--accent-primary-hover);
         }
         
         .btn-primary:hover {
             background: var(--accent-primary-hover);
+        }
+
+        /* The comic "pop": primary and destructive actions lift onto a hard
+           ink shadow on hover, like a panel stamped off the page. */
+        .btn-primary:hover:not(:disabled),
+        .btn-danger:hover:not(:disabled) {
+            box-shadow: var(--shadow-pop);
+            transform: translate(-1px, -1px);
         }
         
         .btn-success {
@@ -1002,10 +1029,23 @@
         .btn:disabled,
         .btn:disabled:hover {
             background: var(--btn-neutral-bg);
+            border-color: transparent;
             color: var(--text-muted);
             filter: grayscale(1);
             opacity: 0.6;
             cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        /* Ghost: a quiet text button for tertiary actions. */
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-secondary);
+        }
+
+        .btn-ghost:hover {
+            background: var(--bg-hover);
         }
         
         /* Action dropdown styles */
@@ -1016,12 +1056,13 @@
         
         .action-dropdown-toggle {
             padding: 6px 10px;
-            border: none;
-            border-radius: 5px;
+            border: 1px solid transparent;
+            border-radius: var(--radius-sm);
             cursor: pointer;
-            font-size: 12px;
-            font-weight: 500;
-            transition: all 0.3s;
+            font-family: inherit;
+            font-size: var(--text-sm);
+            font-weight: 600;
+            transition: background-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
             /* Neutral by default (e.g. Metadata); the colour modifiers below
                switch to a filled colour with white text. */
             background: var(--btn-neutral-bg);
@@ -1077,11 +1118,11 @@
         }
         
         .action-dropdown-toggle.mark {
-            background: var(--accent-primary);
+            background: var(--color-info);
         }
         
         .action-dropdown-toggle.mark:hover {
-            background: var(--accent-primary-hover);
+            background: var(--color-info-hover);
         }
         
         .action-dropdown-toggle:disabled,
@@ -1100,10 +1141,11 @@
             top: calc(100% + 5px);
             background: var(--bg-secondary);
             border: 1px solid var(--border-secondary);
-            border-radius: 5px;
+            border-radius: var(--radius-md);
             box-shadow: var(--shadow-md);
             z-index: 1000;
-            min-width: 180px;
+            min-width: 200px;
+            padding: 4px;
             overflow: hidden;
         }
         
@@ -1115,6 +1157,7 @@
             padding: 10px 15px;
             cursor: pointer;
             border: none;
+            border-radius: var(--radius-sm);
             background: none;
             width: 100%;
             text-align: left;
@@ -3065,6 +3108,8 @@
             width: 100%;
             height: 100%;
             background: var(--modal-overlay);
+            -webkit-backdrop-filter: blur(3px);
+            backdrop-filter: blur(3px);
             z-index: 1000;
             overflow-y: auto;
         }
@@ -3078,37 +3123,59 @@
         
         .modal-content {
             background: var(--bg-secondary);
-            border-radius: 8px;
+            border: 1px solid var(--border-secondary);
+            /* A brand-red rule across the top of every dialog, like the colour
+               bar on a comic cover. */
+            border-top: 4px solid var(--accent-primary);
+            border-radius: var(--radius-lg);
             max-width: 800px;
             width: 100%;
             max-height: 90vh;
             overflow-y: auto;
-            box-shadow: var(--shadow-md);
+            box-shadow: var(--shadow-lg);
+            animation: modal-enter var(--duration-base) var(--ease-out);
+        }
+
+        @keyframes modal-enter {
+            from { opacity: 0; transform: translateY(8px) scale(0.985); }
+            to { opacity: 1; transform: none; }
         }
         
         .modal-header {
-            padding: 20px;
+            padding: 16px 20px;
             border-bottom: 1px solid var(--border-primary);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            gap: 12px;
         }
         
         .modal-header h2 {
             margin: 0;
+            font-size: var(--text-xl);
             color: var(--text-primary);
         }
         
         .close-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            width: 34px;
+            height: 34px;
             background: none;
             border: none;
+            border-radius: var(--radius-sm);
             font-size: 24px;
+            line-height: 1;
             cursor: pointer;
-            color: var(--text-light);
+            color: var(--text-muted);
+            transition: background-color var(--duration-fast) var(--ease-out), color var(--duration-fast) var(--ease-out);
         }
         
         .close-btn:hover {
-            color: var(--text-muted);
+            background: var(--bg-hover);
+            color: var(--text-primary);
         }
         
         .modal-body {
@@ -3116,26 +3183,92 @@
         }
         
         .form-group {
-            margin-bottom: 15px;
+            margin-bottom: 16px;
         }
         
         .form-group label {
             display: block;
-            margin-bottom: 5px;
-            font-weight: 500;
+            margin-bottom: 6px;
+            font-weight: 600;
+            font-size: var(--text-sm);
             color: var(--text-secondary);
         }
         
-        .form-group input,
+        .form-group input:not([type="checkbox"]):not([type="radio"]),
+        .form-group select,
         .form-group textarea {
             width: 100%;
-            padding: 10px;
+            min-height: var(--control-height);
+            padding: 8px 12px;
             border: 1px solid var(--border-input);
-            border-radius: 5px;
-            font-size: 14px;
+            border-radius: var(--radius-sm);
+            font-size: var(--text-md);
             font-family: inherit;
-            background: var(--bg-primary);
+            background: var(--bg-raised);
             color: var(--text-primary);
+            transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+        }
+
+        .form-group input:not([type="checkbox"]):not([type="radio"]):focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px var(--accent-primary-soft);
+        }
+
+        .form-group input:disabled,
+        .form-group select:disabled,
+        .form-group textarea:disabled {
+            opacity: 0.65;
+            cursor: not-allowed;
+        }
+
+        /* Helper text under a field. */
+        .form-hint {
+            display: block;
+            margin-top: 6px;
+            font-size: var(--text-sm);
+            line-height: 1.5;
+            color: var(--text-muted);
+        }
+
+        .form-hint--indent {
+            margin-left: 30px;
+        }
+
+        .form-hint--lead {
+            margin-top: 0;
+            margin-bottom: 12px;
+        }
+
+        /* Checkbox + text on one line; the whole row is the hit target. */
+        .checkbox-label,
+        .form-group label.checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            flex-shrink: 0;
+            width: 20px;
+            height: 20px;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .checkbox-label--minor,
+        .form-group label.checkbox-label--minor {
+            margin-top: 8px;
+            font-weight: 400;
+        }
+
+        .checkbox-label--minor input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
         }
         
         .form-group textarea {
@@ -3153,22 +3286,25 @@
         }
         
         .modal-footer {
-            padding: 20px;
+            padding: 14px 20px;
             border-top: 1px solid var(--border-primary);
+            background: var(--bg-tertiary);
+            border-radius: 0 0 var(--radius-lg) var(--radius-lg);
             display: flex;
             justify-content: flex-end;
+            flex-wrap: wrap;
             gap: 10px;
         }
         
         .error-message {
-            background: #fee;
-            color: var(--brand-red);
+            background: var(--status-normalized);
+            color: var(--text-error);
             padding: 12px;
             border-radius: 6px;
             margin-bottom: 15px;
             font-size: 14px;
             display: none;
-            border: 1px solid #fcc;
+            border: 1px solid var(--status-normalized-hover);
         }
         
         .error-message.show {
@@ -3176,14 +3312,14 @@
         }
         
         .success-message {
-            background: #efe;
-            color: var(--color-success);
+            background: var(--status-marked);
+            color: var(--status-ok-text);
             padding: 12px;
             border-radius: 6px;
             margin-bottom: 15px;
             font-size: 14px;
             display: none;
-            border: 1px solid #cfc;
+            border: 1px solid var(--status-marked-hover);
         }
         
         .success-message.show {
@@ -3197,7 +3333,7 @@
         }
         
         .spinner {
-            border: 3px solid #f3f3f3;
+            border: 3px solid var(--border-secondary);
             border-top: 3px solid var(--accent-primary);
             border-radius: 50%;
             width: 40px;
@@ -3919,7 +4055,8 @@
                 width: 100%;
             }
             
-            .form-group input,
+            .form-group input:not([type="checkbox"]):not([type="radio"]),
+            .form-group select,
             .form-group textarea {
                 font-size: 16px; /* Prevents zoom on iOS */
             }

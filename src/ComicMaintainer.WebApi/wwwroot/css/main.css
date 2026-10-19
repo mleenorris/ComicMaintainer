@@ -5209,7 +5209,9 @@ summary:focus-visible,
 }
 
 @media (min-width: 1025px) {
-    body {
+    /* Only the main app page (index.html) has the sidebar; jobs.html and
+       reader.html share this stylesheet and keep their own layouts. */
+    body.app-shell {
         display: grid;
         grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
         grid-template-rows: auto minmax(0, 1fr);
@@ -5221,7 +5223,7 @@ summary:focus-visible,
         grid-row: 1 / span 2;
     }
 
-    body > .header {
+    body.app-shell > .header {
         grid-column: 2;
         grid-row: 1;
         /* Light top bar beside the sidebar: controls switch to the page
@@ -5241,7 +5243,7 @@ summary:focus-visible,
         padding: 10px 0;
     }
 
-    body > main {
+    body.app-shell > main {
         grid-column: 2;
         grid-row: 2;
         min-height: 0;
@@ -5615,4 +5617,10 @@ summary:focus-visible,
         color: var(--text-primary);
         white-space: nowrap;
     }
+}
+
+.brand-mark--lg {
+    width: 72px;
+    height: 72px;
+    filter: drop-shadow(3px 3px 0 var(--brand-ink));
 }

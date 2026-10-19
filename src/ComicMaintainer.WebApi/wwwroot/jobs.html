@@ -18,13 +18,15 @@
             window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     </script>
     <style>
-        body { margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { margin: 0; padding: 0; font-family: var(--font-sans); }
         .jobs-page { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
-        .jobs-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem 1rem; margin-bottom: 1rem; }
-        .jobs-header h1 { margin: 0; font-size: 1.5rem; }
+        .jobs-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem 1rem; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 3px solid var(--accent-primary); }
+        .jobs-header h1 { margin: 0; font-family: var(--font-display); font-size: 1.75rem; font-weight: 900; display: flex; align-items: center; gap: 0.6rem; }
+        .jobs-header h1 .icon { width: 1.9rem; height: 1.9rem; padding: 0.3rem; border: 2px solid var(--brand-ink); border-radius: var(--radius-sm); background: var(--brand-yellow); color: var(--brand-ink); box-shadow: 2px 2px 0 var(--brand-ink); }
+        .jobs-header a { display: inline-flex; align-items: center; gap: 0.35rem; }
         .jobs-header a { color: var(--accent-text, #2471a3); text-decoration: none; font-weight: 500; white-space: nowrap; }
         .jobs-header a:hover { text-decoration: underline; }
-        .jobs-card { background: var(--bg-secondary, #fff); border: 1px solid var(--border-input, #e1e4e8); border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+        .jobs-card { background: var(--bg-raised, #fff); border: 1px solid var(--border-secondary, #e1e4e8); border-radius: var(--radius-lg, 8px); box-shadow: var(--shadow-sm); padding: 1.1rem 1.4rem; margin-bottom: 1rem; }
         .jobs-card h2 { margin: 0 0 0.25rem 0; font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem; }
         .jobs-card .desc { color: var(--text-muted, #6a737d); margin-bottom: 0.75rem; }
         .jobs-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem 1rem; align-items: end; margin-top: 0.5rem; }
@@ -32,12 +34,12 @@
         /* Checkbox options read as one line: box, then its label. */
         .jobs-row label.toggle { flex-direction: row; align-items: center; min-height: 2.1rem; color: var(--text-primary, #222); font-size: 0.9rem; }
         .jobs-row label.toggle input { width: 16px; height: 16px; margin: 0; flex-shrink: 0; }
-        .jobs-row input[type="number"] { padding: 0.4rem 0.5rem; font-size: 0.95rem; border: 1px solid var(--border-input, #ccc); border-radius: 4px; background: var(--bg-primary, #fff); color: var(--text-primary, #222); }
+        .jobs-row input[type="number"] { padding: 0.4rem 0.5rem; font-size: 0.95rem; border: 1px solid var(--border-input, #ccc); border-radius: var(--radius-sm, 4px); background: var(--bg-primary, #fff); color: var(--text-primary, #222); }
         .jobs-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem; }
-        .jobs-actions button { padding: 0.45rem 0.9rem; font-size: 0.9rem; border-radius: 6px; cursor: pointer; border: 1px solid transparent; }
+        .jobs-actions button { padding: 0.45rem 0.9rem; font-size: 0.9rem; font-weight: 600; border-radius: var(--radius-sm, 6px); cursor: pointer; border: 1px solid transparent; }
         .jobs-actions button:disabled { opacity: 0.6; cursor: not-allowed; }
-        .btn-primary { background: var(--accent-primary, #3498db); color: #fff; }
-        .btn-primary:hover { background: var(--accent-primary-hover, #2980b9); }
+        .btn-primary { background: var(--accent-primary); color: #fff; }
+        .btn-primary:hover { background: var(--accent-primary-hover); }
         .jobs-actions .btn-secondary { background: transparent; border-color: var(--border-input, #ccc); color: var(--text-primary, #222); }
         .jobs-actions .btn-secondary:hover { background: var(--bg-hover, rgba(0,0,0,0.04)); }
         .status-pill { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
@@ -63,8 +65,8 @@
 <body>
     <main class="jobs-page">
         <div class="jobs-header">
-            <h1>⏰ Scheduled Jobs</h1>
-            <a href="/">← Back to Library</a>
+            <h1><svg class="icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg> Scheduled Jobs</h1>
+            <a href="/"><span aria-hidden="true">←</span> Back to Library</a>
         </div>
         <p class="meta">Recurring background jobs the server can run for you. Enable a job and set how often it should run; trigger an ad-hoc run any time with <strong>Run now</strong>.</p>
 

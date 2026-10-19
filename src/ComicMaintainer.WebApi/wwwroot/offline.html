@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Offline - Comic Maintainer</title>
-    <meta name="theme-color" content="#2c3e50">
+    <meta name="theme-color" content="#241c17">
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
     <!-- This page is precached by the service worker and shown when a
          navigation request fails because the device (or the server) is
@@ -21,9 +21,12 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background: #2c3e50;
-            color: #ecf0f1;
+            font-family: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+            background-color: #241c17;
+            background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1.4px);
+            background-size: 6px 6px;
+            border-top: 6px solid #c9302c;
+            color: #fbf3e4;
             padding: 24px;
             box-sizing: border-box;
         }
@@ -35,35 +38,45 @@
 
         h1 {
             margin: 0 0 12px;
-            font-size: 1.6rem;
+            font-family: "Bangers", "Anton", "Impact", "Arial Black", sans-serif;
+            font-size: 2rem;
+            font-weight: 900;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            color: #ffc845;
         }
 
         p {
             margin: 0 0 20px;
             line-height: 1.5;
-            color: #bdc3c7;
+            color: #d8c9b4;
         }
 
         button {
             font: inherit;
             font-weight: 600;
             padding: 10px 22px;
-            border: none;
-            border-radius: 6px;
-            background: #4a90d9;
+            border: 2px solid #000;
+            border-radius: 8px;
+            background: #c9302c;
             color: #fff;
+            box-shadow: 3px 3px 0 #000;
             cursor: pointer;
         }
 
+        button:hover {
+            background: #d9443f;
+        }
+
         button:focus-visible {
-            outline: 2px solid #fff;
+            outline: 2px solid #ffc845;
             outline-offset: 2px;
         }
 
         .status {
             margin-top: 16px;
             font-size: 0.9rem;
-            color: #95a5a6;
+            color: #b3a493;
         }
 
         .downloads {
@@ -89,9 +102,10 @@
         .downloads a {
             display: block;
             padding: 10px 12px;
-            border-radius: 6px;
-            background: rgba(255, 255, 255, 0.08);
-            color: #ecf0f1;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.06);
+            color: #fbf3e4;
             text-decoration: none;
             word-break: break-word;
         }
@@ -104,7 +118,7 @@
         .downloads .pages {
             display: block;
             font-size: 0.8rem;
-            color: #bdc3c7;
+            color: #d8c9b4;
         }
 
         @media (prefers-reduced-motion: reduce) {

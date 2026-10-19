@@ -18,7 +18,7 @@ public class FrontendVisualConsistencyTests
             var current = AppContext.BaseDirectory;
             for (var i = 0; i < 10 && current != null; i++)
             {
-                var candidate = Path.Combine(current, "src", "ComicMaintainer.WebApi", "wwwroot");
+                var candidate = Path.Join(current, "src", "ComicMaintainer.WebApi", "wwwroot");
                 if (Directory.Exists(candidate))
                 {
                     return candidate;
@@ -31,7 +31,7 @@ public class FrontendVisualConsistencyTests
 
     private static string Read(params string[] relativeParts)
     {
-        var path = Path.Combine(new[] { WwwRoot }.Concat(relativeParts).ToArray());
+        var path = Path.Join(new[] { WwwRoot }.Concat(relativeParts).ToArray());
         Assert.True(File.Exists(path), $"Expected {path} to exist");
         return File.ReadAllText(path);
     }
@@ -149,6 +149,15 @@ public class FrontendVisualConsistencyTests
 
         // iOS Safari zooms into inputs smaller than 16px on focus.
         Assert.Matches(new Regex(@"\.header-search input\s*\{[^}]*width:\s*100%;[^}]*font-size:\s*16px;"), css);
+    }
+
+    [Fact]
+    public void MainCss_TabletHeaderOverridesApplyAfterDesktopRules()
+    {
+        var css = Read("css", "main.css");
+
+        Assert.Matches(new Regex(@"\.header-search\s*\{[^}]*min-width:\s*200px;[\s\S]*?@media \(max-width: 1200px\) and \(min-width: 769px\)\s*\{\s*\.header-search\s*\{\s*min-width:\s*140px;"), css);
+        Assert.Matches(new Regex(@"\.settings-dropdown-menu\s*\{[^}]*right:\s*0;[\s\S]*?@media \(max-width: 1200px\) and \(min-width: 769px\)\s*\{\s*\.settings-dropdown-menu\s*\{[^}]*right:\s*auto;[^}]*left:\s*0;"), css);
     }
 
     [Fact]

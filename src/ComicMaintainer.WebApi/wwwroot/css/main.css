@@ -277,10 +277,6 @@
             .header-content > .watcher-status-indicator {
                 padding: 0 9px;
             }
-
-            .header-search {
-                min-width: 140px;
-            }
         }
         
         .header-search {
@@ -535,6 +531,17 @@
         
         .settings-dropdown-menu.show {
             display: block;
+        }
+
+        @media (max-width: 1200px) and (min-width: 769px) {
+            .header-search {
+                min-width: 140px;
+            }
+
+            .settings-dropdown-menu {
+                right: auto;
+                left: 0;
+            }
         }
         
         .settings-dropdown-item {

@@ -1791,7 +1791,7 @@
             const notice = document.getElementById('settingsReadOnlyNotice');
             if (notice) notice.hidden = userCapabilities.canAdminister;
 
-            const settingsBody = document.querySelector('#settingsModal .modal-body');
+            const settingsBody = document.getElementById('settingsPageBody');
             if (settingsBody) {
                 settingsBody.querySelectorAll('input, select, textarea, button').forEach(el => {
                     if (el.closest('[data-user-setting]')) return;
@@ -2079,7 +2079,9 @@
         //   #/home          → overview page (default landing)
         //   #/library       → full series library (grid/list, filters, bulk)
         //   #/series/{id}    → a single series' page (synopsis + files)
-        let currentView = 'home';           // 'home' | 'library' | 'series'
+        //   #/settings      → the settings page
+        let currentView = 'home';           // 'home' | 'library' | 'series' | 'settings'
+        let settingsReturnHash = '#/home';  // where leaving Settings goes back to
         let seriesDetailOrigin = 'library'; // where the series "Back" returns to
         let overviewLoaded = false;
 
@@ -2089,6 +2091,7 @@
                 return { view: 'series', seriesId: decodeURIComponent(raw.slice('/series/'.length)) };
             }
             if (raw === '/library') return { view: 'library' };
+            if (raw === '/settings') return { view: 'settings' };
             return { view: 'home' };
         }
 
@@ -2110,8 +2113,19 @@
                 seriesIssueRangeSelectArmed = false;
             }
             currentView = route.view;
+            if (route.view !== 'settings') {
+                settingsReturnHash = window.location.hash || '#/home';
+            }
             applyViewVisibility(route.view);
-            if (route.view === 'home') {
+            if (route.view === 'settings') {
+                if (currentSeriesDetailId) {
+                    disconnectSeriesIssuesObserver();
+                    currentSeriesDetailId = null;
+                    currentSeriesDetailTitleKeys = null;
+                    currentSeriesDetailSeries = null;
+                }
+                loadSettings();
+            } else if (route.view === 'home') {
                 // The overview/home page is not a series detail. Clear any
                 // lingering detail state so it can't leak into the reader
                 // return snapshot (readComic) and cause the app to reopen a
@@ -2144,20 +2158,25 @@
         // make sense inside the library / series contexts.
         function applyViewVisibility(view) {
             const isHome = view === 'home';
+            const isSettings = view === 'settings';
             const isLibraryList = view === 'library';
+            const hideLibrary = isHome || isSettings;
             const overview = document.getElementById('overviewView');
             const health = document.getElementById('libraryHealthDashboard');
             const files = document.getElementById('libraryFilesView');
+            const settings = document.getElementById('settingsView');
             if (overview) overview.hidden = !isHome;
-            if (health) health.style.display = isHome ? 'none' : '';
-            if (files) files.style.display = isHome ? 'none' : '';
+            if (settings) settings.hidden = !isSettings;
+            if (health) health.style.display = hideLibrary ? 'none' : '';
+            if (files) files.style.display = hideLibrary ? 'none' : '';
+            document.body.classList.toggle('view-settings', isSettings);
 
             // Search / filter / sort apply to the library and series files.
             const headerSearch = document.querySelector('.header-search');
             const headerFilter = document.querySelector('.header-filter-dropdown');
             const headerSort = document.querySelector('.header-sort-dropdown');
             [headerSearch, headerFilter, headerSort].forEach(el => {
-                if (el) el.style.display = isHome ? 'none' : '';
+                if (el) el.style.display = hideLibrary ? 'none' : '';
             });
 
             // The list/grid/compact layout toggle is only meaningful on the
@@ -2173,8 +2192,13 @@
                 navOverviewBtn: currentView === 'home',
                 navLibraryBtn: currentView === 'library' || currentView === 'series',
                 sidebarOverviewBtn: currentView === 'home',
-                sidebarLibraryBtn: currentView === 'library' || currentView === 'series'
+                sidebarLibraryBtn: currentView === 'library' || currentView === 'series',
+                sidebarSettingsBtn: currentView === 'settings'
             };
+            const topbarTitle = document.getElementById('topbarTitle');
+            if (topbarTitle) {
+                topbarTitle.textContent = ({ home: 'Overview', library: 'Library', series: 'Library', settings: 'Settings' })[currentView] || '';
+            }
             Object.entries(activeByView).forEach(([id, active]) => {
                 const el = document.getElementById(id);
                 if (!el) return;
@@ -7656,8 +7680,14 @@
             return messageEl;
         }
         
-        async function openSettings() {
-            // Re-assert capability gating in case the modal contents were
+        // Settings is a page (#/settings); the router calls loadSettings()
+        // whenever it is shown so the form always reflects the server.
+        function openSettings() {
+            navigate('#/settings');
+        }
+
+        async function loadSettings() {
+            // Re-assert capability gating in case the page contents were
             // re-rendered since the last check.
             applyCapabilities();
             try {
@@ -7846,16 +7876,66 @@
                 if (errorReportingDedupeHours) errorReportingDedupeHours.value = settingsData.error_reporting_dedupe_window_hours ?? 24;
                 if (errorReportingComment) errorReportingComment.checked = settingsData.error_reporting_comment_on_recurrence !== false;
                  
-                console.log('[SETTINGS] All settings loaded successfully, opening modal');
-                document.getElementById('settingsModal').classList.add('active');
+                console.log('[SETTINGS] All settings loaded successfully');
+                updateSettingsNavActive();
             } catch (error) {
-                console.error('[SETTINGS] Error in openSettings():', error);
+                console.error('[SETTINGS] Error in loadSettings():', error);
                 showMessage('Failed to load settings: ' + error.message, 'error');
             }
         }
         
         function closeSettings() {
-            document.getElementById('settingsModal').classList.remove('active');
+            const target = settingsReturnHash && settingsReturnHash !== '#/settings' ? settingsReturnHash : '#/home';
+            navigate(target);
+        }
+
+        function scrollToSettingsSection(id) {
+            const section = document.getElementById(id);
+            if (!section) return;
+            const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            section.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+            setSettingsNavActive(id);
+            const heading = section.querySelector('.settings-card-title');
+            if (heading) {
+                heading.setAttribute('tabindex', '-1');
+                heading.focus({ preventScroll: true });
+            }
+        }
+
+        function setSettingsNavActive(id) {
+            document.querySelectorAll('.settings-nav-link').forEach(link => {
+                const active = link.dataset.settingsTarget === id;
+                link.classList.toggle('active', active);
+                if (active) {
+                    link.setAttribute('aria-current', 'true');
+                } else {
+                    link.removeAttribute('aria-current');
+                }
+            });
+        }
+
+        // Highlight the section-nav entry for the card nearest the top of the
+        // viewport while the settings page scrolls.
+        let settingsSectionObserver = null;
+        function updateSettingsNavActive() {
+            if (settingsSectionObserver || typeof IntersectionObserver === 'undefined') return;
+            const cards = Array.from(document.querySelectorAll('#settingsPageBody .settings-card'));
+            if (!cards.length) return;
+            const visible = new Map();
+            settingsSectionObserver = new IntersectionObserver(entries => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        visible.set(entry.target.id, entry.boundingClientRect.top);
+                    } else {
+                        visible.delete(entry.target.id);
+                    }
+                });
+                if (!visible.size) return;
+                const topmost = [...visible.entries()].sort((a, b) => a[1] - b[1])[0][0];
+                setSettingsNavActive(topmost);
+            }, { rootMargin: '-15% 0px -70% 0px' });
+            cards.forEach(card => settingsSectionObserver.observe(card));
+            setSettingsNavActive(cards[0].id);
         }
         
         function showResetConfirmation() {
@@ -10166,7 +10246,7 @@
                 }
 
                 showMessage('Settings saved successfully! Changes to log rotation, external metadata, and database cleanup will take effect on restart.', 'success');
-                closeSettings();
+                loadSettings();
             } catch (error) {
                 showMessage('Failed to save settings: ' + error.message, 'error');
             }
@@ -12094,6 +12174,9 @@
                 } else if (key === 'l') {
                     event.preventDefault();
                     navigate('#/library');
+                } else if (key === 's') {
+                    event.preventDefault();
+                    navigate('#/settings');
                 }
                 return;
             }

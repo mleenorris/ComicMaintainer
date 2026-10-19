@@ -236,6 +236,7 @@
                     <rect x="66" y="68" width="8" height="12" fill="#7CB8B8"/>
                     <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
                 </svg>
+                <span class="topbar-title" id="topbarTitle" aria-hidden="true">Overview</span>
                 <div class="watcher-status-indicator" id="watcherStatus" title="Watcher Status" role="status" aria-live="polite" aria-label="Watcher status">
                     <span class="watcher-icon" aria-hidden="true"></span>
                     <span class="watcher-text">Checking...</span>
@@ -608,6 +609,561 @@
                 </div>
             </div>
         </section>
+        <section id="settingsView" class="settings-page" aria-labelledby="settingsPageTitle" hidden>
+            <div class="page-header">
+                <div>
+                    <h2 class="page-title" id="settingsPageTitle">Settings</h2>
+                    <p class="page-subtitle">Configure processing, delivery, integrations and maintenance for this ComicMaintainer instance.</p>
+                </div>
+            </div>
+            <div class="settings-layout">
+                <nav class="settings-nav" aria-label="Settings sections">
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-appearance" onclick="scrollToSettingsSection('settings-appearance')"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg><span>Appearance</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-access" onclick="scrollToSettingsSection('settings-access')"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><span>Access</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-watcher" onclick="scrollToSettingsSection('settings-watcher')"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg><span>Watcher</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-ereader" onclick="scrollToSettingsSection('settings-ereader')"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg><span>Send to Ereader</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-error-reporting" onclick="scrollToSettingsSection('settings-error-reporting')"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span>Automated Error Reporting</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-logs" onclick="scrollToSettingsSection('settings-logs')"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg><span>Log Rotation</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-database" onclick="scrollToSettingsSection('settings-database')"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg><span>Database Cleanup</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-filename" onclick="scrollToSettingsSection('settings-filename')"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg><span>Filename Format</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-padding" onclick="scrollToSettingsSection('settings-padding')"><svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg><span>Issue Number Padding</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-covers" onclick="scrollToSettingsSection('settings-covers')"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><span>Series Covers</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-metadata" onclick="scrollToSettingsSection('settings-metadata')"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>External Series Metadata</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-suwayomi" onclick="scrollToSettingsSection('settings-suwayomi')"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Suwayomi Downloads</span></button>
+                    <button type="button" class="settings-nav-link settings-nav-link--danger" data-settings-target="settings-danger" onclick="scrollToSettingsSection('settings-danger')"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span>Danger Zone</span></button>
+                </nav>
+                <div class="settings-page-body" id="settingsPageBody">
+                    <div class="settings-readonly-notice" id="settingsReadOnlyNotice" hidden>
+                        <svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg> These are server-wide settings and can only be changed by an administrator. Your personal appearance preference below is still editable.
+                    </div>
+
+                    <section class="settings-card" id="settings-appearance" aria-labelledby="settings-appearance-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-moon"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-appearance-title">Appearance</h3>
+                                <p class="settings-card-desc">Theme and personal display preferences.</p>
+                            </div>
+                        </header>
+                        <div class="form-group" data-user-setting>
+                            <label for="themeSelect">Theme</label>
+                            <select id="themeSelect" name="theme" onchange="updateThemeFromSettings()">
+                                <option value="light">Light Mode</option>
+                                <option value="dark">Dark Mode</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="defaultLibraryViewSelect">Default library view</label>
+                            <select id="defaultLibraryViewSelect" name="defaultLibraryView" onchange="updateDefaultLibraryViewFromSettings()">
+                                <option value="files">📄 Files (folder view)</option>
+                                <option value="series">🖼️ Series</option>
+                            </select>
+                            <small class="form-hint">
+                                Controls which view the library loads into when you first open the site.
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-access" aria-labelledby="settings-access-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-lock"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-access-title">Access</h3>
+                                <p class="settings-card-desc">Sign-in and guest access.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="allowRegistrationCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="allowRegistrationCheckbox" name="allowRegistration" onchange="updateAllowRegistration()">
+                                <span>Allow visitors to register their own account</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                Disabled by default. When disabled, only an administrator can create accounts, so anyone who can reach this server cannot sign themselves up. Leave this off unless you intentionally want open sign-ups.
+                            </small>
+                        </div>
+
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="defaultPreferredLanguageSelect">Default preferred series-name language</label>
+                            <select id="defaultPreferredLanguageSelect" name="defaultPreferredLanguage" onchange="updateDefaultPreferredLanguageFromSettings()">
+                                <option value="">None (use canonical title)</option>
+                                <option value="en">English</option>
+                                <option value="ja">Japanese (日本語)</option>
+                                <option value="ko">Korean (한국어)</option>
+                                <option value="zh">Chinese (中文)</option>
+                            </select>
+                            <small class="form-hint">
+                                Used as a fallback when a series has no per-series language override. The library will prefer the first cached title or alias in this language. Changing this also enqueues a background job that rewrites every affected file's <code>ComicInfo.xml</code> <code>&lt;Series&gt;</code> to match (requires normalization to be enabled).
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-watcher" aria-labelledby="settings-watcher-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-eye"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-watcher-title">Watcher</h3>
+                                <p class="settings-card-desc">Automatic processing of new files.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <small class="form-hint form-hint--lead">
+                                The file watcher automatically starts when either rename or normalize is enabled below. It monitors the directory for changes and automatically processes new or modified files based on your selected options.
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="watcherEnableRenameCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="watcherEnableRenameCheckbox" name="watcherEnableRename" onchange="updateWatcherEnableRename()">
+                                <span>Enable file rename (🔵 renamed indicator)</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                When enabled, files will be renamed based on the filename template during processing.
+                            </small>
+                        </div>
+
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="watcherEnableNormalizeCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="watcherEnableNormalizeCheckbox" name="watcherEnableNormalize" onchange="updateWatcherEnableNormalize()">
+                                <span>Enable metadata normalize (🔴 normalized indicator)</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                When enabled, metadata will be normalized during processing.
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-ereader" aria-labelledby="settings-ereader-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-send"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-ereader-title">Send to Ereader</h3>
+                                <p class="settings-card-desc">Email delivery to Kindle and other devices.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                           <small id="emailStatusSummary" class="form-hint form-hint--lead">
+                               Configure SMTP delivery and saved ereader devices.
+                           </small>
+                           <button class="btn btn-small" type="button" data-requires-write onclick="openEmailDevicesModal()">Manage Ereader Devices</button>
+                           <button class="btn btn-small" type="button" onclick="loadEmailStatus()">Refresh Status</button>
+                        </div>
+                        <div class="form-group">
+                           <label for="smtpHost">SMTP Host</label>
+                           <input type="text" id="smtpHost" name="smtpHost" autocomplete="off" placeholder="smtp.example.com">
+                        </div>
+                        <div class="form-group">
+                           <label for="smtpPort">SMTP Port</label>
+                           <input type="number" id="smtpPort" name="smtpPort" min="1" max="65535" step="1" autocomplete="off" placeholder="587">
+                        </div>
+                        <div class="form-group">
+                           <label for="smtpUsername">SMTP Username</label>
+                           <input type="text" id="smtpUsername" name="smtpUsername" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                           <label for="smtpPassword">SMTP Password</label>
+                           <input type="password" id="smtpPassword" name="smtpPassword" autocomplete="new-password">
+                           <small id="smtpPasswordHint" class="form-hint">
+                               Leave blank to keep the stored password.
+                           </small>
+                           <label for="smtpClearPasswordCheckbox" class="checkbox-label checkbox-label--minor">
+                               <input type="checkbox" id="smtpClearPasswordCheckbox" name="smtpClearPassword">
+                               <span>Clear stored SMTP password on save</span>
+                           </label>
+                        </div>
+                        <div class="form-group">
+                           <label for="smtpUseSslCheckbox" class="checkbox-label">
+                               <input type="checkbox" id="smtpUseSslCheckbox" name="smtpUseSsl">
+                               <span>Use implicit TLS (SMTPS, usually port 465)</span>
+                           </label>
+                           <small class="form-hint form-hint--indent">
+                               Leave unchecked for the common submission port 587, which upgrades the connection with STARTTLS.
+                           </small>
+                        </div>
+                        <div class="form-group">
+                           <label for="smtpAllowInsecureCheckbox" class="checkbox-label">
+                               <input type="checkbox" id="smtpAllowInsecureCheckbox" name="smtpAllowInsecure">
+                               <span>Allow insecure plaintext connection</span>
+                           </label>
+                           <small class="form-hint form-hint--indent">
+                               Only enable for a trusted local relay that offers no TLS. Credentials and attachments are sent unencrypted.
+                           </small>
+                        </div>
+                        <div class="form-group">
+                           <label for="emailFromAddress">From Address</label>
+                           <input type="email" id="emailFromAddress" name="emailFromAddress" autocomplete="off" placeholder="comics@example.com">
+                        </div>
+                        <div class="form-group">
+                           <label for="emailFromName">From Name</label>
+                           <input type="text" id="emailFromName" name="emailFromName" autocomplete="off" placeholder="ComicMaintainer">
+                        </div>
+                        <div class="form-group">
+                           <label for="emailMaxAttachmentMb">Max Attachment Size (MB)</label>
+                           <input type="number" id="emailMaxAttachmentMb" name="emailMaxAttachmentMb" min="1" step="1" autocomplete="off" placeholder="25">
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-error-reporting" aria-labelledby="settings-error-reporting-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-alert"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-error-reporting-title">Automated Error Reporting</h3>
+                                <p class="settings-card-desc">Share redacted error reports with the developers.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                           <small class="form-hint form-hint--lead">
+                               When enabled, errors logged by this instance are deduplicated and filed as issues on the ComicMaintainer project repository, where they reach the people who develop it. Paths, email addresses and credentials are redacted before anything is sent. This is off by default; nothing leaves this machine until you turn it on and supply a token.
+                           </small>
+                           <label for="errorReportingEnabledCheckbox" class="checkbox-label">
+                               <input type="checkbox" id="errorReportingEnabledCheckbox" name="errorReportingEnabled">
+                               <span>File GitHub issues for errors</span>
+                           </label>
+                        </div>
+                        <div class="form-group">
+                           <label>Destination Repository</label>
+                           <div id="errorReportingDestination" style="color: var(--text-secondary);"></div>
+                           <small class="form-hint">
+                               Fixed: reports go to the project's own repository, which is the only place anyone can act on them.
+                           </small>
+                        </div>
+                        <div class="form-group">
+                           <label for="errorReportingToken">GitHub Token</label>
+                           <input type="password" id="errorReportingToken" name="errorReportingToken" autocomplete="new-password">
+                           <small id="errorReportingTokenHint" class="form-hint">
+                               Use a fine-grained token with <code>issues: write</code> on that repository only.
+                           </small>
+                           <label for="errorReportingClearTokenCheckbox" class="checkbox-label checkbox-label--minor">
+                               <input type="checkbox" id="errorReportingClearTokenCheckbox" name="errorReportingClearToken">
+                               <span>Clear stored token on save</span>
+                           </label>
+                        </div>
+                        <div class="form-group">
+                           <label for="errorReportingAssignee">Assign Issues To (optional)</label>
+                           <input type="text" id="errorReportingAssignee" name="errorReportingAssignee" autocomplete="off" placeholder="copilot-swe-agent">
+                           <small class="form-hint">
+                               GitHub login to assign new issues to. Set this to the coding agent's login to have it start work automatically. If the login cannot be assigned, the issue is still created unassigned.
+                           </small>
+                        </div>
+                        <div class="form-group">
+                           <label for="errorReportingMaxPerDay">Maximum Issues Per Day</label>
+                           <input type="number" id="errorReportingMaxPerDay" name="errorReportingMaxPerDay" min="0" max="100" step="1" autocomplete="off" placeholder="10">
+                        </div>
+                        <div class="form-group">
+                           <label for="errorReportingDedupeHours">Recurrence Comment Interval (Hours)</label>
+                           <input type="number" id="errorReportingDedupeHours" name="errorReportingDedupeHours" min="1" max="720" step="1" autocomplete="off" placeholder="24">
+                           <small class="form-hint">
+                               An already-filed failure never gets a second issue. This is how long to wait before adding a "still happening" comment to the existing one.
+                           </small>
+                        </div>
+                        <div class="form-group">
+                           <label for="errorReportingCommentCheckbox" class="checkbox-label">
+                               <input type="checkbox" id="errorReportingCommentCheckbox" name="errorReportingComment">
+                               <span>Comment on existing issues when a failure recurs</span>
+                           </label>
+                        </div>
+                        <div class="form-group">
+                           <button class="btn btn-small" type="button" data-requires-write onclick="sendErrorReportingTest()">Send Test Report</button>
+                           <small id="errorReportingTestHint" class="form-hint">
+                               Save your settings first, then send a harmless test report to confirm the token works.
+                           </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-logs" aria-labelledby="settings-logs-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-file-text"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-logs-title">Log Rotation</h3>
+                                <p class="settings-card-desc">How much log history is kept.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="logMaxSize">
+                                Maximum Log File Size (MB)
+                                <span class="setting-restart-badge" title="This setting is only applied when the service starts.">Restart required</span>
+                            </label>
+                            <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="100" step="1" placeholder="5" autocomplete="off">
+                            <small class="form-hint">
+                                When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. The new size only takes effect after the service restarts — use <strong>Restart Service</strong> below to apply it immediately.
+                            </small>
+                            <small class="form-hint">
+                                <strong>Note:</strong> Can also be configured via the <code>LOG_MAX_BYTES</code> environment variable (in bytes).
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-database" aria-labelledby="settings-database-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-hard-drive"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-database-title">Database Cleanup</h3>
+                                <p class="settings-card-desc">Pruning of old processing records.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="dbCleanupInterval">Cleanup Interval (Hours)</label>
+                            <input type="number" id="dbCleanupInterval" name="dbCleanupInterval" min="0" step="1" placeholder="12" autocomplete="off">
+                            <small class="form-hint">
+                                How often the database should be cleaned of stale entries for files that no longer exist. Set to 0 to only run on startup. Changes take effect on restart.
+                            </small>
+                            <small class="form-hint">
+                                <strong>Recommended:</strong> 12 hours (default) or 24 hours for less frequent cleanup.
+                            </small>
+                        </div>
+
+                        <div class="form-group" style="margin-top: 15px;">
+                            <button class="btn btn-primary" onclick="cleanupDatabaseNow()" style="width: 100%;">
+                                <svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Clean Database Now
+                            </button>
+                            <small class="form-hint">
+                                Manually trigger database cleanup to remove stale entries for files that no longer exist on disk.
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-filename" aria-labelledby="settings-filename-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-pencil"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-filename-title">Filename Format</h3>
+                                <p class="settings-card-desc">How processed files are renamed.</p>
+                            </div>
+                        </header>
+                        <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
+                            Configure how files are renamed when processed. Use placeholders like <code>{series}</code>, <code>{issue}</code>, etc.
+                        </p>
+                        <div class="form-group">
+                            <label for="filenameFormat">Filename Template</label>
+                            <input type="text" id="filenameFormat" name="filenameFormat" placeholder="{series} - Chapter {issue}" autocomplete="off">
+                            <small class="form-hint">
+                                Available placeholders:
+                            </small>
+                            <ul style="margin: 10px 0 10px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.6;">
+                                <li><code>{series}</code> - Series name</li>
+                                <li><code>{issue}</code> - Issue number (padded based on settings, default 4 digits, e.g., 0001, or 0071.4 for decimals)</li>
+                                <li><code>{issue_no_pad}</code> - Issue number (no padding, e.g., 1, or 71.4 for decimals)</li>
+                                <li><code>{title}</code> - Issue title</li>
+                                <li><code>{volume}</code> - Volume number</li>
+                                <li><code>{year}</code> - Publication year</li>
+                                <li><code>{publisher}</code> - Publisher name</li>
+                            </ul>
+                            <small style="display: block; margin-top: 10px; color: var(--text-muted);">
+                                <strong>Example:</strong> <code>{series} v{volume} #{issue_no_pad} ({year})</code><br>
+                                <strong>Note:</strong> File extension (.cbz or .cbr) is automatically preserved
+                            </small>
+                        </div>
+                        <div style="margin-top: 15px; padding: 10px; background: var(--bg-hover); border-radius: 5px;">
+                            <small style="color: var(--text-muted);">
+                                <strong>Current format:</strong> <span id="currentFormat" style="font-family: monospace;"></span>
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-padding" aria-labelledby="settings-padding-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-tag"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-padding-title">Issue Number Padding</h3>
+                                <p class="settings-card-desc">Zero-padding for issue numbers.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="issueNumberPadding">Number of Digits for {issue} Placeholder</label>
+                            <input type="number" id="issueNumberPadding" name="issueNumberPadding" min="0" max="10" step="1" placeholder="4" autocomplete="off">
+                            <small class="form-hint">
+                                Controls how many digits the <code>{issue}</code> placeholder uses (default: 4). For example, with padding set to 4, issue 5 becomes 0005, with padding 3 it becomes 005, and with padding 0 it remains 5.
+                            </small>
+                            <small class="form-hint">
+                                <strong>Note:</strong> This only affects the <code>{issue}</code> placeholder. Use <code>{issue_no_pad}</code> for unpadded issue numbers regardless of this setting.
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-covers" aria-labelledby="settings-covers-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-image"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-covers-title">Series Covers</h3>
+                                <p class="settings-card-desc">Series cover artwork.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="writeCoverToFirstArchiveCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="writeCoverToFirstArchiveCheckbox" name="writeCoverToFirstArchive" onchange="updateWriteCoverToFirstArchive()">
+                                <span>Embed series cover into first issue archive</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                When enabled, the cached provider/user series image is also written into the first issue's archive as a <code>cover.&lt;ext&gt;</code> entry, so external readers (Komga, Kavita, etc.) show the same cover. This rewrites the comic archive in place; the write is idempotent and only targets writable CBZ archives. The cover shown throughout ComicMaintainer always uses the downloaded provider image regardless of this setting.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="writeCoverToSeriesFolderCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="writeCoverToSeriesFolderCheckbox" name="writeCoverToSeriesFolder" onchange="updateWriteCoverToSeriesFolder()">
+                                <span>Write series cover into each series folder</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                When enabled, a copy of the cached series cover is written into every on-disk folder that contains files for the series as a <code>cover.&lt;ext&gt;</code> sidecar, so file managers and external readers can display it. Set to disabled to leave series folders untouched.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="downloadExternalSeriesImagesCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="downloadExternalSeriesImagesCheckbox" name="downloadExternalSeriesImages" onchange="updateDownloadExternalSeriesImages()">
+                                <span>Download series cover images from external providers</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                When enabled, external metadata refreshes also try to download a series cover image from the chosen provider. Disable to keep metadata-only refreshes (e.g. for limited-bandwidth deployments).
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="seriesImageMaxMB">Max Stored Cover Size (MB)</label>
+                            <input type="number" id="seriesImageMaxMB" name="seriesImageMaxMB" min="1" step="1" placeholder="5" autocomplete="off">
+                            <small class="form-hint">
+                                Maximum size of a stored series cover image. Larger downloads are downscaled to fit under this limit. Default: 5 MB.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="seriesImageMaxDownloadMB">Max Download Size (MB)</label>
+                            <input type="number" id="seriesImageMaxDownloadMB" name="seriesImageMaxDownloadMB" min="1" step="1" placeholder="25" autocomplete="off">
+                            <small class="form-hint">
+                                Hard ceiling for the raw payload fetched when downloading an external cover. Payloads above this are rejected; those between the stored limit and this ceiling are downscaled. Must be greater than or equal to the stored cover size. Default: 25 MB.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="seriesImageMaxDimension">Max Cover Dimension (px)</label>
+                            <input type="number" id="seriesImageMaxDimension" name="seriesImageMaxDimension" min="1" step="1" placeholder="2048" autocomplete="off">
+                            <small class="form-hint">
+                                Maximum width or height, in pixels, of a stored series cover image. Oversized downloads are resized (preserving aspect ratio) so their largest dimension is at most this value. Default: 2048.
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-metadata" aria-labelledby="settings-metadata-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-globe"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-metadata-title">External Series Metadata</h3>
+                                <p class="settings-card-desc">Synopsis and metadata providers.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="enableExternalSeriesMetadata" class="checkbox-label">
+                                <input type="checkbox" id="enableExternalSeriesMetadata" name="enableExternalSeriesMetadata">
+                                <span>Enable external series metadata (alias grouping)</span>
+                            </label>
+                            <small class="form-hint">
+                                Master switch. When enabled, ComicMaintainer can look up alternate series titles from the providers configured below so variants can be grouped together in the series library view. Lookups are <strong>manual</strong> — use the Library page's <em>Metadata → Refresh All External Metadata</em> button or the per-series <em>Manage Names</em> action to populate the cache. Changes take effect after restart.
+                            </small>
+                        </div>
+
+                        <h4 class="settings-subheading">ComicVine (US comics)</h4>
+                        <div class="form-group">
+                            <label for="comicVineApiKey">ComicVine API Key</label>
+                            <input type="password" id="comicVineApiKey" name="comicVineApiKey" placeholder="Enter ComicVine API key" autocomplete="off">
+                            <small class="form-hint">
+                                Leave blank to disable ComicVine lookups. The key is stored in user settings on this instance.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="comicVineBaseUrl">ComicVine Base URL</label>
+                            <input type="text" id="comicVineBaseUrl" name="comicVineBaseUrl" placeholder="https://comicvine.gamespot.com/api" autocomplete="off">
+                        </div>
+
+                        <h4 class="settings-subheading">MangaDex (manga)</h4>
+                        <div class="form-group">
+                            <label for="enableMangaDexMetadata" class="checkbox-label">
+                                <input type="checkbox" id="enableMangaDexMetadata" name="enableMangaDexMetadata">
+                                <span>Enable MangaDex provider</span>
+                            </label>
+                            <small class="form-hint">
+                                Looks up canonical titles and alternate localizations from MangaDex. No API key required.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="mangaDexBaseUrl">MangaDex Base URL</label>
+                            <input type="text" id="mangaDexBaseUrl" name="mangaDexBaseUrl" placeholder="https://api.mangadex.org" autocomplete="off">
+                        </div>
+
+                        <h4 class="settings-subheading">AniList</h4>
+                        <div class="form-group">
+                            <label for="enableAniListMetadata" class="checkbox-label">
+                                <input type="checkbox" id="enableAniListMetadata" name="enableAniListMetadata">
+                                <span>Enable AniList provider</span>
+                            </label>
+                            <small class="form-hint">
+                                Queries AniList for both Manga (Japanese origin) and Manhwa (Korean origin). No API key required.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="aniListBaseUrl">AniList GraphQL Endpoint</label>
+                            <input type="text" id="aniListBaseUrl" name="aniListBaseUrl" placeholder="https://graphql.anilist.co" autocomplete="off">
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-suwayomi" aria-labelledby="settings-suwayomi-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-download"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-suwayomi-title">Suwayomi Downloads</h3>
+                                <p class="settings-card-desc">Fill missing issues from a Suwayomi server.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="enableSuwayomiCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="enableSuwayomiCheckbox" name="enableSuwayomiCheckbox">
+                                <span>Enable Suwayomi integration</span>
+                            </label>
+                            <small class="form-hint">
+                                Lets ComicMaintainer ask a <a href="https://github.com/Suwayomi/Suwayomi-Server" target="_blank" rel="noopener noreferrer">Suwayomi</a> server to download the issues a series is missing. Suwayomi saves them to its own download directory, so mount that directory inside the watched directory for the new files to be picked up.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="suwayomiBaseUrl">Suwayomi Server URL</label>
+                            <input type="text" id="suwayomiBaseUrl" name="suwayomiBaseUrl" placeholder="http://localhost:4567" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="suwayomiUsername">Username (optional)</label>
+                            <input type="text" id="suwayomiUsername" name="suwayomiUsername" placeholder="Only if the server requires basic auth" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="suwayomiPassword">Password (optional)</label>
+                            <input type="password" id="suwayomiPassword" name="suwayomiPassword" placeholder="Enter password" autocomplete="new-password">
+                            <small id="suwayomiPasswordHint" class="form-hint"></small>
+                            <label for="suwayomiClearPasswordCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="suwayomiClearPasswordCheckbox" name="suwayomiClearPasswordCheckbox">
+                                <span style="font-size: 13px; color: var(--text-muted);">Clear the stored password</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn" type="button" onclick="testSuwayomiConnection()"><svg class="icon" aria-hidden="true"><use href="#i-plug"/></svg> Test Connection</button>
+                            <small id="suwayomiStatusHint" class="form-hint">Save your settings before testing.</small>
+                        </div>
+                    </section>
+                    <section class="settings-card settings-card--danger" id="settings-danger" aria-labelledby="settings-danger-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-alert"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-danger-title">Danger Zone</h3>
+                                <p class="settings-card-desc">Irreversible actions.</p>
+                            </div>
+                        </header>
+                        <div class="form-group settings-danger-box">
+                            <label class="settings-danger-title">Reset Database</label>
+                            <p class="settings-danger-text">
+                                This will permanently delete all processing information including:
+                            </p>
+                            <ul class="settings-danger-list">
+                                <li>All file processing states (processed, renamed, normalized)</li>
+                                <li>Complete processing history</li>
+                                <li>All database records</li>
+                            </ul>
+                            <p class="settings-danger-warning">
+                                <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg> This action cannot be undone! Your actual comic files will NOT be deleted.
+                            </p>
+                            <button class="btn btn-danger" onclick="showResetConfirmation()">
+                                <svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Reset Database
+                            </button>
+                        </div>
+                    </section>
+                </div>
+            </div>
+            <div class="settings-savebar" role="region" aria-label="Save settings">
+                <span class="settings-savebar-hint">Changes apply when you save. Some take effect after a restart.</span>
+                <div class="settings-savebar-actions">
+                    <button type="button" class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
+                    <button type="button" class="btn btn-warning" onclick="resetFilenameFormat()" title="Reset the filename format to its default"><svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg> Reset Filename Format</button>
+                    <button type="button" class="btn btn-primary" onclick="saveFilenameFormat()"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg> Save Settings</button>
+                </div>
+            </div>
+        </section>
     </main>
     
     <!-- Tag Editor Modal -->
@@ -884,450 +1440,6 @@
         </div>
     </div>
     
-    <!-- Settings Modal -->
-    <div class="modal" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle" aria-hidden="true">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 id="settingsModalTitle">Settings</h2>
-                <button class="close-btn" onclick="closeSettings()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="settings-readonly-notice" id="settingsReadOnlyNotice" hidden>
-                    🔒 These are server-wide settings and can only be changed by an administrator. Your personal appearance preference below is still editable.
-                </div>
-                <h3 style="margin-bottom: 10px; color: var(--text-secondary);">Appearance</h3>
-                <div class="form-group" data-user-setting>
-                    <label for="themeSelect">Theme</label>
-                    <select id="themeSelect" name="theme" onchange="updateThemeFromSettings()">
-                        <option value="light">Light Mode</option>
-                        <option value="dark">Dark Mode</option>
-                    </select>
-                </div>
-                <div class="form-group" style="margin-top: 15px;">
-                    <label for="defaultLibraryViewSelect">Default library view</label>
-                    <select id="defaultLibraryViewSelect" name="defaultLibraryView" onchange="updateDefaultLibraryViewFromSettings()">
-                        <option value="files">📄 Files (folder view)</option>
-                        <option value="series">🖼️ Series</option>
-                    </select>
-                    <small class="form-hint">
-                        Controls which view the library loads into when you first open the site.
-                    </small>
-                </div>
-
-                <h3 style="margin: 20px 0 10px; color: var(--text-secondary);">Access</h3>
-                <div class="form-group">
-                    <label for="allowRegistrationCheckbox" class="checkbox-label">
-                        <input type="checkbox" id="allowRegistrationCheckbox" name="allowRegistration" onchange="updateAllowRegistration()">
-                        <span>Allow visitors to register their own account</span>
-                    </label>
-                    <small class="form-hint form-hint--indent">
-                        Disabled by default. When disabled, only an administrator can create accounts, so anyone who can reach this server cannot sign themselves up. Leave this off unless you intentionally want open sign-ups.
-                    </small>
-                </div>
-
-                <div class="form-group" style="margin-top: 15px;">
-                    <label for="defaultPreferredLanguageSelect">Default preferred series-name language</label>
-                    <select id="defaultPreferredLanguageSelect" name="defaultPreferredLanguage" onchange="updateDefaultPreferredLanguageFromSettings()">
-                        <option value="">None (use canonical title)</option>
-                        <option value="en">English</option>
-                        <option value="ja">Japanese (日本語)</option>
-                        <option value="ko">Korean (한국어)</option>
-                        <option value="zh">Chinese (中文)</option>
-                    </select>
-                    <small class="form-hint">
-                        Used as a fallback when a series has no per-series language override. The library will prefer the first cached title or alias in this language. Changing this also enqueues a background job that rewrites every affected file's <code>ComicInfo.xml</code> <code>&lt;Series&gt;</code> to match (requires normalization to be enabled).
-                    </small>
-                </div>
-                
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Watcher</h3>
-                <div class="form-group">
-                    <small class="form-hint form-hint--lead">
-                        The file watcher automatically starts when either rename or normalize is enabled below. It monitors the directory for changes and automatically processes new or modified files based on your selected options.
-                    </small>
-                </div>
-                
-                <div class="form-group">
-                    <label for="watcherEnableRenameCheckbox" class="checkbox-label">
-                        <input type="checkbox" id="watcherEnableRenameCheckbox" name="watcherEnableRename" onchange="updateWatcherEnableRename()">
-                        <span>Enable file rename (🔵 renamed indicator)</span>
-                    </label>
-                    <small class="form-hint form-hint--indent">
-                        When enabled, files will be renamed based on the filename template during processing.
-                    </small>
-                </div>
-                
-                <div class="form-group" style="margin-top: 15px;">
-                    <label for="watcherEnableNormalizeCheckbox" class="checkbox-label">
-                        <input type="checkbox" id="watcherEnableNormalizeCheckbox" name="watcherEnableNormalize" onchange="updateWatcherEnableNormalize()">
-                        <span>Enable metadata normalize (🔴 normalized indicator)</span>
-                    </label>
-                    <small class="form-hint form-hint--indent">
-                        When enabled, metadata will be normalized during processing.
-                    </small>
-                </div>
-
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Send to Ereader</h3>
-                <div class="form-group">
-                   <small id="emailStatusSummary" class="form-hint form-hint--lead">
-                       Configure SMTP delivery and saved ereader devices.
-                   </small>
-                   <button class="btn btn-small" type="button" data-requires-write onclick="openEmailDevicesModal()">Manage Ereader Devices</button>
-                   <button class="btn btn-small" type="button" onclick="loadEmailStatus()">Refresh Status</button>
-                </div>
-                <div class="form-group">
-                   <label for="smtpHost">SMTP Host</label>
-                   <input type="text" id="smtpHost" name="smtpHost" autocomplete="off" placeholder="smtp.example.com">
-                </div>
-                <div class="form-group">
-                   <label for="smtpPort">SMTP Port</label>
-                   <input type="number" id="smtpPort" name="smtpPort" min="1" max="65535" step="1" autocomplete="off" placeholder="587">
-                </div>
-                <div class="form-group">
-                   <label for="smtpUsername">SMTP Username</label>
-                   <input type="text" id="smtpUsername" name="smtpUsername" autocomplete="off">
-                </div>
-                <div class="form-group">
-                   <label for="smtpPassword">SMTP Password</label>
-                   <input type="password" id="smtpPassword" name="smtpPassword" autocomplete="new-password">
-                   <small id="smtpPasswordHint" class="form-hint">
-                       Leave blank to keep the stored password.
-                   </small>
-                   <label for="smtpClearPasswordCheckbox" class="checkbox-label checkbox-label--minor">
-                       <input type="checkbox" id="smtpClearPasswordCheckbox" name="smtpClearPassword">
-                       <span>Clear stored SMTP password on save</span>
-                   </label>
-                </div>
-                <div class="form-group">
-                   <label for="smtpUseSslCheckbox" class="checkbox-label">
-                       <input type="checkbox" id="smtpUseSslCheckbox" name="smtpUseSsl">
-                       <span>Use implicit TLS (SMTPS, usually port 465)</span>
-                   </label>
-                   <small class="form-hint form-hint--indent">
-                       Leave unchecked for the common submission port 587, which upgrades the connection with STARTTLS.
-                   </small>
-                </div>
-                <div class="form-group">
-                   <label for="smtpAllowInsecureCheckbox" class="checkbox-label">
-                       <input type="checkbox" id="smtpAllowInsecureCheckbox" name="smtpAllowInsecure">
-                       <span>Allow insecure plaintext connection</span>
-                   </label>
-                   <small class="form-hint form-hint--indent">
-                       Only enable for a trusted local relay that offers no TLS. Credentials and attachments are sent unencrypted.
-                   </small>
-                </div>
-                <div class="form-group">
-                   <label for="emailFromAddress">From Address</label>
-                   <input type="email" id="emailFromAddress" name="emailFromAddress" autocomplete="off" placeholder="comics@example.com">
-                </div>
-                <div class="form-group">
-                   <label for="emailFromName">From Name</label>
-                   <input type="text" id="emailFromName" name="emailFromName" autocomplete="off" placeholder="ComicMaintainer">
-                </div>
-                <div class="form-group">
-                   <label for="emailMaxAttachmentMb">Max Attachment Size (MB)</label>
-                   <input type="number" id="emailMaxAttachmentMb" name="emailMaxAttachmentMb" min="1" step="1" autocomplete="off" placeholder="25">
-                </div>
-                 
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Automated Error Reporting</h3>
-                <div class="form-group">
-                   <small class="form-hint form-hint--lead">
-                       When enabled, errors logged by this instance are deduplicated and filed as issues on the ComicMaintainer project repository, where they reach the people who develop it. Paths, email addresses and credentials are redacted before anything is sent. This is off by default; nothing leaves this machine until you turn it on and supply a token.
-                   </small>
-                   <label for="errorReportingEnabledCheckbox" class="checkbox-label">
-                       <input type="checkbox" id="errorReportingEnabledCheckbox" name="errorReportingEnabled">
-                       <span>File GitHub issues for errors</span>
-                   </label>
-                </div>
-                <div class="form-group">
-                   <label>Destination Repository</label>
-                   <div id="errorReportingDestination" style="color: var(--text-secondary);"></div>
-                   <small class="form-hint">
-                       Fixed: reports go to the project's own repository, which is the only place anyone can act on them.
-                   </small>
-                </div>
-                <div class="form-group">
-                   <label for="errorReportingToken">GitHub Token</label>
-                   <input type="password" id="errorReportingToken" name="errorReportingToken" autocomplete="new-password">
-                   <small id="errorReportingTokenHint" class="form-hint">
-                       Use a fine-grained token with <code>issues: write</code> on that repository only.
-                   </small>
-                   <label for="errorReportingClearTokenCheckbox" class="checkbox-label checkbox-label--minor">
-                       <input type="checkbox" id="errorReportingClearTokenCheckbox" name="errorReportingClearToken">
-                       <span>Clear stored token on save</span>
-                   </label>
-                </div>
-                <div class="form-group">
-                   <label for="errorReportingAssignee">Assign Issues To (optional)</label>
-                   <input type="text" id="errorReportingAssignee" name="errorReportingAssignee" autocomplete="off" placeholder="copilot-swe-agent">
-                   <small class="form-hint">
-                       GitHub login to assign new issues to. Set this to the coding agent's login to have it start work automatically. If the login cannot be assigned, the issue is still created unassigned.
-                   </small>
-                </div>
-                <div class="form-group">
-                   <label for="errorReportingMaxPerDay">Maximum Issues Per Day</label>
-                   <input type="number" id="errorReportingMaxPerDay" name="errorReportingMaxPerDay" min="0" max="100" step="1" autocomplete="off" placeholder="10">
-                </div>
-                <div class="form-group">
-                   <label for="errorReportingDedupeHours">Recurrence Comment Interval (Hours)</label>
-                   <input type="number" id="errorReportingDedupeHours" name="errorReportingDedupeHours" min="1" max="720" step="1" autocomplete="off" placeholder="24">
-                   <small class="form-hint">
-                       An already-filed failure never gets a second issue. This is how long to wait before adding a "still happening" comment to the existing one.
-                   </small>
-                </div>
-                <div class="form-group">
-                   <label for="errorReportingCommentCheckbox" class="checkbox-label">
-                       <input type="checkbox" id="errorReportingCommentCheckbox" name="errorReportingComment">
-                       <span>Comment on existing issues when a failure recurs</span>
-                   </label>
-                </div>
-                <div class="form-group">
-                   <button class="btn btn-small" type="button" data-requires-write onclick="sendErrorReportingTest()">Send Test Report</button>
-                   <small id="errorReportingTestHint" class="form-hint">
-                       Save your settings first, then send a harmless test report to confirm the token works.
-                   </small>
-                </div>
-
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Log Rotation</h3>
-                <div class="form-group">
-                    <label for="logMaxSize">
-                        Maximum Log File Size (MB)
-                        <span class="setting-restart-badge" title="This setting is only applied when the service starts.">Restart required</span>
-                    </label>
-                    <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="100" step="1" placeholder="5" autocomplete="off">
-                    <small class="form-hint">
-                        When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. The new size only takes effect after the service restarts — use <strong>Restart Service</strong> below to apply it immediately.
-                    </small>
-                    <small class="form-hint">
-                        <strong>Note:</strong> Can also be configured via the <code>LOG_MAX_BYTES</code> environment variable (in bytes).
-                    </small>
-                </div>
-                
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Database Cleanup</h3>
-                <div class="form-group">
-                    <label for="dbCleanupInterval">Cleanup Interval (Hours)</label>
-                    <input type="number" id="dbCleanupInterval" name="dbCleanupInterval" min="0" step="1" placeholder="12" autocomplete="off">
-                    <small class="form-hint">
-                        How often the database should be cleaned of stale entries for files that no longer exist. Set to 0 to only run on startup. Changes take effect on restart.
-                    </small>
-                    <small class="form-hint">
-                        <strong>Recommended:</strong> 12 hours (default) or 24 hours for less frequent cleanup.
-                    </small>
-                </div>
-                
-                <div class="form-group" style="margin-top: 15px;">
-                    <button class="btn btn-primary" onclick="cleanupDatabaseNow()" style="width: 100%;">
-                        <svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Clean Database Now
-                    </button>
-                    <small class="form-hint">
-                        Manually trigger database cleanup to remove stale entries for files that no longer exist on disk.
-                    </small>
-                </div>
-                
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Filename Format</h3>
-                <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
-                    Configure how files are renamed when processed. Use placeholders like <code>{series}</code>, <code>{issue}</code>, etc.
-                </p>
-                <div class="form-group">
-                    <label for="filenameFormat">Filename Template</label>
-                    <input type="text" id="filenameFormat" name="filenameFormat" placeholder="{series} - Chapter {issue}" autocomplete="off">
-                    <small class="form-hint">
-                        Available placeholders:
-                    </small>
-                    <ul style="margin: 10px 0 10px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.6;">
-                        <li><code>{series}</code> - Series name</li>
-                        <li><code>{issue}</code> - Issue number (padded based on settings, default 4 digits, e.g., 0001, or 0071.4 for decimals)</li>
-                        <li><code>{issue_no_pad}</code> - Issue number (no padding, e.g., 1, or 71.4 for decimals)</li>
-                        <li><code>{title}</code> - Issue title</li>
-                        <li><code>{volume}</code> - Volume number</li>
-                        <li><code>{year}</code> - Publication year</li>
-                        <li><code>{publisher}</code> - Publisher name</li>
-                    </ul>
-                    <small style="display: block; margin-top: 10px; color: var(--text-muted);">
-                        <strong>Example:</strong> <code>{series} v{volume} #{issue_no_pad} ({year})</code><br>
-                        <strong>Note:</strong> File extension (.cbz or .cbr) is automatically preserved
-                    </small>
-                </div>
-                <div style="margin-top: 15px; padding: 10px; background: var(--bg-hover); border-radius: 5px;">
-                    <small style="color: var(--text-muted);">
-                        <strong>Current format:</strong> <span id="currentFormat" style="font-family: monospace;"></span>
-                    </small>
-                </div>
-                
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Issue Number Padding</h3>
-                <div class="form-group">
-                    <label for="issueNumberPadding">Number of Digits for {issue} Placeholder</label>
-                    <input type="number" id="issueNumberPadding" name="issueNumberPadding" min="0" max="10" step="1" placeholder="4" autocomplete="off">
-                    <small class="form-hint">
-                        Controls how many digits the <code>{issue}</code> placeholder uses (default: 4). For example, with padding set to 4, issue 5 becomes 0005, with padding 3 it becomes 005, and with padding 0 it remains 5.
-                    </small>
-                    <small class="form-hint">
-                        <strong>Note:</strong> This only affects the <code>{issue}</code> placeholder. Use <code>{issue_no_pad}</code> for unpadded issue numbers regardless of this setting.
-                    </small>
-                </div>
-
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Series Covers</h3>
-                <div class="form-group">
-                    <label for="writeCoverToFirstArchiveCheckbox" class="checkbox-label">
-                        <input type="checkbox" id="writeCoverToFirstArchiveCheckbox" name="writeCoverToFirstArchive" onchange="updateWriteCoverToFirstArchive()">
-                        <span>Embed series cover into first issue archive</span>
-                    </label>
-                    <small class="form-hint form-hint--indent">
-                        When enabled, the cached provider/user series image is also written into the first issue's archive as a <code>cover.&lt;ext&gt;</code> entry, so external readers (Komga, Kavita, etc.) show the same cover. This rewrites the comic archive in place; the write is idempotent and only targets writable CBZ archives. The cover shown throughout ComicMaintainer always uses the downloaded provider image regardless of this setting.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="writeCoverToSeriesFolderCheckbox" class="checkbox-label">
-                        <input type="checkbox" id="writeCoverToSeriesFolderCheckbox" name="writeCoverToSeriesFolder" onchange="updateWriteCoverToSeriesFolder()">
-                        <span>Write series cover into each series folder</span>
-                    </label>
-                    <small class="form-hint form-hint--indent">
-                        When enabled, a copy of the cached series cover is written into every on-disk folder that contains files for the series as a <code>cover.&lt;ext&gt;</code> sidecar, so file managers and external readers can display it. Set to disabled to leave series folders untouched.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="downloadExternalSeriesImagesCheckbox" class="checkbox-label">
-                        <input type="checkbox" id="downloadExternalSeriesImagesCheckbox" name="downloadExternalSeriesImages" onchange="updateDownloadExternalSeriesImages()">
-                        <span>Download series cover images from external providers</span>
-                    </label>
-                    <small class="form-hint form-hint--indent">
-                        When enabled, external metadata refreshes also try to download a series cover image from the chosen provider. Disable to keep metadata-only refreshes (e.g. for limited-bandwidth deployments).
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="seriesImageMaxMB">Max Stored Cover Size (MB)</label>
-                    <input type="number" id="seriesImageMaxMB" name="seriesImageMaxMB" min="1" step="1" placeholder="5" autocomplete="off">
-                    <small class="form-hint">
-                        Maximum size of a stored series cover image. Larger downloads are downscaled to fit under this limit. Default: 5 MB.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="seriesImageMaxDownloadMB">Max Download Size (MB)</label>
-                    <input type="number" id="seriesImageMaxDownloadMB" name="seriesImageMaxDownloadMB" min="1" step="1" placeholder="25" autocomplete="off">
-                    <small class="form-hint">
-                        Hard ceiling for the raw payload fetched when downloading an external cover. Payloads above this are rejected; those between the stored limit and this ceiling are downscaled. Must be greater than or equal to the stored cover size. Default: 25 MB.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="seriesImageMaxDimension">Max Cover Dimension (px)</label>
-                    <input type="number" id="seriesImageMaxDimension" name="seriesImageMaxDimension" min="1" step="1" placeholder="2048" autocomplete="off">
-                    <small class="form-hint">
-                        Maximum width or height, in pixels, of a stored series cover image. Oversized downloads are resized (preserving aspect ratio) so their largest dimension is at most this value. Default: 2048.
-                    </small>
-                </div>
-
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">External Series Metadata</h3>
-                <div class="form-group">
-                    <label for="enableExternalSeriesMetadata" class="checkbox-label">
-                        <input type="checkbox" id="enableExternalSeriesMetadata" name="enableExternalSeriesMetadata">
-                        <span>Enable external series metadata (alias grouping)</span>
-                    </label>
-                    <small class="form-hint">
-                        Master switch. When enabled, ComicMaintainer can look up alternate series titles from the providers configured below so variants can be grouped together in the series library view. Lookups are <strong>manual</strong> — use the Library page's <em>Metadata → Refresh All External Metadata</em> button or the per-series <em>Manage Names</em> action to populate the cache. Changes take effect after restart.
-                    </small>
-                </div>
-
-                <h4 style="margin-bottom: 8px; margin-top: 18px; color: var(--text-secondary);">ComicVine (US comics)</h4>
-                <div class="form-group">
-                    <label for="comicVineApiKey">ComicVine API Key</label>
-                    <input type="password" id="comicVineApiKey" name="comicVineApiKey" placeholder="Enter ComicVine API key" autocomplete="off">
-                    <small class="form-hint">
-                        Leave blank to disable ComicVine lookups. The key is stored in user settings on this instance.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="comicVineBaseUrl">ComicVine Base URL</label>
-                    <input type="text" id="comicVineBaseUrl" name="comicVineBaseUrl" placeholder="https://comicvine.gamespot.com/api" autocomplete="off">
-                </div>
-
-                <h4 style="margin-bottom: 8px; margin-top: 18px; color: var(--text-secondary);">MangaDex (manga)</h4>
-                <div class="form-group">
-                    <label for="enableMangaDexMetadata" class="checkbox-label">
-                        <input type="checkbox" id="enableMangaDexMetadata" name="enableMangaDexMetadata">
-                        <span>Enable MangaDex provider</span>
-                    </label>
-                    <small class="form-hint">
-                        Looks up canonical titles and alternate localizations from MangaDex. No API key required.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="mangaDexBaseUrl">MangaDex Base URL</label>
-                    <input type="text" id="mangaDexBaseUrl" name="mangaDexBaseUrl" placeholder="https://api.mangadex.org" autocomplete="off">
-                </div>
-
-                <h4 style="margin-bottom: 8px; margin-top: 18px; color: var(--text-secondary);">AniList</h4>
-                <div class="form-group">
-                    <label for="enableAniListMetadata" class="checkbox-label">
-                        <input type="checkbox" id="enableAniListMetadata" name="enableAniListMetadata">
-                        <span>Enable AniList provider</span>
-                    </label>
-                    <small class="form-hint">
-                        Queries AniList for both Manga (Japanese origin) and Manhwa (Korean origin). No API key required.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="aniListBaseUrl">AniList GraphQL Endpoint</label>
-                    <input type="text" id="aniListBaseUrl" name="aniListBaseUrl" placeholder="https://graphql.anilist.co" autocomplete="off">
-                </div>
-
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Suwayomi Downloads</h3>
-                <div class="form-group">
-                    <label for="enableSuwayomiCheckbox" class="checkbox-label">
-                        <input type="checkbox" id="enableSuwayomiCheckbox" name="enableSuwayomiCheckbox">
-                        <span>Enable Suwayomi integration</span>
-                    </label>
-                    <small class="form-hint">
-                        Lets ComicMaintainer ask a <a href="https://github.com/Suwayomi/Suwayomi-Server" target="_blank" rel="noopener noreferrer">Suwayomi</a> server to download the issues a series is missing. Suwayomi saves them to its own download directory, so mount that directory inside the watched directory for the new files to be picked up.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="suwayomiBaseUrl">Suwayomi Server URL</label>
-                    <input type="text" id="suwayomiBaseUrl" name="suwayomiBaseUrl" placeholder="http://localhost:4567" autocomplete="off">
-                </div>
-                <div class="form-group">
-                    <label for="suwayomiUsername">Username (optional)</label>
-                    <input type="text" id="suwayomiUsername" name="suwayomiUsername" placeholder="Only if the server requires basic auth" autocomplete="off">
-                </div>
-                <div class="form-group">
-                    <label for="suwayomiPassword">Password (optional)</label>
-                    <input type="password" id="suwayomiPassword" name="suwayomiPassword" placeholder="Enter password" autocomplete="new-password">
-                    <small id="suwayomiPasswordHint" class="form-hint"></small>
-                    <label for="suwayomiClearPasswordCheckbox" class="checkbox-label checkbox-label--minor">
-                        <input type="checkbox" id="suwayomiClearPasswordCheckbox" name="suwayomiClearPasswordCheckbox">
-                        <span style="font-size: 13px; color: var(--text-muted);">Clear the stored password</span>
-                    </label>
-                </div>
-                <div class="form-group">
-                    <button class="btn" type="button" onclick="testSuwayomiConnection()"><svg class="icon" aria-hidden="true"><use href="#i-plug"/></svg> Test Connection</button>
-                    <small id="suwayomiStatusHint" class="form-hint">Save your settings before testing.</small>
-                </div>
-                
-                <h3 style="margin-bottom: 10px; margin-top: 35px; color: #e74c3c; border-bottom: 2px solid #e74c3c; padding-bottom: 8px;">⚠️ Danger Zone</h3>
-                <div class="form-group" style="border: 2px solid #e74c3c; border-radius: 8px; padding: 20px; background: var(--bg-hover);">
-                    <label style="font-weight: 600; color: #e74c3c; font-size: 15px;">Reset Database</label>
-                    <p style="margin: 10px 0; color: var(--text-secondary); font-size: 14px;">
-                        This will permanently delete all processing information including:
-                    </p>
-                    <ul style="margin: 10px 0 15px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.8;">
-                        <li>All file processing states (processed, renamed, normalized)</li>
-                        <li>Complete processing history</li>
-                        <li>All database records</li>
-                    </ul>
-                    <p style="margin: 10px 0; color: #e74c3c; font-size: 13px; font-weight: 600;">
-                        ⚠️ This action cannot be undone! Your actual comic files will NOT be deleted.
-                    </p>
-                    <button class="btn btn-danger" onclick="showResetConfirmation()" style="margin-top: 10px; font-weight: 600;">
-                        <svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Reset Database
-                    </button>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn" onclick="closeSettings()">Cancel</button>
-                <button class="btn btn-warning" onclick="resetFilenameFormat()">Reset to Default</button>
-                <button class="btn btn-primary" onclick="saveFilenameFormat()">Save</button>
-            </div>
-        </div>
-    </div>
-    
     <!-- Reset Confirmation Modal -->
     <div class="modal" id="resetConfirmationModal" role="dialog" aria-modal="true" aria-labelledby="resetConfirmationModalTitle" aria-hidden="true">
         <div class="modal-content" style="max-width: 500px;">
@@ -1472,6 +1584,7 @@
                     <li><kbd>Esc</kbd><span>Clear the search box (while it is focused)</span></li>
                     <li><kbd>g</kbd> <kbd>h</kbd><span>Go to Overview</span></li>
                     <li><kbd>g</kbd> <kbd>l</kbd><span>Go to Library</span></li>
+                    <li><kbd>g</kbd> <kbd>s</kbd><span>Go to Settings</span></li>
                     <li><kbd>r</kbd><span>Refresh the file list <em>(Library)</em></span></li>
                     <li><kbd>f</kbd><span>Open the filter menu <em>(Library)</em></span></li>
                     <li><kbd>?</kbd><span>Show this help</span></li>

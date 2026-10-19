@@ -204,8 +204,8 @@
                 </div>
                 <div class="header-controls">
                     <nav class="header-nav" id="headerNav" aria-label="Primary">
-                        <button type="button" class="header-nav-btn" id="navOverviewBtn" onclick="navigate('#/home')">🏠<span class="header-nav-label"> Overview</span></button>
-                        <button type="button" class="header-nav-btn" id="navLibraryBtn" onclick="navigate('#/library')">📚<span class="header-nav-label"> Library</span></button>
+                        <button type="button" class="header-nav-btn" id="navOverviewBtn" onclick="navigate('#/home')" title="Overview">🏠<span class="header-nav-label"> Overview</span></button>
+                        <button type="button" class="header-nav-btn" id="navLibraryBtn" onclick="navigate('#/library')" title="Library">📚<span class="header-nav-label"> Library</span></button>
                     </nav>
                     <button type="button" id="progressIndicator" class="progress-indicator-btn" onclick="restoreProgressModal()" style="display: none;" title="Show progress" aria-label="Show processing progress">
                         <span id="progressIndicatorText">⏳ Processing...</span>
@@ -1000,7 +1000,7 @@
                 </div>
                 
                 <div class="form-group" style="margin-top: 15px;">
-                    <button class="btn" onclick="cleanupDatabaseNow()" style="background: var(--accent-primary); color: white; width: 100%;">
+                    <button class="btn btn-primary" onclick="cleanupDatabaseNow()" style="width: 100%;">
                         🧹 Clean Database Now
                     </button>
                     <small style="display: block; margin-top: 5px; color: var(--text-muted);">
@@ -1200,14 +1200,14 @@
                     <p style="margin: 10px 0; color: #e74c3c; font-size: 13px; font-weight: 600;">
                         ⚠️ This action cannot be undone! Your actual comic files will NOT be deleted.
                     </p>
-                    <button class="btn" onclick="showResetConfirmation()" style="background: #e74c3c; color: white; margin-top: 10px; font-weight: 600;">
+                    <button class="btn btn-danger" onclick="showResetConfirmation()" style="margin-top: 10px; font-weight: 600;">
                         🗑️ Reset Database
                     </button>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn" onclick="closeSettings()">Cancel</button>
-                <button class="btn" onclick="resetFilenameFormat()" style="background: #e67e22; color: white;">Reset to Default</button>
+                <button class="btn btn-warning" onclick="resetFilenameFormat()">Reset to Default</button>
                 <button class="btn btn-primary" onclick="saveFilenameFormat()">Save</button>
             </div>
         </div>
@@ -1242,7 +1242,7 @@
             </div>
             <div class="modal-footer">
                 <button class="btn" onclick="closeResetConfirmation()">Cancel</button>
-                <button class="btn" onclick="confirmReset()" style="background: #e74c3c; color: white; font-weight: 600;">
+                <button class="btn btn-danger" onclick="confirmReset()" style="font-weight: 600;">
                     Yes, Reset Database
                 </button>
             </div>

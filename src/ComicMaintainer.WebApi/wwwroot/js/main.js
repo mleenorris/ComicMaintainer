@@ -2223,7 +2223,7 @@
             }
             overviewLoaded = true;
             const rows = [
-                { title: '▶ Continue Reading', items: data.continue_reading || [], empty: 'Nothing in progress yet.', resume: true, seeAll: false },
+                { title: '📖 Continue Reading', items: data.continue_reading || [], empty: 'Nothing in progress yet.', resume: true, seeAll: false },
                 { title: '🆕 Series Updates', items: data.series_updates || [], empty: 'No new files in the last 30 days.', resume: false, seeAll: true },
                 { title: '✨ Newly Added Series', items: data.newly_added_series || [], empty: 'No new series in the last 30 days.', resume: false, seeAll: true }
             ];
@@ -4423,7 +4423,7 @@
                                 ${series.metadata_source ? html`<div class="series-detail-meta">Source: ${series.metadata_source}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
                                 ${rawHtml(renderSeriesSynopsis(series))}
                                 <div class="series-detail-actions">
-                                    ${issues.length ? html`<button type="button" class="btn btn-small" onclick="readComic('${jsArg(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
+                                    ${issues.length ? html`<button type="button" class="btn btn-small btn-primary" onclick="readComic('${jsArg(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
                                     <div class="file-actions-dropdown series-actions-dropdown">
                                         <button type="button" class="dropdown-toggle" onclick="toggleDropdown(event, '${jsArg(SERIES_ACTIONS_DROPDOWN_KEY)}')">
                                             ⚙️ Actions

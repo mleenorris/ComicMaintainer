@@ -40,6 +40,23 @@
             --status-ok-text: #1e8449;
             --status-warn-text: #b9770e;
             --status-bad-text: #c0392b;
+
+            /* Accent for active/selected states and primary actions. Shared by
+               both themes; it matches .btn-primary. */
+            --accent-primary: #3498db;
+            --accent-primary-hover: #2980b9;
+
+            /* Inline error / warning text */
+            --text-error: #c0392b;
+            --text-warning: #b9770e;
+            --danger: #c0392b;
+
+            /* Neutral (secondary) buttons: a .btn without a colour modifier */
+            --btn-neutral-bg: #e3e7ea;
+            --btn-neutral-hover: #d5dadf;
+
+            /* Native controls (checkboxes, selects, scrollbars) follow the theme */
+            color-scheme: light;
         }
         
         [data-theme="dark"] {
@@ -84,12 +101,28 @@
             --status-ok-text: #6ee7a8;
             --status-warn-text: #f4c26b;
             --status-bad-text: #f4a09c;
+
+            --text-error: #f4a09c;
+            --text-warning: #f4c26b;
+            --danger: #f4a09c;
+
+            --btn-neutral-bg: #2f2f2f;
+            --btn-neutral-hover: #3b3b3b;
+
+            color-scheme: dark;
         }
         
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
+        }
+
+        /* The hidden attribute must always win. Components that set their own
+           display (flex, grid, ...) otherwise beat the user agent's
+           [hidden] { display: none } and leave "hidden" controls on screen. */
+        [hidden] {
+            display: none !important;
         }
         
         /* Visually hidden utility class for accessibility */
@@ -113,6 +146,7 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             background: var(--bg-primary);
             color: var(--text-primary);
+            accent-color: var(--accent-primary);
             transition: background-color 0.3s, color 0.3s;
             overflow: hidden;
             overflow-x: hidden;
@@ -124,7 +158,7 @@
         .header {
             background: var(--bg-header);
             color: var(--text-header);
-            padding: 12px 20px;
+            padding: 12px 0;
             box-shadow: var(--shadow-sm);
             flex-shrink: 0;
             position: sticky;
@@ -135,12 +169,23 @@
         
         .header .container {
             overflow: visible;
+            /* Keep the page container's horizontal padding so the header lines
+               up with the content below, but not its vertical padding, which
+               made the bar ~112px tall for a single row of controls. */
+            padding-top: 0;
+            padding-bottom: 0;
         }
         
         .header-content {
             display: flex;
             align-items: center;
             gap: 10px;
+        }
+
+        .header-content > svg {
+            width: 40px;
+            height: 40px;
+            flex-shrink: 0;
         }
         
         .header-left h1 {
@@ -173,33 +218,62 @@
             flex: 0 0 auto;
         }
 
+        /* Header controls sit on the dark header bar in both themes, so they
+           use translucent white rather than the page surface colours, and
+           share one height and corner radius. */
         .header-nav-btn {
             display: inline-flex;
             align-items: center;
             gap: 4px;
-            padding: 6px 12px;
-            border: 1px solid var(--border-primary);
+            height: 36px;
+            padding: 0 12px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
             border-radius: 8px;
-            background: var(--bg-secondary, transparent);
-            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-header);
             font-size: 13px;
             font-weight: 600;
             cursor: pointer;
             white-space: nowrap;
+            transition: background 0.2s, border-color 0.2s;
         }
 
         .header-nav-btn:hover {
-            background: var(--bg-hover);
+            background: rgba(255, 255, 255, 0.2);
         }
 
         .header-nav-btn.active {
-            background: var(--accent-primary, #4a90d9);
-            border-color: var(--accent-primary, #4a90d9);
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
             color: #fff;
         }
 
         @media (max-width: 600px) {
             .header-nav-label { display: none; }
+        }
+
+        /* Between phones and wide desktops the one-row header ran out of room
+           (at 1024px the layout toggle was pushed off-screen). Drop labels that
+           have an icon and tooltip equivalent, and wrap the controls onto a
+           second row rather than clip them if it still doesn't fit. */
+        @media (max-width: 1200px) and (min-width: 769px) {
+            .header-content {
+                flex-wrap: wrap;
+                row-gap: 8px;
+            }
+
+            .header-nav-label,
+            .header-content > .watcher-status-indicator .watcher-text {
+                display: none;
+            }
+
+            .header-content > .watcher-status-indicator {
+                padding: 0 9px;
+            }
+
+            .header-search {
+                min-width: 140px;
+            }
         }
         
         .header-search {
@@ -209,9 +283,10 @@
         }
         
         .header-search input {
+            height: 36px;
             padding: 8px 32px 8px 12px;
             border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 5px;
+            border-radius: 8px;
             background: rgba(255, 255, 255, 0.1);
             color: var(--text-header);
             font-size: 13px;
@@ -271,8 +346,9 @@
             background: rgba(255, 255, 255, 0.1);
             border: 1px solid rgba(255, 255, 255, 0.2);
             color: var(--text-header);
-            padding: 8px 12px;
-            border-radius: 5px;
+            height: 36px;
+            padding: 0 12px;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 13px;
             display: flex;
@@ -300,8 +376,9 @@
             background: rgba(255, 255, 255, 0.1);
             border: 1px solid rgba(255, 255, 255, 0.2);
             color: var(--text-header);
-            padding: 8px 12px;
-            border-radius: 5px;
+            height: 36px;
+            padding: 0 12px;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 13px;
             display: flex;
@@ -396,6 +473,14 @@
             font-weight: 500;
             white-space: nowrap;
         }
+
+        /* In the header the watcher is a status, not a button: a slimmer pill
+           at the shared control height. */
+        .header-content > .watcher-status-indicator {
+            height: 36px;
+            padding: 0 12px;
+            border-radius: 999px;
+        }
         
         .settings-menu-wrapper {
             position: relative;
@@ -405,13 +490,13 @@
             background: rgba(255, 255, 255, 0.1);
             border: 1px solid rgba(255, 255, 255, 0.2);
             color: var(--text-header);
-            padding: 10px;
-            border-radius: 5px;
+            padding: 0;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 20px;
             transition: all 0.3s;
-            width: 40px;
-            height: 40px;
+            width: 36px;
+            height: 36px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -425,14 +510,20 @@
             display: none;
             position: absolute;
             right: 0;
-            top: calc(100% + 5px);
+            top: calc(100% + 6px);
             background: var(--bg-secondary);
             border: 1px solid var(--border-secondary);
-            border-radius: 5px;
+            border-radius: 8px;
             box-shadow: var(--shadow-md);
             z-index: 1000;
-            min-width: 200px;
-            overflow: hidden;
+            min-width: 240px;
+            /* The menu is taller than many viewports; scroll inside it rather
+               than letting Logout and the About items fall off-screen. */
+            max-height: calc(100vh - 80px);
+            max-height: calc(100dvh - 80px);
+            overflow-x: hidden;
+            overflow-y: auto;
+            overscroll-behavior: contain;
         }
         
         .settings-dropdown-menu.show {
@@ -528,6 +619,10 @@
         }
         
         .container {
+            /* Without an explicit width the container shrink-wraps its content
+               inside the column-flex body, so pages were narrower than the
+               header and re-centred whenever their content changed width. */
+            width: 100%;
             max-width: 1400px;
             min-width: 800px;
             margin: 0 auto;
@@ -716,6 +811,15 @@
             font-size: 14px;
             font-weight: 500;
             transition: all 0.3s;
+            /* Neutral (secondary) look for buttons without a colour modifier.
+               Without it they fall back to the browser's light-grey button,
+               which glares in dark mode. The modifiers below override it. */
+            background: var(--btn-neutral-bg);
+            color: var(--text-primary);
+        }
+
+        .btn:hover {
+            background: var(--btn-neutral-hover);
         }
         
         .btn-primary {
@@ -772,8 +876,14 @@
             background: #138d75;
         }
         
-        .btn:disabled {
-            opacity: 0.5;
+        /* Disabled buttons turn neutral instead of a faded copy of their colour,
+           so a row of unavailable actions reads as inactive rather than as a
+           muddy rainbow. The grayscale filter also mutes emoji icons. */
+        .btn:disabled,
+        .btn:disabled:hover {
+            background: var(--btn-neutral-bg);
+            color: var(--text-muted);
+            filter: grayscale(1);
             cursor: not-allowed;
         }
         
@@ -791,7 +901,10 @@
             font-size: 12px;
             font-weight: 500;
             transition: all 0.3s;
-            color: white;
+            /* Neutral by default (e.g. Metadata); the colour modifiers below
+               switch to a filled colour with white text. */
+            background: var(--btn-neutral-bg);
+            color: var(--text-primary);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -799,6 +912,17 @@
             width: 100%;
             min-height: 37px;
             box-sizing: border-box;
+        }
+
+        .action-dropdown-toggle:hover {
+            background: var(--btn-neutral-hover);
+        }
+
+        .action-dropdown-toggle.process,
+        .action-dropdown-toggle.rename,
+        .action-dropdown-toggle.normalize,
+        .action-dropdown-toggle.mark {
+            color: #fff;
         }
         
         .action-dropdown-toggle::after {
@@ -839,8 +963,11 @@
             background: #2980b9;
         }
         
-        .action-dropdown-toggle:disabled {
-            opacity: 0.5;
+        .action-dropdown-toggle:disabled,
+        .action-dropdown-toggle:disabled:hover {
+            background: var(--btn-neutral-bg);
+            color: var(--text-muted);
+            filter: grayscale(1);
             cursor: not-allowed;
         }
         
@@ -935,31 +1062,41 @@
             transform: scale(1.05);
         }
 
+        /* Segmented List / Grid / Compact control on the dark header bar. */
         .header-view-toggle {
             display: flex;
             align-items: center;
-            gap: 6px;
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-primary);
-            border-radius: 999px;
-            padding: 4px;
+            flex-shrink: 0;
+            gap: 2px;
+            height: 36px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            padding: 3px;
         }
 
         .header-view-btn {
+            height: 100%;
             border: none;
             background: transparent;
-            color: var(--text-secondary);
-            border-radius: 999px;
-            padding: 7px 12px;
+            color: rgba(255, 255, 255, 0.85);
+            border-radius: 6px;
+            padding: 0 10px;
             cursor: pointer;
             font-size: 13px;
             font-weight: 600;
+            white-space: nowrap;
             transition: all 0.2s ease;
+        }
+
+        .header-view-btn:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
         }
 
         .header-view-btn.active {
             background: var(--accent-primary);
-            color: white;
+            color: #fff;
         }
 
         /* ── Series grid (Kavita-style cover-dominant cards) ── */
@@ -976,7 +1113,9 @@
         .series-card {
             position: relative;
             display: block;
-            border: none;
+            /* Surfaces share one background colour, so the hairline border is
+               what separates cards from the page (shadows barely show in dark). */
+            border: 1px solid var(--border-primary);
             border-radius: 8px;
             background: var(--bg-secondary);
             box-shadow: var(--shadow-sm);
@@ -1286,6 +1425,16 @@
 
         @media (max-width: 600px) {
             .overview-card { width: 132px; }
+        }
+
+        /* The page container has no padding on phones; inset the row titles
+           and the first card while letting carousels still scroll edge to edge. */
+        @media (max-width: 768px) {
+            .overview-row-header { padding: 0 12px; }
+            .overview-carousel {
+                padding: 4px 12px 12px;
+                scroll-padding-inline: 12px;
+            }
         }
 
         /* ── Series detail view ── */
@@ -1885,6 +2034,7 @@
         
         .file-list {
             background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
             border-radius: 8px;
             box-shadow: var(--shadow-sm);
             overflow-y: auto;
@@ -2187,6 +2337,7 @@
 
         .library-health-dashboard {
             background: var(--bg-secondary);
+            border: 1px solid var(--border-primary);
             border-radius: 10px;
             box-shadow: var(--shadow-sm);
             padding: 18px;
@@ -3010,7 +3161,7 @@
         /* Intermediate Desktop Responsive Styles (Tablets & Small Desktops) */
         @media (max-width: 1024px) and (min-width: 769px) {
             .header {
-                padding: 10px 15px;
+                padding: 10px 0;
             }
             
             .header h1 {
@@ -3190,12 +3341,15 @@
             
             .header-search {
                 flex: 1;
+                /* The desktop 200px minimum pushed Sort off a 390px screen. */
+                min-width: 0;
             }
             
             .header-search input {
                 width: 100%;
                 padding: 8px 30px 8px 10px;
-                font-size: 12px;
+                /* At least 16px, or iOS Safari zooms the page on focus. */
+                font-size: 16px;
             }
             
             .header-filter-toggle,
@@ -3278,7 +3432,10 @@
             .settings-dropdown-menu {
                 right: auto;
                 left: 0;
-                min-width: 200px;
+                min-width: 240px;
+                max-width: calc(100vw - 20px);
+                max-height: calc(100vh - 60px);
+                max-height: calc(100dvh - 60px);
             }
             
             .actions-bar {
@@ -3420,6 +3577,8 @@
                 max-width: 100%;
                 width: 100%;
                 border-radius: 0;
+                border-left: none;
+                border-right: none;
                 margin: 0;
                 min-height: 0;
                 flex: none;
@@ -3836,6 +3995,22 @@
             position: static;
             top: auto;
             left: auto;
+        }
+
+        /* Overview cards have no selection checkbox, so the badge takes the
+           corner instead of floating where the checkbox would be. */
+        .overview-series-card .series-lookup-badge {
+            left: 8px;
+        }
+
+        /* Beside the series title on the detail page it flows with the text.
+           Absolutely positioned it had no positioned ancestor and ended up
+           behind the header at the top-left of the page. */
+        .series-detail-summary-body h2 .series-lookup-badge {
+            position: static;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 6px;
         }
 
         /* ---------- Provider health widget ---------- */

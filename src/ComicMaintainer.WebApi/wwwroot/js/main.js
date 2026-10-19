@@ -3316,7 +3316,7 @@
             if (!seriesLibrary.length) {
                 renderHtml(fileList, html`
                     <div class="empty-state">
-                        <div class="empty-state-icon">🖼️</div>
+                        <div class="empty-state-icon">${uiIcon('image')}</div>
                         <h2>No series found</h2>
                         <p>${searchQuery || filterMode !== 'all' ? 'Try a different search term or filter' : 'Process and normalize comics to build your series library view.'}</p>
                     </div>
@@ -4767,7 +4767,7 @@
                 } else if (searchQuery || filterMode !== 'all') {
                     renderHtml(fileList, html`
                         <div class="empty-state">
-                            <div class="empty-state-icon">🔍</div>
+                            <div class="empty-state-icon">${uiIcon('search')}</div>
                             <h2>No matching files found</h2>
                             <p>Try a different search term or filter</p>
                         </div>
@@ -4775,7 +4775,7 @@
                 } else {
                     renderHtml(fileList, html`
                         <div class="empty-state">
-                            <div class="empty-state-icon">📁</div>
+                            <div class="empty-state-icon">${uiIcon('folder')}</div>
                             <h2>No comic files found</h2>
                             <p>Add some .cbz or .cbr files to your watched directory</p>
                         </div>

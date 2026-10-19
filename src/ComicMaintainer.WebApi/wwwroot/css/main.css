@@ -1342,7 +1342,7 @@
         .series-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-            gap: 16px;
+            gap: 20px;
             padding: 18px;
             width: 100%;
             box-sizing: border-box;
@@ -1354,25 +1354,27 @@
             /* Surfaces share one background colour, so the hairline border is
                what separates cards from the page (shadows barely show in dark). */
             border: 1px solid var(--border-primary);
-            border-radius: 8px;
-            background: var(--bg-secondary);
+            border-radius: var(--radius-md);
+            background: var(--bg-raised);
             box-shadow: var(--shadow-sm);
             overflow: hidden;
             cursor: pointer;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            transition: transform var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out), border-color var(--duration-base) var(--ease-out);
             padding: 0;
             text-align: left;
             color: inherit;
             font: inherit;
         }
 
+        /* Comic "panel lift": the card rises and casts a hard ink shadow. */
         .series-card:hover {
-            transform: translateY(-4px);
-            box-shadow: var(--shadow-md);
+            transform: translate(-2px, -3px);
+            border-color: var(--brand-ink);
+            box-shadow: var(--shadow-pop);
         }
 
         .series-card:focus-visible {
-            outline: 2px solid var(--text-primary);
+            outline: 3px solid var(--accent-primary);
             outline-offset: 2px;
         }
 
@@ -1492,13 +1494,15 @@
             position: absolute;
             top: 6px;
             right: 6px;
-            background: rgba(0,0,0,0.7);
-            color: #fff;
+            background: var(--brand-yellow);
+            color: var(--brand-ink);
+            border: 1.5px solid var(--brand-ink);
             font-size: 11px;
-            font-weight: 700;
-            padding: 2px 7px;
-            border-radius: 4px;
+            font-weight: 800;
+            padding: 1px 7px;
+            border-radius: var(--radius-pill);
             line-height: 1.4;
+            box-shadow: 1px 1px 0 var(--brand-ink);
             pointer-events: none;
         }
 
@@ -1667,17 +1671,32 @@
 
         .overview-resume-btn {
             width: 100%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
             padding: 6px 8px;
-            border: none;
-            border-radius: 8px;
+            border: 2px solid var(--brand-ink);
+            border-radius: var(--radius-sm);
             background: var(--accent-primary);
             color: #fff;
             font-size: 12px;
-            font-weight: 600;
+            font-weight: 700;
             cursor: pointer;
+            box-shadow: 2px 2px 0 var(--brand-ink);
+            transition: transform var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
         }
 
-        .overview-resume-btn:hover { filter: brightness(1.08); }
+        .overview-resume-btn:hover {
+            background: var(--accent-primary-hover);
+            transform: translate(-1px, -1px);
+            box-shadow: 3px 3px 0 var(--brand-ink);
+        }
+
+        .overview-resume-btn:active {
+            transform: translate(1px, 1px);
+            box-shadow: 0 0 0 var(--brand-ink);
+        }
 
         .overview-empty {
             color: var(--text-muted);
@@ -2054,13 +2073,15 @@
             position: absolute;
             top: 6px;
             left: 6px;
-            background: rgba(0,0,0,0.7);
-            color: #fff;
+            background: var(--brand-yellow);
+            color: var(--brand-ink);
+            border: 1.5px solid var(--brand-ink);
             font-size: 11px;
-            font-weight: 700;
-            padding: 2px 7px;
-            border-radius: 4px;
+            font-weight: 800;
+            padding: 1px 7px;
+            border-radius: var(--radius-pill);
             line-height: 1.4;
+            box-shadow: 1px 1px 0 var(--brand-ink);
             pointer-events: none;
         }
 
@@ -2599,9 +2620,9 @@
         }
 
         .library-health-dashboard {
-            background: var(--bg-secondary);
+            background: var(--bg-raised);
             border: 1px solid var(--border-primary);
-            border-radius: 10px;
+            border-radius: var(--radius-lg);
             box-shadow: var(--shadow-sm);
             padding: 18px;
             margin-bottom: 16px;
@@ -2625,8 +2646,8 @@
         }
 
         .library-health-header h2 {
-            font-size: 18px;
-            color: var(--text-secondary);
+            font-size: var(--text-xl);
+            color: var(--text-primary);
             margin-bottom: 4px;
         }
 
@@ -2668,9 +2689,20 @@
             border: 1px dashed var(--border-secondary);
             border-radius: 10px;
         }
-        .library-health-empty .library-health-empty-icon {
-            font-size: 38px;
-            margin-bottom: 8px;
+        .library-health-empty .library-health-empty-icon,
+        .empty-state-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 64px;
+            height: 64px;
+            margin-bottom: 12px;
+            border: 2px solid var(--brand-ink);
+            border-radius: 50%;
+            background: var(--brand-yellow);
+            color: var(--brand-ink);
+            font-size: 30px;
+            box-shadow: 3px 3px 0 var(--brand-ink);
         }
         .library-health-empty h3 {
             margin: 0 0 6px;
@@ -2688,7 +2720,7 @@
         .library-health-card {
             border: 1px solid var(--border-primary);
             background: var(--bg-primary);
-            border-radius: 10px;
+            border-radius: var(--radius-md);
             padding: 14px;
             display: flex;
             flex-direction: column;
@@ -2700,19 +2732,21 @@
 
         button.library-health-card {
             cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
+            transition: transform var(--duration-base) var(--ease-out), box-shadow var(--duration-base) var(--ease-out), border-color var(--duration-base) var(--ease-out);
         }
 
         button.library-health-card:hover {
-            transform: translateY(-1px);
-            border-color: var(--border-secondary);
-            box-shadow: var(--shadow-sm);
+            transform: translate(-1px, -2px);
+            border-color: var(--brand-ink);
+            box-shadow: var(--shadow-pop);
         }
 
         .library-health-card strong {
-            font-size: 28px;
+            font-family: var(--font-display);
+            font-size: 30px;
+            font-weight: 900;
             line-height: 1;
-            color: var(--text-secondary);
+            color: var(--text-primary);
         }
 
         .library-health-card small,
@@ -2721,19 +2755,20 @@
             font-size: 12px;
         }
 
+        /* Status tiles carry a coloured top rule like a comic caption tab. */
         .library-health-card.success {
-            border-color: rgba(39, 174, 96, 0.35);
-            background: linear-gradient(180deg, rgba(39, 174, 96, 0.06), transparent 70%);
+            border-top: 4px solid var(--color-success);
+            background: linear-gradient(180deg, rgba(47, 125, 50, 0.07), transparent 70%);
         }
 
         .library-health-card.warning {
-            border-color: rgba(243, 156, 18, 0.45);
-            background: linear-gradient(180deg, rgba(243, 156, 18, 0.08), transparent 70%);
+            border-top: 4px solid var(--brand-yellow);
+            background: linear-gradient(180deg, rgba(255, 200, 69, 0.12), transparent 70%);
         }
 
         .library-health-card.accent {
-            border-color: rgba(52, 152, 219, 0.4);
-            background: linear-gradient(180deg, rgba(52, 152, 219, 0.06), transparent 70%);
+            border-top: 4px solid var(--accent-primary);
+            background: linear-gradient(180deg, var(--accent-primary-soft), transparent 70%);
         }
 
         .library-health-card.neutral {
@@ -3497,12 +3532,13 @@
         .empty-state {
             text-align: center;
             padding: 60px 20px;
-            color: var(--text-light);
+            color: var(--text-muted);
         }
-        
-        .empty-state-icon {
-            font-size: 64px;
-            margin-bottom: 20px;
+
+        .empty-state h2 {
+            margin-bottom: 6px;
+            font-size: var(--text-xl);
+            color: var(--text-primary);
         }
         
         .pagination {
@@ -4169,8 +4205,9 @@
             }
             
             .empty-state-icon {
-                font-size: 48px;
-                margin-bottom: 15px;
+                width: 56px;
+                height: 56px;
+                font-size: 26px;
             }
             
             .empty-state h2 {
@@ -4303,8 +4340,9 @@
             }
             
             .empty-state-icon {
-                font-size: 40px;
-                margin-bottom: 12px;
+                width: 52px;
+                height: 52px;
+                font-size: 24px;
             }
             
             .empty-state h2 {

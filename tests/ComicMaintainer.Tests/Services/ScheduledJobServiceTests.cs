@@ -3,6 +3,7 @@ using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -72,6 +73,35 @@ public class ScheduledJobServiceTests
         await service.SeedDefaultsAsync();
         var jobs = await service.ListAsync();
         Assert.Single(jobs);
+    }
+
+    [Fact]
+    public async Task SeedDefaultsAsync_WhenInstancesSeedConcurrently_IsIdempotent()
+    {
+        var databasePath = Path.Combine(Path.GetTempPath(), $"scheduled-job-seed-{Guid.NewGuid():N}.db");
+        var factory = new SqliteTestDbContextFactory(databasePath, new ConcurrentSaveChangesInterceptor());
+        try
+        {
+            await using (var db = factory.CreateDbContext())
+            {
+                await db.Database.EnsureCreatedAsync();
+            }
+
+            var handler = new FakeHandler("alpha");
+            var first = new ScheduledJobService(factory, [handler], NullLogger<ScheduledJobService>.Instance);
+            var second = new ScheduledJobService(factory, [handler], NullLogger<ScheduledJobService>.Instance);
+
+            await Task.WhenAll(first.SeedDefaultsAsync(), second.SeedDefaultsAsync());
+
+            Assert.Single(await first.ListAsync());
+        }
+        finally
+        {
+            if (File.Exists(databasePath))
+            {
+                File.Delete(databasePath);
+            }
+        }
     }
 
     [Fact]
@@ -145,5 +175,46 @@ public class ScheduledJobServiceTests
     {
         Assert.Throws<InvalidOperationException>(() =>
             BuildService(new FakeHandler("alpha"), new FakeHandler("alpha")));
+    }
+
+    private sealed class SqliteTestDbContextFactory : IDbContextFactory<ComicMaintainerDbContext>
+    {
+        private readonly DbContextOptions<ComicMaintainerDbContext> _options;
+
+        public SqliteTestDbContextFactory(string databasePath, SaveChangesInterceptor interceptor)
+        {
+            _options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+                .UseSqlite($"Data Source={databasePath};Pooling=False")
+                .AddInterceptors(interceptor)
+                .Options;
+        }
+
+        public ComicMaintainerDbContext CreateDbContext() => new(_options);
+
+        public Task<ComicMaintainerDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(CreateDbContext());
+        }
+    }
+
+    private sealed class ConcurrentSaveChangesInterceptor : SaveChangesInterceptor
+    {
+        private readonly TaskCompletionSource<bool> _bothCallsReady = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _callCount;
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _callCount) == 2)
+            {
+                _bothCallsReady.TrySetResult(true);
+            }
+
+            await _bothCallsReady.Task.WaitAsync(cancellationToken);
+            return result;
+        }
     }
 }

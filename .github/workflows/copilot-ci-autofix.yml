@@ -1,0 +1,64 @@
+name: Copilot CI Autofix
+
+# Hands failures of the automated test workflows to the Copilot cloud agent:
+#
+# - Pull request: comments "@copilot ..." on the pull request with the failed jobs and log
+#   excerpts, so Copilot pushes a fix to the pull request's branch. Copilot is asked at most
+#   once per commit and COPILOT_AUTOFIX_MAX_ATTEMPTS times per pull request (default 3).
+# - Default branch: opens a `ci-failure` issue and assigns it to Copilot, which opens a fix
+#   pull request. While that issue is open, later failures are added to it as comments, and
+#   the issue is closed once the workflow passes on the default branch again.
+#
+# Requires the COPILOT_AUTOFIX_TOKEN secret, a token of a user with a Copilot license:
+# Copilot ignores comments written by bots and cannot be assigned with GITHUB_TOKEN. Without
+# the secret this workflow only logs a warning. See docs/COPILOT_CI_AUTOFIX.md.
+#
+# Security: workflow_run runs this workflow from the default branch with access to secrets,
+# so it never checks out or runs code from the failed run. Runs from forks are ignored: their
+# logs are untrusted input that Copilot would read as instructions.
+
+on:
+  workflow_run:
+    # Workflow names (their `name:`), not file names.
+    workflows: [".NET Tests", "Integration Tests (E2E Container)"]
+    types: [completed]
+
+permissions:
+  actions: read    # list the failed jobs and download their logs
+  contents: read   # check out the autofix script
+
+jobs:
+  hand-to-copilot:
+    name: Hand failures to Copilot
+    # Failures, plus passing default-branch runs (to close resolved issues).
+    if: >-
+      github.event.workflow_run.head_repository.full_name == github.repository && (
+        github.event.workflow_run.conclusion == 'failure' || (
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event != 'pull_request' &&
+          github.event.workflow_run.head_branch == github.event.repository.default_branch))
+    runs-on: ubuntu-latest
+    # Can wait up to 50 minutes for a Copilot session that is already working on the branch.
+    timeout-minutes: 60
+    concurrency:
+      # One run per branch at a time, so two failures of the same commit cannot both pass the
+      # "already asked" check. Later runs wait; of several waiting runs only the newest is kept.
+      group: copilot-ci-autofix-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+    steps:
+      # The default branch (workflow_run's checkout ref), never the failed run's commit.
+      - name: Check out the autofix script
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+
+      - name: Request a fix or close a resolved issue
+        uses: actions/github-script@v9
+        env:
+          COPILOT_AUTOFIX_TOKEN: ${{ secrets.COPILOT_AUTOFIX_TOKEN }}
+          COPILOT_AUTOFIX_MAX_ATTEMPTS: ${{ vars.COPILOT_AUTOFIX_MAX_ATTEMPTS }}
+        with:
+          script: |
+            const { handleCompletedRun } = require('./.github/scripts/copilot-ci-autofix.js');
+            await handleCompletedRun({ github, context, core, getOctokit });

@@ -68,6 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so free disk space read as "84258.8 MB".
 
 ### Fixed
+- **The Docker image now shows the version of the release it was published as.** A merge to
+  `dotnet` started the image build and the automatic version bump at the same moment, so the
+  image was built from the merge commit, which still held the previous version number. The bump
+  commit could not start a build of its own because it is pushed with `GITHUB_TOKEN`, and commits
+  pushed that way do not trigger other workflows. As a result, the version in the app was always
+  one behind the newest GitHub release. The image is now built after the version bump finishes,
+  from the commit that holds the new version. A newer build cancels an older one that is still
+  running, so a stale image can no longer be pushed last.
 - **The Reload button on the "new version available" banner reloads the page again.** The
   service worker relayed the page's live-update event stream, which stays open indefinitely, so
   the old worker always had a request in flight. Chrome does not let a waiting service worker

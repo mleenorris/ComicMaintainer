@@ -1,4 +1,6 @@
 name: Automatic Version Bump
+# docker-publish-dotnet.yml publishes the image when this workflow completes and refers to it by
+# the name above, so rename both together.
 
 on:
   push:

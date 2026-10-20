@@ -50,7 +50,7 @@ This uses the same Docker Hub repository as the Python version (`iceburn1/comicm
 4. **Determine Docker tags** - Calculates appropriate tags based on branch
 5. **Cache Docker layers** - Caches build layers for faster subsequent builds
 6. **Set up Docker Buildx** - Configures Docker for multi-platform builds
-7. **Log in to Docker Hub** - Authenticates with Docker Hub (only on push, not PRs)
+7. **Log in to Docker Hub** - Authenticates with Docker Hub (not for pull requests)
 8. **Build and push** - Builds the Docker image using `Dockerfile.dotnet` and pushes to Docker Hub
 
 ## Required Secrets

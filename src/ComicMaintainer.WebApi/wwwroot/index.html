@@ -160,7 +160,7 @@
             <button type="button" class="sidebar-link" id="sidebarOverviewBtn" onclick="navigate('#/home')"><svg class="icon" aria-hidden="true"><use href="#i-home"/></svg><span>Overview</span></button>
             <button type="button" class="sidebar-link" id="sidebarLibraryBtn" onclick="navigate('#/library')"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg><span>Library</span></button>
             <button type="button" class="sidebar-link" id="sidebarSettingsBtn" onclick="openSettings()"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
-            <a class="sidebar-link" href="/jobs.html"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><span>Scheduled Jobs</span></a>
+            <button type="button" class="sidebar-link" id="sidebarJobsBtn" onclick="openScheduledJobs()"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><span>Scheduled Jobs</span></button>
 
             <div class="sidebar-section-label">Library tools</div>
             <button type="button" class="sidebar-link" onclick="scanUnmarkedFiles()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><span>Scan Unmarked</span></button>
@@ -255,7 +255,7 @@
                         <button class="settings-dropdown-item" onclick="openEmailDeliveryHistoryModal(); closeSettingsMenu();">
                             <svg class="icon" aria-hidden="true"><use href="#i-send"/></svg> Email Delivery History
                         </button>
-                        <button class="settings-dropdown-item" onclick="window.location.href='/jobs.html'; closeSettingsMenu();">
+                        <button class="settings-dropdown-item" id="scheduledJobsMenuItem" onclick="openScheduledJobs(); closeSettingsMenu();">
                             <svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg> Scheduled Jobs
                         </button>
                         <div class="settings-dropdown-section-label">View</div>
@@ -1171,6 +1171,24 @@
                 </div>
             </div>
         </section>
+
+        <!-- Scheduled Jobs page (#/jobs). Cards are rendered by js/app/scheduled-jobs.js. -->
+        <section id="jobsView" class="jobs-page" aria-labelledby="jobsPageTitle" hidden>
+            <div class="page-header">
+                <div>
+                    <h2 class="page-title" id="jobsPageTitle">Scheduled Jobs</h2>
+                    <p class="page-subtitle">Recurring background jobs the server can run for you. Enable a job and set how often it should run; trigger an ad-hoc run any time with Run now.</p>
+                </div>
+            </div>
+            <div class="jobs-page-body">
+                <div class="settings-readonly-notice" id="scheduledJobsAdminNotice" hidden>
+                    <svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg> Scheduled jobs are managed by administrators.
+                </div>
+                <div id="scheduledJobsList" class="scheduled-jobs-list" aria-busy="true">
+                    <div class="loading"><div class="spinner"></div><p>Loading scheduled jobs...</p></div>
+                </div>
+            </div>
+        </section>
     </main>
     
     <!-- Tag Editor Modal -->
@@ -1557,6 +1575,7 @@
                     <li><kbd>g</kbd> <kbd>h</kbd><span>Go to Overview</span></li>
                     <li><kbd>g</kbd> <kbd>l</kbd><span>Go to Library</span></li>
                     <li><kbd>g</kbd> <kbd>s</kbd><span>Go to Settings</span></li>
+                    <li id="scheduledJobsShortcutItem"><kbd>g</kbd> <kbd>j</kbd><span>Go to Scheduled Jobs</span></li>
                     <li><kbd>r</kbd><span>Refresh the file list <em>(Library)</em></span></li>
                     <li><kbd>f</kbd><span>Open the filter menu <em>(Library)</em></span></li>
                     <li><kbd>?</kbd><span>Show this help</span></li>
@@ -2033,6 +2052,7 @@
     <script src="/js/app/file-actions.js?v=__APP_VERSION__"></script>
     <script src="/js/app/jobs.js?v=__APP_VERSION__"></script>
     <script src="/js/app/settings.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/scheduled-jobs.js?v=__APP_VERSION__"></script>
     <script src="/js/app/email.js?v=__APP_VERSION__"></script>
     <script src="/js/app/menus.js?v=__APP_VERSION__"></script>
     <script src="/js/app/series-metadata.js?v=__APP_VERSION__"></script>

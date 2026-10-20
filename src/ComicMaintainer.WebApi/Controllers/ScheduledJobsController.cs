@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.WebApi.Authorization;
 using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,9 +14,15 @@ namespace ComicMaintainer.WebApi.Controllers;
 /// updates their schedule/options, triggers ad-hoc runs, and surfaces the
 /// findings produced by the metadata-audit handler.
 /// </summary>
+/// <remarks>
+/// Administrator-only in full, including the read endpoints: the jobs are
+/// server administration (database backups, library-wide scans and
+/// auto-corrections) and their schedule is server configuration, so the UI
+/// only offers the Scheduled Jobs page to administrators.
+/// </remarks>
 [ApiController]
 [Route("api/scheduled-jobs")]
-[Authorize]
+[Authorize(Policy = AuthorizationPolicies.CanAdminister)]
 public class ScheduledJobsController : ControllerBase
 {
     private readonly IScheduledJobService _service;

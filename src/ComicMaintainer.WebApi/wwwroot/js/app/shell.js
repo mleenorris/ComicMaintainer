@@ -422,11 +422,16 @@
             document.body.classList.toggle('user-read-only', !userCapabilities.canModifyLibrary);
 
             // /api/diagnostics reports host paths, disk space and process
-            // memory, so it is administrator-only. Hide the entry point rather
-            // than let it open a panel that can only say "403".
-            ['diagnosticsMenuItem', 'sidebarDiagnosticsItem'].forEach(id => {
-                const diagnosticsItem = document.getElementById(id);
-                if (diagnosticsItem) diagnosticsItem.hidden = !userCapabilities.canAdminister;
+            // memory, and scheduled jobs are server administration (backups,
+            // library-wide scans and auto-corrections), so both APIs are
+            // administrator-only. Hide the entry points rather than let them
+            // open a page or panel that can only say "403".
+            [
+                'diagnosticsMenuItem', 'sidebarDiagnosticsItem',
+                'scheduledJobsMenuItem', 'sidebarJobsBtn', 'scheduledJobsShortcutItem'
+            ].forEach(id => {
+                const adminItem = document.getElementById(id);
+                if (adminItem) adminItem.hidden = !userCapabilities.canAdminister;
             });
 
             // Server-wide settings are administrator-only; the personal
@@ -457,6 +462,10 @@
                 const button = document.getElementById(id);
                 if (button) button.disabled = !settingsLoaded || !userCapabilities.canAdminister;
             });
+
+            // Scheduled jobs are administrator-only (see the entry points
+            // above); anyone else who reaches the page gets a notice instead.
+            applyScheduledJobsCapabilities();
         }
 
         // Fetch and display version

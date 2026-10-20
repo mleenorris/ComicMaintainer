@@ -37,7 +37,6 @@ public class WriteOperationAuthorizationConvention : IActionModelConvention
         ["Metadata"] = AuthorizationPolicies.CanModifyLibrary,
         ["Status"] = AuthorizationPolicies.CanModifyLibrary,
         ["SeriesImages"] = AuthorizationPolicies.CanModifyLibrary,
-        ["ScheduledJobs"] = AuthorizationPolicies.CanModifyLibrary,
         ["Watcher"] = AuthorizationPolicies.CanModifyLibrary,
         ["Email"] = AuthorizationPolicies.CanModifyLibrary,
         ["Suwayomi"] = AuthorizationPolicies.CanModifyLibrary,
@@ -45,6 +44,7 @@ public class WriteOperationAuthorizationConvention : IActionModelConvention
         // listing it here keeps write endpoints added later covered by default.
         ["ErrorReports"] = AuthorizationPolicies.CanAdminister,
         ["Backups"] = AuthorizationPolicies.CanAdminister,
+        ["ScheduledJobs"] = AuthorizationPolicies.CanAdminister,
         ["Settings"] = AuthorizationPolicies.CanAdminister
     };
 

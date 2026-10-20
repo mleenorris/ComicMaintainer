@@ -4,7 +4,7 @@ namespace ComicMaintainer.Tests.Wwwroot;
 
 /// <summary>
 /// Guard rails for the shared look of the web UI: theme tokens, default button
-/// styling, the header and page widths, and the standalone Scheduled Jobs page.
+/// styling, the header and page widths, and the Scheduled Jobs page.
 /// Each test pins a specific visual defect that previously shipped. Like the
 /// other <c>Wwwroot</c> suites these are text-level assertions on the files as
 /// shipped, because the styles are plain static assets with no build step.
@@ -172,15 +172,17 @@ public class FrontendVisualConsistencyTests
     }
 
     [Fact]
-    public void JobsHtml_FollowsTheAppTheme()
+    public void JobsHtml_OnlyRedirectsToTheThemedAppPage()
     {
         var html = Read("jobs.html");
 
-        // The Scheduled Jobs page is linked from the main menu but loads none
-        // of main.js, so it has to apply the theme itself or dark-mode users
-        // land on a light page.
-        Assert.Contains("document.documentElement.setAttribute('data-theme'", html);
-        Assert.Contains("prefers-color-scheme: dark", html);
-        Assert.Contains("/api/preferences", html);
+        // Scheduled Jobs used to be a standalone page that had to re-implement
+        // the theme (dark-mode users once landed on a light page). It is a page
+        // of index.html now, which themes every page, so jobs.html must only
+        // forward old links there rather than render a page of its own.
+        Assert.Contains("window.location.replace('/#/jobs')", html);
+        Assert.DoesNotContain("<style", html);
+        Assert.DoesNotContain("stylesheet", html);
+        Assert.DoesNotContain("/api/", html);
     }
 }

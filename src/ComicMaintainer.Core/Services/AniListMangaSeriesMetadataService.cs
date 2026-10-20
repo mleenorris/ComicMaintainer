@@ -156,7 +156,7 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
                     response.StatusCode);
                 if ((int)response.StatusCode == 429)
                 {
-                    _health.RecordRateLimited(TimeSpan.FromSeconds(5), $"HTTP 429 {response.ReasonPhrase}");
+                    _health.RecordRateLimited(TimeSpan.FromSeconds(5), $"HTTP 429 {response.ReasonPhrase}", recordFailedRequest: true);
                 }
                 else
                 {

@@ -17,7 +17,7 @@ public class ComicEmailQueue : IComicEmailQueue
 
     private readonly Channel<int> _channel = Channel.CreateUnbounded<int>(new UnboundedChannelOptions
     {
-        SingleReader = true,
+        SingleReader = false,
         SingleWriter = false
     });
 

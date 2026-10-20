@@ -1,7 +1,9 @@
+using System.Diagnostics.Metrics;
 using System.Net;
 using System.Text;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Telemetry;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -13,7 +15,8 @@ public class MangaDexSeriesMetadataServiceTests
 {
     private static MangaDexSeriesMetadataService CreateService(
         StubHttpMessageHandler handler,
-        AppSettings settings)
+        AppSettings settings,
+        ComicMaintainerMetrics? metrics = null)
     {
         var httpClientFactory = new Mock<IHttpClientFactory>();
         httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient(handler));
@@ -25,8 +28,58 @@ public class MangaDexSeriesMetadataServiceTests
             httpClientFactory.Object,
             optionsMonitor.Object,
             new MemoryCache(new MemoryCacheOptions()),
-            Mock.Of<ILogger<MangaDexSeriesMetadataService>>());
+            Mock.Of<ILogger<MangaDexSeriesMetadataService>>(),
+            metrics);
     }
+
+    [Fact]
+    public async Task LookupSeriesAsync_RecordsOnlyTerminalRateLimitAsFailedRequest()
+    {
+        var responses = new Queue<HttpResponseMessage>(
+        [
+            new(HttpStatusCode.TooManyRequests),
+            new(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{ "data": [] }""", Encoding.UTF8, "application/json")
+            },
+            new(HttpStatusCode.TooManyRequests),
+            new(HttpStatusCode.TooManyRequests)
+        ]);
+        var handler = new StubHttpMessageHandler(_ => responses.Dequeue());
+        using var metrics = new ComicMaintainerMetrics();
+        var outcomes = new List<string>();
+        using var listener = new MeterListener();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (instrument.Name == "comicmaintainer.metadata_provider.requests")
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, _, tags, _) =>
+        {
+            foreach (var tag in tags)
+            {
+                if (tag.Key == "outcome")
+                {
+                    outcomes.Add((string)tag.Value!);
+                }
+            }
+        });
+        listener.Start();
+
+        var service = CreateService(handler, new AppSettings
+        {
+            EnableMangaDexMetadata = true,
+            MangaDexBaseUrl = "https://api.mangadex.example"
+        }, metrics);
+
+        await service.LookupSeriesAsync("Retry succeeds");
+        await service.LookupSeriesAsync("Retry fails");
+
+        Assert.Equal(1, outcomes.Count(outcome => outcome == "failed"));
+    }
+
     [Fact]
     public async Task LookupSeriesAsync_ReturnsCanonicalTitleAndAliases()
     {

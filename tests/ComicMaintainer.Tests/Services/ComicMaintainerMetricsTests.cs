@@ -1,5 +1,9 @@
 using System.Diagnostics.Metrics;
+using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Services;
 using ComicMaintainer.Core.Telemetry;
+using Microsoft.Extensions.Logging;
+using Moq;
 
 namespace ComicMaintainer.Tests.Services;
 
@@ -55,7 +59,12 @@ public class ComicMaintainerMetricsTests
         metrics.RecordProviderRateLimitWait("MangaDex", "server", TimeSpan.FromSeconds(5));
         metrics.RecordEmailSend(success: false);
         metrics.RecordDatabaseBackup(success: true);
-        metrics.SetEmailQueueDepthProvider(() => 3);
+        var emailQueue = new ComicEmailQueue(
+            () => Mock.Of<IComicEmailService>(),
+            Mock.Of<ILogger<ComicEmailQueue>>(),
+            metrics);
+        emailQueue.Enqueue(1);
+        emailQueue.Enqueue(2);
         recorder.Collect();
 
         var m = recorder.Measurements;
@@ -67,7 +76,7 @@ public class ComicMaintainerMetricsTests
         Assert.Contains(m, x => x.Instrument == "comicmaintainer.metadata_provider.rate_limit_waits" && (string?)x.Tags["kind"] == "server");
         Assert.Contains(m, x => x.Instrument == "comicmaintainer.email.sends" && (string?)x.Tags["outcome"] == "failed");
         Assert.Contains(m, x => x.Instrument == "comicmaintainer.database.backups");
-        Assert.Contains(m, x => x.Instrument == "comicmaintainer.email.queue_depth" && x.Value == 3);
+        Assert.Contains(m, x => x.Instrument == "comicmaintainer.email.queue_depth" && x.Value == 2);
     }
 
     [Fact]

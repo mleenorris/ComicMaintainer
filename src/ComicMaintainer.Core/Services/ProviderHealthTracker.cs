@@ -53,9 +53,14 @@ internal sealed class ProviderHealthTracker
     /// resulting wall-clock deadline so <see cref="Snapshot"/> can surface a
     /// "Degraded - rate limited" indicator until it passes.
     /// </summary>
-    public void RecordRateLimited(TimeSpan retryAfter, string? error)
+    public void RecordRateLimited(TimeSpan retryAfter, string? error, bool recordFailedRequest = false)
     {
         _metrics?.RecordProviderRateLimitWait(_name, "server", retryAfter);
+        if (recordFailedRequest)
+        {
+            _metrics?.RecordProviderRequest(_name, success: false);
+        }
+
         lock (_gate)
         {
             _failureCount++;

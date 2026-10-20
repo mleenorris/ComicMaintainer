@@ -7,7 +7,7 @@
     
     <!-- PWA Meta Tags -->
     <meta name="description" content="Setup administrator for Comic Maintainer">
-    <meta name="theme-color" content="#2c3e50">
+    <meta name="theme-color" content="#241c17">
     
     <!-- Cache Control for HTML -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -20,30 +20,49 @@
     
     <style>
         :root {
-            --bg-primary: #f5f5f5;
-            --bg-secondary: #ffffff;
-            --bg-header: #2c3e50;
-            --text-primary: #333;
-            --text-secondary: #2c3e50;
-            --text-muted: #7f8c8d;
-            --border-input: #ddd;
-            --shadow-md: 0 4px 20px rgba(0,0,0,0.1);
-            --primary-color: #3498db;
-            --primary-hover: #2980b9;
-            --danger-color: #e74c3c;
-            --success-color: #27ae60;
-            --warning-color: #f39c12;
+            /* Mirrors the warm comic palette in css/main.css (this page is
+               standalone and does not load that stylesheet). */
+            --bg-primary: #f6efe3;
+            --bg-secondary: #fffdf8;
+            --bg-header: #241c17;
+            --text-primary: #2a221d;
+            --text-secondary: #3d322b;
+            --text-muted: #6f6158;
+            --border-input: #d9cbb6;
+            --ink: #241c17;
+            --brand-yellow: #ffc845;
+            --shadow-md: 6px 6px 0 #241c17;
+            --primary-color: #c9302c;
+            --primary-hover: #a8241f;
+            --focus-ring: rgba(201, 48, 44, 0.25);
+            --danger-color: #b0261f;
+            --danger-bg: #fdecea;
+            --success-color: #2f7d32;
+            --success-bg: #e9f5e9;
+            --halftone: radial-gradient(rgba(36, 28, 23, 0.09) 1px, transparent 1.5px);
+            --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", Arial, sans-serif;
+            --font-display: "Bangers", "Anton", "Impact", "Arial Black", var(--font-sans);
+            --warning-color: #c98a00;
         }
         
         [data-theme="dark"] {
-            --bg-primary: #1a1a1a;
-            --bg-secondary: #2d2d2d;
-            --bg-header: #1f2937;
-            --text-primary: #e5e5e5;
-            --text-secondary: #d1d5db;
-            --text-muted: #9ca3af;
-            --border-input: #4a4a4a;
-            --shadow-md: 0 4px 20px rgba(0,0,0,0.3);
+            --bg-primary: #17120f;
+            --bg-secondary: #221b16;
+            --bg-header: #120e0b;
+            --text-primary: #f3e9da;
+            --text-secondary: #e2d5c3;
+            --text-muted: #b3a493;
+            --border-input: #4a3d33;
+            --ink: #000000;
+            --shadow-md: 6px 6px 0 #000000;
+            --primary-color: #ef5a4f;
+            --primary-hover: #f37a70;
+            --focus-ring: rgba(239, 90, 79, 0.3);
+            --danger-color: #ff8f84;
+            --danger-bg: rgba(239, 90, 79, 0.14);
+            --success-color: #7fd08a;
+            --success-bg: rgba(127, 208, 138, 0.12);
+            --halftone: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1.5px);
         }
         
         * {
@@ -53,8 +72,10 @@
         }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: var(--bg-primary);
+            font-family: var(--font-sans);
+            background-color: var(--bg-primary);
+            background-image: var(--halftone);
+            background-size: 8px 8px;
             color: var(--text-primary);
             min-height: 100vh;
             display: flex;
@@ -66,10 +87,13 @@
         }
         
         .setup-container {
+            position: relative;
             background: var(--bg-secondary);
-            border-radius: 12px;
+            border: 3px solid var(--ink);
+            border-top: 8px solid var(--primary-color);
+            border-radius: 14px;
             box-shadow: var(--shadow-md);
-            padding: 40px;
+            padding: 36px 40px 40px;
             width: 100%;
             max-width: 450px;
             transition: background-color 0.3s;
@@ -81,12 +105,20 @@
         }
         
         .logo {
-            margin-bottom: 20px;
+            margin-bottom: 16px;
+        }
+
+        .brand-logo {
+            filter: drop-shadow(3px 3px 0 var(--ink));
         }
         
         .setup-header h1 {
-            color: var(--text-secondary);
-            font-size: 24px;
+            color: var(--text-primary);
+            font-family: var(--font-display);
+            font-size: 30px;
+            font-weight: 900;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
             margin-bottom: 10px;
         }
         
@@ -122,16 +154,17 @@
             width: 100%;
             padding: 12px 15px;
             border: 1px solid var(--border-input);
-            border-radius: 6px;
+            border-radius: 8px;
             font-size: 14px;
             background: var(--bg-primary);
             color: var(--text-primary);
-            transition: border-color 0.3s, background-color 0.3s;
+            transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
         }
         
         .form-group input:focus {
             outline: none;
             border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px var(--focus-ring);
         }
         
         /* Controls above clear the default outline for mouse users. Keyboard
@@ -158,30 +191,42 @@
         .btn {
             width: 100%;
             padding: 12px 20px;
-            border: none;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: 500;
+            border: 2px solid var(--ink);
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: 0.01em;
             cursor: pointer;
-            transition: all 0.3s;
+            transition: transform 0.12s, box-shadow 0.12s, background-color 0.12s;
         }
         
         .btn-primary {
             background: var(--primary-color);
             color: white;
+            box-shadow: 3px 3px 0 var(--ink);
         }
         
         .btn-primary:hover {
             background: var(--primary-hover);
+            transform: translate(-1px, -1px);
+            box-shadow: 4px 4px 0 var(--ink);
+        }
+
+        .btn-primary:active {
+            transform: translate(2px, 2px);
+            box-shadow: 1px 1px 0 var(--ink);
         }
         
         .btn-primary:disabled {
-            background: #95a5a6;
+            background: var(--text-muted);
+            box-shadow: none;
+            transform: none;
             cursor: not-allowed;
         }
         
         .error-message {
-            background: #fee;
+            background: var(--danger-bg);
+            border-left: 4px solid var(--danger-color);
             color: var(--danger-color);
             padding: 12px;
             border-radius: 6px;
@@ -195,7 +240,8 @@
         }
         
         .success-message {
-            background: #efe;
+            background: var(--success-bg);
+            border-left: 4px solid var(--success-color);
             color: var(--success-color);
             padding: 12px;
             border-radius: 6px;
@@ -215,7 +261,7 @@
         
         .password-strength .strength-bar {
             height: 4px;
-            background: #ddd;
+            background: var(--border-input);
             border-radius: 2px;
             margin-top: 5px;
             overflow: hidden;
@@ -247,8 +293,10 @@
             top: 20px;
             right: 20px;
             background: var(--bg-secondary);
-            border: 1px solid var(--border-input);
+            border: 2px solid var(--ink);
             border-radius: 50%;
+            box-shadow: 2px 2px 0 var(--ink);
+            color: var(--text-primary);
             width: 40px;
             height: 40px;
             display: flex;
@@ -307,51 +355,16 @@
 </head>
 <body>
     <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle light/dark theme" title="Toggle Theme">
-        <span aria-hidden="true">🌓</span>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
     </button>
     
     <main class="setup-container">
         <div class="setup-header">
             <div class="logo">
-                <svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-                    <!-- Brown border/frame -->
-                    <rect x="5" y="5" width="90" height="90" rx="10" fill="#8B5A3C" stroke="#5C3A28" stroke-width="2"/>
-                    <rect x="10" y="10" width="80" height="80" rx="8" fill="#A67C52"/>
-                    
-                    <!-- Teal shelf background -->
-                    <rect x="15" y="15" width="70" height="70" rx="6" fill="#7CB8B8"/>
-                    
-                    <!-- Three comic books -->
-                    <!-- Left book - yellow/green -->
-                    <rect x="20" y="22" width="18" height="30" rx="2" fill="#D4D46E" stroke="#5C3A28" stroke-width="1.5"/>
-                    <rect x="20" y="22" width="18" height="8" fill="#B8B85A"/>
-                    <text x="29" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
-                    <text x="29" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
-                    
-                    <!-- Middle book - orange/red -->
-                    <rect x="41" y="22" width="18" height="30" rx="2" fill="#E67E5A" stroke="#5C3A28" stroke-width="1.5"/>
-                    <rect x="41" y="22" width="18" height="8" fill="#CC6644"/>
-                    <text x="50" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">O</text>
-                    <text x="50" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
-                    
-                    <!-- Right book - beige -->
-                    <rect x="62" y="22" width="18" height="30" rx="2" fill="#E8D4C4" stroke="#5C3A28" stroke-width="1.5"/>
-                    <rect x="62" y="22" width="18" height="8" fill="#D4BCA8"/>
-                    <text x="71" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
-                    <text x="71" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
-                    
-                    <!-- Label "COMIC LIBRARY" -->
-                    <rect x="20" y="54" width="60" height="10" rx="2" fill="#F4C430"/>
-                    <text x="50" y="61.5" font-family="Arial, sans-serif" font-size="6" font-weight="bold" fill="#5C3A28" text-anchor="middle">COMIC LIBRARY</text>
-                    
-                    <!-- Bottom shelf with books -->
-                    <rect x="20" y="68" width="8" height="12" fill="#6A8AB8"/>
-                    <rect x="30" y="68" width="6" height="12" fill="#E67E5A"/>
-                    <rect x="38" y="68" width="8" height="12" fill="#7CB8B8"/>
-                    <rect x="48" y="68" width="6" height="12" fill="#E8D4C4"/>
-                    <rect x="58" y="68" width="6" height="12" fill="#E67E5A"/>
-                    <rect x="66" y="68" width="8" height="12" fill="#7CB8B8"/>
-                    <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
+                <svg class="brand-logo" width="72" height="72" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+                    <rect x="2" y="2" width="36" height="36" rx="9" fill="#c9302c"/>
+                    <path d="M20 6.5l3.3 6.4 7-1.9-3.2 6.5 5.9 4.2-7.1 1.6.6 7.2L20 26.6l-6.5 3.9.6-7.2-7.1-1.6 5.9-4.2-3.2-6.5 7 1.9z" fill="#ffc845" stroke="#241c17" stroke-width="1.6" stroke-linejoin="round"/>
+                    <text x="20" y="22.6" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="8.5" fill="#241c17">CM</text>
                 </svg>
             </div>
             <h1>Administrator Setup</h1>

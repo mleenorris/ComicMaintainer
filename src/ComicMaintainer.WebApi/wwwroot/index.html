@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Comic Maintainer - Web Interface</title>
+    <title>Comic Maintainer</title>
     
     <!-- PWA Meta Tags -->
     <meta name="description" content="Manage and process your comic archive files with ComicTagger">
     <!-- Note: theme-color is not supported by Firefox but is widely supported by Chrome, Safari, and Edge -->
-    <meta name="theme-color" content="#2c3e50">
+    <meta name="theme-color" content="#241c17">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -46,8 +46,8 @@
             start_url: '/',
             scope: '/',
             display: 'standalone',
-            background_color: '#2c3e50',
-            theme_color: '#2c3e50',
+            background_color: '#241c17',
+            theme_color: '#241c17',
             orientation: 'any',
             prefer_related_applications: false,
             icons: [
@@ -77,209 +77,293 @@
         window.APP_VERSION = '__APP_VERSION__';
     </script>
 </head>
-<body>
+<body class="app-shell">
+    <!-- Icon sprite. Every icon is a 24×24 outline drawn with currentColor, so
+         it follows the surrounding text colour in both themes. Use with
+         <svg class="icon" aria-hidden="true"><use href="#i-NAME"/></svg>. -->
+    <svg xmlns="http://www.w3.org/2000/svg" class="icon-sprite" aria-hidden="true" focusable="false">
+        <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/></symbol>
+        <symbol id="i-library" viewBox="0 0 24 24"><rect x="3" y="4" width="4.5" height="16" rx="1"/><rect x="9.5" y="4" width="4.5" height="16" rx="1"/><path d="M16 5.6l3.4-.9 3.1 14.6-3.4.9z"/></symbol>
+        <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+        <symbol id="i-history" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/><path d="M12 8v4l3 2"/></symbol>
+        <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+        <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.4-4.6L4 8"/><path d="M4 3.5V8h4.5"/><path d="M4 13a8 8 0 0 0 14.4 4.6L20 16"/><path d="M20 20.5V16h-4.5"/></symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></symbol>
+        <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+        <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></symbol>
+        <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9s1.3-6.3 3.8-9z"/></symbol>
+        <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+        <symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></symbol>
+        <symbol id="i-send" viewBox="0 0 24 24"><path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4z"/></symbol>
+        <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 13.5A8.5 8.5 0 1 1 10.5 3.5a6.5 6.5 0 0 0 10 10z"/></symbol>
+        <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></symbol>
+        <symbol id="i-key" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3L20 3"/><path d="M15.5 7.5l3 3"/><path d="M18 5l2 2"/></symbol>
+        <symbol id="i-logout" viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></symbol>
+        <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+        <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></symbol>
+        <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+        <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5l12 7.5-12 7.5z"/></symbol>
+        <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></symbol>
+        <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></symbol>
+        <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/><circle cx="7.5" cy="7.5" r="1.5"/></symbol>
+        <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+        <symbol id="i-book-open" viewBox="0 0 24 24"><path d="M2 5h6a4 4 0 0 1 4 4v12a3 3 0 0 0-3-3H2z"/><path d="M22 5h-6a4 4 0 0 0-4 4v12a3 3 0 0 1 3-3h7z"/></symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></symbol>
+        <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h12M9 12h12M9 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+        <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="11" rx="1"/><rect x="13.5" y="3" width="7.5" height="11" rx="1"/><path d="M3 18h7.5M13.5 18h7.5M3 21h5M13.5 21h5"/></symbol>
+        <symbol id="i-compact" viewBox="0 0 24 24"><rect x="3" y="3" width="5" height="8" rx="1"/><rect x="9.5" y="3" width="5" height="8" rx="1"/><rect x="16" y="3" width="5" height="8" rx="1"/><rect x="3" y="13" width="5" height="8" rx="1"/><rect x="9.5" y="13" width="5" height="8" rx="1"/><rect x="16" y="13" width="5" height="8" rx="1"/></symbol>
+        <symbol id="i-filter" viewBox="0 0 24 24"><path d="M3 5h18l-7 8v6l-4 2v-8z"/></symbol>
+        <symbol id="i-sort" viewBox="0 0 24 24"><path d="M7 4v16M3 16l4 4 4-4"/><path d="M17 20V4M13 8l4-4 4 4"/></symbol>
+        <symbol id="i-more" viewBox="0 0 24 24"><path d="M12 5h.01M12 12h.01M12 19h.01" stroke-width="3"/></symbol>
+        <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+        <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></symbol>
+        <symbol id="i-eraser" viewBox="0 0 24 24"><path d="M7 21h13"/><path d="M4.5 15.5l9-9a2 2 0 0 1 2.8 0l3.2 3.2a2 2 0 0 1 0 2.8L13 19H8.5z"/><path d="M9 11l5.5 5.5"/></symbol>
+        <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+        <symbol id="i-unlink" viewBox="0 0 24 24"><path d="M15.7 14l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M8.3 10l-3 3a4 4 0 0 0 5.7 5.7l1-1"/><path d="M4 4l16 16"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7"/></symbol>
+        <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l3 3 5-6"/></symbol>
+        <symbol id="i-rotate-ccw" viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1L3.5 8.5"/><path d="M3.5 3.5v5h5"/></symbol>
+        <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3.5l9.5 16.5h-19z"/><path d="M12 10v4.5M12 17.5h.01"/></symbol>
+        <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M4 7h4a2 2 0 1 1 4 0h4v4a2 2 0 1 1 0 4v4h-4a2 2 0 1 0-4 0H4v-4a2 2 0 1 0 0-4z"/></symbol>
+        <symbol id="i-text" viewBox="0 0 24 24"><path d="M4 7V5h16v2"/><path d="M12 5v14"/><path d="M9 19h6"/></symbol>
+        <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></symbol>
+        <symbol id="i-hard-drive" viewBox="0 0 24 24"><path d="M3 14l3-9h12l3 9"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 17h.01M11 17h.01"/></symbol>
+        <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+        <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/></symbol>
+        <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3 8a2 2 0 0 1 2-2h2.5l2-2.5h5l2 2.5H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+        <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+        <symbol id="i-smartphone" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M11 18h2"/></symbol>
+    </svg>
     <a class="skip-to-content" href="#mainContent">Skip to main content</a>
+    <!-- Desktop sidebar: primary navigation, library tools and account
+         actions. Hidden below 1025px, where the header and its ⋮ menu carry
+         the same entries. -->
+    <aside class="app-sidebar" id="appSidebar" aria-label="Sidebar">
+        <a class="sidebar-brand" href="#/home" aria-label="Comic Maintainer – Overview">
+            <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+                <rect x="2" y="2" width="36" height="36" rx="9" fill="#c9302c"/>
+                <path d="M20 6.5l3.3 6.4 7-1.9-3.2 6.5 5.9 4.2-7.1 1.6.6 7.2L20 26.6l-6.5 3.9.6-7.2-7.1-1.6 5.9-4.2-3.2-6.5 7 1.9z" fill="#ffc845" stroke="#241c17" stroke-width="1.6" stroke-linejoin="round"/>
+                <text x="20" y="22.6" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="8.5" fill="#241c17">CM</text>
+            </svg>
+            <span class="sidebar-brand-text">
+                <span class="sidebar-brand-name">Comic</span>
+                <span class="sidebar-brand-name sidebar-brand-name--accent">Maintainer</span>
+            </span>
+        </a>
+        <div class="watcher-status-indicator sidebar-watcher" id="watcherStatusSidebar" title="Watcher Status" role="status" aria-live="polite" aria-label="Watcher status">
+            <span class="watcher-icon" aria-hidden="true"></span>
+            <span class="watcher-text">Checking...</span>
+        </div>
+        <nav class="sidebar-nav" aria-label="Primary">
+            <button type="button" class="sidebar-link" id="sidebarOverviewBtn" onclick="navigate('#/home')"><svg class="icon" aria-hidden="true"><use href="#i-home"/></svg><span>Overview</span></button>
+            <button type="button" class="sidebar-link" id="sidebarLibraryBtn" onclick="navigate('#/library')"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg><span>Library</span></button>
+            <button type="button" class="sidebar-link" id="sidebarSettingsBtn" onclick="openSettings()"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
+            <a class="sidebar-link" href="/jobs.html"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg><span>Scheduled Jobs</span></a>
+
+            <div class="sidebar-section-label">Library tools</div>
+            <button type="button" class="sidebar-link" onclick="scanUnmarkedFiles()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg><span>Scan Unmarked</span></button>
+            <button type="button" class="sidebar-link" onclick="openDuplicateReviewModal()"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg><span>Review Duplicates</span></button>
+            <button type="button" class="sidebar-link" onclick="openCombineFoldersModal()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg><span>Combine Folders</span></button>
+            <button type="button" class="sidebar-link" onclick="openProcessingHistoryModal()"><svg class="icon" aria-hidden="true"><use href="#i-history"/></svg><span>Processing History</span></button>
+            <button type="button" class="sidebar-link" onclick="refreshFiles()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg><span>Refresh Library</span></button>
+
+            <div class="sidebar-section-label">Delivery</div>
+            <button type="button" class="sidebar-link" onclick="openEmailDevicesModal()"><svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg><span>Ereader Devices</span></button>
+            <button type="button" class="sidebar-link" onclick="openEmailDeliveryHistoryModal()"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg><span>Delivery History</span></button>
+
+            <div class="sidebar-section-label">System</div>
+            <button type="button" class="sidebar-link" onclick="openLogsModal()"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg><span>Logs</span></button>
+            <button type="button" class="sidebar-link" onclick="openExternalProvidersModal()"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>External Providers</span></button>
+            <button type="button" class="sidebar-link" id="sidebarDiagnosticsItem" onclick="openDiagnosticsModal()"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg><span>Diagnostics</span></button>
+            <button type="button" class="sidebar-link" id="installAppSidebarButton" onclick="installApp()" style="display: none;">
+                <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Install App</span>
+            </button>
+        </nav>
+        <div class="sidebar-footer">
+            <div class="sidebar-user" id="sidebarUser" hidden>
+                <span class="sidebar-user-avatar" aria-hidden="true"><svg class="icon"><use href="#i-user"/></svg></span>
+                <span class="sidebar-user-name" id="sidebarUsername"></span>
+            </div>
+            <div class="sidebar-footer-actions">
+                <button type="button" class="sidebar-icon-btn" onclick="toggleTheme()" aria-label="Toggle theme" title="Toggle theme"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg></button>
+                <button type="button" class="sidebar-icon-btn" onclick="openKeyboardShortcutsModal()" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg></button>
+                <button type="button" class="sidebar-icon-btn" onclick="openChangePasswordModal()" aria-label="Change password" title="Change password"><svg class="icon" aria-hidden="true"><use href="#i-key"/></svg></button>
+                <button type="button" class="sidebar-icon-btn" onclick="openAboutModal()" aria-label="About" title="About"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg></button>
+                <button type="button" class="sidebar-icon-btn sidebar-icon-btn--danger" onclick="logout()" aria-label="Log out" title="Log out"><svg class="icon" aria-hidden="true"><use href="#i-logout"/></svg></button>
+            </div>
+        </div>
+    </aside>
+
     <div class="header">
         <div class="container">
             <div class="header-content">
-                <svg width="48" height="48" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-                    <!-- Brown border/frame -->
-                    <rect x="5" y="5" width="90" height="90" rx="10" fill="#8B5A3C" stroke="#5C3A28" stroke-width="2"/>
-                    <rect x="10" y="10" width="80" height="80" rx="8" fill="#A67C52"/>
-                    
-                    <!-- Teal shelf background -->
-                    <rect x="15" y="15" width="70" height="70" rx="6" fill="#7CB8B8"/>
-                    
-                    <!-- Three comic books -->
-                    <!-- Left book - yellow/green -->
-                    <rect x="20" y="22" width="18" height="30" rx="2" fill="#D4D46E" stroke="#5C3A28" stroke-width="1.5"/>
-                    <rect x="20" y="22" width="18" height="8" fill="#B8B85A"/>
-                    <text x="29" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
-                    <text x="29" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
-                    
-                    <!-- Middle book - orange/red -->
-                    <rect x="41" y="22" width="18" height="30" rx="2" fill="#E67E5A" stroke="#5C3A28" stroke-width="1.5"/>
-                    <rect x="41" y="22" width="18" height="8" fill="#CC6644"/>
-                    <text x="50" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">O</text>
-                    <text x="50" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
-                    
-                    <!-- Right book - beige -->
-                    <rect x="62" y="22" width="18" height="30" rx="2" fill="#E8D4C4" stroke="#5C3A28" stroke-width="1.5"/>
-                    <rect x="62" y="22" width="18" height="8" fill="#D4BCA8"/>
-                    <text x="71" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
-                    <text x="71" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
-                    
-                    <!-- Label "COMIC LIBRARY" -->
-                    <rect x="20" y="54" width="60" height="10" rx="2" fill="#F4C430"/>
-                    <text x="50" y="61.5" font-family="Arial, sans-serif" font-size="6" font-weight="bold" fill="#5C3A28" text-anchor="middle">COMIC LIBRARY</text>
-                    
-                    <!-- Bottom shelf with books -->
-                    <rect x="20" y="68" width="8" height="12" fill="#6A8AB8"/>
-                    <rect x="30" y="68" width="6" height="12" fill="#E67E5A"/>
-                    <rect x="38" y="68" width="8" height="12" fill="#7CB8B8"/>
-                    <rect x="48" y="68" width="6" height="12" fill="#E8D4C4"/>
-                    <rect x="58" y="68" width="6" height="12" fill="#E67E5A"/>
-                    <rect x="66" y="68" width="8" height="12" fill="#7CB8B8"/>
-                    <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
+                <svg class="brand-mark header-brand-mark" width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+                    <rect x="2" y="2" width="36" height="36" rx="9" fill="#c9302c"/>
+                    <path d="M20 6.5l3.3 6.4 7-1.9-3.2 6.5 5.9 4.2-7.1 1.6.6 7.2L20 26.6l-6.5 3.9.6-7.2-7.1-1.6 5.9-4.2-3.2-6.5 7 1.9z" fill="#ffc845" stroke="#241c17" stroke-width="1.6" stroke-linejoin="round"/>
+                    <text x="20" y="22.6" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="8.5" fill="#241c17">CM</text>
                 </svg>
+                <span class="topbar-title" id="topbarTitle" aria-hidden="true">Overview</span>
                 <div class="watcher-status-indicator" id="watcherStatus" title="Watcher Status" role="status" aria-live="polite" aria-label="Watcher status">
-                    <span class="watcher-icon" aria-hidden="true">⚙️</span>
+                    <span class="watcher-icon" aria-hidden="true"></span>
                     <span class="watcher-text">Checking...</span>
                 </div>
                 <div class="settings-menu-wrapper">
                     <button type="button" class="settings-menu-toggle" onclick="toggleSettingsMenu(event)" id="settingsMenuToggle" aria-label="Open menu" aria-haspopup="true" aria-expanded="false" aria-controls="settingsDropdownMenu">
-                        ⋮
+                        <svg class="icon" aria-hidden="true"><use href="#i-more"/></svg>
                     </button>
                     <div class="settings-dropdown-menu" id="settingsDropdownMenu">
                         <div class="settings-dropdown-brand">
                             <img src="icons/icon-192x192.png" alt="Comic Maintainer" class="settings-dropdown-brand-icon" width="32" height="32" />
                             <div class="watcher-status-indicator" id="watcherStatusMenu" title="Watcher Status">
-                                <span class="watcher-icon">⚙️</span>
+                                <span class="watcher-icon" aria-hidden="true"></span>
                                 <span class="watcher-text">Checking...</span>
                             </div>
                         </div>
                         <div class="settings-dropdown-item user-info-item" id="userInfo" style="display: none;">
-                            👤 <span id="usernameDisplay"></span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-user"/></svg> <span id="usernameDisplay"></span>
                         </div>
                         <div class="settings-dropdown-section-label">Library</div>
                         <button class="settings-dropdown-item" onclick="refreshFiles(); closeSettingsMenu();">
-                            🔄 Refresh
+                            <svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh
                         </button>
                         <button class="settings-dropdown-item" onclick="scanUnmarkedFiles(); closeSettingsMenu();">
-                            🔍 Scan Unmarked
+                            <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg> Scan Unmarked
                         </button>
                         <button class="settings-dropdown-item" onclick="openDuplicateReviewModal(); closeSettingsMenu();">
-                            🔁 Review Duplicates
+                            <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg> Review Duplicates
                         </button>
                         <button class="settings-dropdown-item" onclick="openCombineFoldersModal(); closeSettingsMenu();">
-                            📁 Combine Folders
+                            <svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Combine Folders
                         </button>
                         <button class="settings-dropdown-item" onclick="openProcessingHistoryModal(); closeSettingsMenu();">
-                            📜 Processing History
+                            <svg class="icon" aria-hidden="true"><use href="#i-history"/></svg> Processing History
                         </button>
                         <button class="settings-dropdown-item" onclick="openLogsModal(); closeSettingsMenu();">
-                            📋 View Logs
+                            <svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg> View Logs
                         </button>
                         <button class="settings-dropdown-item" onclick="openExternalProvidersModal(); closeSettingsMenu();">
-                            🌐 External Providers Status
+                            <svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg> External Providers Status
                         </button>
                         <button class="settings-dropdown-item" id="diagnosticsMenuItem" onclick="openDiagnosticsModal(); closeSettingsMenu();">
-                            🩺 System Diagnostics
+                            <svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg> System Diagnostics
                         </button>
                         <button class="settings-dropdown-item" onclick="openEmailDevicesModal(); closeSettingsMenu();">
-                            📧 Ereader Devices
+                            <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg> Ereader Devices
                         </button>
                         <button class="settings-dropdown-item" onclick="openEmailDeliveryHistoryModal(); closeSettingsMenu();">
-                            📨 Email Delivery History
+                            <svg class="icon" aria-hidden="true"><use href="#i-send"/></svg> Email Delivery History
                         </button>
                         <button class="settings-dropdown-item" onclick="window.location.href='/jobs.html'; closeSettingsMenu();">
-                            ⏰ Scheduled Jobs
+                            <svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg> Scheduled Jobs
                         </button>
                         <div class="settings-dropdown-section-label">View</div>
                         <button class="settings-dropdown-item" onclick="toggleTheme(); closeSettingsMenu();">
-                            🌓 Toggle Theme
+                            <svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg> Toggle Theme
                         </button>
                         <button class="settings-dropdown-item" id="installAppButton" onclick="installApp(); closeSettingsMenu();" style="display: none;">
-                            📱 Install App
+                            <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg> Install App
                         </button>
                         <div class="settings-dropdown-section-label">Account</div>
                         <button class="settings-dropdown-item" onclick="openSettings(); closeSettingsMenu();">
-                            ⚙️ Settings
+                            <svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg> Settings
                         </button>
                         <button class="settings-dropdown-item" onclick="openChangePasswordModal(); closeSettingsMenu();">
-                            🔑 Change Password
+                            <svg class="icon" aria-hidden="true"><use href="#i-key"/></svg> Change Password
                         </button>
                         <button class="settings-dropdown-item settings-dropdown-item-logout" onclick="logout(); closeSettingsMenu();">
-                            🚪 Logout
+                            <svg class="icon" aria-hidden="true"><use href="#i-logout"/></svg> Logout
                         </button>
                         <div class="settings-dropdown-section-label">About</div>
                         <button class="settings-dropdown-item" onclick="openKeyboardShortcutsModal(); closeSettingsMenu();">
-                            ⌨️ Keyboard Shortcuts
+                            <svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg> Keyboard Shortcuts
                         </button>
                         <button class="settings-dropdown-item" onclick="openAboutModal(); closeSettingsMenu();">
-                            ℹ️ About
+                            <svg class="icon" aria-hidden="true"><use href="#i-info"/></svg> About
                         </button>
                     
                     </div>
                 </div>
                 <div class="header-controls">
                     <nav class="header-nav" id="headerNav" aria-label="Primary">
-                        <button type="button" class="header-nav-btn" id="navOverviewBtn" onclick="navigate('#/home')" title="Overview">🏠<span class="header-nav-label"> Overview</span></button>
-                        <button type="button" class="header-nav-btn" id="navLibraryBtn" onclick="navigate('#/library')" title="Library">📚<span class="header-nav-label"> Library</span></button>
+                        <button type="button" class="header-nav-btn" id="navOverviewBtn" onclick="navigate('#/home')" title="Overview"><svg class="icon" aria-hidden="true"><use href="#i-home"/></svg> <span class="header-nav-label"> Overview</span></button>
+                        <button type="button" class="header-nav-btn" id="navLibraryBtn" onclick="navigate('#/library')" title="Library"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg> <span class="header-nav-label"> Library</span></button>
                     </nav>
                     <button type="button" id="progressIndicator" class="progress-indicator-btn" onclick="restoreProgressModal()" style="display: none;" title="Show progress" aria-label="Show processing progress">
-                        <span id="progressIndicatorText">⏳ Processing...</span>
+                        <span id="progressIndicatorText">Processing…</span>
                     </button>
                     <div class="header-search">
                         <label for="headerSearchInput" class="visually-hidden">Search files</label>
-                        <input type="text" id="headerSearchInput" name="headerSearch" placeholder="🔍 Search files..." oninput="debouncedFilterFiles()" />
+                        <svg class="icon header-search-icon" aria-hidden="true"><use href="#i-search"/></svg>
+                        <input type="text" id="headerSearchInput" name="headerSearch" placeholder="Search files…" oninput="debouncedFilterFiles()" />
                         <button type="button" class="header-search-clear" id="headerSearchClear" onclick="clearHeaderSearch()" aria-label="Clear search" title="Clear search (Esc)" hidden>&times;</button>
                     </div>
                     <div class="header-filter-dropdown">
                         <button type="button" class="header-filter-toggle" onclick="toggleHeaderFilterDropdown(event)" id="headerFilterToggle" aria-label="Filter files" aria-haspopup="true" aria-expanded="false" aria-controls="headerFilterMenu">
-                            <span id="headerFilterLabel">📚 All</span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-filter"/></svg><span id="headerFilterLabel">All</span>
                         </button>
                         <div class="header-dropdown-menu" id="headerFilterMenu">
                             <button class="header-dropdown-item active" onclick="setHeaderFilter('all')" data-filter="all">
-                                📚 All Files
+                                <svg class="icon" aria-hidden="true"><use href="#i-library"/></svg> All Files
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('unmarked')" data-filter="unmarked">
-                                ⚠️ Unmarked
+                                <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg> Unmarked
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('marked')" data-filter="marked">
-                                ✅ Marked
+                                <svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg> Marked
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('duplicates')" data-filter="duplicates">
-                                🔁 Duplicates
+                                <svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg> Duplicates
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('renamed')" data-filter="renamed">
-                                📝 Renamed
+                                <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> Renamed
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('normalized')" data-filter="normalized">
-                                📋 Normalized
+                                <svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg> Normalized
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('read')" data-filter="read">
-                                👁️ Read
+                                <svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> Read
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('unread')" data-filter="unread">
-                                📚 Unread
+                                <svg class="icon" aria-hidden="true"><use href="#i-library"/></svg> Unread
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('matched')" data-filter="matched">
-                                🔗 Provider Matched
+                                <svg class="icon" aria-hidden="true"><use href="#i-link"/></svg> Provider Matched
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('unmatched')" data-filter="unmatched">
-                                ❓ Not Matched
+                                <svg class="icon" aria-hidden="true"><use href="#i-unlink"/></svg> Not Matched
                             </button>
                             <button class="header-dropdown-item" onclick="setHeaderFilter('missing')" data-filter="missing">
-                                🧩 Missing Issues
+                                <svg class="icon" aria-hidden="true"><use href="#i-puzzle"/></svg> Missing Issues
                             </button>
                         </div>
                     </div>
                     <div class="header-sort-dropdown">
                         <button type="button" class="header-sort-toggle" onclick="toggleHeaderSortDropdown(event)" id="headerSortToggle" aria-label="Sort files" aria-haspopup="true" aria-expanded="false" aria-controls="headerSortMenu">
-                            <span id="headerSortLabel">🔤 Name</span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-sort"/></svg><span id="headerSortLabel">Name</span>
                         </button>
                         <div class="header-dropdown-menu" id="headerSortMenu">
                             <button class="header-dropdown-item active" onclick="setSort('name')" data-sort="name">
-                                🔤 Name
+                                <svg class="icon" aria-hidden="true"><use href="#i-text"/></svg> Name
                             </button>
                             <button class="header-dropdown-item" onclick="setSort('date')" data-sort="date">
-                                📅 Date
+                                <svg class="icon" aria-hidden="true"><use href="#i-calendar"/></svg> Date
                             </button>
                             <button class="header-dropdown-item" onclick="setSort('size')" data-sort="size">
-                                💾 Size
+                                <svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg> Size
                             </button>
                         </div>
                     </div>
                     <div class="header-view-toggle series-layout-toggle" id="seriesLayoutToggle" role="group" aria-label="Series layout">
                         <button type="button" class="header-view-btn" id="seriesLayoutListBtn" onclick="setSeriesLayout('list')" title="List view — best for phones in portrait" aria-label="List layout">
-                            ☰ List
+                            <svg class="icon" aria-hidden="true"><use href="#i-list"/></svg> List
                         </button>
                         <button type="button" class="header-view-btn" id="seriesLayoutGridBtn" onclick="setSeriesLayout('grid')" title="Grid view — cover with title below" aria-label="Grid layout">
-                            ▦ Grid
+                            <svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg> Grid
                         </button>
                         <button type="button" class="header-view-btn" id="seriesLayoutCompactBtn" onclick="setSeriesLayout('compact')" title="Compact view — cover-only with overlay title" aria-label="Compact layout">
-                            ⊞ Compact
+                            <svg class="icon" aria-hidden="true"><use href="#i-compact"/></svg> Compact
                         </button>
                     </div>
                 </div>
@@ -342,10 +426,10 @@
                  </button>
              </div>
              <div class="library-health-empty" id="libraryHealthEmpty" hidden>
-                 <div class="library-health-empty-icon">📚</div>
+                 <div class="library-health-empty-icon"><svg class="icon" aria-hidden="true"><use href="#i-library"/></svg></div>
                  <h3>No files indexed yet</h3>
                  <p>Add comics to your watched folder, or use <strong>Scan Unmarked</strong> from the ⋮ menu to bring them in. Once files appear here, you'll see processing status, duplicates, and folders ready to combine.</p>
-                 <button class="btn btn-primary btn-small" onclick="scanUnmarkedFiles()" data-requires-write>🔍 Scan Unmarked</button>
+                 <button class="btn btn-primary btn-small" onclick="scanUnmarkedFiles()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg> Scan Unmarked</button>
              </div>
              <div class="controls-wrapper">
                  <div class="actions-bar">
@@ -353,20 +437,20 @@
                         <!-- Process Dropdown -->
                         <div class="action-dropdown" data-requires-write>
                             <button class="action-dropdown-toggle process" onclick="toggleActionDropdown(event, 'processDropdown')">
-                                🚀<span> Process</span>
+                                <svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> <span> Process</span>
                             </button>
                             <div class="action-dropdown-menu" id="processDropdown">
                                 <button class="action-dropdown-item" onclick="processAllFilesAsync(); closeAllActionDropdowns();">
-                                    🚀 Process All
+                                    <svg class="icon" aria-hidden="true"><use href="#i-play"/></svg> Process All
                                 </button>
                                 <button class="action-dropdown-item" onclick="processUnmarkedFiles(); closeAllActionDropdowns();">
-                                    ⚠️ Process Unmarked
+                                    <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg> Process Unmarked
                                 </button>
                                 <button class="action-dropdown-item" id="processSelectedItem" onclick="processSelectedFilesAsync(); closeAllActionDropdowns();" disabled>
-                                    ⚡ Process Selected
+                                    <svg class="icon" aria-hidden="true"><use href="#i-zap"/></svg> Process Selected
                                 </button>
                                 <button class="action-dropdown-item" id="clearSelectedStatusItem" onclick="clearSelectedProcessedStatus(); closeAllActionDropdowns();" disabled title="Clear the renamed/normalized flags on the selected files so they can be re-processed">
-                                    ♻️ Clear Processed Status
+                                    <svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg> Clear Processed Status
                                 </button>
                             </div>
                         </div>
@@ -374,17 +458,17 @@
                     <!-- Rename Dropdown -->
                     <div class="action-dropdown" data-requires-write>
                         <button class="action-dropdown-toggle rename" onclick="toggleActionDropdown(event, 'renameDropdown')">
-                            📝<span> Rename</span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> <span> Rename</span>
                         </button>
                         <div class="action-dropdown-menu" id="renameDropdown">
                             <button class="action-dropdown-item" onclick="renameAllFiles(); closeAllActionDropdowns();">
-                                📝 Rename All
+                                <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> Rename All
                             </button>
                             <button class="action-dropdown-item" onclick="renameUnmarkedFiles(); closeAllActionDropdowns();">
-                                📝 Rename Unmarked
+                                <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> Rename Unmarked
                             </button>
                             <button class="action-dropdown-item" id="renameSelectedItem" onclick="renameSelectedFiles(); closeAllActionDropdowns();" disabled>
-                                📝 Rename Selected
+                                <svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> Rename Selected
                             </button>
                         </div>
                     </div>
@@ -392,17 +476,17 @@
                     <!-- Normalize Dropdown -->
                     <div class="action-dropdown" data-requires-write>
                         <button class="action-dropdown-toggle normalize" onclick="toggleActionDropdown(event, 'normalizeDropdown')">
-                            🔧<span> Normalize</span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg> <span> Normalize</span>
                         </button>
                         <div class="action-dropdown-menu" id="normalizeDropdown">
                             <button class="action-dropdown-item" onclick="normalizeAllFiles(); closeAllActionDropdowns();">
-                                🔧 Normalize All
+                                <svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg> Normalize All
                             </button>
                             <button class="action-dropdown-item" onclick="normalizeUnmarkedFiles(); closeAllActionDropdowns();">
-                                🔧 Normalize Unmarked
+                                <svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg> Normalize Unmarked
                             </button>
                             <button class="action-dropdown-item" id="normalizeSelectedItem" onclick="normalizeSelectedFiles(); closeAllActionDropdowns();" disabled>
-                                🔧 Normalize Selected
+                                <svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg> Normalize Selected
                             </button>
                         </div>
                     </div>
@@ -410,20 +494,20 @@
                     <!-- Mark Read Dropdown -->
                     <div class="action-dropdown" data-requires-write>
                         <button class="action-dropdown-toggle mark" onclick="toggleActionDropdown(event, 'markDropdown')">
-                            👁️<span> Mark</span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> <span> Mark</span>
                         </button>
                         <div class="action-dropdown-menu" id="markDropdown">
                             <button class="action-dropdown-item" onclick="markAllFilesRead(); closeAllActionDropdowns();">
-                                ✅ Mark All Read
+                                <svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg> Mark All Read
                             </button>
                             <button class="action-dropdown-item" onclick="markAllFilesUnread(); closeAllActionDropdowns();">
-                                📚 Mark All Unread
+                                <svg class="icon" aria-hidden="true"><use href="#i-library"/></svg> Mark All Unread
                             </button>
                             <button class="action-dropdown-item" id="markSelectedReadItem" onclick="markSelectedFilesRead(); closeAllActionDropdowns();" disabled>
-                                ✅ Mark Selected Read
+                                <svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg> Mark Selected Read
                             </button>
                             <button class="action-dropdown-item" id="markSelectedUnreadItem" onclick="markSelectedFilesUnread(); closeAllActionDropdowns();" disabled>
-                                📚 Mark Selected Unread
+                                <svg class="icon" aria-hidden="true"><use href="#i-library"/></svg> Mark Selected Unread
                             </button>
                         </div>
                     </div>
@@ -431,40 +515,40 @@
                     <!-- Metadata Dropdown -->
                     <div class="action-dropdown" data-requires-write>
                         <button class="action-dropdown-toggle" onclick="toggleActionDropdown(event, 'metadataDropdown')">
-                            🌐<span> Metadata</span>
+                            <svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg> <span> Metadata</span>
                         </button>
                         <div class="action-dropdown-menu" id="metadataDropdown">
                             <button class="action-dropdown-item" onclick="refreshAllExternalMetadata(); closeAllActionDropdowns();">
-                                🌐 Refresh All External Metadata
+                                <svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg> Refresh All External Metadata
                             </button>
                             <button class="action-dropdown-item" onclick="matchAllUnmatchedSeries(); closeAllActionDropdowns();">
-                                🔍 Match All Unmatched Series
+                                <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg> Match All Unmatched Series
                             </button>
                             <button class="action-dropdown-item" onclick="updateAllSeriesCovers(); closeAllActionDropdowns();" title="Re-apply the current cached series image to cover sidecars and first-issue archives for every series in the library.">
-                                🖼️ Update Covers All Series
+                                <svg class="icon" aria-hidden="true"><use href="#i-image"/></svg> Update Covers All Series
                             </button>
                             <button class="action-dropdown-item" id="updateSeriesCoversSelectedItem" onclick="updateSelectedSeriesCovers(); closeAllActionDropdowns();" disabled title="Re-apply the current cached series image to the selected series, or to the series you are currently viewing.">
-                                🖼️ Update Covers Selected Series
+                                <svg class="icon" aria-hidden="true"><use href="#i-image"/></svg> Update Covers Selected Series
                             </button>
                             <div class="dropdown-divider"></div>
                             <button class="action-dropdown-item" id="removeMetadataSelectedItem" onclick="removeMetadataSelected(); closeAllActionDropdowns();" disabled title="Strip the embedded ComicInfo.xml from each selected file and mark them unprocessed so they can be re-processed.">
-                                🧹 Remove Metadata Selected
+                                <svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Remove Metadata Selected
                             </button>
                             <button class="action-dropdown-item" id="emailSelectedItem" onclick="openEmailSendModalForSelected(); closeAllActionDropdowns();" disabled>
-                                📧 Email Selected to Ereader
+                                <svg class="icon" aria-hidden="true"><use href="#i-mail"/></svg> Email Selected to Ereader
                             </button>
                             <button class="action-dropdown-item" onclick="removeMetadataAll(); closeAllActionDropdowns();" title="Strip the embedded ComicInfo.xml from every file in the library and mark them unprocessed so they can be re-processed.">
-                                🧹 Remove Metadata All
+                                <svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Remove Metadata All
                             </button>
                         </div>
                     </div>
                     
-                    <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" data-requires-write disabled>✏️<span> Update</span></button>
-                    <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteSelectedBtn" data-requires-write disabled>🗑️<span> Delete</span></button>
-                    <button class="btn" onclick="refreshLibraryHealth()" aria-label="Refresh library health" title="Refresh">🔄<span class="btn-label"> Refresh</span></button>
-                    <button class="btn" onclick="refreshFiles()" aria-label="Refresh library" title="Refresh library">🔄<span class="btn-label"> Refresh Library</span></button>
-                    <button class="btn btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" data-requires-write hidden>🔁<span class="btn-label"> Review Duplicates</span></button>
-                    <button class="btn" id="combineFoldersBtn" onclick="openCombineFoldersModal()" data-requires-write hidden>📁<span class="btn-label"> Combine Folders</span></button>
+                    <button class="btn btn-warning" onclick="batchUpdateTags()" id="batchUpdateBtn" data-requires-write disabled><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg> <span> Update</span></button>
+                    <button class="btn btn-danger" onclick="deleteSelectedFiles()" id="deleteSelectedBtn" data-requires-write disabled><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> <span> Delete</span></button>
+                    <button class="btn" onclick="refreshLibraryHealth()" aria-label="Refresh library health" title="Refresh"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> <span class="btn-label"> Refresh</span></button>
+                    <button class="btn" onclick="refreshFiles()" aria-label="Refresh library" title="Refresh library"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> <span class="btn-label"> Refresh Library</span></button>
+                    <button class="btn btn-warning" id="reviewDuplicatesBtn" onclick="openDuplicateReviewModal()" data-requires-write hidden><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg> <span class="btn-label"> Review Duplicates</span></button>
+                    <button class="btn" id="combineFoldersBtn" onclick="openCombineFoldersModal()" data-requires-write hidden><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> <span class="btn-label"> Combine Folders</span></button>
                 </div>
                 <span class="select-info" id="selectInfo">No files selected</span>
             </div>
@@ -476,13 +560,13 @@
             <div class="content-wrapper">
                 <div class="series-layout-toolbar-mobile" id="seriesLayoutToolbarMobile" role="group" aria-label="Series layout" hidden>
                     <button type="button" class="series-layout-mobile-btn" id="seriesLayoutListBtnMobile" onclick="setSeriesLayout('list')" aria-label="List layout">
-                        ☰ List
+                        <svg class="icon" aria-hidden="true"><use href="#i-list"/></svg> List
                     </button>
                     <button type="button" class="series-layout-mobile-btn" id="seriesLayoutGridBtnMobile" onclick="setSeriesLayout('grid')" aria-label="Grid layout">
-                        ▦ Grid
+                        <svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg> Grid
                     </button>
                     <button type="button" class="series-layout-mobile-btn" id="seriesLayoutCompactBtnMobile" onclick="setSeriesLayout('compact')" aria-label="Compact layout">
-                        ⊞ Compact
+                        <svg class="icon" aria-hidden="true"><use href="#i-compact"/></svg> Compact
                     </button>
                 </div>
                 <div class="file-list" id="fileList">
@@ -490,6 +574,565 @@
                         <div class="spinner"></div>
                         <p>Loading files...</p>
                     </div>
+                </div>
+            </div>
+        </section>
+        <section id="settingsView" class="settings-page" aria-labelledby="settingsPageTitle" hidden>
+            <div class="page-header">
+                <div>
+                    <h2 class="page-title" id="settingsPageTitle">Settings</h2>
+                    <p class="page-subtitle">Configure processing, delivery, integrations and maintenance for this ComicMaintainer instance.</p>
+                </div>
+            </div>
+            <div id="settingsLoadStatus" class="settings-load-status" role="status" aria-live="polite" hidden>
+                <span id="settingsLoadMessage"></span>
+                <button type="button" class="btn btn-ghost" id="settingsRetryButton" onclick="loadSettings()" hidden>Retry</button>
+            </div>
+            <div class="settings-layout">
+                <nav class="settings-nav" aria-label="Settings sections">
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-appearance" onclick="scrollToSettingsSection('settings-appearance')"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg><span>Appearance</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-access" onclick="scrollToSettingsSection('settings-access')"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><span>Access</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-watcher" onclick="scrollToSettingsSection('settings-watcher')"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg><span>Watcher</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-ereader" onclick="scrollToSettingsSection('settings-ereader')"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg><span>Send to Ereader</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-error-reporting" onclick="scrollToSettingsSection('settings-error-reporting')"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span>Automated Error Reporting</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-logs" onclick="scrollToSettingsSection('settings-logs')"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg><span>Log Rotation</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-database" onclick="scrollToSettingsSection('settings-database')"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg><span>Database Cleanup</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-filename" onclick="scrollToSettingsSection('settings-filename')"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg><span>Filename Format</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-padding" onclick="scrollToSettingsSection('settings-padding')"><svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg><span>Issue Number Padding</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-covers" onclick="scrollToSettingsSection('settings-covers')"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><span>Series Covers</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-metadata" onclick="scrollToSettingsSection('settings-metadata')"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>External Series Metadata</span></button>
+                    <button type="button" class="settings-nav-link" data-settings-target="settings-suwayomi" onclick="scrollToSettingsSection('settings-suwayomi')"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Suwayomi Downloads</span></button>
+                    <button type="button" class="settings-nav-link settings-nav-link--danger" data-settings-target="settings-danger" onclick="scrollToSettingsSection('settings-danger')"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span>Danger Zone</span></button>
+                </nav>
+                <div class="settings-page-body" id="settingsPageBody">
+                    <div class="settings-readonly-notice" id="settingsReadOnlyNotice" hidden>
+                        <svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg> These are server-wide settings and can only be changed by an administrator. Your personal appearance preference below is still editable.
+                    </div>
+
+                    <section class="settings-card" id="settings-appearance" aria-labelledby="settings-appearance-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-moon"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-appearance-title">Appearance</h3>
+                                <p class="settings-card-desc">Theme and personal display preferences.</p>
+                            </div>
+                        </header>
+                        <div class="form-group" data-user-setting>
+                            <label for="themeSelect">Theme</label>
+                            <select id="themeSelect" name="theme" onchange="updateThemeFromSettings()">
+                                <option value="light">Light Mode</option>
+                                <option value="dark">Dark Mode</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="defaultLibraryViewSelect">Default library view</label>
+                            <select id="defaultLibraryViewSelect" name="defaultLibraryView" onchange="updateDefaultLibraryViewFromSettings()">
+                                <option value="files">📄 Files (folder view)</option>
+                                <option value="series">🖼️ Series</option>
+                            </select>
+                            <small class="form-hint">
+                                Controls which view the library loads into when you first open the site.
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-access" aria-labelledby="settings-access-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-lock"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-access-title">Access</h3>
+                                <p class="settings-card-desc">Sign-in and guest access.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="allowRegistrationCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="allowRegistrationCheckbox" name="allowRegistration" onchange="updateAllowRegistration()">
+                                <span>Allow visitors to register their own account</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                Disabled by default. When disabled, only an administrator can create accounts, so anyone who can reach this server cannot sign themselves up. Leave this off unless you intentionally want open sign-ups.
+                            </small>
+                        </div>
+
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="defaultPreferredLanguageSelect">Default preferred series-name language</label>
+                            <select id="defaultPreferredLanguageSelect" name="defaultPreferredLanguage" onchange="updateDefaultPreferredLanguageFromSettings()">
+                                <option value="">None (use canonical title)</option>
+                                <option value="en">English</option>
+                                <option value="ja">Japanese (日本語)</option>
+                                <option value="ko">Korean (한국어)</option>
+                                <option value="zh">Chinese (中文)</option>
+                            </select>
+                            <small class="form-hint">
+                                Used as a fallback when a series has no per-series language override. The library will prefer the first cached title or alias in this language. Changing this also enqueues a background job that rewrites every affected file's <code>ComicInfo.xml</code> <code>&lt;Series&gt;</code> to match (requires normalization to be enabled).
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-watcher" aria-labelledby="settings-watcher-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-eye"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-watcher-title">Watcher</h3>
+                                <p class="settings-card-desc">Automatic processing of new files.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <small class="form-hint form-hint--lead">
+                                The file watcher automatically starts when either rename or normalize is enabled below. It monitors the directory for changes and automatically processes new or modified files based on your selected options.
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="watcherEnableRenameCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="watcherEnableRenameCheckbox" name="watcherEnableRename" onchange="updateWatcherEnableRename()">
+                                <span>Enable file rename (🔵 renamed indicator)</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                When enabled, files will be renamed based on the filename template during processing.
+                            </small>
+                        </div>
+
+                        <div class="form-group" style="margin-top: 15px;">
+                            <label for="watcherEnableNormalizeCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="watcherEnableNormalizeCheckbox" name="watcherEnableNormalize" onchange="updateWatcherEnableNormalize()">
+                                <span>Enable metadata normalize (🔴 normalized indicator)</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                When enabled, metadata will be normalized during processing.
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-ereader" aria-labelledby="settings-ereader-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-send"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-ereader-title">Send to Ereader</h3>
+                                <p class="settings-card-desc">Email delivery to Kindle and other devices.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                           <small id="emailStatusSummary" class="form-hint form-hint--lead">
+                               Configure SMTP delivery and saved ereader devices.
+                           </small>
+                           <button class="btn btn-small" type="button" data-requires-write onclick="openEmailDevicesModal()">Manage Ereader Devices</button>
+                           <button class="btn btn-small" type="button" onclick="loadEmailStatus()">Refresh Status</button>
+                        </div>
+                        <div class="form-group">
+                           <label for="smtpHost">SMTP Host</label>
+                           <input type="text" id="smtpHost" name="smtpHost" autocomplete="off" placeholder="smtp.example.com">
+                        </div>
+                        <div class="form-group">
+                           <label for="smtpPort">SMTP Port</label>
+                           <input type="number" id="smtpPort" name="smtpPort" min="1" max="65535" step="1" autocomplete="off" placeholder="587">
+                        </div>
+                        <div class="form-group">
+                           <label for="smtpUsername">SMTP Username</label>
+                           <input type="text" id="smtpUsername" name="smtpUsername" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                           <label for="smtpPassword">SMTP Password</label>
+                           <input type="password" id="smtpPassword" name="smtpPassword" autocomplete="new-password">
+                           <small id="smtpPasswordHint" class="form-hint">
+                               Leave blank to keep the stored password.
+                           </small>
+                           <label for="smtpClearPasswordCheckbox" class="checkbox-label checkbox-label--minor">
+                               <input type="checkbox" id="smtpClearPasswordCheckbox" name="smtpClearPassword">
+                               <span>Clear stored SMTP password on save</span>
+                           </label>
+                        </div>
+                        <div class="form-group">
+                           <label for="smtpUseSslCheckbox" class="checkbox-label">
+                               <input type="checkbox" id="smtpUseSslCheckbox" name="smtpUseSsl">
+                               <span>Use implicit TLS (SMTPS, usually port 465)</span>
+                           </label>
+                           <small class="form-hint form-hint--indent">
+                               Leave unchecked for the common submission port 587, which upgrades the connection with STARTTLS.
+                           </small>
+                        </div>
+                        <div class="form-group">
+                           <label for="smtpAllowInsecureCheckbox" class="checkbox-label">
+                               <input type="checkbox" id="smtpAllowInsecureCheckbox" name="smtpAllowInsecure">
+                               <span>Allow insecure plaintext connection</span>
+                           </label>
+                           <small class="form-hint form-hint--indent">
+                               Only enable for a trusted local relay that offers no TLS. Credentials and attachments are sent unencrypted.
+                           </small>
+                        </div>
+                        <div class="form-group">
+                           <label for="emailFromAddress">From Address</label>
+                           <input type="email" id="emailFromAddress" name="emailFromAddress" autocomplete="off" placeholder="comics@example.com">
+                        </div>
+                        <div class="form-group">
+                           <label for="emailFromName">From Name</label>
+                           <input type="text" id="emailFromName" name="emailFromName" autocomplete="off" placeholder="ComicMaintainer">
+                        </div>
+                        <div class="form-group">
+                           <label for="emailMaxAttachmentMb">Max Attachment Size (MB)</label>
+                           <input type="number" id="emailMaxAttachmentMb" name="emailMaxAttachmentMb" min="1" step="1" autocomplete="off" placeholder="25">
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-error-reporting" aria-labelledby="settings-error-reporting-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-alert"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-error-reporting-title">Automated Error Reporting</h3>
+                                <p class="settings-card-desc">Share redacted error reports with the developers.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                           <small class="form-hint form-hint--lead">
+                               When enabled, errors logged by this instance are deduplicated and filed as issues on the ComicMaintainer project repository, where they reach the people who develop it. Paths, email addresses and credentials are redacted before anything is sent. This is off by default; nothing leaves this machine until you turn it on and supply a token.
+                           </small>
+                           <label for="errorReportingEnabledCheckbox" class="checkbox-label">
+                               <input type="checkbox" id="errorReportingEnabledCheckbox" name="errorReportingEnabled">
+                               <span>File GitHub issues for errors</span>
+                           </label>
+                        </div>
+                        <div class="form-group">
+                           <label>Destination Repository</label>
+                           <div id="errorReportingDestination" style="color: var(--text-secondary);"></div>
+                           <small class="form-hint">
+                               Fixed: reports go to the project's own repository, which is the only place anyone can act on them.
+                           </small>
+                        </div>
+                        <div class="form-group">
+                           <label for="errorReportingToken">GitHub Token</label>
+                           <input type="password" id="errorReportingToken" name="errorReportingToken" autocomplete="new-password">
+                           <small id="errorReportingTokenHint" class="form-hint">
+                               Use a fine-grained token with <code>issues: write</code> on that repository only.
+                           </small>
+                           <label for="errorReportingClearTokenCheckbox" class="checkbox-label checkbox-label--minor">
+                               <input type="checkbox" id="errorReportingClearTokenCheckbox" name="errorReportingClearToken">
+                               <span>Clear stored token on save</span>
+                           </label>
+                        </div>
+                        <div class="form-group">
+                           <label for="errorReportingAssignee">Assign Issues To (optional)</label>
+                           <input type="text" id="errorReportingAssignee" name="errorReportingAssignee" autocomplete="off" placeholder="copilot-swe-agent">
+                           <small class="form-hint">
+                               GitHub login to assign new issues to. Set this to the coding agent's login to have it start work automatically. If the login cannot be assigned, the issue is still created unassigned.
+                           </small>
+                        </div>
+                        <div class="form-group">
+                           <label for="errorReportingMaxPerDay">Maximum Issues Per Day</label>
+                           <input type="number" id="errorReportingMaxPerDay" name="errorReportingMaxPerDay" min="0" max="100" step="1" autocomplete="off" placeholder="10">
+                        </div>
+                        <div class="form-group">
+                           <label for="errorReportingDedupeHours">Recurrence Comment Interval (Hours)</label>
+                           <input type="number" id="errorReportingDedupeHours" name="errorReportingDedupeHours" min="1" max="720" step="1" autocomplete="off" placeholder="24">
+                           <small class="form-hint">
+                               An already-filed failure never gets a second issue. This is how long to wait before adding a "still happening" comment to the existing one.
+                           </small>
+                        </div>
+                        <div class="form-group">
+                           <label for="errorReportingCommentCheckbox" class="checkbox-label">
+                               <input type="checkbox" id="errorReportingCommentCheckbox" name="errorReportingComment">
+                               <span>Comment on existing issues when a failure recurs</span>
+                           </label>
+                        </div>
+                        <div class="form-group">
+                           <button class="btn btn-small" type="button" data-requires-write onclick="sendErrorReportingTest()">Send Test Report</button>
+                           <small id="errorReportingTestHint" class="form-hint">
+                               Save your settings first, then send a harmless test report to confirm the token works.
+                           </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-logs" aria-labelledby="settings-logs-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-file-text"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-logs-title">Log Rotation</h3>
+                                <p class="settings-card-desc">How much log history is kept.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="logMaxSize">
+                                Maximum Log File Size (MB)
+                                <span class="setting-restart-badge" title="This setting is only applied when the service starts.">Restart required</span>
+                            </label>
+                            <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="100" step="1" placeholder="5" autocomplete="off">
+                            <small class="form-hint">
+                                When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. The new size only takes effect after the service restarts — use <strong>Restart Service</strong> below to apply it immediately.
+                            </small>
+                            <small class="form-hint">
+                                <strong>Note:</strong> Can also be configured via the <code>LOG_MAX_BYTES</code> environment variable (in bytes).
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-database" aria-labelledby="settings-database-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-hard-drive"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-database-title">Database Cleanup</h3>
+                                <p class="settings-card-desc">Pruning of old processing records.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="dbCleanupInterval">Cleanup Interval (Hours)</label>
+                            <input type="number" id="dbCleanupInterval" name="dbCleanupInterval" min="0" step="1" placeholder="12" autocomplete="off">
+                            <small class="form-hint">
+                                How often the database should be cleaned of stale entries for files that no longer exist. Set to 0 to only run on startup. Changes take effect on restart.
+                            </small>
+                            <small class="form-hint">
+                                <strong>Recommended:</strong> 12 hours (default) or 24 hours for less frequent cleanup.
+                            </small>
+                        </div>
+
+                        <div class="form-group" style="margin-top: 15px;">
+                            <button class="btn btn-primary" onclick="cleanupDatabaseNow()" style="width: 100%;">
+                                <svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Clean Database Now
+                            </button>
+                            <small class="form-hint">
+                                Manually trigger database cleanup to remove stale entries for files that no longer exist on disk.
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-filename" aria-labelledby="settings-filename-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-pencil"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-filename-title">Filename Format</h3>
+                                <p class="settings-card-desc">How processed files are renamed.</p>
+                            </div>
+                        </header>
+                        <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
+                            Configure how files are renamed when processed. Use placeholders like <code>{series}</code>, <code>{issue}</code>, etc.
+                        </p>
+                        <div class="form-group">
+                            <label for="filenameFormat">Filename Template</label>
+                            <input type="text" id="filenameFormat" name="filenameFormat" placeholder="{series} - Chapter {issue}" autocomplete="off">
+                            <small class="form-hint">
+                                Available placeholders:
+                            </small>
+                            <ul style="margin: 10px 0 10px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.6;">
+                                <li><code>{series}</code> - Series name</li>
+                                <li><code>{issue}</code> - Issue number (padded based on settings, default 4 digits, e.g., 0001, or 0071.4 for decimals)</li>
+                                <li><code>{issue_no_pad}</code> - Issue number (no padding, e.g., 1, or 71.4 for decimals)</li>
+                                <li><code>{title}</code> - Issue title</li>
+                                <li><code>{volume}</code> - Volume number</li>
+                                <li><code>{year}</code> - Publication year</li>
+                                <li><code>{publisher}</code> - Publisher name</li>
+                            </ul>
+                            <small style="display: block; margin-top: 10px; color: var(--text-muted);">
+                                <strong>Example:</strong> <code>{series} v{volume} #{issue_no_pad} ({year})</code><br>
+                                <strong>Note:</strong> File extension (.cbz or .cbr) is automatically preserved
+                            </small>
+                        </div>
+                        <div style="margin-top: 15px; padding: 10px; background: var(--bg-hover); border-radius: 5px;">
+                            <small style="color: var(--text-muted);">
+                                <strong>Current format:</strong> <span id="currentFormat" style="font-family: monospace;"></span>
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-padding" aria-labelledby="settings-padding-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-tag"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-padding-title">Issue Number Padding</h3>
+                                <p class="settings-card-desc">Zero-padding for issue numbers.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="issueNumberPadding">Number of Digits for {issue} Placeholder</label>
+                            <input type="number" id="issueNumberPadding" name="issueNumberPadding" min="0" max="10" step="1" placeholder="4" autocomplete="off">
+                            <small class="form-hint">
+                                Controls how many digits the <code>{issue}</code> placeholder uses (default: 4). For example, with padding set to 4, issue 5 becomes 0005, with padding 3 it becomes 005, and with padding 0 it remains 5.
+                            </small>
+                            <small class="form-hint">
+                                <strong>Note:</strong> This only affects the <code>{issue}</code> placeholder. Use <code>{issue_no_pad}</code> for unpadded issue numbers regardless of this setting.
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-covers" aria-labelledby="settings-covers-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-image"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-covers-title">Series Covers</h3>
+                                <p class="settings-card-desc">Series cover artwork.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="writeCoverToFirstArchiveCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="writeCoverToFirstArchiveCheckbox" name="writeCoverToFirstArchive" onchange="updateWriteCoverToFirstArchive()">
+                                <span>Embed series cover into first issue archive</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                When enabled, the cached provider/user series image is also written into the first issue's archive as a <code>cover.&lt;ext&gt;</code> entry, so external readers (Komga, Kavita, etc.) show the same cover. This rewrites the comic archive in place; the write is idempotent and only targets writable CBZ archives. The cover shown throughout ComicMaintainer always uses the downloaded provider image regardless of this setting.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="writeCoverToSeriesFolderCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="writeCoverToSeriesFolderCheckbox" name="writeCoverToSeriesFolder" onchange="updateWriteCoverToSeriesFolder()">
+                                <span>Write series cover into each series folder</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                When enabled, a copy of the cached series cover is written into every on-disk folder that contains files for the series as a <code>cover.&lt;ext&gt;</code> sidecar, so file managers and external readers can display it. Set to disabled to leave series folders untouched.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="downloadExternalSeriesImagesCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="downloadExternalSeriesImagesCheckbox" name="downloadExternalSeriesImages" onchange="updateDownloadExternalSeriesImages()">
+                                <span>Download series cover images from external providers</span>
+                            </label>
+                            <small class="form-hint form-hint--indent">
+                                When enabled, external metadata refreshes also try to download a series cover image from the chosen provider. Disable to keep metadata-only refreshes (e.g. for limited-bandwidth deployments).
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="seriesImageMaxMB">Max Stored Cover Size (MB)</label>
+                            <input type="number" id="seriesImageMaxMB" name="seriesImageMaxMB" min="1" step="1" placeholder="5" autocomplete="off">
+                            <small class="form-hint">
+                                Maximum size of a stored series cover image. Larger downloads are downscaled to fit under this limit. Default: 5 MB.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="seriesImageMaxDownloadMB">Max Download Size (MB)</label>
+                            <input type="number" id="seriesImageMaxDownloadMB" name="seriesImageMaxDownloadMB" min="1" step="1" placeholder="25" autocomplete="off">
+                            <small class="form-hint">
+                                Hard ceiling for the raw payload fetched when downloading an external cover. Payloads above this are rejected; those between the stored limit and this ceiling are downscaled. Must be greater than or equal to the stored cover size. Default: 25 MB.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="seriesImageMaxDimension">Max Cover Dimension (px)</label>
+                            <input type="number" id="seriesImageMaxDimension" name="seriesImageMaxDimension" min="1" step="1" placeholder="2048" autocomplete="off">
+                            <small class="form-hint">
+                                Maximum width or height, in pixels, of a stored series cover image. Oversized downloads are resized (preserving aspect ratio) so their largest dimension is at most this value. Default: 2048.
+                            </small>
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-metadata" aria-labelledby="settings-metadata-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-globe"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-metadata-title">External Series Metadata</h3>
+                                <p class="settings-card-desc">Synopsis and metadata providers.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="enableExternalSeriesMetadata" class="checkbox-label">
+                                <input type="checkbox" id="enableExternalSeriesMetadata" name="enableExternalSeriesMetadata">
+                                <span>Enable external series metadata (alias grouping)</span>
+                            </label>
+                            <small class="form-hint">
+                                Master switch. When enabled, ComicMaintainer can look up alternate series titles from the providers configured below so variants can be grouped together in the series library view. Lookups are <strong>manual</strong> — use the Library page's <em>Metadata → Refresh All External Metadata</em> button or the per-series <em>Manage Names</em> action to populate the cache. Changes take effect after restart.
+                            </small>
+                        </div>
+
+                        <h4 class="settings-subheading">ComicVine (US comics)</h4>
+                        <div class="form-group">
+                            <label for="comicVineApiKey">ComicVine API Key</label>
+                            <input type="password" id="comicVineApiKey" name="comicVineApiKey" placeholder="Enter ComicVine API key" autocomplete="off">
+                            <small class="form-hint">
+                                Leave blank to disable ComicVine lookups. The key is stored in user settings on this instance.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="comicVineBaseUrl">ComicVine Base URL</label>
+                            <input type="text" id="comicVineBaseUrl" name="comicVineBaseUrl" placeholder="https://comicvine.gamespot.com/api" autocomplete="off">
+                        </div>
+
+                        <h4 class="settings-subheading">MangaDex (manga)</h4>
+                        <div class="form-group">
+                            <label for="enableMangaDexMetadata" class="checkbox-label">
+                                <input type="checkbox" id="enableMangaDexMetadata" name="enableMangaDexMetadata">
+                                <span>Enable MangaDex provider</span>
+                            </label>
+                            <small class="form-hint">
+                                Looks up canonical titles and alternate localizations from MangaDex. No API key required.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="mangaDexBaseUrl">MangaDex Base URL</label>
+                            <input type="text" id="mangaDexBaseUrl" name="mangaDexBaseUrl" placeholder="https://api.mangadex.org" autocomplete="off">
+                        </div>
+
+                        <h4 class="settings-subheading">AniList</h4>
+                        <div class="form-group">
+                            <label for="enableAniListMetadata" class="checkbox-label">
+                                <input type="checkbox" id="enableAniListMetadata" name="enableAniListMetadata">
+                                <span>Enable AniList provider</span>
+                            </label>
+                            <small class="form-hint">
+                                Queries AniList for both Manga (Japanese origin) and Manhwa (Korean origin). No API key required.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="aniListBaseUrl">AniList GraphQL Endpoint</label>
+                            <input type="text" id="aniListBaseUrl" name="aniListBaseUrl" placeholder="https://graphql.anilist.co" autocomplete="off">
+                        </div>
+                    </section>
+                    <section class="settings-card" id="settings-suwayomi" aria-labelledby="settings-suwayomi-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-download"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-suwayomi-title">Suwayomi Downloads</h3>
+                                <p class="settings-card-desc">Fill missing issues from a Suwayomi server.</p>
+                            </div>
+                        </header>
+                        <div class="form-group">
+                            <label for="enableSuwayomiCheckbox" class="checkbox-label">
+                                <input type="checkbox" id="enableSuwayomiCheckbox" name="enableSuwayomiCheckbox">
+                                <span>Enable Suwayomi integration</span>
+                            </label>
+                            <small class="form-hint">
+                                Lets ComicMaintainer ask a <a href="https://github.com/Suwayomi/Suwayomi-Server" target="_blank" rel="noopener noreferrer">Suwayomi</a> server to download the issues a series is missing. Suwayomi saves them to its own download directory, so mount that directory inside the watched directory for the new files to be picked up.
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="suwayomiBaseUrl">Suwayomi Server URL</label>
+                            <input type="text" id="suwayomiBaseUrl" name="suwayomiBaseUrl" placeholder="http://localhost:4567" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="suwayomiUsername">Username (optional)</label>
+                            <input type="text" id="suwayomiUsername" name="suwayomiUsername" placeholder="Only if the server requires basic auth" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="suwayomiPassword">Password (optional)</label>
+                            <input type="password" id="suwayomiPassword" name="suwayomiPassword" placeholder="Enter password" autocomplete="new-password">
+                            <small id="suwayomiPasswordHint" class="form-hint"></small>
+                            <label for="suwayomiClearPasswordCheckbox" class="checkbox-label checkbox-label--minor">
+                                <input type="checkbox" id="suwayomiClearPasswordCheckbox" name="suwayomiClearPasswordCheckbox">
+                                <span style="font-size: 13px; color: var(--text-muted);">Clear the stored password</span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn" type="button" onclick="testSuwayomiConnection()"><svg class="icon" aria-hidden="true"><use href="#i-plug"/></svg> Test Connection</button>
+                            <small id="suwayomiStatusHint" class="form-hint">Save your settings before testing.</small>
+                        </div>
+                    </section>
+                    <section class="settings-card settings-card--danger" id="settings-danger" aria-labelledby="settings-danger-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-alert"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-danger-title">Danger Zone</h3>
+                                <p class="settings-card-desc">Irreversible actions.</p>
+                            </div>
+                        </header>
+                        <div class="form-group settings-danger-box">
+                            <label class="settings-danger-title">Reset Database</label>
+                            <p class="settings-danger-text">
+                                This will permanently delete all processing information including:
+                            </p>
+                            <ul class="settings-danger-list">
+                                <li>All file processing states (processed, renamed, normalized)</li>
+                                <li>Complete processing history</li>
+                                <li>All database records</li>
+                            </ul>
+                            <p class="settings-danger-warning">
+                                <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg> This action cannot be undone! Your actual comic files will NOT be deleted.
+                            </p>
+                            <button class="btn btn-danger" onclick="showResetConfirmation()">
+                                <svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Reset Database
+                            </button>
+                        </div>
+                    </section>
+                </div>
+            </div>
+            <div class="settings-savebar" role="region" aria-label="Save settings">
+                <span class="settings-savebar-hint">Changes apply when you save. Some take effect after a restart.</span>
+                <div class="settings-savebar-actions">
+                    <button type="button" class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
+                    <button type="button" class="btn btn-warning" id="resetFilenameFormatBtn" onclick="resetFilenameFormat()" title="Reset the filename format to its default"><svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg> Reset Filename Format</button>
+                    <button type="button" class="btn btn-primary" id="saveSettingsBtn" onclick="saveFilenameFormat()"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg> Save Settings</button>
                 </div>
             </div>
         </section>
@@ -631,7 +1274,7 @@
                  </div>
                  <div class="duplicate-review-callout" id="fileInfoDuplicateReview" style="display: none;">
                      <p>This file is currently flagged as a duplicate. Open the duplicate review flow to inspect it and take action.</p>
-                     <button class="btn btn-warning" id="fileInfoDuplicateReviewBtn" onclick="openDuplicateReviewFromFileInfo()">🔁 Review Duplicate</button>
+                     <button class="btn btn-warning" id="fileInfoDuplicateReviewBtn" onclick="openDuplicateReviewFromFileInfo()"><svg class="icon" aria-hidden="true"><use href="#i-copy"/></svg> Review Duplicate</button>
                  </div>
              </div>
              <div class="modal-footer">
@@ -649,45 +1292,10 @@
             </div>
             <div class="modal-body">
                 <div style="text-align: center; margin-bottom: 20px;">
-                    <svg width="80" height="80" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-                        <!-- Brown border/frame -->
-                        <rect x="5" y="5" width="90" height="90" rx="10" fill="#8B5A3C" stroke="#5C3A28" stroke-width="2"/>
-                        <rect x="10" y="10" width="80" height="80" rx="8" fill="#A67C52"/>
-                        
-                        <!-- Teal shelf background -->
-                        <rect x="15" y="15" width="70" height="70" rx="6" fill="#7CB8B8"/>
-                        
-                        <!-- Three comic books -->
-                        <!-- Left book - yellow/green -->
-                        <rect x="20" y="22" width="18" height="30" rx="2" fill="#D4D46E" stroke="#5C3A28" stroke-width="1.5"/>
-                        <rect x="20" y="22" width="18" height="8" fill="#B8B85A"/>
-                        <text x="29" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
-                        <text x="29" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
-                        
-                        <!-- Middle book - orange/red -->
-                        <rect x="41" y="22" width="18" height="30" rx="2" fill="#E67E5A" stroke="#5C3A28" stroke-width="1.5"/>
-                        <rect x="41" y="22" width="18" height="8" fill="#CC6644"/>
-                        <text x="50" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">O</text>
-                        <text x="50" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">M</text>
-                        
-                        <!-- Right book - beige -->
-                        <rect x="62" y="22" width="18" height="30" rx="2" fill="#E8D4C4" stroke="#5C3A28" stroke-width="1.5"/>
-                        <rect x="62" y="22" width="18" height="8" fill="#D4BCA8"/>
-                        <text x="71" y="38" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
-                        <text x="71" y="48" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#5C3A28" text-anchor="middle">C</text>
-                        
-                        <!-- Label "COMIC LIBRARY" -->
-                        <rect x="20" y="54" width="60" height="10" rx="2" fill="#F4C430"/>
-                        <text x="50" y="61.5" font-family="Arial, sans-serif" font-size="6" font-weight="bold" fill="#5C3A28" text-anchor="middle">COMIC LIBRARY</text>
-                        
-                        <!-- Bottom shelf with books -->
-                        <rect x="20" y="68" width="8" height="12" fill="#6A8AB8"/>
-                        <rect x="30" y="68" width="6" height="12" fill="#E67E5A"/>
-                        <rect x="38" y="68" width="8" height="12" fill="#7CB8B8"/>
-                        <rect x="48" y="68" width="6" height="12" fill="#E8D4C4"/>
-                        <rect x="58" y="68" width="6" height="12" fill="#E67E5A"/>
-                        <rect x="66" y="68" width="8" height="12" fill="#7CB8B8"/>
-                        <rect x="76" y="68" width="6" height="12" fill="#D4A574"/>
+                    <svg class="brand-mark brand-mark--lg" width="72" height="72" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+                        <rect x="2" y="2" width="36" height="36" rx="9" fill="#c9302c"/>
+                        <path d="M20 6.5l3.3 6.4 7-1.9-3.2 6.5 5.9 4.2-7.1 1.6.6 7.2L20 26.6l-6.5 3.9.6-7.2-7.1-1.6 5.9-4.2-3.2-6.5 7 1.9z" fill="#ffc845" stroke="#241c17" stroke-width="1.6" stroke-linejoin="round"/>
+                        <text x="20" y="22.6" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="8.5" fill="#241c17">CM</text>
                     </svg>
                 </div>
                 
@@ -769,450 +1377,6 @@
         </div>
     </div>
     
-    <!-- Settings Modal -->
-    <div class="modal" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle" aria-hidden="true">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2 id="settingsModalTitle">Settings</h2>
-                <button class="close-btn" onclick="closeSettings()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="settings-readonly-notice" id="settingsReadOnlyNotice" hidden>
-                    🔒 These are server-wide settings and can only be changed by an administrator. Your personal appearance preference below is still editable.
-                </div>
-                <h3 style="margin-bottom: 10px; color: var(--text-secondary);">Appearance</h3>
-                <div class="form-group" data-user-setting>
-                    <label for="themeSelect">Theme</label>
-                    <select id="themeSelect" name="theme" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);" onchange="updateThemeFromSettings()">
-                        <option value="light">Light Mode</option>
-                        <option value="dark">Dark Mode</option>
-                    </select>
-                </div>
-                <div class="form-group" style="margin-top: 15px;">
-                    <label for="defaultLibraryViewSelect">Default library view</label>
-                    <select id="defaultLibraryViewSelect" name="defaultLibraryView" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);" onchange="updateDefaultLibraryViewFromSettings()">
-                        <option value="files">📄 Files (folder view)</option>
-                        <option value="series">🖼️ Series</option>
-                    </select>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Controls which view the library loads into when you first open the site.
-                    </small>
-                </div>
-
-                <h3 style="margin: 20px 0 10px; color: var(--text-secondary);">Access</h3>
-                <div class="form-group">
-                    <label for="allowRegistrationCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="allowRegistrationCheckbox" name="allowRegistration" onchange="updateAllowRegistration()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                        <span>Allow visitors to register their own account</span>
-                    </label>
-                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
-                        Disabled by default. When disabled, only an administrator can create accounts, so anyone who can reach this server cannot sign themselves up. Leave this off unless you intentionally want open sign-ups.
-                    </small>
-                </div>
-
-                <div class="form-group" style="margin-top: 15px;">
-                    <label for="defaultPreferredLanguageSelect">Default preferred series-name language</label>
-                    <select id="defaultPreferredLanguageSelect" name="defaultPreferredLanguage" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);" onchange="updateDefaultPreferredLanguageFromSettings()">
-                        <option value="">None (use canonical title)</option>
-                        <option value="en">English</option>
-                        <option value="ja">Japanese (日本語)</option>
-                        <option value="ko">Korean (한국어)</option>
-                        <option value="zh">Chinese (中文)</option>
-                    </select>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Used as a fallback when a series has no per-series language override. The library will prefer the first cached title or alias in this language. Changing this also enqueues a background job that rewrites every affected file's <code>ComicInfo.xml</code> <code>&lt;Series&gt;</code> to match (requires normalization to be enabled).
-                    </small>
-                </div>
-                
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Watcher</h3>
-                <div class="form-group">
-                    <small style="display: block; margin-bottom: 15px; color: var(--text-muted);">
-                        The file watcher automatically starts when either rename or normalize is enabled below. It monitors the directory for changes and automatically processes new or modified files based on your selected options.
-                    </small>
-                </div>
-                
-                <div class="form-group">
-                    <label for="watcherEnableRenameCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="watcherEnableRenameCheckbox" name="watcherEnableRename" onchange="updateWatcherEnableRename()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                        <span>Enable file rename (🔵 renamed indicator)</span>
-                    </label>
-                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
-                        When enabled, files will be renamed based on the filename template during processing.
-                    </small>
-                </div>
-                
-                <div class="form-group" style="margin-top: 15px;">
-                    <label for="watcherEnableNormalizeCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="watcherEnableNormalizeCheckbox" name="watcherEnableNormalize" onchange="updateWatcherEnableNormalize()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                        <span>Enable metadata normalize (🔴 normalized indicator)</span>
-                    </label>
-                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
-                        When enabled, metadata will be normalized during processing.
-                    </small>
-                </div>
-
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Send to Ereader</h3>
-                <div class="form-group">
-                   <small id="emailStatusSummary" style="display: block; margin-bottom: 15px; color: var(--text-muted);">
-                       Configure SMTP delivery and saved ereader devices.
-                   </small>
-                   <button class="btn btn-small" type="button" data-requires-write onclick="openEmailDevicesModal()">Manage Ereader Devices</button>
-                   <button class="btn btn-small" type="button" onclick="loadEmailStatus()">Refresh Status</button>
-                </div>
-                <div class="form-group">
-                   <label for="smtpHost">SMTP Host</label>
-                   <input type="text" id="smtpHost" name="smtpHost" autocomplete="off" placeholder="smtp.example.com">
-                </div>
-                <div class="form-group">
-                   <label for="smtpPort">SMTP Port</label>
-                   <input type="number" id="smtpPort" name="smtpPort" min="1" max="65535" step="1" autocomplete="off" placeholder="587">
-                </div>
-                <div class="form-group">
-                   <label for="smtpUsername">SMTP Username</label>
-                   <input type="text" id="smtpUsername" name="smtpUsername" autocomplete="off">
-                </div>
-                <div class="form-group">
-                   <label for="smtpPassword">SMTP Password</label>
-                   <input type="password" id="smtpPassword" name="smtpPassword" autocomplete="new-password">
-                   <small id="smtpPasswordHint" style="display: block; margin-top: 5px; color: var(--text-muted);">
-                       Leave blank to keep the stored password.
-                   </small>
-                   <label for="smtpClearPasswordCheckbox" style="display: flex; align-items: center; cursor: pointer; margin-top: 8px; font-weight: 400;">
-                       <input type="checkbox" id="smtpClearPasswordCheckbox" name="smtpClearPassword" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
-                       <span>Clear stored SMTP password on save</span>
-                   </label>
-                </div>
-                <div class="form-group">
-                   <label for="smtpUseSslCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                       <input type="checkbox" id="smtpUseSslCheckbox" name="smtpUseSsl" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                       <span>Use implicit TLS (SMTPS, usually port 465)</span>
-                   </label>
-                   <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
-                       Leave unchecked for the common submission port 587, which upgrades the connection with STARTTLS.
-                   </small>
-                </div>
-                <div class="form-group">
-                   <label for="smtpAllowInsecureCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                       <input type="checkbox" id="smtpAllowInsecureCheckbox" name="smtpAllowInsecure" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                       <span>Allow insecure plaintext connection</span>
-                   </label>
-                   <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
-                       Only enable for a trusted local relay that offers no TLS. Credentials and attachments are sent unencrypted.
-                   </small>
-                </div>
-                <div class="form-group">
-                   <label for="emailFromAddress">From Address</label>
-                   <input type="email" id="emailFromAddress" name="emailFromAddress" autocomplete="off" placeholder="comics@example.com">
-                </div>
-                <div class="form-group">
-                   <label for="emailFromName">From Name</label>
-                   <input type="text" id="emailFromName" name="emailFromName" autocomplete="off" placeholder="ComicMaintainer">
-                </div>
-                <div class="form-group">
-                   <label for="emailMaxAttachmentMb">Max Attachment Size (MB)</label>
-                   <input type="number" id="emailMaxAttachmentMb" name="emailMaxAttachmentMb" min="1" step="1" autocomplete="off" placeholder="25">
-                </div>
-                 
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Automated Error Reporting</h3>
-                <div class="form-group">
-                   <small style="display: block; margin-bottom: 15px; color: var(--text-muted);">
-                       When enabled, errors logged by this instance are deduplicated and filed as issues on the ComicMaintainer project repository, where they reach the people who develop it. Paths, email addresses and credentials are redacted before anything is sent. This is off by default; nothing leaves this machine until you turn it on and supply a token.
-                   </small>
-                   <label for="errorReportingEnabledCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                       <input type="checkbox" id="errorReportingEnabledCheckbox" name="errorReportingEnabled" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                       <span>File GitHub issues for errors</span>
-                   </label>
-                </div>
-                <div class="form-group">
-                   <label>Destination Repository</label>
-                   <div id="errorReportingDestination" style="color: var(--text-secondary);"></div>
-                   <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                       Fixed: reports go to the project's own repository, which is the only place anyone can act on them.
-                   </small>
-                </div>
-                <div class="form-group">
-                   <label for="errorReportingToken">GitHub Token</label>
-                   <input type="password" id="errorReportingToken" name="errorReportingToken" autocomplete="new-password">
-                   <small id="errorReportingTokenHint" style="display: block; margin-top: 5px; color: var(--text-muted);">
-                       Use a fine-grained token with <code>issues: write</code> on that repository only.
-                   </small>
-                   <label for="errorReportingClearTokenCheckbox" style="display: flex; align-items: center; cursor: pointer; margin-top: 8px; font-weight: 400;">
-                       <input type="checkbox" id="errorReportingClearTokenCheckbox" name="errorReportingClearToken" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
-                       <span>Clear stored token on save</span>
-                   </label>
-                </div>
-                <div class="form-group">
-                   <label for="errorReportingAssignee">Assign Issues To (optional)</label>
-                   <input type="text" id="errorReportingAssignee" name="errorReportingAssignee" autocomplete="off" placeholder="copilot-swe-agent">
-                   <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                       GitHub login to assign new issues to. Set this to the coding agent's login to have it start work automatically. If the login cannot be assigned, the issue is still created unassigned.
-                   </small>
-                </div>
-                <div class="form-group">
-                   <label for="errorReportingMaxPerDay">Maximum Issues Per Day</label>
-                   <input type="number" id="errorReportingMaxPerDay" name="errorReportingMaxPerDay" min="0" max="100" step="1" autocomplete="off" placeholder="10">
-                </div>
-                <div class="form-group">
-                   <label for="errorReportingDedupeHours">Recurrence Comment Interval (Hours)</label>
-                   <input type="number" id="errorReportingDedupeHours" name="errorReportingDedupeHours" min="1" max="720" step="1" autocomplete="off" placeholder="24">
-                   <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                       An already-filed failure never gets a second issue. This is how long to wait before adding a "still happening" comment to the existing one.
-                   </small>
-                </div>
-                <div class="form-group">
-                   <label for="errorReportingCommentCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                       <input type="checkbox" id="errorReportingCommentCheckbox" name="errorReportingComment" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                       <span>Comment on existing issues when a failure recurs</span>
-                   </label>
-                </div>
-                <div class="form-group">
-                   <button class="btn btn-small" type="button" data-requires-write onclick="sendErrorReportingTest()">Send Test Report</button>
-                   <small id="errorReportingTestHint" style="display: block; margin-top: 5px; color: var(--text-muted);">
-                       Save your settings first, then send a harmless test report to confirm the token works.
-                   </small>
-                </div>
-
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Log Rotation</h3>
-                <div class="form-group">
-                    <label for="logMaxSize">
-                        Maximum Log File Size (MB)
-                        <span class="setting-restart-badge" title="This setting is only applied when the service starts.">Restart required</span>
-                    </label>
-                    <input type="number" id="logMaxSize" name="logMaxSize" min="1" max="100" step="1" placeholder="5" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        When the log file reaches this size, it will be rotated. Up to 3 backup files will be kept. The new size only takes effect after the service restarts — use <strong>Restart Service</strong> below to apply it immediately.
-                    </small>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        <strong>Note:</strong> Can also be configured via the <code>LOG_MAX_BYTES</code> environment variable (in bytes).
-                    </small>
-                </div>
-                
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Database Cleanup</h3>
-                <div class="form-group">
-                    <label for="dbCleanupInterval">Cleanup Interval (Hours)</label>
-                    <input type="number" id="dbCleanupInterval" name="dbCleanupInterval" min="0" step="1" placeholder="12" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        How often the database should be cleaned of stale entries for files that no longer exist. Set to 0 to only run on startup. Changes take effect on restart.
-                    </small>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        <strong>Recommended:</strong> 12 hours (default) or 24 hours for less frequent cleanup.
-                    </small>
-                </div>
-                
-                <div class="form-group" style="margin-top: 15px;">
-                    <button class="btn btn-primary" onclick="cleanupDatabaseNow()" style="width: 100%;">
-                        🧹 Clean Database Now
-                    </button>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Manually trigger database cleanup to remove stale entries for files that no longer exist on disk.
-                    </small>
-                </div>
-                
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Filename Format</h3>
-                <p style="margin-bottom: 15px; color: var(--text-muted); font-size: 14px;">
-                    Configure how files are renamed when processed. Use placeholders like <code>{series}</code>, <code>{issue}</code>, etc.
-                </p>
-                <div class="form-group">
-                    <label for="filenameFormat">Filename Template</label>
-                    <input type="text" id="filenameFormat" name="filenameFormat" placeholder="{series} - Chapter {issue}" autocomplete="off">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Available placeholders:
-                    </small>
-                    <ul style="margin: 10px 0 10px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.6;">
-                        <li><code>{series}</code> - Series name</li>
-                        <li><code>{issue}</code> - Issue number (padded based on settings, default 4 digits, e.g., 0001, or 0071.4 for decimals)</li>
-                        <li><code>{issue_no_pad}</code> - Issue number (no padding, e.g., 1, or 71.4 for decimals)</li>
-                        <li><code>{title}</code> - Issue title</li>
-                        <li><code>{volume}</code> - Volume number</li>
-                        <li><code>{year}</code> - Publication year</li>
-                        <li><code>{publisher}</code> - Publisher name</li>
-                    </ul>
-                    <small style="display: block; margin-top: 10px; color: var(--text-muted);">
-                        <strong>Example:</strong> <code>{series} v{volume} #{issue_no_pad} ({year})</code><br>
-                        <strong>Note:</strong> File extension (.cbz or .cbr) is automatically preserved
-                    </small>
-                </div>
-                <div style="margin-top: 15px; padding: 10px; background: var(--bg-hover); border-radius: 5px;">
-                    <small style="color: var(--text-muted);">
-                        <strong>Current format:</strong> <span id="currentFormat" style="font-family: monospace;"></span>
-                    </small>
-                </div>
-                
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Issue Number Padding</h3>
-                <div class="form-group">
-                    <label for="issueNumberPadding">Number of Digits for {issue} Placeholder</label>
-                    <input type="number" id="issueNumberPadding" name="issueNumberPadding" min="0" max="10" step="1" placeholder="4" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Controls how many digits the <code>{issue}</code> placeholder uses (default: 4). For example, with padding set to 4, issue 5 becomes 0005, with padding 3 it becomes 005, and with padding 0 it remains 5.
-                    </small>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        <strong>Note:</strong> This only affects the <code>{issue}</code> placeholder. Use <code>{issue_no_pad}</code> for unpadded issue numbers regardless of this setting.
-                    </small>
-                </div>
-
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Series Covers</h3>
-                <div class="form-group">
-                    <label for="writeCoverToFirstArchiveCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="writeCoverToFirstArchiveCheckbox" name="writeCoverToFirstArchive" onchange="updateWriteCoverToFirstArchive()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                        <span>Embed series cover into first issue archive</span>
-                    </label>
-                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
-                        When enabled, the cached provider/user series image is also written into the first issue's archive as a <code>cover.&lt;ext&gt;</code> entry, so external readers (Komga, Kavita, etc.) show the same cover. This rewrites the comic archive in place; the write is idempotent and only targets writable CBZ archives. The cover shown throughout ComicMaintainer always uses the downloaded provider image regardless of this setting.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="writeCoverToSeriesFolderCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="writeCoverToSeriesFolderCheckbox" name="writeCoverToSeriesFolder" onchange="updateWriteCoverToSeriesFolder()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                        <span>Write series cover into each series folder</span>
-                    </label>
-                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
-                        When enabled, a copy of the cached series cover is written into every on-disk folder that contains files for the series as a <code>cover.&lt;ext&gt;</code> sidecar, so file managers and external readers can display it. Set to disabled to leave series folders untouched.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="downloadExternalSeriesImagesCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="downloadExternalSeriesImagesCheckbox" name="downloadExternalSeriesImages" onchange="updateDownloadExternalSeriesImages()" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                        <span>Download series cover images from external providers</span>
-                    </label>
-                    <small style="display: block; margin-top: 5px; margin-left: 30px; color: var(--text-muted);">
-                        When enabled, external metadata refreshes also try to download a series cover image from the chosen provider. Disable to keep metadata-only refreshes (e.g. for limited-bandwidth deployments).
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="seriesImageMaxMB">Max Stored Cover Size (MB)</label>
-                    <input type="number" id="seriesImageMaxMB" name="seriesImageMaxMB" min="1" step="1" placeholder="5" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Maximum size of a stored series cover image. Larger downloads are downscaled to fit under this limit. Default: 5 MB.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="seriesImageMaxDownloadMB">Max Download Size (MB)</label>
-                    <input type="number" id="seriesImageMaxDownloadMB" name="seriesImageMaxDownloadMB" min="1" step="1" placeholder="25" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Hard ceiling for the raw payload fetched when downloading an external cover. Payloads above this are rejected; those between the stored limit and this ceiling are downscaled. Must be greater than or equal to the stored cover size. Default: 25 MB.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="seriesImageMaxDimension">Max Cover Dimension (px)</label>
-                    <input type="number" id="seriesImageMaxDimension" name="seriesImageMaxDimension" min="1" step="1" placeholder="2048" autocomplete="off" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Maximum width or height, in pixels, of a stored series cover image. Oversized downloads are resized (preserving aspect ratio) so their largest dimension is at most this value. Default: 2048.
-                    </small>
-                </div>
-
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">External Series Metadata</h3>
-                <div class="form-group">
-                    <label for="enableExternalSeriesMetadata" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="enableExternalSeriesMetadata" name="enableExternalSeriesMetadata" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                        <span>Enable external series metadata (alias grouping)</span>
-                    </label>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Master switch. When enabled, ComicMaintainer can look up alternate series titles from the providers configured below so variants can be grouped together in the series library view. Lookups are <strong>manual</strong> — use the Library page's <em>Metadata → Refresh All External Metadata</em> button or the per-series <em>Manage Names</em> action to populate the cache. Changes take effect after restart.
-                    </small>
-                </div>
-
-                <h4 style="margin-bottom: 8px; margin-top: 18px; color: var(--text-secondary);">ComicVine (US comics)</h4>
-                <div class="form-group">
-                    <label for="comicVineApiKey">ComicVine API Key</label>
-                    <input type="password" id="comicVineApiKey" name="comicVineApiKey" placeholder="Enter ComicVine API key" autocomplete="off">
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Leave blank to disable ComicVine lookups. The key is stored in user settings on this instance.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="comicVineBaseUrl">ComicVine Base URL</label>
-                    <input type="text" id="comicVineBaseUrl" name="comicVineBaseUrl" placeholder="https://comicvine.gamespot.com/api" autocomplete="off">
-                </div>
-
-                <h4 style="margin-bottom: 8px; margin-top: 18px; color: var(--text-secondary);">MangaDex (manga)</h4>
-                <div class="form-group">
-                    <label for="enableMangaDexMetadata" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="enableMangaDexMetadata" name="enableMangaDexMetadata" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                        <span>Enable MangaDex provider</span>
-                    </label>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Looks up canonical titles and alternate localizations from MangaDex. No API key required.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="mangaDexBaseUrl">MangaDex Base URL</label>
-                    <input type="text" id="mangaDexBaseUrl" name="mangaDexBaseUrl" placeholder="https://api.mangadex.org" autocomplete="off">
-                </div>
-
-                <h4 style="margin-bottom: 8px; margin-top: 18px; color: var(--text-secondary);">AniList</h4>
-                <div class="form-group">
-                    <label for="enableAniListMetadata" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="enableAniListMetadata" name="enableAniListMetadata" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                        <span>Enable AniList provider</span>
-                    </label>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Queries AniList for both Manga (Japanese origin) and Manhwa (Korean origin). No API key required.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="aniListBaseUrl">AniList GraphQL Endpoint</label>
-                    <input type="text" id="aniListBaseUrl" name="aniListBaseUrl" placeholder="https://graphql.anilist.co" autocomplete="off">
-                </div>
-
-                <h3 style="margin-bottom: 10px; margin-top: 25px; color: var(--text-secondary);">Suwayomi Downloads</h3>
-                <div class="form-group">
-                    <label for="enableSuwayomiCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                        <input type="checkbox" id="enableSuwayomiCheckbox" name="enableSuwayomiCheckbox" style="margin-right: 10px; width: 20px; height: 20px; cursor: pointer;">
-                        <span>Enable Suwayomi integration</span>
-                    </label>
-                    <small style="display: block; margin-top: 5px; color: var(--text-muted);">
-                        Lets ComicMaintainer ask a <a href="https://github.com/Suwayomi/Suwayomi-Server" target="_blank" rel="noopener noreferrer">Suwayomi</a> server to download the issues a series is missing. Suwayomi saves them to its own download directory, so mount that directory inside the watched directory for the new files to be picked up.
-                    </small>
-                </div>
-                <div class="form-group">
-                    <label for="suwayomiBaseUrl">Suwayomi Server URL</label>
-                    <input type="text" id="suwayomiBaseUrl" name="suwayomiBaseUrl" placeholder="http://localhost:4567" autocomplete="off">
-                </div>
-                <div class="form-group">
-                    <label for="suwayomiUsername">Username (optional)</label>
-                    <input type="text" id="suwayomiUsername" name="suwayomiUsername" placeholder="Only if the server requires basic auth" autocomplete="off">
-                </div>
-                <div class="form-group">
-                    <label for="suwayomiPassword">Password (optional)</label>
-                    <input type="password" id="suwayomiPassword" name="suwayomiPassword" placeholder="Enter password" autocomplete="new-password">
-                    <small id="suwayomiPasswordHint" style="display: block; margin-top: 5px; color: var(--text-muted);"></small>
-                    <label for="suwayomiClearPasswordCheckbox" style="display: flex; align-items: center; cursor: pointer; margin-top: 8px;">
-                        <input type="checkbox" id="suwayomiClearPasswordCheckbox" name="suwayomiClearPasswordCheckbox" style="margin-right: 10px; width: 16px; height: 16px; cursor: pointer;">
-                        <span style="font-size: 13px; color: var(--text-muted);">Clear the stored password</span>
-                    </label>
-                </div>
-                <div class="form-group">
-                    <button class="btn" type="button" onclick="testSuwayomiConnection()">🔌 Test Connection</button>
-                    <small id="suwayomiStatusHint" style="display: block; margin-top: 5px; color: var(--text-muted);">Save your settings before testing.</small>
-                </div>
-                
-                <h3 style="margin-bottom: 10px; margin-top: 35px; color: #e74c3c; border-bottom: 2px solid #e74c3c; padding-bottom: 8px;">⚠️ Danger Zone</h3>
-                <div class="form-group" style="border: 2px solid #e74c3c; border-radius: 8px; padding: 20px; background: var(--bg-hover);">
-                    <label style="font-weight: 600; color: #e74c3c; font-size: 15px;">Reset Database</label>
-                    <p style="margin: 10px 0; color: var(--text-secondary); font-size: 14px;">
-                        This will permanently delete all processing information including:
-                    </p>
-                    <ul style="margin: 10px 0 15px 20px; color: var(--text-muted); font-size: 13px; line-height: 1.8;">
-                        <li>All file processing states (processed, renamed, normalized)</li>
-                        <li>Complete processing history</li>
-                        <li>All database records</li>
-                    </ul>
-                    <p style="margin: 10px 0; color: #e74c3c; font-size: 13px; font-weight: 600;">
-                        ⚠️ This action cannot be undone! Your actual comic files will NOT be deleted.
-                    </p>
-                    <button class="btn btn-danger" onclick="showResetConfirmation()" style="margin-top: 10px; font-weight: 600;">
-                        🗑️ Reset Database
-                    </button>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn" onclick="closeSettings()">Cancel</button>
-                <button class="btn btn-warning" onclick="resetFilenameFormat()">Reset to Default</button>
-                <button class="btn btn-primary" onclick="saveFilenameFormat()">Save</button>
-            </div>
-        </div>
-    </div>
-    
     <!-- Reset Confirmation Modal -->
     <div class="modal" id="resetConfirmationModal" role="dialog" aria-modal="true" aria-labelledby="resetConfirmationModalTitle" aria-hidden="true">
         <div class="modal-content" style="max-width: 500px;">
@@ -1276,7 +1440,7 @@
                         <option value="1000">Last 1000</option>
                         <option value="0">All</option>
                     </select>
-                    <button class="btn" onclick="loadLogs()" style="margin-left: auto;">🔄 Refresh</button>
+                    <button class="btn" onclick="loadLogs()" style="margin-left: auto;"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh</button>
                 </div>
                 <div id="logsLoadingIndicator" style="display: none; padding: 20px; text-align: center; color: var(--text-muted);">
                     Loading logs...
@@ -1310,7 +1474,7 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn" onclick="loadProviderHealth()">↻ Refresh</button>
+                <button class="btn" onclick="loadProviderHealth()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh</button>
                 <button class="btn" onclick="closeExternalProvidersModal()">Close</button>
             </div>
         </div>
@@ -1337,8 +1501,8 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn" onclick="loadDiagnostics()">↻ Refresh</button>
-                <button class="btn" id="copyDiagnosticsBtn" onclick="copyDiagnosticsReport()">📋 Copy report</button>
+                <button class="btn" onclick="loadDiagnostics()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh</button>
+                <button class="btn" id="copyDiagnosticsBtn" onclick="copyDiagnosticsReport()"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg> Copy report</button>
                 <button class="btn" onclick="closeDiagnosticsModal()">Close</button>
             </div>
         </div>
@@ -1357,6 +1521,7 @@
                     <li><kbd>Esc</kbd><span>Clear the search box (while it is focused)</span></li>
                     <li><kbd>g</kbd> <kbd>h</kbd><span>Go to Overview</span></li>
                     <li><kbd>g</kbd> <kbd>l</kbd><span>Go to Library</span></li>
+                    <li><kbd>g</kbd> <kbd>s</kbd><span>Go to Settings</span></li>
                     <li><kbd>r</kbd><span>Refresh the file list <em>(Library)</em></span></li>
                     <li><kbd>f</kbd><span>Open the filter menu <em>(Library)</em></span></li>
                     <li><kbd>?</kbd><span>Show this help</span></li>
@@ -1396,7 +1561,7 @@
                 </div>
                 <div class="form-group">
                     <label for="emailDeviceFormat">Default Format</label>
-                    <select id="emailDeviceFormat" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="emailDeviceFormat">
                         <option value="original">Original archive</option>
                         <option value="epub">EPUB</option>
                         <option value="azw3">AZW3 (Kindle)</option>
@@ -1448,12 +1613,12 @@
                 </div>
                 <div class="form-group" id="emailSendDeviceGroup">
                     <label for="emailSendDeviceSelect">Device</label>
-                    <select id="emailSendDeviceSelect" onchange="refreshEmailCondensePlan()" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="emailSendDeviceSelect" onchange="refreshEmailCondensePlan()">
                     </select>
                 </div>
                 <div class="form-group">
                     <label for="emailSendFormatSelect">Format</label>
-                    <select id="emailSendFormatSelect" onchange="onEmailSendFormatChange()" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="emailSendFormatSelect" onchange="onEmailSendFormatChange()">
                         <option value="device">Device default</option>
                         <option value="original">Original archive</option>
                         <option value="epub">EPUB</option>
@@ -1463,7 +1628,7 @@
                 </div>
                 <div class="form-group">
                     <label for="emailCondenseModeSelect">Condense before sending</label>
-                    <select id="emailCondenseModeSelect" onchange="onEmailCondenseChange()" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="emailCondenseModeSelect" onchange="onEmailCondenseChange()">
                         <option value="none">Send each issue separately</option>
                         <option value="count">Combine every N issues into one book</option>
                         <option value="all">Combine all issues into one book</option>
@@ -1471,12 +1636,12 @@
                 </div>
                 <div class="form-group" id="emailCondenseCountGroup" hidden>
                     <label for="emailCondenseCountInput">Issues per book</label>
-                    <input type="number" id="emailCondenseCountInput" min="2" max="500" step="1" value="5" onchange="onEmailCondenseChange()" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <input type="number" id="emailCondenseCountInput" min="2" max="500" step="1" value="5" onchange="onEmailCondenseChange()">
                 </div>
                 <div id="emailCondensePlan" hidden style="margin-bottom: 12px; padding: 10px; border-radius: 5px; background: var(--bg-primary); color: var(--text-muted); font-size: 13px;"></div>
                 <div id="emailCondenseBuilds" hidden aria-live="polite" style="margin-bottom: 12px; padding: 10px; border-radius: 5px; background: var(--bg-primary); color: var(--text-muted); font-size: 13px;"></div>
-                <label for="emailSkipAlreadyDeliveredCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" id="emailSkipAlreadyDeliveredCheckbox" checked onchange="refreshEmailCondensePlan()" style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                <label for="emailSkipAlreadyDeliveredCheckbox" class="checkbox-label">
+                    <input type="checkbox" id="emailSkipAlreadyDeliveredCheckbox" checked onchange="refreshEmailCondensePlan()">
                     <span>Skip files already sent to this device</span>
                 </label>
             </div>
@@ -1498,20 +1663,20 @@
                 <div id="emailSubscriptionsList" style="margin-bottom: 18px;"></div>
                 <div class="form-group">
                     <label for="emailSubscriptionDeviceSelect">Device</label>
-                    <select id="emailSubscriptionDeviceSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="emailSubscriptionDeviceSelect">
                     </select>
                 </div>
                 <div class="form-group">
                     <label for="emailSubscriptionFormatSelect">Format</label>
-                    <select id="emailSubscriptionFormatSelect" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid var(--border-input); background: var(--bg-primary); color: var(--text-primary);">
+                    <select id="emailSubscriptionFormatSelect">
                         <option value="device">Device default</option>
                         <option value="original">Original archive</option>
                         <option value="epub">EPUB</option>
                         <option value="azw3">AZW3 (Kindle)</option>
                     </select>
                 </div>
-                <label for="emailSubscriptionEnabledCheckbox" style="display: flex; align-items: center; cursor: pointer;">
-                    <input type="checkbox" id="emailSubscriptionEnabledCheckbox" checked style="margin-right: 10px; width: 18px; height: 18px; cursor: pointer;">
+                <label for="emailSubscriptionEnabledCheckbox" class="checkbox-label">
+                    <input type="checkbox" id="emailSubscriptionEnabledCheckbox" checked>
                     <span>Enable automatic delivery for new issues</span>
                 </label>
             </div>
@@ -1539,7 +1704,7 @@
                     <!-- History items will be loaded here -->
                 </div>
                 <div id="historyPagination" style="display: flex; justify-content: center; align-items: center; gap: 10px; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-primary);">
-                    <button class="btn" id="historyPrevBtn" onclick="loadPreviousHistoryPage()" disabled>← Previous</button>
+                    <button class="btn" id="historyPrevBtn" onclick="loadPreviousHistoryPage()" disabled><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg> Previous</button>
                     <span id="historyPageInfo" style="color: var(--text-secondary); font-size: 14px;">Page 1</span>
                     <button class="btn" id="historyNextBtn" onclick="loadNextHistoryPage()" disabled>Next →</button>
                 </div>
@@ -1558,7 +1723,7 @@
              </div>
              <div class="modal-body">
                  <div class="duplicate-review-toolbar">
-                     <button class="btn btn-small" id="duplicateReviewPrevBtn" onclick="changeDuplicateReviewItem(-1)">← Previous</button>
+                     <button class="btn btn-small" id="duplicateReviewPrevBtn" onclick="changeDuplicateReviewItem(-1)"><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg> Previous</button>
                      <span id="duplicateReviewCounter">0 of 0</span>
                      <button class="btn btn-small" id="duplicateReviewNextBtn" onclick="changeDuplicateReviewItem(1)">Next →</button>
                  </div>
@@ -1586,12 +1751,12 @@
                          </div>
                      </div>
                      <div class="duplicate-review-actions">
-                         <button class="btn" onclick="openDuplicateInfo()">ℹ️ View Info</button>
-                         <button class="btn" onclick="openDuplicateTags()">👁️ View/Edit Tags</button>
-                         <button class="btn" onclick="openDuplicateReader()">📖 Read Comic</button>
-                         <button class="btn" id="duplicateReviewReadToggleBtn" onclick="toggleDuplicateReadStatus()">✅ Mark Read</button>
-                         <button class="btn btn-danger" onclick="deleteCurrentDuplicate()">🗑️ Delete Duplicate</button>
-                         <button class="btn btn-danger" id="duplicateReviewDeleteAllBtn" onclick="deleteAllDuplicates()" data-requires-write>🗑️ Delete All Duplicates</button>
+                         <button class="btn" onclick="openDuplicateInfo()"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg> View Info</button>
+                         <button class="btn" onclick="openDuplicateTags()"><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> View/Edit Tags</button>
+                         <button class="btn" onclick="openDuplicateReader()"><svg class="icon" aria-hidden="true"><use href="#i-book-open"/></svg> Read Comic</button>
+                         <button class="btn" id="duplicateReviewReadToggleBtn" onclick="toggleDuplicateReadStatus()"><svg class="icon" aria-hidden="true"><use href="#i-check-circle"/></svg> Mark Read</button>
+                         <button class="btn btn-danger" onclick="deleteCurrentDuplicate()"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete Duplicate</button>
+                         <button class="btn btn-danger" id="duplicateReviewDeleteAllBtn" onclick="deleteAllDuplicates()" data-requires-write><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Delete All Duplicates</button>
                      </div>
                      <div class="duplicate-review-tip">
                          Review duplicates one-by-one, inspect their metadata, and delete the copy you do not want to keep.
@@ -1613,7 +1778,7 @@
              </div>
              <div class="modal-body">
                  <div class="duplicate-review-toolbar">
-                     <button class="btn btn-small" id="combineFoldersPrevBtn" onclick="changeCombineFolderGroup(-1)">← Previous</button>
+                     <button class="btn btn-small" id="combineFoldersPrevBtn" onclick="changeCombineFolderGroup(-1)"><svg class="icon" aria-hidden="true"><use href="#i-arrow-left"/></svg> Previous</button>
                      <span id="combineFoldersCounter">0 of 0</span>
                      <button class="btn btn-small" id="combineFoldersNextBtn" onclick="changeCombineFolderGroup(1)">Next →</button>
                  </div>
@@ -1634,8 +1799,8 @@
                  </div>
              </div>
              <div class="modal-footer">
-                 <button class="btn" id="combineFoldersPreviewBtn" onclick="previewCombineFolders()" disabled>👀 Preview Merge</button>
-                 <button class="btn btn-warning" id="combineFoldersConfirmBtn" onclick="confirmCombineFolders()" disabled>📁 Combine Folders</button>
+                 <button class="btn" id="combineFoldersPreviewBtn" onclick="previewCombineFolders()" disabled><svg class="icon" aria-hidden="true"><use href="#i-eye"/></svg> Preview Merge</button>
+                 <button class="btn btn-warning" id="combineFoldersConfirmBtn" onclick="confirmCombineFolders()" disabled><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Combine Folders</button>
                  <button class="btn" onclick="closeCombineFoldersModal()">Close</button>
              </div>
          </div>
@@ -1659,7 +1824,7 @@
                  <div id="seriesFoldersMergeNote" class="duplicate-review-tip" style="display: none;"></div>
              </div>
              <div class="modal-footer">
-                 <button class="btn" id="seriesFoldersMergeBtn" onclick="openMergeForSeriesFolders()" disabled>📁 Merge Folders</button>
+                 <button class="btn" id="seriesFoldersMergeBtn" onclick="openMergeForSeriesFolders()" disabled><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Merge Folders</button>
                  <button class="btn" onclick="closeSeriesFoldersModal()">Close</button>
              </div>
          </div>
@@ -1707,7 +1872,7 @@
                      <div id="manageSeriesUserAliases" style="padding: 10px; background: var(--bg-hover); border-radius: 5px; margin-top: 5px; min-height: 36px;">None</div>
                      <div style="display: flex; gap: 8px; margin-top: 8px;">
                          <input type="text" id="manageSeriesNewAlias" placeholder="Add an alias (e.g. The Dark Knight)" autocomplete="off" style="flex: 1; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary);">
-                         <button class="btn btn-small" type="button" onclick="addManageSeriesAlias()">➕ Add</button>
+                         <button class="btn btn-small" type="button" onclick="addManageSeriesAlias()"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Add</button>
                      </div>
                  </div>
                  <div class="form-group">
@@ -1719,14 +1884,14 @@
                              <div id="manageSeriesImageStatus" style="font-size: 12px; color: var(--text-secondary);">No image cached.</div>
                              <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                                  <input type="file" id="manageSeriesImageInput" accept="image/jpeg,image/png,image/webp" style="display: none;" onchange="uploadManageSeriesImage()">
-                                 <button class="btn btn-small" type="button" onclick="document.getElementById('manageSeriesImageInput').click()">📷 Upload Image</button>
-                                 <button class="btn btn-small" type="button" onclick="openFetchSeriesImageFromProvider()" title="Search the configured external metadata providers for a cover image">🌐 Fetch from Provider</button>
-                                 <button class="btn btn-small" type="button" onclick="clearManageSeriesImage()">🗑️ Clear Image</button>
+                                 <button class="btn btn-small" type="button" onclick="document.getElementById('manageSeriesImageInput').click()"><svg class="icon" aria-hidden="true"><use href="#i-camera"/></svg> Upload Image</button>
+                                 <button class="btn btn-small" type="button" onclick="openFetchSeriesImageFromProvider()" title="Search the configured external metadata providers for a cover image"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg> Fetch from Provider</button>
+                                 <button class="btn btn-small" type="button" onclick="clearManageSeriesImage()"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg> Clear Image</button>
                              </div>
                              <div id="manageSeriesImageProviderPanel" style="display: none; margin-top: 8px; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary);">
                                  <div style="display: flex; gap: 6px; align-items: center;">
                                      <input type="text" id="manageSeriesImageProviderQuery" placeholder="Search title..." autocomplete="off" style="flex: 1; padding: 6px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-primary); color: var(--text-primary);">
-                                     <button class="btn btn-small" type="button" onclick="searchSeriesImageCandidates()">🔍 Search</button>
+                                     <button class="btn btn-small" type="button" onclick="searchSeriesImageCandidates()"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg> Search</button>
                                      <button class="btn btn-small" type="button" onclick="closeFetchSeriesImageFromProvider()">Close</button>
                                  </div>
                                  <div id="manageSeriesImageProviderStatus" style="font-size: 12px; color: var(--text-secondary); margin-top: 6px;"></div>
@@ -1740,16 +1905,16 @@
                      <p style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">Query the configured external providers (ComicVine / MangaDex) for candidate matches and add their canonical title or known aliases.</p>
                      <div style="display: flex; gap: 8px; margin-top: 8px;">
                          <input type="text" id="manageSeriesSearchInput" placeholder="Search title..." autocomplete="off" style="flex: 1; padding: 8px; border: 1px solid var(--border-primary); border-radius: 4px; background: var(--bg-secondary); color: var(--text-primary);">
-                         <button class="btn btn-small" type="button" onclick="searchExternalSeries()">🔍 Search</button>
+                         <button class="btn btn-small" type="button" onclick="searchExternalSeries()"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg> Search</button>
                      </div>
                      <div id="manageSeriesSearchResults" style="margin-top: 10px;"></div>
                  </div>
              </div>
              <div class="modal-footer">
-                 <button class="btn btn-small" type="button" onclick="refreshSeriesMetadata()">🔄 Refresh from Provider</button>
-                 <button class="btn btn-small" type="button" onclick="clearSeriesExternalMetadata()" title="Remove cached provider aliases, source, and downloaded image for this series. User aliases and uploaded images are kept.">🧹 Clear External Metadata</button>
-                 <button class="btn btn-small" type="button" onclick="checkCombinableFoldersFromManageSeries()" title="Re-scan the library for folders that can now be merged with this series">📁 Check for Combinable Folders</button>
-                 <button class="btn btn-primary" type="button" onclick="saveManageSeriesNames()">💾 Save</button>
+                 <button class="btn btn-small" type="button" onclick="refreshSeriesMetadata()"><svg class="icon" aria-hidden="true"><use href="#i-refresh"/></svg> Refresh from Provider</button>
+                 <button class="btn btn-small" type="button" onclick="clearSeriesExternalMetadata()" title="Remove cached provider aliases, source, and downloaded image for this series. User aliases and uploaded images are kept."><svg class="icon" aria-hidden="true"><use href="#i-eraser"/></svg> Clear External Metadata</button>
+                 <button class="btn btn-small" type="button" onclick="checkCombinableFoldersFromManageSeries()" title="Re-scan the library for folders that can now be merged with this series"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg> Check for Combinable Folders</button>
+                 <button class="btn btn-primary" type="button" onclick="saveManageSeriesNames()"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg> Save</button>
                  <button class="btn" type="button" onclick="closeManageSeriesNamesModal()">Close</button>
              </div>
          </div>
@@ -1773,7 +1938,7 @@
                     <div class="form-group">
                         <label for="newPassword">New Password</label>
                         <input type="password" id="newPassword" name="newPassword" required autocomplete="new-password" minlength="8">
-                        <small style="display: block; margin-top: 5px; color: var(--text-muted);">
+                        <small class="form-hint">
                             Password must be at least 8 characters long
                         </small>
                     </div>

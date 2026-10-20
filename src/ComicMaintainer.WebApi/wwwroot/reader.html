@@ -23,20 +23,20 @@
            where it makes sense (focus rings, accent) so future theme work
            cascades into the reader. */
         :root {
-            --reader-bg: #0b0b0e;
-            --reader-bg-elevated: rgba(15, 17, 22, 0.85);
+            --reader-bg: #0d0a08;
+            --reader-bg-elevated: rgba(24, 18, 14, 0.88);
             --reader-border: rgba(255, 255, 255, 0.08);
-            --reader-text: #f3f4f6;
-            --reader-text-muted: #9ca3af;
-            --reader-text-dim: #6b7280;
-            --reader-accent: #3b82f6;
-            --reader-accent-hover: #2563eb;
+            --reader-text: #f6eee2;
+            --reader-text-muted: #b3a493;
+            --reader-text-dim: #7f7064;
+            --reader-accent: #ef5a4f;
+            --reader-accent-hover: #f37a70;
             --reader-surface: rgba(255, 255, 255, 0.06);
             --reader-surface-hover: rgba(255, 255, 255, 0.12);
             --reader-radius: 8px;
             --reader-radius-sm: 6px;
             --reader-control-h: 36px;
-            --reader-focus-ring: 0 0 0 2px rgba(59, 130, 246, 0.55);
+            --reader-focus-ring: 0 0 0 2px rgba(255, 200, 69, 0.7);
         }
 
         body.reader-mode {
@@ -45,7 +45,7 @@
             overflow: hidden;
             background: var(--reader-bg);
             color: var(--reader-text);
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            font-family: var(--font-sans);
         }
 
         .reader-container {
@@ -606,7 +606,7 @@
         }
 
         .toast.info {
-            border-left-color: #3b82f6;
+            border-left-color: var(--reader-accent);
         }
 
         .toast.error {

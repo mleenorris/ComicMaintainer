@@ -157,6 +157,17 @@
             return { [TRUSTED_HTML]: true, value: String(value ?? '') };
         }
 
+        /**
+         * Markup for an icon from the inline sprite in index.html. Usable both
+         * inside html`` (it is trusted markup) and in plain template strings
+         * (it stringifies to the same markup). `name` must be a sprite id
+         * literal from this file, never user data.
+         */
+        function uiIcon(name) {
+            const markup = `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+            return { ...rawHtml(markup), toString: () => markup };
+        }
+
         function isTrustedHtml(value) {
             return !!value && typeof value === 'object' && value[TRUSTED_HTML] === true;
         }
@@ -554,17 +565,17 @@
         // label stays correct for every filter mode (previously the restore path
         // omitted renamed/normalized/read/unread and showed a blank label).
         const FILTER_LABELS = {
-            'all': '📚 All',
-            'unmarked': '⚠️ Unmarked',
-            'marked': '✅ Marked',
-            'duplicates': '🔁 Duplicates',
-            'renamed': '📝 Renamed',
-            'normalized': '📋 Normalized',
-            'read': '👁️ Read',
-            'unread': '📚 Unread',
-            'matched': '🔗 Matched',
-            'unmatched': '❓ Not Matched',
-            'missing': '🧩 Missing Issues'
+            'all': 'All',
+            'unmarked': 'Unmarked',
+            'marked': 'Marked',
+            'duplicates': 'Duplicates',
+            'renamed': 'Renamed',
+            'normalized': 'Normalized',
+            'read': 'Read',
+            'unread': 'Unread',
+            'matched': 'Matched',
+            'unmatched': 'Not Matched',
+            'missing': 'Missing Issues'
         };
         let libraryViewMode = 'series';
         // Series layout: null = auto (list on mobile portrait, compact otherwise),
@@ -1367,6 +1378,7 @@
         });
 
         onViewportResize(applyMobileLibraryView);
+        onViewportResize(updateSettingsNavActive);
 
         // Debounce library health refreshes so bursts of file events trigger only one refresh.
         // The delay can be overridden for cases like job completion where a faster refresh is useful.
@@ -1736,6 +1748,8 @@
         // default to true so the UI stays fully functional if the capability
         // lookup fails — the API is the real enforcement point.
         let userCapabilities = { canModifyLibrary: true, canAdminister: true };
+        let settingsLoaded = false;
+        let settingsLoadRequest = 0;
 
         // Fetch the signed-in user and hide controls they are not allowed to use.
         // The server still enforces the same rules via authorization policies;
@@ -1770,21 +1784,28 @@
             // /api/diagnostics reports host paths, disk space and process
             // memory, so it is administrator-only. Hide the entry point rather
             // than let it open a panel that can only say "403".
-            const diagnosticsItem = document.getElementById('diagnosticsMenuItem');
-            if (diagnosticsItem) diagnosticsItem.hidden = !userCapabilities.canAdminister;
+            ['diagnosticsMenuItem', 'sidebarDiagnosticsItem'].forEach(id => {
+                const diagnosticsItem = document.getElementById(id);
+                if (diagnosticsItem) diagnosticsItem.hidden = !userCapabilities.canAdminister;
+            });
 
             // Server-wide settings are administrator-only; the personal
             // appearance preference stays editable for everyone.
             const notice = document.getElementById('settingsReadOnlyNotice');
             if (notice) notice.hidden = userCapabilities.canAdminister;
 
-            const settingsBody = document.querySelector('#settingsModal .modal-body');
+            const settingsBody = document.getElementById('settingsPageBody');
             if (settingsBody) {
                 settingsBody.querySelectorAll('input, select, textarea, button').forEach(el => {
-                    if (el.closest('[data-user-setting]')) return;
-                    el.disabled = !userCapabilities.canAdminister;
+                    const isUserSetting = !!el.closest('[data-user-setting]');
+                    el.disabled = !settingsLoaded || (!isUserSetting && !userCapabilities.canAdminister);
                 });
             }
+
+            ['resetFilenameFormatBtn', 'saveSettingsBtn'].forEach(id => {
+                const button = document.getElementById(id);
+                if (button) button.disabled = !settingsLoaded || !userCapabilities.canAdminister;
+            });
         }
 
         // Fetch and display version
@@ -2019,23 +2040,25 @@
             e.preventDefault();
             // Stash the event so we can trigger it later via our custom install button
             deferredPrompt = e;
-            // Show the custom install button
-            const installButton = document.getElementById('installAppButton');
-            if (installButton) {
-                installButton.style.display = 'block';
-            }
+            setInstallAppButtonsVisible(true);
         });
         
         // Handle successful installation
         window.addEventListener('appinstalled', (evt) => {
             console.log('PWA: App successfully installed');
-            // Hide the install button after installation
-            const installButton = document.getElementById('installAppButton');
-            if (installButton) {
-                installButton.style.display = 'none';
-            }
+            setInstallAppButtonsVisible(false);
             deferredPrompt = null;
         });
+
+        function setInstallAppButtonsVisible(visible) {
+            ['installAppButton', 'installAppSidebarButton'].forEach(id => {
+                const button = document.getElementById(id);
+                if (!button) return;
+                button.style.display = visible
+                    ? (id === 'installAppSidebarButton' ? 'flex' : 'block')
+                    : 'none';
+            });
+        }
         
         // Function to trigger installation
         function installApp() {
@@ -2066,7 +2089,33 @@
         //   #/home          → overview page (default landing)
         //   #/library       → full series library (grid/list, filters, bulk)
         //   #/series/{id}    → a single series' page (synopsis + files)
-        let currentView = 'home';           // 'home' | 'library' | 'series'
+        //   #/settings      → the settings page
+        let currentView = 'home';           // 'home' | 'library' | 'series' | 'settings'
+        let settingsReturnHash = '#/home';  // where leaving Settings goes back to
+        let lastRoutedPage = null;          // top-level page last shown (see enterPage)
+
+        // Overview, Library and Settings are separate pages that share one
+        // document. Give each its own tab title and, when the user moves to a
+        // different page, start it at the top and move focus to the content so
+        // assistive tech announces the change like a real navigation. Moving
+        // between the library and a series stays on the "library" page so its
+        // scroll position survives the round trip.
+        const PAGE_TITLES = { home: 'Overview', library: 'Library', settings: 'Settings' };
+        function enterPage(view) {
+            const page = view === 'series' ? 'library' : view;
+            document.title = (PAGE_TITLES[page] || 'Overview') + ' · Comic Maintainer';
+            const isInitialLoad = lastRoutedPage === null;
+            const changed = page !== lastRoutedPage;
+            lastRoutedPage = page;
+            if (isInitialLoad || !changed) return;
+            window.scrollTo(0, 0);
+            const settingsPage = document.getElementById('settingsView');
+            if (page === 'settings' && settingsPage) settingsPage.scrollTop = 0;
+            const main = document.getElementById('mainContent');
+            if (main && !main.contains(document.activeElement)) {
+                main.focus({ preventScroll: true });
+            }
+        }
         let seriesDetailOrigin = 'library'; // where the series "Back" returns to
         let overviewLoaded = false;
 
@@ -2076,6 +2125,7 @@
                 return { view: 'series', seriesId: decodeURIComponent(raw.slice('/series/'.length)) };
             }
             if (raw === '/library') return { view: 'library' };
+            if (raw === '/settings') return { view: 'settings' };
             return { view: 'home' };
         }
 
@@ -2097,8 +2147,20 @@
                 seriesIssueRangeSelectArmed = false;
             }
             currentView = route.view;
+            if (route.view !== 'settings') {
+                settingsReturnHash = window.location.hash || '#/home';
+            }
             applyViewVisibility(route.view);
-            if (route.view === 'home') {
+            enterPage(route.view);
+            if (route.view === 'settings') {
+                if (currentSeriesDetailId) {
+                    disconnectSeriesIssuesObserver();
+                    currentSeriesDetailId = null;
+                    currentSeriesDetailTitleKeys = null;
+                    currentSeriesDetailSeries = null;
+                }
+                loadSettings();
+            } else if (route.view === 'home') {
                 // The overview/home page is not a series detail. Clear any
                 // lingering detail state so it can't leak into the reader
                 // return snapshot (readComic) and cause the app to reopen a
@@ -2131,20 +2193,25 @@
         // make sense inside the library / series contexts.
         function applyViewVisibility(view) {
             const isHome = view === 'home';
+            const isSettings = view === 'settings';
             const isLibraryList = view === 'library';
+            const hideLibrary = isHome || isSettings;
             const overview = document.getElementById('overviewView');
             const health = document.getElementById('libraryHealthDashboard');
             const files = document.getElementById('libraryFilesView');
+            const settings = document.getElementById('settingsView');
             if (overview) overview.hidden = !isHome;
-            if (health) health.style.display = isHome ? 'none' : '';
-            if (files) files.style.display = isHome ? 'none' : '';
+            if (settings) settings.hidden = !isSettings;
+            if (health) health.style.display = hideLibrary ? 'none' : '';
+            if (files) files.style.display = hideLibrary ? 'none' : '';
+            document.body.classList.toggle('view-settings', isSettings);
 
             // Search / filter / sort apply to the library and series files.
             const headerSearch = document.querySelector('.header-search');
             const headerFilter = document.querySelector('.header-filter-dropdown');
             const headerSort = document.querySelector('.header-sort-dropdown');
             [headerSearch, headerFilter, headerSort].forEach(el => {
-                if (el) el.style.display = isHome ? 'none' : '';
+                if (el) el.style.display = hideLibrary ? 'none' : '';
             });
 
             // The list/grid/compact layout toggle is only meaningful on the
@@ -2156,8 +2223,27 @@
         }
 
         function updateNavActiveState() {
-            document.getElementById('navOverviewBtn')?.classList.toggle('active', currentView === 'home');
-            document.getElementById('navLibraryBtn')?.classList.toggle('active', currentView === 'library' || currentView === 'series');
+            const activeByView = {
+                navOverviewBtn: currentView === 'home',
+                navLibraryBtn: currentView === 'library' || currentView === 'series',
+                sidebarOverviewBtn: currentView === 'home',
+                sidebarLibraryBtn: currentView === 'library' || currentView === 'series',
+                sidebarSettingsBtn: currentView === 'settings'
+            };
+            const topbarTitle = document.getElementById('topbarTitle');
+            if (topbarTitle) {
+                topbarTitle.textContent = ({ home: 'Overview', library: 'Library', series: 'Library', settings: 'Settings' })[currentView] || '';
+            }
+            Object.entries(activeByView).forEach(([id, active]) => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.classList.toggle('active', active);
+                if (active) {
+                    el.setAttribute('aria-current', 'page');
+                } else {
+                    el.removeAttribute('aria-current');
+                }
+            });
         }
 
         // Render the full library list (reuses the existing series grid/list).
@@ -2223,9 +2309,9 @@
             }
             overviewLoaded = true;
             const rows = [
-                { title: '📖 Continue Reading', items: data.continue_reading || [], empty: 'Nothing in progress yet.', resume: true, seeAll: false },
-                { title: '🆕 Series Updates', items: data.series_updates || [], empty: 'No new files in the last 30 days.', resume: false, seeAll: true },
-                { title: '✨ Newly Added Series', items: data.newly_added_series || [], empty: 'No new series in the last 30 days.', resume: false, seeAll: true }
+                { title: 'Continue Reading', icon: 'book-open', items: data.continue_reading || [], empty: 'Nothing in progress yet.', resume: true, seeAll: false },
+                { title: 'Series Updates', icon: 'refresh', items: data.series_updates || [], empty: 'No new files in the last 30 days.', resume: false, seeAll: true },
+                { title: 'Newly Added Series', icon: 'plus', items: data.newly_added_series || [], empty: 'No new series in the last 30 days.', resume: false, seeAll: true }
             ];
             renderHtml(container, rawHtml(rows.map(renderOverviewRow).join('')));
             hydrateProtectedImages(container);
@@ -2238,7 +2324,7 @@
             return `
                 <section class="overview-row">
                     <div class="overview-row-header">
-                        <h2 class="overview-row-title">${escapeHtml(row.title)}</h2>
+                        <h2 class="overview-row-title"><span class="overview-row-icon">${uiIcon(row.icon)}</span>${escapeHtml(row.title)}</h2>
                         ${row.seeAll && row.items.length ? `<button type="button" class="overview-see-all" onclick="navigate('#/library')">See all →</button>` : ''}
                     </div>
                     <div class="overview-carousel">${cards}</div>
@@ -2250,7 +2336,7 @@
             const cover = series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path;
             const fallback = series.has_external_image && series.external_image_url ? series.cover_file_path : '';
             const resumeBtn = (resume && series.resume_file_path)
-                ? `<button type="button" class="overview-resume-btn" onclick="event.stopPropagation(); readComic('${escapeJs(series.resume_file_path)}')">▶ Resume</button>`
+                ? `<button type="button" class="overview-resume-btn" onclick="event.stopPropagation(); readComic('${escapeJs(series.resume_file_path)}')">${uiIcon('play')} Resume</button>`
                 : '';
             return `
                 <div class="overview-card">
@@ -2295,6 +2381,12 @@
                 if (userInfo && usernameDisplay) {
                     usernameDisplay.textContent = username;
                     userInfo.style.display = 'block';
+                }
+                const sidebarUser = document.getElementById('sidebarUser');
+                const sidebarUsername = document.getElementById('sidebarUsername');
+                if (sidebarUser && sidebarUsername) {
+                    sidebarUsername.textContent = username;
+                    sidebarUser.hidden = false;
                 }
             }
             
@@ -2905,9 +2997,9 @@
         // restore path so both stay in sync.
         function applySortUi() {
             const sortLabels = {
-                'name': '🔤 Name',
-                'date': '📅 Date',
-                'size': '💾 Size'
+                'name': 'Name',
+                'date': 'Date',
+                'size': 'Size'
             };
 
             const arrow = sortDirection === 'asc' ? '↑' : '↓';
@@ -3259,7 +3351,7 @@
             if (!seriesLibrary.length) {
                 renderHtml(fileList, html`
                     <div class="empty-state">
-                        <div class="empty-state-icon">🖼️</div>
+                        <div class="empty-state-icon">${uiIcon('image')}</div>
                         <h2>No series found</h2>
                         <p>${searchQuery || filterMode !== 'all' ? 'Try a different search term or filter' : 'Process and normalize comics to build your series library view.'}</p>
                     </div>
@@ -4213,7 +4305,7 @@
             const seriesId = series && series.id ? series.id : '';
             const seriesTitle = series && (series.title || series.canonical_title) ? (series.title || series.canonical_title) : '';
             const action = seriesId && suwayomiAvailable
-                ? `<button type="button" class="btn btn-small" data-requires-write onclick="downloadMissingIssuesFromSuwayomi('${escapeJs(seriesId)}','${escapeJs(seriesTitle)}')" title="Ask the configured Suwayomi server to download these issues">⬇️ Download from Suwayomi</button>`
+                ? `<button type="button" class="btn btn-small" data-requires-write onclick="downloadMissingIssuesFromSuwayomi('${escapeJs(seriesId)}','${escapeJs(seriesTitle)}')" title="Ask the configured Suwayomi server to download these issues">${uiIcon('download')} Download from Suwayomi</button>`
                 : '';
             return `
                 <div class="series-detail-missing-banner" role="status">
@@ -4268,52 +4360,52 @@
                                     </div>
                                     <div class="series-issue-actions file-actions-dropdown" onclick="event.stopPropagation()">
                                         <button type="button" class="dropdown-toggle series-issue-actions-toggle" aria-label="Issue actions" onclick="toggleDropdown(event, '${escapeJs(issue.file_path)}')">
-                                            <span aria-hidden="true">⋮</span>
+                                            ${uiIcon('more')}
                                         </button>
                                         <div class="dropdown-menu" id="${getDropdownId(issue.file_path)}">
                                             <button class="dropdown-item" onclick="showFileInfo('${escapeJs(issue.file_path)}', '${escapeJs(issue.file_name)}'); closeAllDropdowns();">
-                                                ℹ️ Info
+                                                ${uiIcon('info')} Info
                                             </button>
                                             <button class="dropdown-item" onclick="viewTags('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                👁️ View/Edit
+                                                ${uiIcon('eye')} View/Edit
                                             </button>
                                             <button class="dropdown-item" onclick="readComic('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                📖 Read Comic
+                                                ${uiIcon('book-open')} Read Comic
                                             </button>
                                             <button class="dropdown-item" data-requires-write onclick="openEmailSendModalForFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                📧 Email to Ereader…
+                                                ${uiIcon('mail')} Email to Ereader…
                                             </button>
                                             ${issue.duplicate
                                                 ? `<button class="dropdown-item" onclick="openDuplicateReviewModal('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                    🔁 Review Duplicate
+                                                    ${uiIcon('copy')} Review Duplicate
                                                 </button>`
                                                 : ''
                                             }
                                             <div class="dropdown-divider"></div>
                                             ${issue.read
                                                 ? `<button class="dropdown-item" onclick="markFileUnread('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                    📚 Mark Unread
+                                                    ${uiIcon('library')} Mark Unread
                                                 </button>`
                                                 : `<button class="dropdown-item" onclick="markFileRead('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                    ✅ Mark Read
+                                                    ${uiIcon('check-circle')} Mark Read
                                                 </button>`
                                             }
                                             <div class="dropdown-divider"></div>
                                             <button class="dropdown-item" onclick="processSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                🚀 Process
+                                                ${uiIcon('play')} Process
                                             </button>
                                             <button class="dropdown-item" onclick="renameSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                📝 Rename
+                                                ${uiIcon('pencil')} Rename
                                             </button>
                                             <button class="dropdown-item" onclick="normalizeSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                ✨ Normalize
+                                                ${uiIcon('tag')} Normalize
                                             </button>
                                             <button class="dropdown-item" onclick="removeFileMetadata('${escapeJs(issue.file_path)}'); closeAllDropdowns();" title="Open the archive, delete the embedded ComicInfo.xml, and mark the file as unprocessed so it can be re-processed.">
-                                                🧹 Remove Metadata
+                                                ${uiIcon('eraser')} Remove Metadata
                                             </button>
                                             <div class="dropdown-divider"></div>
                                             <button class="dropdown-item" onclick="deleteSingleFile('${escapeJs(issue.file_path)}'); closeAllDropdowns();">
-                                                🗑️ Delete
+                                                ${uiIcon('trash')} Delete
                                             </button>
                                         </div>
                                     </div>
@@ -4413,7 +4505,7 @@
             renderHtml(fileList, html`
                 <div class="series-detail" id="seriesDetailPanel">
                     <div class="series-detail-header">
-                        <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">← Back to Series</button>
+                        <button type="button" class="btn btn-small series-detail-back" onclick="closeSeriesDetail()">${uiIcon('arrow-left')} Back to Series</button>
                         <div class="series-detail-summary">
                             <img class="series-detail-cover" data-protected-image="${series.has_external_image && series.external_image_url ? series.external_image_url : series.cover_file_path}" data-protected-image-fallback="${series.has_external_image && series.external_image_url ? series.cover_file_path : ''}" alt="${series.title} cover" loading="lazy" decoding="async" fetchpriority="low">
                             <div class="series-detail-summary-body">
@@ -4423,37 +4515,37 @@
                                 ${series.metadata_source ? html`<div class="series-detail-meta">Source: ${series.metadata_source}${series.last_lookup_utc ? ` · ${new Date(series.last_lookup_utc).toLocaleString()}` : ''}</div>` : ''}
                                 ${rawHtml(renderSeriesSynopsis(series))}
                                 <div class="series-detail-actions">
-                                    ${issues.length ? html`<button type="button" class="btn btn-small btn-primary" onclick="readComic('${jsArg(issues[0].file_path)}')">📖 Read First Issue</button>` : ''}
+                                    ${issues.length ? html`<button type="button" class="btn btn-small btn-primary" onclick="readComic('${jsArg(issues[0].file_path)}')">${uiIcon('book-open')} Read First Issue</button>` : ''}
                                     <div class="file-actions-dropdown series-actions-dropdown">
                                         <button type="button" class="dropdown-toggle" onclick="toggleDropdown(event, '${jsArg(SERIES_ACTIONS_DROPDOWN_KEY)}')">
-                                            ⚙️ Actions
+                                            ${uiIcon('settings')} Actions
                                         </button>
                                         <div class="dropdown-menu" id="${getDropdownId(SERIES_ACTIONS_DROPDOWN_KEY)}">
                                             <button class="dropdown-item" onclick="openManageSeriesNamesModal('${jsArg(series.title)}'); closeAllDropdowns();">
-                                                🏷️ Manage Names
+                                                ${uiIcon('tag')} Manage Names
                                             </button>
                                             <button class="dropdown-item" onclick="openSeriesFoldersModal('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="See the on-disk folders contributing to this series and merge them into one">
-                                                📁 Manage Folders
+                                                ${uiIcon('folder')} Manage Folders
                                             </button>
                                             <div class="dropdown-divider"></div>
                                             <button class="dropdown-item" onclick="refreshSeriesMetadataDirect('${jsArg(series.title)}'); closeAllDropdowns();">
-                                                🌐 Refresh Metadata
+                                                ${uiIcon('globe')} Refresh Metadata
                                             </button>
                                             <button class="dropdown-item" onclick="refreshSeriesFolder('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Refresh metadata for every folder/alias that groups under this series">
-                                                📁 Refresh Folder
+                                                ${uiIcon('folder')} Refresh Folder
                                             </button>
                                             <button class="dropdown-item" onclick="updateSeriesCoversDirect('${jsArg(series.title)}'); closeAllDropdowns();" title="Re-apply the current cached series image to this series' cover sidecars and first-issue archive. This may rewrite the archive file.">
-                                                🖼️ Update Covers
+                                                ${uiIcon('image')} Update Covers
                                             </button>
                                             <button class="dropdown-item" data-requires-write onclick="openEmailSendModalForSeries('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();">
-                                                📧 Email All Issues
+                                                ${uiIcon('mail')} Email All Issues
                                             </button>
                                             <button class="dropdown-item" data-requires-write onclick="openEmailSubscriptionModal('${jsArg(series.title)}'); closeAllDropdowns();">
-                                                🔁 Auto-send New Issues
+                                                ${uiIcon('copy')} Auto-send New Issues
                                             </button>
                                             <div class="dropdown-divider"></div>
                                             <button class="dropdown-item" onclick="resetSeriesProcessedStatus('${jsArg(series.id)}','${jsArg(series.title)}'); closeAllDropdowns();" title="Clear the renamed/normalized flags on every file in this series so they will be re-processed on the next Process / Rename / Normalize run. Use this if a metadata or filename change is not being applied.">
-                                                ♻️ Reset Processed Status
+                                                ${uiIcon('rotate-ccw')} Reset Processed Status
                                             </button>
                                         </div>
                                     </div>
@@ -4471,7 +4563,7 @@
                                 <span>Select all issues</span>
                             </label>
                             <span class="series-detail-selection-meta">${issueCount} issue${issueCount === 1 ? '' : 's'} in this series${!allLoaded ? ` · showing ${issues.length}` : ''}</span>
-                            <button type="button" class="btn btn-small" data-requires-write onclick="openEmailSendModalForSelected()">📧 Email Selected</button>
+                            <button type="button" class="btn btn-small" data-requires-write onclick="openEmailSendModalForSelected()">${uiIcon('mail')} Email Selected</button>
                         </div>
                         ${rawHtml(renderMissingIssuesBanner(issues, series))}
                     ` : ''}
@@ -4574,48 +4666,48 @@
                             </button>
                             <div class="dropdown-menu" id="${getDropdownId(file.relative_path)}">
                                 <button class="dropdown-item" onclick="showFileInfo('${escapeJs(file.relative_path)}', '${escapeJs(file.name)}'); closeAllDropdowns();">
-                                    ℹ️ Info
+                                    ${uiIcon('info')} Info
                                 </button>
                                 <button class="dropdown-item" onclick="viewTags('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    👁️ View/Edit
+                                    ${uiIcon('eye')} View/Edit
                                 </button>
                                 <button class="dropdown-item" onclick="readComic('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    📖 Read Comic
+                                    ${uiIcon('book-open')} Read Comic
                                 </button>
                                 <button class="dropdown-item" data-requires-write onclick="openEmailSendModalForFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    📧 Email to Ereader…
+                                    ${uiIcon('mail')} Email to Ereader…
                                 </button>
                                 ${file.duplicate
                                     ? `<button class="dropdown-item" onclick="openDuplicateReviewModal('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                        🔁 Review Duplicate
+                                        ${uiIcon('copy')} Review Duplicate
                                     </button>`
                                     : ''
                                 }
                                 <div class="dropdown-divider"></div>
                                 ${file.read
                                     ? `<button class="dropdown-item" onclick="markFileUnread('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                        📚 Mark Unread
+                                        ${uiIcon('library')} Mark Unread
                                     </button>`
                                     : `<button class="dropdown-item" onclick="markFileRead('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                        ✅ Mark Read
+                                        ${uiIcon('check-circle')} Mark Read
                                     </button>`
                                 }
                                 <div class="dropdown-divider"></div>
                                 <button class="dropdown-item" onclick="processSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    🚀 Process
+                                    ${uiIcon('play')} Process
                                 </button>
                                 <button class="dropdown-item" onclick="renameSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    📝 Rename
+                                    ${uiIcon('pencil')} Rename
                                 </button>
                                 <button class="dropdown-item" onclick="normalizeSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    ✨ Normalize
+                                    ${uiIcon('tag')} Normalize
                                 </button>
                                 <button class="dropdown-item" onclick="removeFileMetadata('${escapeJs(file.relative_path)}'); closeAllDropdowns();" title="Open the archive, delete the embedded ComicInfo.xml, and mark the file as unprocessed so it can be re-processed.">
-                                    🧹 Remove Metadata
+                                    ${uiIcon('eraser')} Remove Metadata
                                 </button>
                                 <div class="dropdown-divider"></div>
                                 <button class="dropdown-item" onclick="deleteSingleFile('${escapeJs(file.relative_path)}'); closeAllDropdowns();">
-                                    🗑️ Delete
+                                    ${uiIcon('trash')} Delete
                                 </button>
                             </div>
                         </div>
@@ -4710,7 +4802,7 @@
                 } else if (searchQuery || filterMode !== 'all') {
                     renderHtml(fileList, html`
                         <div class="empty-state">
-                            <div class="empty-state-icon">🔍</div>
+                            <div class="empty-state-icon">${uiIcon('search')}</div>
                             <h2>No matching files found</h2>
                             <p>Try a different search term or filter</p>
                         </div>
@@ -4718,7 +4810,7 @@
                 } else {
                     renderHtml(fileList, html`
                         <div class="empty-state">
-                            <div class="empty-state-icon">📁</div>
+                            <div class="empty-state-icon">${uiIcon('folder')}</div>
                             <h2>No comic files found</h2>
                             <p>Add some .cbz or .cbr files to your watched directory</p>
                         </div>
@@ -7623,9 +7715,26 @@
             return messageEl;
         }
         
-        async function openSettings() {
-            // Re-assert capability gating in case the modal contents were
-            // re-rendered since the last check.
+        // Settings is a page (#/settings); the router calls loadSettings()
+        // whenever it is shown so the form always reflects the server.
+        function openSettings() {
+            navigate('#/settings');
+        }
+
+        function setSettingsLoadStatus(state, message = '') {
+            const status = document.getElementById('settingsLoadStatus');
+            const messageElement = document.getElementById('settingsLoadMessage');
+            const retryButton = document.getElementById('settingsRetryButton');
+            if (!status) return;
+            status.hidden = state === 'loaded';
+            if (messageElement) messageElement.textContent = message;
+            if (retryButton) retryButton.hidden = state !== 'error';
+        }
+
+        async function loadSettings() {
+            const loadRequest = ++settingsLoadRequest;
+            settingsLoaded = false;
+            setSettingsLoadStatus('loading', 'Loading settings…');
             applyCapabilities();
             try {
                 // Load all settings
@@ -7647,6 +7756,7 @@
                 }
                 
                 const settingsData = await settingsResponse.json();
+                if (loadRequest !== settingsLoadRequest) return;
                 console.log('[SETTINGS] Settings data loaded:', settingsData);
                 
                 document.getElementById('filenameFormat').value = settingsData.filename_format || '';
@@ -7813,16 +7923,81 @@
                 if (errorReportingDedupeHours) errorReportingDedupeHours.value = settingsData.error_reporting_dedupe_window_hours ?? 24;
                 if (errorReportingComment) errorReportingComment.checked = settingsData.error_reporting_comment_on_recurrence !== false;
                  
-                console.log('[SETTINGS] All settings loaded successfully, opening modal');
-                document.getElementById('settingsModal').classList.add('active');
+                console.log('[SETTINGS] All settings loaded successfully');
+                updateSettingsNavActive();
+                settingsLoaded = true;
+                setSettingsLoadStatus('loaded');
+                applyCapabilities();
             } catch (error) {
-                console.error('[SETTINGS] Error in openSettings():', error);
+                if (loadRequest !== settingsLoadRequest) return;
+                console.error('[SETTINGS] Error in loadSettings():', error);
+                setSettingsLoadStatus('error', 'Settings could not be loaded. Retry before making changes.');
                 showMessage('Failed to load settings: ' + error.message, 'error');
             }
         }
         
         function closeSettings() {
-            document.getElementById('settingsModal').classList.remove('active');
+            const target = settingsReturnHash && settingsReturnHash !== '#/settings' ? settingsReturnHash : '#/home';
+            navigate(target);
+        }
+
+        function scrollToSettingsSection(id) {
+            const section = document.getElementById(id);
+            if (!section) return;
+            const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            section.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+            setSettingsNavActive(id);
+            const heading = section.querySelector('.settings-card-title');
+            if (heading) {
+                heading.setAttribute('tabindex', '-1');
+                heading.focus({ preventScroll: true });
+            }
+        }
+
+        function setSettingsNavActive(id) {
+            document.querySelectorAll('.settings-nav-link').forEach(link => {
+                const active = link.dataset.settingsTarget === id;
+                link.classList.toggle('active', active);
+                if (active) {
+                    link.setAttribute('aria-current', 'true');
+                } else {
+                    link.removeAttribute('aria-current');
+                }
+            });
+        }
+
+        // Highlight the section-nav entry for the card nearest the top of the
+        // viewport while the settings page scrolls.
+        let settingsSectionObserver = null;
+        let settingsSectionObserverHeight = null;
+        function updateSettingsNavActive() {
+            if (typeof IntersectionObserver === 'undefined') return;
+            const rootHeight = document.documentElement.clientHeight;
+            if (settingsSectionObserver && settingsSectionObserverHeight === rootHeight) return;
+            if (settingsSectionObserver) {
+                settingsSectionObserver.disconnect();
+                settingsSectionObserver = null;
+            }
+            const cards = Array.from(document.querySelectorAll('#settingsPageBody .settings-card'));
+            if (!cards.length) return;
+            const visible = new Map();
+            settingsSectionObserverHeight = rootHeight;
+            settingsSectionObserver = new IntersectionObserver(entries => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        visible.set(entry.target.id, entry.boundingClientRect.top);
+                    } else {
+                        visible.delete(entry.target.id);
+                    }
+                });
+                if (!visible.size) return;
+                const topmost = [...visible.entries()].sort((a, b) => a[1] - b[1])[0][0];
+                setSettingsNavActive(topmost);
+            }, { rootMargin: `${-Math.round(rootHeight * 0.15)}px 0px ${-Math.round(rootHeight * 0.70)}px 0px` });
+            cards.forEach(card => settingsSectionObserver.observe(card));
+            if (!document.querySelector('.settings-nav-link[aria-current="true"]')) {
+                setSettingsNavActive(cards[0].id);
+            }
         }
         
         function showResetConfirmation() {
@@ -8475,7 +8650,7 @@
                 modal.classList.remove('active');
                 setProgressIndicatorVisible(true);
                 const indicatorText = document.getElementById('progressIndicatorText');
-                indicatorText.textContent = `⏳ ${title}`;
+                indicatorText.textContent = title;
             } else {
                 // Show the full modal
                 modal.classList.add('active');
@@ -8504,7 +8679,7 @@
             const indicator = document.getElementById('progressIndicator');
             if (indicator.style.display !== 'none') {
                 const indicatorText = document.getElementById('progressIndicatorText');
-                indicatorText.textContent = `⏳ ${current} / ${total} files (${percent}%)`;
+                indicatorText.textContent = `${current} / ${total} files (${percent}%)`;
             }
         }
 
@@ -8643,7 +8818,7 @@
             // Show the indicator with current progress
             const percentText = document.getElementById('progressPercent').textContent;
             const progressText = document.getElementById('progressText').textContent;
-            indicatorText.textContent = `⏳ ${progressText} (${percentText})`;
+            indicatorText.textContent = `${progressText} (${percentText})`;
             setProgressIndicatorVisible(true);
             
             // Save minimized state to localStorage
@@ -9815,6 +9990,7 @@
         }
 
         async function saveFilenameFormat() {
+            if (!settingsLoaded || !userCapabilities.canAdminister) return;
             const format = document.getElementById('filenameFormat').value.trim();
             const logMaxSize = parseFloat(document.getElementById('logMaxSize').value);
             const issueNumberPadding = parseInt(document.getElementById('issueNumberPadding').value);
@@ -9897,7 +10073,8 @@
                 const formatResponse = await fetch(apiUrl('/api/settings/filename-format'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ format: format })
                 });
@@ -9916,7 +10093,8 @@
                 const logResponse = await fetch(apiUrl('/api/settings/log-max-bytes'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ maxMB: logMaxSize })
                 });
@@ -9935,7 +10113,8 @@
                 const paddingResponse = await fetch(apiUrl('/api/settings/issue-number-padding'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ padding: issueNumberPadding })
                 });
@@ -9954,7 +10133,8 @@
                 const cleanupResponse = await fetch(apiUrl('/api/settings/database-cleanup-interval-hours'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ hours: dbCleanupInterval })
                 });
@@ -9973,7 +10153,8 @@
                 const metadataResponse = await fetch(apiUrl('/api/settings/external-series-metadata'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({
                         enabled: enableExternalSeriesMetadata,
@@ -10133,7 +10314,7 @@
                 }
 
                 showMessage('Settings saved successfully! Changes to log rotation, external metadata, and database cleanup will take effect on restart.', 'success');
-                closeSettings();
+                loadSettings();
             } catch (error) {
                 showMessage('Failed to save settings: ' + error.message, 'error');
             }
@@ -10158,6 +10339,7 @@
         }
 
         async function resetFilenameFormat() {
+            if (!settingsLoaded || !userCapabilities.canAdminister) return;
             try {
                 const response = await fetch(apiUrl('/api/settings/filename-format'), {
                     headers: getAuthHeaders()
@@ -10489,24 +10671,24 @@
         function updateWatcherStatusDisplay(running, enabled) {
             const indicators = [
                 document.getElementById('watcherStatus'),
-                document.getElementById('watcherStatusMenu')
+                document.getElementById('watcherStatusMenu'),
+                document.getElementById('watcherStatusSidebar')
             ].filter(Boolean);
             if (indicators.length === 0) return;
 
-            let icon, text, title, statusClass;
+            // The icon is a CSS status dot coloured by the running / stopped
+            // class, so only the text and tooltip change here.
+            let text, title, statusClass;
             if (running === null || enabled === null) {
                 // Unknown status
-                icon = '❓';
                 text = 'Status Unknown';
                 title = 'Unable to determine watcher status';
                 statusClass = null;
             } else if (running) {
-                icon = '✅';
                 text = 'Watcher Running';
                 title = 'File watcher is running and monitoring for changes';
                 statusClass = 'running';
             } else {
-                icon = '⛔';
                 text = 'Watcher Stopped';
                 title = enabled
                     ? 'File watcher is enabled but not running'
@@ -10517,9 +10699,7 @@
             indicators.forEach(statusIndicator => {
                 statusIndicator.classList.remove('running', 'stopped');
                 if (statusClass) statusIndicator.classList.add(statusClass);
-                const iconElement = statusIndicator.querySelector('.watcher-icon');
                 const textElement = statusIndicator.querySelector('.watcher-text');
-                if (iconElement) iconElement.textContent = icon;
                 if (textElement) textElement.textContent = text;
                 statusIndicator.title = title;
             });
@@ -11573,7 +11753,7 @@
                             </div>
                             <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Aliases: ${aliases}</div>
                             <div style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;">
-                                <button class="btn btn-small btn-primary" type="button" onclick="applySearchResultAsMatch(${idx})" title="Mark this candidate as the correct match for the series">✅ Use This Match</button>
+                                <button class="btn btn-small btn-primary" type="button" onclick="applySearchResultAsMatch(${idx})" title="Mark this candidate as the correct match for the series">${uiIcon('check-circle')} Use This Match</button>
                                 <button class="btn btn-small" type="button" onclick="adoptSearchResult(${idx}, 'canonical')">Adopt as Canonical</button>
                                 <button class="btn btn-small" type="button" onclick="adoptSearchResult(${idx}, 'aliases')">Add Aliases</button>
                             </div>
@@ -12063,6 +12243,9 @@
                 } else if (key === 'l') {
                     event.preventDefault();
                     navigate('#/library');
+                } else if (key === 's') {
+                    event.preventDefault();
+                    navigate('#/settings');
                 }
                 return;
             }

@@ -1,15 +1,40 @@
 name: Build and Push .NET Docker Image
 
 on:
-  push:
-    branches: 
+  # Publish only after the version bump for a merge has finished. Building on the push itself
+  # used the merge commit, which still carries the previous version, and the bump commit cannot
+  # start a build of its own because it is pushed with GITHUB_TOKEN. The published image was
+  # therefore always one version behind the newest release. A workflow_run build checks out the
+  # newest commit on the default branch (dotnet), which already contains the bump. It runs
+  # whatever the bump's outcome, so a merge whose bump was skipped is still published.
+  workflow_run:
+    workflows: ["Automatic Version Bump"]
+    types: [completed]
+    branches:
       - dotnet
   pull_request:
     branches: 
       - dotnet
+  # Republishes the selected branch (run it on dotnet), e.g. after a failed push to Docker Hub.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Publishing runs share one group, and a newer run cancels an older one that is still in
+# progress, so a stale build can never finish last and overwrite the :dotnet tag. Every other run
+# (pull request builds, which never push, and runs whose job is skipped below) gets a group of its
+# own, so it can never cancel a publish.
+concurrency:
+  group: ${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || github.event.workflow_run.event == 'push') && 'publish' || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   build-and-push-dotnet:
+    # Only a version bump that ran for a push to this repository may publish. workflow_run also
+    # fires when a fork's pull request defines a workflow with the same name on a branch called
+    # dotnet, and that run must not start a privileged publish.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

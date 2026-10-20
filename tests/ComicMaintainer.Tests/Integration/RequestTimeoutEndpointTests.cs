@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ComicMaintainer.Tests.Integration;
@@ -21,13 +22,30 @@ namespace ComicMaintainer.Tests.Integration;
 /// being cut off at thirty seconds with an empty 504. These tests hold the
 /// endpoints that must be exempt, and the wiring that lets them be.
 /// </summary>
-public class RequestTimeoutEndpointTests : IClassFixture<WebApplicationFactory<Program>>
+public class RequestTimeoutEndpointTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
+    private readonly string _configDirectory;
 
     public RequestTimeoutEndpointTests(WebApplicationFactory<Program> factory)
     {
-        _factory = factory;
+        _configDirectory = Path.Join(Path.GetTempPath(), "ComicMaintainer.Tests", Guid.NewGuid().ToString("N"));
+        _factory = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, configuration) =>
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["AppSettings:ConfigDirectory"] = _configDirectory,
+                })));
+    }
+
+    public void Dispose()
+    {
+        _factory.Dispose();
+        if (Directory.Exists(_configDirectory))
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            Directory.Delete(_configDirectory, recursive: true);
+        }
     }
 
     [Theory]

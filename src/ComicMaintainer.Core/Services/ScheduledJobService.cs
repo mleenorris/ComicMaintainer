@@ -84,7 +84,25 @@ public class ScheduledJobService : IScheduledJobService
 
         if (added > 0)
         {
-            await db.SaveChangesAsync(cancellationToken);
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException)
+            {
+                await using var verificationDb = await _dbContextFactory.CreateDbContextAsync(cancellationToken);
+                var persistedKeys = new HashSet<string>(
+                    await verificationDb.ScheduledJobs.Select(j => j.JobKey).ToListAsync(cancellationToken),
+                    StringComparer.OrdinalIgnoreCase);
+
+                if (_handlers.Keys.Any(key => !persistedKeys.Contains(key)))
+                {
+                    throw;
+                }
+
+                return;
+            }
+
             _logger.LogInformation("Seeded {Count} scheduled job definition(s)", added);
         }
     }

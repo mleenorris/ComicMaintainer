@@ -1378,6 +1378,7 @@
         });
 
         onViewportResize(applyMobileLibraryView);
+        onViewportResize(updateSettingsNavActive);
 
         // Debounce library health refreshes so bursts of file events trigger only one refresh.
         // The delay can be overridden for cases like job completion where a faster refresh is useful.
@@ -7968,11 +7969,19 @@
         // Highlight the section-nav entry for the card nearest the top of the
         // viewport while the settings page scrolls.
         let settingsSectionObserver = null;
+        let settingsSectionObserverHeight = null;
         function updateSettingsNavActive() {
-            if (settingsSectionObserver || typeof IntersectionObserver === 'undefined') return;
+            if (typeof IntersectionObserver === 'undefined') return;
+            const rootHeight = document.documentElement.clientHeight;
+            if (settingsSectionObserver && settingsSectionObserverHeight === rootHeight) return;
+            if (settingsSectionObserver) {
+                settingsSectionObserver.disconnect();
+                settingsSectionObserver = null;
+            }
             const cards = Array.from(document.querySelectorAll('#settingsPageBody .settings-card'));
             if (!cards.length) return;
             const visible = new Map();
+            settingsSectionObserverHeight = rootHeight;
             settingsSectionObserver = new IntersectionObserver(entries => {
                 entries.forEach(entry => {
                     if (entry.isIntersecting) {
@@ -7984,9 +7993,11 @@
                 if (!visible.size) return;
                 const topmost = [...visible.entries()].sort((a, b) => a[1] - b[1])[0][0];
                 setSettingsNavActive(topmost);
-            }, { rootMargin: '-15% 0px -70% 0px' });
+            }, { rootMargin: `${-Math.round(rootHeight * 0.15)}px 0px ${-Math.round(rootHeight * 0.70)}px 0px` });
             cards.forEach(card => settingsSectionObserver.observe(card));
-            setSettingsNavActive(cards[0].id);
+            if (!document.querySelector('.settings-nav-link[aria-current="true"]')) {
+                setSettingsNavActive(cards[0].id);
+            }
         }
         
         function showResetConfirmation() {

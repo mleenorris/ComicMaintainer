@@ -117,6 +117,17 @@ public class FrontendAppShellTests
     }
 
     [Fact]
+    public void Settings_SectionObserverUsesViewportHeightAndRebuildsAfterResize()
+    {
+        var js = Read("js", "main.js");
+
+        Assert.Contains("onViewportResize(updateSettingsNavActive);", js);
+        Assert.Contains("const rootHeight = document.documentElement.clientHeight;", js);
+        Assert.Contains("settingsSectionObserverHeight === rootHeight", js);
+        Assert.Contains("`${-Math.round(rootHeight * 0.15)}px 0px ${-Math.round(rootHeight * 0.70)}px 0px`", js);
+    }
+
+    [Fact]
     public void MainCss_SidebarGridIsScopedToTheAppShell()
     {
         // jobs.html and reader.html load main.css too; an unscoped body grid

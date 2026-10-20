@@ -11,9 +11,11 @@ This document describes the GitHub Actions workflow for building and publishing 
 The workflow is triggered on:
 
 - **Push** to branch:
+  - `master` - main branch (when PRs are merged)
   - `dotnet` - .NET branch (when PRs are merged)
 
 - **Pull Request** to branch:
+  - `master`
   - `dotnet`
 
 ## Docker Image Tags
@@ -21,7 +23,7 @@ The workflow is triggered on:
 The workflow creates a Docker image with a single tag:
 
 ### .NET Branch
-When PRs are merged to the `dotnet` branch, the following tag is created:
+When PRs are merged to the `master` or `dotnet` branch, the following tag is created:
 - `iceburn1/comicmaintainer:dotnet`
 
 This uses the same Docker Hub repository as the Python version (`iceburn1/comicmaintainer`) but with the `dotnet` tag to distinguish it from the Python version (which uses `latest`, `stable`, etc.)
@@ -114,7 +116,7 @@ To monitor build status:
 
 ## Usage
 
-Once secrets are configured and PRs are merged to the `dotnet` branch, the workflow runs automatically. To use the published image:
+Once secrets are configured and PRs are merged to the `master` or `dotnet` branch, the workflow runs automatically. To use the published image:
 
 ```bash
 # Pull the .NET version

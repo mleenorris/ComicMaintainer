@@ -2,9 +2,9 @@ name: .NET Tests
 
 on:
   push:
-    branches: [ main, develop, dotnet ]
+    branches: [ main, master, develop, dotnet ]
   pull_request:
-    branches: [ main, develop, dotnet ]
+    branches: [ main, master, develop, dotnet ]
   workflow_dispatch:
 
 permissions:

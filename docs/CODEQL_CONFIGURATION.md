@@ -6,8 +6,8 @@ This document explains the CodeQL security scanning configuration for the ComicM
 
 The repository uses branch-aware CodeQL analysis to scan for security vulnerabilities in the appropriate languages for each branch:
 
-- **dotnet branch**: Analyzes C# and JavaScript code (for .NET projects)
-- **master and python branches**: Analyzes Python and JavaScript code
+- **master, main and dotnet branches**: Analyzes C# and JavaScript code (for .NET projects)
+- **python branch**: Analyzes Python and JavaScript code (the legacy Python version)
 
 ## Workflow Configuration
 
@@ -15,7 +15,7 @@ The CodeQL workflow is defined in `.github/workflows/codeql-analysis.yml` and co
 
 ### 1. analyze-dotnet Job
 
-**Triggers**: Runs when the branch is `dotnet` or when a PR targets `dotnet`
+**Triggers**: Runs when the branch is `master`, `main` or `dotnet`, or when a PR targets one of them
 
 **Languages Analyzed**:
 - **C#**: For .NET Core/ASP.NET Core code
@@ -36,7 +36,7 @@ The CodeQL workflow is defined in `.github/workflows/codeql-analysis.yml` and co
 
 ### 2. analyze-python Job
 
-**Triggers**: Runs when the branch is `master` or `python`, or when a PR targets these branches
+**Triggers**: Runs when the branch is `python`, or when a PR targets it
 
 **Languages Analyzed**:
 - **Python**: For Python application code
@@ -81,8 +81,8 @@ Both jobs use the `security-and-quality` query suite, which includes:
 - Results are uploaded to GitHub Security tab
 - Analysis summaries are stored as artifacts for 90 days
 - Separate artifact names distinguish between branches:
-  - `codeql-summary-dotnet-{language}` for dotnet branch
-  - `codeql-summary-python-{language}` for master/python branches
+  - `codeql-summary-dotnet-{language}` for master/main/dotnet branches
+  - `codeql-summary-python-{language}` for the python branch
 
 ## Benefits of Branch-Aware Configuration
 
@@ -102,15 +102,15 @@ Both jobs use the `security-and-quality` query suite, which includes:
 
 ### Requirements Files
 
-- **dotnet branch**: Uses .csproj files for dependency management (no requirements.txt)
-- **master/python branches**: Uses requirements.txt for Python dependencies
+- **master/main/dotnet branches**: Use .csproj files for dependency management (no requirements.txt)
+- **python branch**: Uses requirements.txt for Python dependencies
 - The workflow includes a check (`if [ -f requirements.txt ]`) to handle branches that don't have this file
 
 ### Branch Support
 
 The workflow explicitly supports:
-- `dotnet` - For C#/.NET projects
-- `master`, `main`, `python` - For Python projects
+- `master`, `main`, `dotnet` - For C#/.NET projects
+- `python` - For the legacy Python project
 
 ### Event Types
 

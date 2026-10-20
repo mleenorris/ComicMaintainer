@@ -9,8 +9,8 @@ in this repository is the fallback.
 No repository files are involved — this is configured in GitHub settings:
 
 1. Go to **Settings → Rules → Rulesets → New ruleset → New branch ruleset**.
-2. Target the default branch (`dotnet` in this repository — it does **not** use
-   `main`/`master`), or target all branches to cover every pull request base.
+2. Target the default branch (currently `dotnet`) and `master`, which now carry
+   the same .NET code, or target all branches to cover every pull request base.
 3. Set **Enforcement status** to **Active**.
 4. Under **Branch rules**, enable **Automatically request Copilot code review**.
 
@@ -42,5 +42,5 @@ repository; if it is not, the step logs a message and the job succeeds.
 
 ## Verification
 
-Open a throwaway pull request against `dotnet` and confirm that **Copilot**
+Open a throwaway pull request against `master` or `dotnet` and confirm that **Copilot**
 appears in the **Reviewers** list and posts a review.

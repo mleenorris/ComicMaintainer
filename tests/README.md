@@ -119,8 +119,8 @@ public void IsComicArchive_VariousExtensions_ReturnsCorrectResult(string fileNam
 ## Continuous Integration
 
 Tests are automatically run on:
-- Push to `main` or `develop` branches
-- Pull requests targeting `main` or `develop`
+- Push to `master`, `dotnet`, `main` or `develop` branches
+- Pull requests targeting any of those branches
 - Manual workflow dispatch
 
 There are two CI workflows that gate every PR:

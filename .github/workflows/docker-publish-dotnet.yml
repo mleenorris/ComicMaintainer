@@ -3,9 +3,11 @@ name: Build and Push .NET Docker Image
 on:
   push:
     branches: 
+      - master
       - dotnet
   pull_request:
     branches: 
+      - master
       - dotnet
 
 jobs:
@@ -37,7 +39,7 @@ jobs:
           # Use the same image repository as Python version, but with dotnet tag
           IMAGE_BASE="iceburn1/comicmaintainer"
           
-          # For dotnet branch, tag as dotnet
+          # The .NET image keeps the dotnet tag whether it is built from master or dotnet
           TAGS="${IMAGE_BASE}:dotnet"
           
           # Output tags in a format that can be used by docker/build-push-action

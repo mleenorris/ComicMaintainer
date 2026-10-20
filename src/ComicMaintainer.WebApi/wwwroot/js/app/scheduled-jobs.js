@@ -48,7 +48,8 @@
         let scheduledJobsLoadRequest = 0;
         let scheduledJobsRefreshTimer = null;
         let metadataAuditFindingsRequest = 0;
-        // Runs started from this page: jobKey → { requestedAt, lastRunUtc, seenRunning }.
+        // Runs started from this page: jobKey → { requestedAt, lastRunUtc, seenRunning, pending }.
+        // `pending` is set while the run request has not been accepted yet.
         const scheduledJobRunRequests = new Map();
 
         function openScheduledJobs() {
@@ -430,7 +431,8 @@
         // it went (the card alone is easy to miss).
         function followScheduledJobRun(job) {
             const request = scheduledJobRunRequests.get(job.jobKey);
-            if (!request) return;
+            // Not followed until the server has accepted the run request.
+            if (!request || request.pending) return;
             if (isScheduledJobRunning(job)) {
                 request.seenRunning = true;
                 return;
@@ -514,16 +516,24 @@
             const job = scheduledJobs.find(item => item.jobKey === jobKey);
             if (!job || isScheduledJobBusy(job)) return;
             const name = job.displayName || jobKey;
-            const button = findScheduledJobCard(jobKey)?.querySelector('[data-job-action="run"]');
-            if (button) button.disabled = true;
+            const latestJob = () => scheduledJobs.find(item => item.jobKey === jobKey) || job;
+            // Busy from the click on, so a status refresh that lands while the
+            // POST is pending cannot re-enable Run now or end the follow early.
+            const request = { requestedAt: Date.now(), lastRunUtc: job.lastRunUtc, seenRunning: false, pending: true };
+            scheduledJobRunRequests.set(jobKey, request);
+            updateScheduledJobCard(job);
             try {
                 await fetchScheduledJobsApi(`/api/scheduled-jobs/${encodeURIComponent(jobKey)}/run`, { method: 'POST' });
-                scheduledJobRunRequests.set(jobKey, { requestedAt: Date.now(), lastRunUtc: job.lastRunUtc, seenRunning: false });
-                updateScheduledJobCard(job);
+                if (scheduledJobRunRequests.get(jobKey) === request) {
+                    request.pending = false;
+                    request.requestedAt = Date.now();
+                }
+                updateScheduledJobCard(latestJob());
                 showMessage(`${name} started.`, 'info');
                 loadScheduledJobs({ statusOnly: true });
             } catch (error) {
-                if (button) button.disabled = false;
+                if (scheduledJobRunRequests.get(jobKey) === request) scheduledJobRunRequests.delete(jobKey);
+                updateScheduledJobCard(latestJob());
                 if (!error.authHandled) {
                     showMessage(`Failed to start ${name}: ${error.message}`, 'error', { reference: true });
                 }

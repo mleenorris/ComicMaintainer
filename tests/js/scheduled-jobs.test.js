@@ -134,3 +134,87 @@ test('the library-scan card renders every pass with its default', () => {
         assert.equal(input[0].includes('checked'), checked, name);
     }
 });
+
+test('a status refresh while Run now is pending cannot let it be submitted again', async () => {
+    const job = { jobKey: 'library-scan', displayName: 'Library scan', lastStatus: 'Success', lastRunUtc: '2026-10-20T16:40:13' };
+    const runButton = { disabled: false, replaceChildren() {} };
+    const part = () => ({ replaceChildren() {} });
+    const card = {
+        dataset: { jobKey: job.jobKey },
+        querySelector: selector => (selector === '[data-job-action="run"]' ? runButton : part())
+    };
+    const list = { setAttribute() {}, querySelector: () => card, replaceChildren() {} };
+    const posts = [];
+    const messages = [];
+    const sandbox = loadScripts(['js/shared.js', 'js/app/templating.js', 'js/app/scheduled-jobs.js'], {
+        document: {
+            getElementById: id => (id === 'scheduledJobsList' ? list : id === 'scheduled-job-library-scan' ? card : null),
+            querySelector: () => null,
+            querySelectorAll: () => []
+        },
+        fetch: async (url, options = {}) => {
+            if (options.method === 'POST') {
+                return new Promise(resolve => posts.push(resolve));
+            }
+            return { ok: true, status: 200, json: async () => [{ ...job }] };
+        },
+        setTimeout: () => 0,
+        clearTimeout: () => {},
+        getAuthHeaders: () => ({}),
+        handleAuthError: () => false,
+        showMessage: (message, type) => messages.push({ message, type }),
+        userCapabilities: { canAdminister: true },
+        currentView: 'jobs'
+    });
+    sandbox.run('renderHtml = () => {}');
+    sandbox.context.initialJobs = [{ ...job }];
+    sandbox.run('scheduledJobs = initialJobs');
+
+    const run = sandbox.run('runScheduledJob');
+    const firstRun = run(job.jobKey);
+    assert.equal(posts.length, 1);
+    assert.equal(runButton.disabled, true);
+
+    // A status refresh completes while the POST is still pending.
+    await sandbox.run('loadScheduledJobs')({ statusOnly: true });
+    assert.equal(runButton.disabled, true, 'Run now must stay disabled while the request is pending');
+    assert.equal(sandbox.run(`scheduledJobRunRequests.has('library-scan')`), true);
+    assert.deepEqual(messages, [], 'nothing is announced before the run is accepted');
+
+    await run(job.jobKey);
+    assert.equal(posts.length, 1, 'a second click must not send another POST');
+
+    posts[0]({ ok: true, status: 202, json: async () => ({}) });
+    await firstRun;
+    assert.equal(runButton.disabled, true);
+    assert.deepEqual(messages.map(item => item.message), ['Library scan started.']);
+});
+
+test('a rejected Run now request re-enables the button', async () => {
+    const job = { jobKey: 'library-scan', displayName: 'Library scan', lastStatus: 'Success' };
+    const runButton = { disabled: false, replaceChildren() {} };
+    const card = {
+        dataset: { jobKey: job.jobKey },
+        querySelector: selector => (selector === '[data-job-action="run"]' ? runButton : { replaceChildren() {} })
+    };
+    const messages = [];
+    const sandbox = loadScripts(['js/shared.js', 'js/app/templating.js', 'js/app/scheduled-jobs.js'], {
+        document: {
+            getElementById: id => (id === 'scheduled-job-library-scan' ? card : null),
+            querySelector: () => null,
+            querySelectorAll: () => []
+        },
+        fetch: async () => ({ ok: false, status: 500, json: async () => ({ error: 'boom' }) }),
+        getAuthHeaders: () => ({}),
+        handleAuthError: () => false,
+        showMessage: (message, type) => messages.push({ message, type })
+    });
+    sandbox.run('renderHtml = () => {}');
+    sandbox.context.initialJobs = [{ ...job }];
+    sandbox.run('scheduledJobs = initialJobs');
+
+    await sandbox.run('runScheduledJob')(job.jobKey);
+    assert.equal(runButton.disabled, false);
+    assert.equal(sandbox.run(`scheduledJobRunRequests.has('library-scan')`), false);
+    assert.equal(messages[0].type, 'error');
+});

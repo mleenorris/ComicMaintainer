@@ -531,8 +531,8 @@ public class FileWatcherServiceTests : IDisposable
     public async Task OnFileRenamed_IgnoresWhenTargetIsTemporaryFile()
     {
         // Arrange
-        var regularFile = Path.Combine(_testDirectory, "test.cbz");
-        var tempFile = Path.Combine(_testDirectory, ".tmp_renamed.cbz");
+        var regularFile = Path.Join(_testDirectory, "test.cbz");
+        var tempFile = Path.Join(_testDirectory, ".tmp_renamed.cbz");
         
         // Create the regular file
         File.WriteAllText(regularFile, "fake cbz content");
@@ -564,7 +564,7 @@ public class FileWatcherServiceTests : IDisposable
     [Fact]
     public async Task StartAsync_IgnoresTemporaryArchivesDuringInitialScan()
     {
-        var tempFile = Path.Combine(_testDirectory, ".tmp_existing.cbz");
+        var tempFile = Path.Join(_testDirectory, ".tmp_existing.cbz");
         File.WriteAllText(tempFile, "fake cbz content");
 
         await _service.StartAsync();

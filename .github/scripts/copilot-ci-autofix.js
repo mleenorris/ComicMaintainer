@@ -33,6 +33,9 @@ const FAILED_CONCLUSIONS = new Set(['failure', 'timed_out']);
 
 const REQUEST_MARKER_PATTERN = /<!-- copilot-ci-autofix:request workflow=(\d+) sha=([0-9a-f]+) -->/g;
 const EXHAUSTED_MARKER = '<!-- copilot-ci-autofix:exhausted -->';
+// Markers only count in comments and issues written by people with access to the repository:
+// anyone can comment on a public repository, and a copied marker would suppress requests.
+const TRUSTED_AUTHOR_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
 const SESSION_POLL_INTERVAL_MS = 60 * 1000;
 const SESSION_MAX_WAIT_MS = 50 * 60 * 1000;
@@ -169,6 +172,10 @@ function issueMarker(run) {
 
 function parseRequestMarkers(body) {
     return Array.from(String(body ?? '').matchAll(REQUEST_MARKER_PATTERN), match => ({ workflowId: match[1], sha: match[2] }));
+}
+
+function isTrustedAuthor(item) {
+    return TRUSTED_AUTHOR_ASSOCIATIONS.has(item.author_association);
 }
 
 function formatRunReference({ run, workflowName, serverUrl, repoFullName }) {
@@ -376,7 +383,7 @@ async function findInheritedFailures({ github, core, repo, run }, baseBranch, fa
 
 async function listOpenCiFailureIssues(userClient, repo) {
     const issues = await userClient.paginate(userClient.rest.issues.listForRepo, { ...repo, state: 'open', labels: CI_FAILURE_LABEL, per_page: 100 });
-    return issues.filter(issue => !issue.pull_request);
+    return issues.filter(issue => !issue.pull_request && isTrustedAuthor(issue));
 }
 
 // Whether the pull request refers to an open `ci-failure` issue, as the pull requests Copilot opens
@@ -474,7 +481,8 @@ async function handlePullRequestFailure(ctx) {
 
     // One request per commit: when several watched workflows fail on the same commit, Copilot is
     // asked once, and any failure its fix does not cover is reported again for the new commit.
-    const comments = await userClient.paginate(userClient.rest.issues.listComments, { ...repo, issue_number: pullRequest.number, per_page: 100 });
+    const comments = (await userClient.paginate(userClient.rest.issues.listComments, { ...repo, issue_number: pullRequest.number, per_page: 100 }))
+        .filter(isTrustedAuthor);
     const requests = comments.flatMap(comment => parseRequestMarkers(comment.body));
     if (requests.some(request => request.sha === run.head_sha)) {
         return finish(core, 'skipped', `Copilot was already asked to fix commit ${run.head_sha} in #${pullRequest.number}.`, { pullRequest: pullRequest.number });

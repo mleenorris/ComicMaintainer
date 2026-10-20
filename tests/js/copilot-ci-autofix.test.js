@@ -182,13 +182,14 @@ function job(id, name, conclusion, failedStep) {
 const UNIT_JOB = job(1, 'Unit Tests (10.0.x)', 'success');
 const INTEGRATION_JOB = job(2, 'Integration Tests (10.0.x)', 'failure', 'Run integration tests');
 
-function requestComment(sha, workflowId = WORKFLOW_ID) {
-    return { body: `@copilot fix it\n<!-- copilot-ci-autofix:request workflow=${workflowId} sha=${sha} -->` };
+function requestComment(sha, workflowId = WORKFLOW_ID, author_association = 'OWNER') {
+    return { author_association, body: `@copilot fix it\n<!-- copilot-ci-autofix:request workflow=${workflowId} sha=${sha} -->` };
 }
 
-function ciFailureIssue(number, workflowId = WORKFLOW_ID) {
+function ciFailureIssue(number, workflowId = WORKFLOW_ID, author_association = 'OWNER') {
     return {
         number,
+        author_association,
         state: 'open',
         labels: [{ name: 'ci-failure' }],
         body: `Failing\n<!-- copilot-ci-autofix:issue workflow=${workflowId} -->`,
@@ -272,7 +273,7 @@ function setup({
                 listComments: async params => ({ data: state.comments.get(params.issue_number) ?? [] }),
                 createComment: async params => {
                     record('createComment', params);
-                    const comment = { id: nextId++, body: params.body, html_url: `https://github.com/${OWNER}/${REPO}/issues/${params.issue_number}#comment` };
+                    const comment = { id: nextId++, author_association: 'OWNER', body: params.body, html_url: `https://github.com/${OWNER}/${REPO}/issues/${params.issue_number}#comment` };
                     state.comments.set(params.issue_number, [...(state.comments.get(params.issue_number) ?? []), comment]);
                     return { data: comment };
                 },
@@ -282,7 +283,7 @@ function setup({
                 create: async params => {
                     record('create', params);
                     const number = nextId++;
-                    const issue = { ...params, number, state: 'open', labels: params.labels.map(name => ({ name })), html_url: `https://github.com/${OWNER}/${REPO}/issues/${number}` };
+                    const issue = { ...params, number, author_association: 'OWNER', state: 'open', labels: params.labels.map(name => ({ name })), html_url: `https://github.com/${OWNER}/${REPO}/issues/${number}` };
                     state.issues.push(issue);
                     return { data: issue };
                 },
@@ -464,6 +465,16 @@ test('Copilot is asked only once per commit, whichever workflow asked first', as
     assert.deepEqual(env.writes(), []);
 });
 
+test('markers copied into comments by people without access to the repository are ignored', async () => {
+    const forged = ['1111111', '2222222', SHA].map(sha => requestComment(sha, WORKFLOW_ID, 'NONE'));
+    const env = setup({ comments: { 7: [...forged, requestComment('4444444', WORKFLOW_ID, 'CONTRIBUTOR')] } });
+
+    const result = await env.invoke();
+
+    assert.equal(result.action, 'requested');
+    assert.equal(result.attempt, 1);
+});
+
 test('after the attempt limit a single note without a Copilot mention is posted', async () => {
     const previous = [requestComment('1111111'), requestComment('2222222'), requestComment('3333333')];
     const env = setup({ comments: { 7: previous } });
@@ -623,7 +634,7 @@ test('a failure on the default branch opens an issue assigned to Copilot', async
 });
 
 test('later failures on the default branch are added to the open issue', async () => {
-    const env = setup({ run: defaultBranchRun(), issues: [ciFailureIssue(5, 999), ciFailureIssue(12)] });
+    const env = setup({ run: defaultBranchRun(), issues: [ciFailureIssue(5, 999), ciFailureIssue(9, WORKFLOW_ID, 'NONE'), ciFailureIssue(12)] });
 
     const result = await env.invoke();
 

@@ -78,7 +78,7 @@ public class ScheduledJobServiceTests
     [Fact]
     public async Task SeedDefaultsAsync_WhenInstancesSeedConcurrently_IsIdempotent()
     {
-        var databasePath = Path.Combine(Path.GetTempPath(), $"scheduled-job-seed-{Guid.NewGuid():N}.db");
+        var databasePath = Path.Join(Path.GetTempPath(), $"scheduled-job-seed-{Guid.NewGuid():N}.db");
         var factory = new SqliteTestDbContextFactory(databasePath, new ConcurrentSaveChangesInterceptor());
         try
         {

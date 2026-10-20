@@ -43,6 +43,7 @@ public class RequestTimeoutEndpointTests : IClassFixture<WebApplicationFactory<P
         _factory.Dispose();
         if (Directory.Exists(_configDirectory))
         {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
             Directory.Delete(_configDirectory, recursive: true);
         }
     }

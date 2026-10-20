@@ -597,6 +597,7 @@
                     <button type="button" class="settings-nav-link" data-settings-target="settings-error-reporting" onclick="scrollToSettingsSection('settings-error-reporting')"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span>Automated Error Reporting</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-logs" onclick="scrollToSettingsSection('settings-logs')"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg><span>Log Rotation</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-database" onclick="scrollToSettingsSection('settings-database')"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg><span>Database Cleanup</span></button>
+                    <button type="button" class="settings-nav-link" id="settingsNavBackups" data-settings-target="settings-backups" onclick="scrollToSettingsSection('settings-backups')"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg><span>Backups</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-filename" onclick="scrollToSettingsSection('settings-filename')"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg><span>Filename Format</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-padding" onclick="scrollToSettingsSection('settings-padding')"><svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg><span>Issue Number Padding</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-covers" onclick="scrollToSettingsSection('settings-covers')"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><span>Series Covers</span></button>
@@ -885,6 +886,40 @@
                                 Manually trigger database cleanup to remove stale entries for files that no longer exist on disk.
                             </small>
                         </div>
+                    </section>
+                    <!-- Administrator-only (the whole /api/backups API is). Hidden by
+                         applyCapabilities() for other users and by loadBackups() on a 403. -->
+                    <section class="settings-card" id="settings-backups" aria-labelledby="settings-backups-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-hard-drive"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-backups-title">Backups</h3>
+                                <p class="settings-card-desc">Database backups: create, download, restore and delete.</p>
+                            </div>
+                        </header>
+                        <div class="backups-restore-pending" id="backupsRestorePending" role="status" hidden>
+                            <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>
+                            <div class="backups-restore-pending-text">
+                                <strong>Restart required.</strong>
+                                A database restore is staged and will be applied the next time ComicMaintainer restarts.
+                            </div>
+                            <button type="button" class="btn btn-small" id="cancelPendingRestoreBtn" onclick="cancelPendingRestore()">
+                                <svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg> Cancel pending restore
+                            </button>
+                        </div>
+                        <div class="form-group backups-actions">
+                            <button type="button" class="btn btn-primary" id="createBackupBtn" onclick="createBackup()">
+                                <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Create backup now
+                            </button>
+                            <button type="button" class="btn" id="restoreBackupFileBtn" onclick="document.getElementById('restoreBackupFileInput').click()">
+                                <svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg> Restore from file…
+                            </button>
+                            <input type="file" id="restoreBackupFileInput" accept=".db" hidden onchange="restoreBackupFromFile(this)">
+                            <small class="form-hint">
+                                A restore is validated and a safety backup of the current database is taken first; it is applied when ComicMaintainer restarts. Backups contain password hashes and stored credentials, so keep downloaded copies private.
+                            </small>
+                        </div>
+                        <div class="backups-list" id="backupsList" aria-live="polite"></div>
                     </section>
                     <section class="settings-card" id="settings-filename" aria-labelledby="settings-filename-title">
                         <header class="settings-card-header">

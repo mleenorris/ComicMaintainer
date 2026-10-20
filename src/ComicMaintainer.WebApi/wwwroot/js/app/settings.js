@@ -274,6 +274,7 @@
             settingsLoaded = false;
             setSettingsLoadStatus('loading', 'Loading settings…');
             applyCapabilities();
+            loadBackups();
             try {
                 // Load all settings
                 const settingsUrl = apiUrl('/api/settings');
@@ -1616,5 +1617,251 @@
                 }
             } catch (error) {
                 showMessage('Failed to cleanup database: ' + error.message, 'error');
+            }
+        }
+
+        // =================================================================
+        // Backups (Settings → Backups)
+        // =================================================================
+        //
+        // The whole /api/backups API is administrator-only: a backup is a
+        // complete copy of the database, password hashes and stored
+        // credentials included. The section is hidden for other users, and
+        // also if the server answers 403 (e.g. before /api/auth/user has
+        // resolved the user's capabilities).
+
+        let backupsForbidden = false;
+        let backupsLoadRequest = 0;
+
+        function updateBackupsSectionVisibility() {
+            const hidden = !userCapabilities.canAdminister || backupsForbidden;
+            ['settings-backups', 'settingsNavBackups'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.hidden = hidden;
+            });
+        }
+
+        /** Fetch a /api/backups endpoint; throws an Error carrying `status` on failure. */
+        async function fetchBackupsApi(path, options = {}) {
+            const response = await fetch(apiUrl(path), {
+                credentials: 'include',
+                ...options,
+                headers: options.headers || getAuthHeaders()
+            });
+            if (handleAuthError(response)) {
+                const error = new Error('Authentication required');
+                error.status = response.status;
+                error.authHandled = true;
+                throw error;
+            }
+            if (!response.ok) {
+                let message = `HTTP error! status: ${response.status}`;
+                try {
+                    const body = await response.json();
+                    if (body && (body.error || body.message)) message = body.error || body.message;
+                } catch (_) { /* non-JSON error body */ }
+                const error = new Error(message);
+                error.status = response.status;
+                throw error;
+            }
+            return response;
+        }
+
+        /** True when the failure needs no toast: a 401 (already redirecting to login) or a 403 (section hidden). */
+        function handleBackupsForbidden(error) {
+            if (error && error.authHandled) return true;
+            if (error && error.status === 403) {
+                backupsForbidden = true;
+                updateBackupsSectionVisibility();
+                return true;
+            }
+            return false;
+        }
+
+        function formatBackupDate(value) {
+            if (!value) return '—';
+            const date = new Date(value);
+            return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+        }
+
+        async function loadBackups() {
+            updateBackupsSectionVisibility();
+            if (!userCapabilities.canAdminister || backupsForbidden) return;
+            const list = document.getElementById('backupsList');
+            if (!list) return;
+            const loadRequest = ++backupsLoadRequest;
+            renderHtml(list, html`<div class="loading"><div class="spinner"></div><p>Loading backups...</p></div>`);
+            try {
+                const response = await fetchBackupsApi('/api/backups');
+                const data = await response.json();
+                if (loadRequest !== backupsLoadRequest) return;
+                renderRestorePending(!!data.restore_pending);
+                renderBackupsList(Array.isArray(data.backups) ? data.backups : []);
+            } catch (error) {
+                if (loadRequest !== backupsLoadRequest) return;
+                if (handleBackupsForbidden(error)) return;
+                console.error('Failed to load backups:', error);
+                renderHtml(list, html`<div class="empty-state"><p>Backups could not be loaded: ${error.message}</p></div>`);
+            }
+        }
+
+        function renderRestorePending(pending) {
+            const banner = document.getElementById('backupsRestorePending');
+            if (banner) banner.hidden = !pending;
+        }
+
+        function renderBackupsList(backups) {
+            const list = document.getElementById('backupsList');
+            if (!list) return;
+            if (!backups.length) {
+                renderHtml(list, html`<div class="empty-state"><p>No backups yet.</p></div>`);
+                return;
+            }
+            renderHtml(list, html`
+                <ul class="backups-items">
+                    ${backups.map(backup => html`
+                        <li class="backups-item">
+                            <div class="backups-item-info">
+                                <strong class="backups-item-name">${backup.name}</strong>
+                                <span class="backups-item-meta">${formatFileSize(Number(backup.size_bytes) || 0)} · ${formatBackupDate(backup.created_utc)}</span>
+                            </div>
+                            <div class="backups-item-actions">
+                                <button type="button" class="btn btn-small" aria-label="Download ${backup.name}" onclick="downloadBackup('${jsArg(backup.name)}')">${uiIcon('download')} Download</button>
+                                <button type="button" class="btn btn-small btn-warning" aria-label="Restore ${backup.name}" onclick="restoreBackup('${jsArg(backup.name)}')">${uiIcon('rotate-ccw')} Restore</button>
+                                <button type="button" class="btn btn-small btn-danger" aria-label="Delete ${backup.name}" onclick="deleteBackup('${jsArg(backup.name)}')">${uiIcon('trash')} Delete</button>
+                            </div>
+                        </li>
+                    `)}
+                </ul>
+            `);
+        }
+
+        async function createBackup() {
+            const button = document.getElementById('createBackupBtn');
+            if (button) button.disabled = true;
+            try {
+                showMessage('Creating backup...', 'info');
+                const response = await fetchBackupsApi('/api/backups', { method: 'POST' });
+                const backup = await response.json();
+                showMessage(`Backup ${backup.name} created.`, 'success');
+            } catch (error) {
+                if (!handleBackupsForbidden(error)) {
+                    showMessage('Failed to create backup: ' + error.message, 'error', { reference: true });
+                }
+            } finally {
+                if (button) button.disabled = false;
+                loadBackups();
+            }
+        }
+
+        // Same authenticated blob download as the condensed-book download:
+        // a plain link could not carry the Authorization header.
+        async function downloadBackup(name) {
+            try {
+                const response = await fetchBackupsApi(`/api/backups/${encodeURIComponent(name)}/download`);
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = name;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                // Revoked later: revoking in the same tick as the click can
+                // cancel the save in some browsers.
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+            } catch (error) {
+                if (!handleBackupsForbidden(error)) {
+                    showMessage('Failed to download backup: ' + error.message, 'error', { reference: true });
+                }
+            }
+        }
+
+        async function deleteBackup(name) {
+            if (!confirm(`Delete backup ${name}?\n\nThis cannot be undone.`)) return;
+            try {
+                await fetchBackupsApi(`/api/backups/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                showMessage(`Backup ${name} deleted.`, 'success');
+            } catch (error) {
+                if (!handleBackupsForbidden(error)) {
+                    showMessage('Failed to delete backup: ' + error.message, 'error', { reference: true });
+                }
+            } finally {
+                loadBackups();
+            }
+        }
+
+        function confirmRestore(source) {
+            return confirm(
+                `Restore the database from ${source}?\n\n` +
+                'A safety backup of the current database is taken first. The restore is applied the next time ' +
+                'ComicMaintainer restarts, replacing all current data (settings, users, read status and history).');
+        }
+
+        function reportRestoreStaged(result) {
+            const safety = result && result.safety_backup && result.safety_backup.name;
+            const message = (result && result.message) || 'Restore staged. Restart ComicMaintainer to apply it.';
+            showMessage(safety ? `${message} Safety backup: ${safety}.` : message, 'warning');
+        }
+
+        async function restoreBackup(name) {
+            if (!confirmRestore(`backup ${name}`)) return;
+            try {
+                showMessage('Validating backup...', 'info');
+                const response = await fetchBackupsApi(`/api/backups/${encodeURIComponent(name)}/restore`, { method: 'POST' });
+                reportRestoreStaged(await response.json());
+            } catch (error) {
+                if (!handleBackupsForbidden(error)) {
+                    showMessage('Failed to restore backup: ' + error.message, 'error', { reference: true });
+                }
+            } finally {
+                loadBackups();
+            }
+        }
+
+        async function restoreBackupFromFile(input) {
+            const file = input && input.files && input.files[0];
+            if (!file) return;
+            // Reset so choosing the same file again still fires `change`.
+            input.value = '';
+            if (!/\.db$/i.test(file.name)) {
+                showMessage('Choose a ComicMaintainer database backup (.db file).', 'error');
+                return;
+            }
+            if (!confirmRestore(`the uploaded file ${file.name}`)) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+            // Let the browser set the multipart Content-Type (with boundary);
+            // getAuthHeaders() defaults it to JSON.
+            const headers = getAuthHeaders();
+            delete headers['Content-Type'];
+            try {
+                showMessage('Uploading and validating backup...', 'info');
+                const response = await fetchBackupsApi('/api/backups/upload-restore', {
+                    method: 'POST',
+                    body: formData,
+                    headers
+                });
+                reportRestoreStaged(await response.json());
+            } catch (error) {
+                if (!handleBackupsForbidden(error)) {
+                    showMessage('Failed to restore from file: ' + error.message, 'error', { reference: true });
+                }
+            } finally {
+                loadBackups();
+            }
+        }
+
+        async function cancelPendingRestore() {
+            try {
+                await fetchBackupsApi('/api/backups/restore-pending', { method: 'DELETE' });
+                showMessage('Pending restore cancelled. The current database will be kept.', 'success');
+            } catch (error) {
+                if (!handleBackupsForbidden(error)) {
+                    showMessage('Failed to cancel the pending restore: ' + error.message, 'error', { reference: true });
+                }
+            } finally {
+                loadBackups();
             }
         }

@@ -434,10 +434,21 @@
             const notice = document.getElementById('settingsReadOnlyNotice');
             if (notice) notice.hidden = userCapabilities.canAdminister;
 
+            // The backups API (a full copy of the database, credentials
+            // included) is administrator-only, so the whole Backups section is
+            // hidden for everyone else (see settings.js).
+            updateBackupsSectionVisibility();
+
             const settingsBody = document.getElementById('settingsPageBody');
             if (settingsBody) {
                 settingsBody.querySelectorAll('input, select, textarea, button').forEach(el => {
                     const isUserSetting = !!el.closest('[data-user-setting]');
+                    // Backups talk to their own API, so they do not wait for
+                    // /api/settings to load.
+                    if (el.closest('#settings-backups')) {
+                        el.disabled = !userCapabilities.canAdminister;
+                        return;
+                    }
                     el.disabled = !settingsLoaded || (!isUserSetting && !userCapabilities.canAdminister);
                 });
             }

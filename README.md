@@ -411,7 +411,8 @@ daily) writes a consistent online copy of the SQLite database to
 `{CONFIG_DIR}/backups/comicmaintainer-yyyyMMdd-HHmmss.db` and keeps the newest
 `AppSettings__DatabaseBackupRetention` (default `7`; set `AppSettings__DatabaseBackupDirectory`
 to change the location). Administrators can list, create, download, delete and
-restore backups through `/api/backups` (see [docs/API.md](docs/API.md#database-backups)).
+restore backups from **Settings → Backups** in the web UI, or through
+`/api/backups` (see [docs/API.md](docs/API.md#database-backups)).
 Restores are validated (SQLite header + `PRAGMA integrity_check`), a safety
 backup of the current database is taken, and the file is staged as
 `comicmaintainer.db.restore-pending`; **restart the container to apply it** —

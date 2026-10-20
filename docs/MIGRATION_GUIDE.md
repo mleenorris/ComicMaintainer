@@ -377,7 +377,7 @@ docker run -p 5001:5000 comicmaintainer-dotnet
 
 ## Getting Help
 
-- **Documentation**: See [README.DOTNET.md](README.DOTNET.md)
+- **Documentation**: See [README.md](../README.md)
 - **Issues**: Report on GitHub Issues
 - **Questions**: Start a GitHub Discussion
 

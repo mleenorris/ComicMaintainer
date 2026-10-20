@@ -62,7 +62,7 @@ public class FrontendAppShellTests
     public void MainJs_EveryUiIconNameHasASpriteSymbol()
     {
         var symbols = SpriteSymbols(Read("index.html"));
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         var missing = Regex.Matches(js, @"uiIcon\('([a-z0-9-]+)'\)")
             .Select(m => "i-" + m.Groups[1].Value)
@@ -90,7 +90,7 @@ public class FrontendAppShellTests
     public void Sidebar_PreservesWatcherAnnouncementsAndInstallAction()
     {
         var html = Read("index.html");
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Matches(
             @"id=""watcherStatusSidebar""[^>]*role=""status""[^>]*aria-live=""polite""",
@@ -105,7 +105,7 @@ public class FrontendAppShellTests
     public void Settings_RemainsUnavailableUntilLoadSucceedsAndCanBeRetried()
     {
         var html = Read("index.html");
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Contains("id=\"settingsLoadStatus\"", html);
         Assert.Contains("id=\"settingsRetryButton\" onclick=\"loadSettings()\"", html);
@@ -119,7 +119,7 @@ public class FrontendAppShellTests
     [Fact]
     public void Settings_SectionObserverUsesViewportHeightAndRebuildsAfterResize()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Contains("onViewportResize(updateSettingsNavActive);", js);
         Assert.Contains("const rootHeight = document.documentElement.clientHeight;", js);
@@ -130,7 +130,7 @@ public class FrontendAppShellTests
     [Fact]
     public void Settings_SaveRequestsIncludeAuthenticationHeaders()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         foreach (var path in new[]
         {
@@ -165,7 +165,7 @@ public class FrontendAppShellTests
     public void Settings_IsARoutedPageRatherThanAModal()
     {
         var html = Read("index.html");
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         Assert.DoesNotContain("id=\"settingsModal\"", html);
         Assert.DoesNotContain("settingsModal", js);
@@ -183,7 +183,7 @@ public class FrontendAppShellTests
     [Fact]
     public void Router_TreatsOverviewLibraryAndSettingsAsSeparatePages()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Contains("const PAGE_TITLES = { home: 'Overview', library: 'Library', settings: 'Settings' };", js);
         Assert.Matches(@"applyViewVisibility\(route\.view\);\s*enterPage\(route\.view\);", js);

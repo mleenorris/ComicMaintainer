@@ -193,9 +193,8 @@ public class ComicReaderController : ControllerBase
                 return NotFound(new { error = "Cover not available" });
             }
 
-            var etag = "\"" + entry.Value.LastModified.UtcTicks.ToString("x") + "-" + entry.Value.Data.Length.ToString("x") + "\"";
-            var ifNoneMatch = Request.Headers.IfNoneMatch.ToString();
-            if (!string.IsNullOrEmpty(ifNoneMatch) && ifNoneMatch.Contains(etag, StringComparison.Ordinal))
+            var etag = BuildCoverETag(entry.Value);
+            if (IfNoneMatchSatisfied(Request.Headers.IfNoneMatch, etag))
             {
                 Response.Headers.ETag = etag;
                 Response.Headers.CacheControl = "public, max-age=3600";
@@ -212,6 +211,49 @@ public class ComicReaderController : ControllerBase
             _logger.LogError(ex, "Error getting cover for {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return StatusCode(500, new { error = "Error reading cover" });
         }
+    }
+
+    /// <summary>
+    /// Builds the strong ETag for a cover entry. Includes the thumbnail
+    /// variant so browsers revalidate after the thumbnail settings change.
+    /// </summary>
+    [NonAction]
+    public static string BuildCoverETag(FileCoverCacheEntry entry)
+    {
+        var variant = string.IsNullOrEmpty(entry.Variant) ? "orig" : entry.Variant;
+        // Keep the opaque-tag to safe token characters.
+        var safeVariant = new string(variant.Where(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.').ToArray());
+        return "\"" + entry.LastModified.UtcTicks.ToString("x") + "-" + entry.Data.Length.ToString("x") + "-" + safeVariant + "\"";
+    }
+
+    /// <summary>
+    /// Evaluates an <c>If-None-Match</c> header against <paramref name="etag"/>
+    /// using the weak comparison mandated by RFC 9110 §13.1.2. Handles
+    /// <c>*</c>, comma-separated lists, multiple header values and
+    /// <c>W/</c>-prefixed tags.
+    /// </summary>
+    [NonAction]
+    public static bool IfNoneMatchSatisfied(Microsoft.Extensions.Primitives.StringValues ifNoneMatch, string etag)
+    {
+        if (Microsoft.Extensions.Primitives.StringValues.IsNullOrEmpty(ifNoneMatch))
+        {
+            return false;
+        }
+        if (!Microsoft.Net.Http.Headers.EntityTagHeaderValue.TryParseList(ifNoneMatch, out var candidates)
+            || candidates is null)
+        {
+            return false;
+        }
+        var current = new Microsoft.Net.Http.Headers.EntityTagHeaderValue(etag);
+        foreach (var candidate in candidates)
+        {
+            if (candidate.Tag.Equals("*", StringComparison.Ordinal)
+                || candidate.Compare(current, useStrongComparison: false))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>

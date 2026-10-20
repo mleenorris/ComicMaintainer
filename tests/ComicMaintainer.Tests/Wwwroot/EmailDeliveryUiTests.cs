@@ -85,7 +85,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void MainJs_SendModalChecksEmailStatusAndDevices()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         // Both must be resolved before the modal is usable, otherwise the only
         // feedback about an unconfigured SMTP server arrives after Send.
@@ -116,7 +116,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void MainJs_CondensePlanBlocksSendingOversizedBooks()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         // The user must learn before sending that a mass condense cannot be
         // emailed, and be offered the download instead.
@@ -131,7 +131,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void MainJs_TracksCondensedEpubBuildProgress()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         // A big condensed book takes minutes to build. The UI must start a
         // tracked build, poll it, and surface both progress and the failure
@@ -148,7 +148,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void MainJs_ReconcilesAndSerializesCondensedBuildPolling()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Contains("function reconcileEmailCondenseBuilds", js);
         Assert.Matches(
@@ -165,7 +165,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void MainJs_CondensedSendsKeepEpubAndAzw3Selectable()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         // A condensed book is generated, so only the original archives are
         // unavailable while condensing: the picker stays enabled and the user
@@ -188,7 +188,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void MainJs_CondenseRequestsCarryTheChosenFormat()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         // The plan, the send and any downloaded build must all use the format
         // the user picked, and a built AZW3 must not be saved as an .epub.
@@ -215,7 +215,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void MainJs_KeepsAzw3AsADeviceDefault()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         // The device format used to be coerced to epub/original, which silently
         // dropped an AZW3 default on both load and save.
@@ -230,7 +230,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void MainJs_LoadsDeliveryHistoryFromApi()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Contains("/api/email/deliveries", js);
         Assert.Contains("function renderEmailDeliveryHistory", js);
@@ -240,7 +240,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void MainJs_SeriesSelectionToolbarOffersEmailSelected()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         // The series grid has no per-card menu (each card is a single <button>),
         // so the selection toolbar is the send entry point for that view.
@@ -253,7 +253,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void MainJs_SeriesEmailWaitsForPendingPathLoads()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Contains("emailBtn.disabled = Array.from(selectedSeries).some", js);
         Assert.Matches(
@@ -264,7 +264,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void MainJs_SavingEmailSettingsInvalidatesStatusCache()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Matches(
             new Regex(@"if \(!emailSettingsResponse\.ok\).*emailStatusCache = null;", RegexOptions.Singleline),
@@ -315,7 +315,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void MainJs_CondensedDownloadDoesNotRevokeTheObjectUrlBeforeTheSaveStarts()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         // Clicking the link only hands the browser the object URL; revoking it
         // in the same tick cancels the save outright in some browsers, which is
@@ -332,7 +332,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void MainJs_CondensedBookFailuresAreReportedForAutomaticIssueFiling()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         // These catch blocks used to end at a banner, so a failed condensed
         // build or download was visible only to the person looking at it.

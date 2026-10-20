@@ -1,4 +1,5 @@
 using ComicMaintainer.Core.Models;
+using ComicMaintainer.Core.Telemetry;
 
 namespace ComicMaintainer.Core.Services;
 
@@ -16,14 +17,17 @@ internal sealed class ProviderHealthTracker
     private DateTime? _lastSuccessUtc;
     private DateTime? _lastFailureUtc;
     private DateTime? _rateLimitedUntilUtc;
+    private readonly ComicMaintainerMetrics? _metrics;
 
-    public ProviderHealthTracker(string name)
+    public ProviderHealthTracker(string name, ComicMaintainerMetrics? metrics = null)
     {
         _name = name;
+        _metrics = metrics;
     }
 
     public void RecordSuccess()
     {
+        _metrics?.RecordProviderRequest(_name, success: true);
         lock (_gate)
         {
             _successCount++;
@@ -33,6 +37,7 @@ internal sealed class ProviderHealthTracker
 
     public void RecordFailure(string? error)
     {
+        _metrics?.RecordProviderRequest(_name, success: false);
         lock (_gate)
         {
             _failureCount++;
@@ -48,8 +53,14 @@ internal sealed class ProviderHealthTracker
     /// resulting wall-clock deadline so <see cref="Snapshot"/> can surface a
     /// "Degraded - rate limited" indicator until it passes.
     /// </summary>
-    public void RecordRateLimited(TimeSpan retryAfter, string? error)
+    public void RecordRateLimited(TimeSpan retryAfter, string? error, bool recordFailedRequest = false)
     {
+        _metrics?.RecordProviderRateLimitWait(_name, "server", retryAfter);
+        if (recordFailedRequest)
+        {
+            _metrics?.RecordProviderRequest(_name, success: false);
+        }
+
         lock (_gate)
         {
             _failureCount++;
@@ -67,6 +78,19 @@ internal sealed class ProviderHealthTracker
             {
                 _rateLimitedUntilUtc = deadline;
             }
+        }
+    }
+
+    /// <summary>
+    /// Records time a request spent queued behind the client-side
+    /// <see cref="ProviderRateLimiter"/>. Only surfaced as a metric; it is not a
+    /// failure and does not affect the health snapshot.
+    /// </summary>
+    public void RecordClientThrottleWait(TimeSpan waited)
+    {
+        if (waited >= ComicMaintainerMetrics.RateLimitWaitThreshold)
+        {
+            _metrics?.RecordProviderRateLimitWait(_name, "client", waited);
         }
     }
 

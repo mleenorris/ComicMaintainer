@@ -17,12 +17,46 @@ const urlsToCache = [
   '/icons/favicon-16x16.png'
 ];
 
+// The app's classic scripts, in the order index.html loads them (reader.html
+// loads /js/shared.js too). Keep in sync with the <script> tags in
+// index.html. They are precached under the same ?v=<version> URL the server
+// injects into the HTML, so the first navigation after an update is served
+// from cache and offline launches have every script. A script that fails to
+// precache is fetched (and cached) on demand instead.
+const APP_SCRIPTS = [
+  '/js/shared.js',
+  '/js/app/templating.js',
+  '/js/app/api.js',
+  '/js/app/state.js',
+  '/js/app/events.js',
+  '/js/app/shell.js',
+  '/js/app/service-worker.js',
+  '/js/app/router.js',
+  '/js/app/library.js',
+  '/js/app/series.js',
+  '/js/app/file-list.js',
+  '/js/app/file-actions.js',
+  '/js/app/jobs.js',
+  '/js/app/settings.js',
+  '/js/app/email.js',
+  '/js/app/menus.js',
+  '/js/app/series-metadata.js',
+  '/js/app/modals.js',
+  '/js/app/error-reporting.js',
+  '/js/main.js'
+];
+
+// Raw app version (e.g. "2.0.341.0") as reported by /api/version; matches the
+// __APP_VERSION__ value the server injects into script URLs.
+let APP_VERSION = null;
+
 // Fetch current version from API and set cache name
 async function updateCacheName() {
   try {
     const response = await fetch('/api/version');
     if (response.ok) {
       const data = await response.json();
+      APP_VERSION = data.version;
       const version = data.version.replace(/\./g, '-'); // Replace dots with dashes for cache name
       CACHE_NAME = `${CACHE_PREFIX}${version}`;
       console.log('Service Worker: Using cache version:', CACHE_NAME);
@@ -356,6 +390,20 @@ async function offlineFallbackResponse() {
   );
 }
 
+// Precache the versioned app scripts. Best effort: without a known version
+// the URLs the page will request cannot be predicted, and a failed script
+// must not abort installation (cache.addAll would reject on any 404).
+function precacheAppScripts(cache) {
+  if (!APP_VERSION) {
+    return Promise.resolve();
+  }
+  return Promise.all(APP_SCRIPTS.map((script) =>
+    cache.add(`${script}?v=${APP_VERSION}`).catch((error) => {
+      console.log('Service Worker: Failed to precache', script, error);
+    })
+  ));
+}
+
 // Install event - cache essential resources
 //
 // An update deliberately does not call skipWaiting() here. It waits until the
@@ -372,7 +420,7 @@ self.addEventListener('install', (event) => {
       .then(() => caches.open(CACHE_NAME))
       .then((cache) => {
         console.log('Service Worker: Caching essential files with cache name:', CACHE_NAME);
-        return cache.addAll(urlsToCache);
+        return cache.addAll(urlsToCache).then(() => precacheAppScripts(cache));
       })
   );
 });

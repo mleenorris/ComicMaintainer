@@ -53,11 +53,12 @@ public class FrontendVisualConsistencyTests
     [Theory]
     [InlineData("css", "main.css")]
     [InlineData("index.html")]
-    [InlineData("js", "main.js")]
+    [InlineData("app-scripts")]
     public void SpaStyles_CustomPropertiesWithoutAFallbackAreDefined(params string[] file)
     {
         var css = Read("css", "main.css");
-        var source = Read(file);
+        // "app-scripts" stands for every script index.html loads (formerly main.js).
+        var source = file is ["app-scripts"] ? WwwrootFiles.ReadAppScripts() : Read(file);
 
         // var(--name) with no fallback resolves to nothing when --name is never
         // declared. --accent-primary was missing for a long time, which left

@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Telemetry;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ComicMaintainer.Core.Configuration;
@@ -69,6 +70,8 @@ public class ComicEmailService : IComicEmailService
     /// </summary>
     private static readonly string[] SeriesFolderCoverExtensions = { ".jpg", ".png", ".webp" };
 
+    private readonly ComicMaintainerMetrics? _metrics;
+
     public ComicEmailService(
         IDbContextFactory<ComicMaintainerDbContext> dbFactory,
         IComicEmailSender sender,
@@ -78,8 +81,10 @@ public class ComicEmailService : IComicEmailService
         ISeriesMetadataCacheService seriesCache,
         ISeriesImageStore seriesImages,
         IOptionsMonitor<AppSettings> settings,
-        ILogger<ComicEmailService> logger)
+        ILogger<ComicEmailService> logger,
+        ComicMaintainerMetrics? metrics = null)
     {
+        _metrics = metrics;
         _dbFactory = dbFactory;
         _sender = sender;
         _epubConverter = epubConverter;
@@ -995,6 +1000,7 @@ public class ComicEmailService : IComicEmailService
 
             delivery.Status = EmailDeliveryStatus.Sent;
             delivery.SentAt = DateTime.UtcNow;
+            _metrics?.RecordEmailSend(success: true);
             delivery.ErrorMessage = null;
 
             if (delivery.SubscriptionId is int subscriptionId)
@@ -1017,6 +1023,7 @@ public class ComicEmailService : IComicEmailService
         {
             delivery.Status = EmailDeliveryStatus.Failed;
             delivery.ErrorMessage = Truncate(ex.Message, 1024);
+            _metrics?.RecordEmailSend(success: false);
 
             // A rejected delivery is almost always the remote SMTP server or the
             // recipient address, both of which the operator controls; the

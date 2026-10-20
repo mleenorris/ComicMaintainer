@@ -788,6 +788,8 @@
 
     <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="false"></div>
 
+    <!-- Helpers shared with index.html (escapeHtml, fetch credentials). -->
+    <script src="/js/shared.js?v=__APP_VERSION__"></script>
     <script>
         let currentPage = 1;
         let totalPages = 1;
@@ -921,22 +923,17 @@
             return urlParams.get(param);
         }
 
+        // Credentials + bearer token unless signed in via Authelia; see
+        // buildCredentialedFetchOptions() in /js/shared.js.
         function buildFetchOptions(extra) {
-            const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
-            const opts = Object.assign({ credentials: 'include' }, extra || {});
-            if (!isAutheliaAuth && token) {
-                opts.headers = Object.assign({}, opts.headers || {}, {
-                    'Authorization': `Bearer ${token}`
-                });
-            }
-            return opts;
+            return buildCredentialedFetchOptions(extra, token);
         }
 
         // Initialize reader
         async function initReader() {
             comicFilePath = getQueryParam('file');
             token = localStorage.getItem('jwt_token') || '';
-            const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+            const isAutheliaAuth = isAutheliaAuthenticated();
 
             if (!comicFilePath) {
                 showError('No comic file specified');
@@ -1224,7 +1221,7 @@
             loadedPages.add(loadKey);
             
             try {
-                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const isAutheliaAuth = isAutheliaAuthenticated();
                 const fetchOptions = {
                     credentials: 'include'
                 };
@@ -1273,7 +1270,7 @@
             // Mark as being loaded
             loadedPages.add(loadKey);
             
-            const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+            const isAutheliaAuth = isAutheliaAuthenticated();
             const fetchOptions = {
                 credentials: 'include'
             };
@@ -1777,7 +1774,7 @@
         // issue it already appended.
         async function prefetchNextComic(filePath = streamTailPath || comicFilePath) {
             try {
-                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const isAutheliaAuth = isAutheliaAuthenticated();
                 const fetchOptions = {
                     credentials: 'include'
                 };
@@ -1845,7 +1842,7 @@
             loadedPages.add(loadKey);
             
             try {
-                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const isAutheliaAuth = isAutheliaAuthenticated();
                 const fetchOptions = {
                     credentials: 'include'
                 };
@@ -1892,13 +1889,6 @@
             }
         }
         
-        // Helper function to escape HTML for safe display
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
         // Reverse the meaning of prev/next when reading right-to-left so the
         // arrows / tap-zones / footer buttons feel natural for manga.
         function effectivePrev() {
@@ -2640,7 +2630,7 @@
 
             markReadInFlight.add(filePath);
             try {
-                const isAutheliaAuth = localStorage.getItem('authelia_authenticated') === 'true';
+                const isAutheliaAuth = isAutheliaAuthenticated();
                 const fetchOptions = {
                     method: 'POST',
                     credentials: 'include'

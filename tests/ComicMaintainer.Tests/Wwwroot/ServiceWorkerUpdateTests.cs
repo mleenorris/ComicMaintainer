@@ -92,7 +92,7 @@ public class ServiceWorkerUpdateTests
     [Fact]
     public void MainJs_UpdateBannerReloadAlwaysEndsInAReload()
     {
-        var contents = ReadAsset("js", "main.js");
+        var contents = WwwrootFiles.ReadAppScripts();
 
         Assert.Contains("applyServiceWorkerUpdate(worker);", ExtractMainJsFunction(contents, "promptForServiceWorkerUpdate"));
 
@@ -119,7 +119,7 @@ public class ServiceWorkerUpdateTests
     [Fact]
     public void MainJs_ServiceWorkerReloadsShareOneGuard()
     {
-        var contents = ReadAsset("js", "main.js");
+        var contents = WwwrootFiles.ReadAppScripts();
 
         // 'controllerchange' and the banner's fallback both reload; routing them
         // through one guarded helper stops a double reload.

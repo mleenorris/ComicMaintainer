@@ -597,6 +597,7 @@
                     <button type="button" class="settings-nav-link" data-settings-target="settings-error-reporting" onclick="scrollToSettingsSection('settings-error-reporting')"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg><span>Automated Error Reporting</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-logs" onclick="scrollToSettingsSection('settings-logs')"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg><span>Log Rotation</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-database" onclick="scrollToSettingsSection('settings-database')"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg><span>Database Cleanup</span></button>
+                    <button type="button" class="settings-nav-link" id="settingsNavBackups" data-settings-target="settings-backups" onclick="scrollToSettingsSection('settings-backups')"><svg class="icon" aria-hidden="true"><use href="#i-hard-drive"/></svg><span>Backups</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-filename" onclick="scrollToSettingsSection('settings-filename')"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg><span>Filename Format</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-padding" onclick="scrollToSettingsSection('settings-padding')"><svg class="icon" aria-hidden="true"><use href="#i-tag"/></svg><span>Issue Number Padding</span></button>
                     <button type="button" class="settings-nav-link" data-settings-target="settings-covers" onclick="scrollToSettingsSection('settings-covers')"><svg class="icon" aria-hidden="true"><use href="#i-image"/></svg><span>Series Covers</span></button>
@@ -885,6 +886,40 @@
                                 Manually trigger database cleanup to remove stale entries for files that no longer exist on disk.
                             </small>
                         </div>
+                    </section>
+                    <!-- Administrator-only (the whole /api/backups API is). Hidden by
+                         applyCapabilities() for other users and by loadBackups() on a 403. -->
+                    <section class="settings-card" id="settings-backups" aria-labelledby="settings-backups-title">
+                        <header class="settings-card-header">
+                            <span class="settings-card-icon" aria-hidden="true"><svg class="icon"><use href="#i-hard-drive"/></svg></span>
+                            <div>
+                                <h3 class="settings-card-title" id="settings-backups-title">Backups</h3>
+                                <p class="settings-card-desc">Database backups: create, download, restore and delete.</p>
+                            </div>
+                        </header>
+                        <div class="backups-restore-pending" id="backupsRestorePending" role="status" hidden>
+                            <svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>
+                            <div class="backups-restore-pending-text">
+                                <strong>Restart required.</strong>
+                                A database restore is staged and will be applied the next time ComicMaintainer restarts.
+                            </div>
+                            <button type="button" class="btn btn-small" id="cancelPendingRestoreBtn" onclick="cancelPendingRestore()">
+                                <svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg> Cancel pending restore
+                            </button>
+                        </div>
+                        <div class="form-group backups-actions">
+                            <button type="button" class="btn btn-primary" id="createBackupBtn" onclick="createBackup()">
+                                <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg> Create backup now
+                            </button>
+                            <button type="button" class="btn" id="restoreBackupFileBtn" onclick="document.getElementById('restoreBackupFileInput').click()">
+                                <svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg> Restore from file…
+                            </button>
+                            <input type="file" id="restoreBackupFileInput" accept=".db" hidden onchange="restoreBackupFromFile(this)">
+                            <small class="form-hint">
+                                A restore is validated and a safety backup of the current database is taken first; it is applied when ComicMaintainer restarts. Backups contain password hashes and stored credentials, so keep downloaded copies private.
+                            </small>
+                        </div>
+                        <div class="backups-list" id="backupsList" aria-live="polite"></div>
                     </section>
                     <section class="settings-card" id="settings-filename" aria-labelledby="settings-filename-title">
                         <header class="settings-card-header">
@@ -1975,10 +2010,34 @@
         
     </script>
 
-    <!-- main.js loaded with server-injected version for cache busting.
+    <!-- App scripts, loaded with a server-injected version for cache busting.
          The __APP_VERSION__ placeholder is replaced by
-         HtmlVersionInjectionMiddleware so the URL is always versioned without
-         requiring a round-trip to /api/version. -->
+         HtmlVersionInjectionMiddleware so the URLs are always versioned
+         without requiring a round-trip to /api/version.
+
+         These are classic (non-module) scripts sharing one global scope, so
+         inline onclick handlers can call their functions. ORDER MATTERS:
+         shared.js and templating.js first, main.js (bootstrap) last. Keep this
+         list in sync with APP_SCRIPTS in /sw.js. -->
+    <script src="/js/shared.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/templating.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/api.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/state.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/events.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/shell.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/service-worker.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/router.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/library.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/series.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/file-list.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/file-actions.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/jobs.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/settings.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/email.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/menus.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/series-metadata.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/modals.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/error-reporting.js?v=__APP_VERSION__"></script>
     <script src="/js/main.js?v=__APP_VERSION__"></script>
 </body>
 </html>

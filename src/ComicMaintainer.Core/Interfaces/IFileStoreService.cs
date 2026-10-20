@@ -141,6 +141,16 @@ public interface IFileStoreService
     Task UpdateFilePathAsync(string oldPath, string newPath, CancellationToken cancellationToken = default, bool broadcastUpdate = true);
 
     /// <summary>
+    /// Re-reads the on-disk size and last-write time of each tracked file in
+    /// <paramref name="filePaths"/> and stores them as <c>FileSize</c> /
+    /// <c>LastModified</c> (local time, matching <see cref="AddFileAsync"/>).
+    /// Unlike <see cref="AddFileAsync"/> this touches nothing else and does
+    /// not broadcast. Untracked or missing files are skipped. Returns the
+    /// number of rows whose stats changed.
+    /// </summary>
+    Task<int> RefreshFileStatsAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Remove stale entries from database where files no longer exist on disk
     /// </summary>
     Task<int> CleanupStaleEntriesAsync(CancellationToken cancellationToken = default);

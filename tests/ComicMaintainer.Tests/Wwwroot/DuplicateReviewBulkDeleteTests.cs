@@ -53,7 +53,7 @@ public class DuplicateReviewBulkDeleteTests
     [Fact]
     public void MainJs_DeleteAllDuplicatesUsesBulkDeleteJob()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Contains("async function deleteAllDuplicates()", js);
 
@@ -70,7 +70,7 @@ public class DuplicateReviewBulkDeleteTests
     [Fact]
     public void MainJs_DeleteAllDuplicatesButtonIsDisabledWhenNoDuplicates()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         var start = js.IndexOf("function updateDuplicateReviewNavigation()", StringComparison.Ordinal);
         Assert.True(start >= 0, "Expected updateDuplicateReviewNavigation in main.js");
@@ -83,7 +83,7 @@ public class DuplicateReviewBulkDeleteTests
     [Fact]
     public void MainJs_DuplicateReviewReloadClearsStateAndIgnoresStaleResponses()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         var start = js.IndexOf("async function openDuplicateReviewModal(", StringComparison.Ordinal);
         Assert.True(start >= 0, "Expected openDuplicateReviewModal in main.js");

@@ -2,9 +2,9 @@ name: .NET Tests
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, dotnet ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, dotnet ]
   workflow_dispatch:
 
 permissions:
@@ -21,6 +21,15 @@ jobs:
 
     steps:
     - uses: actions/checkout@v7
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v7
+      with:
+        node-version: 'lts/*'
+
+    # Dependency-free (node:test + node:vm) unit tests for the web UI scripts.
+    - name: Run JavaScript unit tests
+      run: npm test
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v6

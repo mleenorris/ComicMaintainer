@@ -336,4 +336,44 @@ public class AppSettings
     /// </summary>
     public bool ErrorReportingCommentOnRecurrence { get; set; } = true;
 
+    // ---------------------------------------------------------------------
+    // File cover thumbnails
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Maximum width in pixels of the cover thumbnails stored in the
+    /// file-cover cache and served by <c>/api/reader/cover</c>. Covers are
+    /// downscaled (never upscaled) preserving aspect ratio. Set to 0 to keep
+    /// the original page-1 bytes without re-encoding. Defaults to 480.
+    /// </summary>
+    public int FileCoverThumbnailMaxWidth { get; set; } = 480;
+
+    /// <summary>
+    /// Encoding of cover thumbnails: <c>webp</c> (default) or <c>jpeg</c>.
+    /// Unknown values fall back to <c>webp</c>.
+    /// </summary>
+    public string FileCoverThumbnailFormat { get; set; } = "webp";
+
+    /// <summary>
+    /// Encoder quality (1-100) used for cover thumbnails. Defaults to 80.
+    /// </summary>
+    public int FileCoverThumbnailQuality { get; set; } = 80;
+
+    // ---------------------------------------------------------------------
+    // Database backups
+    // ---------------------------------------------------------------------
+
+    /// <summary>
+    /// Directory where SQLite database backups are written. When empty,
+    /// defaults to <c>{ConfigDirectory}/backups</c>. Backups contain every
+    /// stored secret (password hashes, SMTP/ComicVine credentials), so keep
+    /// this directory private.
+    /// </summary>
+    public string DatabaseBackupDirectory { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Number of most recent backups kept when pruning (after every scheduled
+    /// backup). Values below 1 disable pruning. Defaults to 7.
+    /// </summary>
+    public int DatabaseBackupRetention { get; set; } = 7;
 }

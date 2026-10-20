@@ -11,29 +11,10 @@ namespace ComicMaintainer.Tests.Wwwroot;
 /// </summary>
 public class MainJsSeamlessUpdatesTests
 {
-    private static string WwwRoot
-    {
-        get
-        {
-            var current = AppContext.BaseDirectory;
-            for (var i = 0; i < 10 && current != null; i++)
-            {
-                var candidate = Path.Combine(current, "src", "ComicMaintainer.WebApi", "wwwroot");
-                if (Directory.Exists(candidate))
-                {
-                    return candidate;
-                }
-                current = Path.GetDirectoryName(current);
-            }
-            throw new DirectoryNotFoundException("Could not locate wwwroot relative to test binaries.");
-        }
-    }
-
     private static string ReadMainJs()
     {
-        var path = Path.Combine(WwwRoot, "js", "main.js");
-        Assert.True(File.Exists(path), $"Expected {path} to exist");
-        return File.ReadAllText(path);
+        // main.js is now split into several ordered scripts; scan all of them.
+        return WwwrootFiles.ReadAppScripts();
     }
 
     [Fact]

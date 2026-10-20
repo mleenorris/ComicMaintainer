@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Options;
@@ -272,7 +273,14 @@ public class FileWatcherService : IFileWatcherService, IDisposable
             
             _logger.LogInformation(LoggingHelper.WithWatcherPrefix("Found {Count} comic files on filesystem"), comicFiles.Count);
             
-            // Check each file individually to avoid loading all files into memory
+            // Snapshot the tracked paths once instead of one FileExistsAsync
+            // call per file. Ordinal matches the store's own key comparison.
+            var trackedPaths = new HashSet<string>(
+                (await _fileStore.GetAllFilesAsync(cancellationToken) ?? Enumerable.Empty<ComicFile>())
+                    .Select(f => f.FilePath)
+                    .Where(p => !string.IsNullOrWhiteSpace(p)),
+                StringComparer.Ordinal);
+
             var newFileCount = 0;
             foreach (var file in comicFiles)
             {
@@ -282,7 +290,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
                 try
                 {
                     // Only add if not already in the store
-                    if (!await _fileStore.FileExistsAsync(file, cancellationToken))
+                    if (!trackedPaths.Contains(file))
                     {
                         await _fileStore.AddFileAsync(file, cancellationToken);
                         newFileCount++;

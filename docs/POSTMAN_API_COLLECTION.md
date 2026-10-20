@@ -224,7 +224,7 @@ For detailed API documentation, including:
 
 See the source code documentation in:
 - `src/ComicMaintainer.WebApi/Controllers/`
-- `README.DOTNET.md`
+- `README.md`
 
 ## Support
 

@@ -127,14 +127,14 @@ docker run -e PUID=$(id -u) -e PGID=$(id -g) ...
 
 ## Next Steps
 
-- Read [README.DOTNET.md](docs/README.DOTNET.md) for full documentation
+- Read [README.md](README.md) for full documentation
 - Check [MIGRATION_GUIDE.md](docs/MIGRATION_GUIDE.md) if migrating from Python
 - See [MAUI_ANDROID_SETUP.md](docs/MAUI_ANDROID_SETUP.md) for mobile app setup
 - Review [CSHARP_CONVERSION_SUMMARY.md](docs/archive/CSHARP_CONVERSION_SUMMARY.md) for technical details
 
 ## Getting Help
 
-- 📖 [Documentation](docs/README.DOTNET.md)
+- 📖 [Documentation](README.md)
 - 🐛 [Report Issues](https://github.com/mleenorris/ComicMaintainer/issues)
 - 💬 [Discussions](https://github.com/mleenorris/ComicMaintainer/discussions)
 

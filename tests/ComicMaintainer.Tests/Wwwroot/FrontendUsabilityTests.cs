@@ -111,7 +111,7 @@ public class FrontendUsabilityTests
     public void IndexHtml_DiagnosticsMenuItemIsIdentifiableForCapabilityGating()
     {
         var html = Read("index.html");
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Contains("id=\"diagnosticsMenuItem\"", html);
 
@@ -125,7 +125,7 @@ public class FrontendUsabilityTests
     [Fact]
     public void MainJs_ErrorMessagesCarryTheApiFailureReference()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         // An error a user has to report is only actionable if it can be tied
         // back to a server log line, so a caller reporting a failed API call
@@ -152,7 +152,7 @@ public class FrontendUsabilityTests
     [Fact]
     public void MainJs_LibraryShortcutsStayOutOfTheWayOfTypingAndDialogs()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Contains("function handleLibraryShortcut(", js);
         Assert.Contains("document.addEventListener('keydown', handleLibraryShortcut)", js);
@@ -176,7 +176,7 @@ public class FrontendUsabilityTests
     [Fact]
     public void MainJs_LibraryOnlyShortcutsAreInertWhenTheirControlIsHidden()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         // The header search and filter are display:none on the Overview route,
         // so "/", "r" and "f" would otherwise swallow the keystroke and focus
@@ -195,7 +195,7 @@ public class FrontendUsabilityTests
     [Fact]
     public void MainJs_ClearingTheSearchAlsoRefreshesTheList()
     {
-        var js = Read("js", "main.js");
+        var js = WwwrootFiles.ReadAppScripts();
 
         Assert.Contains("function clearHeaderSearch(", js);
         Assert.Contains("function syncHeaderSearchClear(", js);

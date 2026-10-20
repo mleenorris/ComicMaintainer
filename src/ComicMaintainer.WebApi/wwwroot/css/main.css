@@ -5490,6 +5490,78 @@ summary:focus-visible,
     color: var(--text-error);
 }
 
+/* Settings → Backups */
+.backups-restore-pending {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+    padding: 10px 12px;
+    border: 1px solid var(--text-warning);
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    color: var(--text-warning);
+    line-height: 1.4;
+}
+
+.backups-restore-pending[hidden] {
+    display: none;
+}
+
+.backups-restore-pending-text {
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.backups-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.backups-actions .form-hint {
+    flex-basis: 100%;
+}
+
+.backups-items {
+    list-style: none;
+    margin: 0 0 var(--space-3);
+    padding: 0;
+}
+
+.backups-item {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-2) 0;
+    border-top: 1px solid var(--border-primary);
+}
+
+.backups-item-info {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.backups-item-name {
+    overflow-wrap: anywhere;
+}
+
+.backups-item-meta {
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+}
+
+.backups-item-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
 .settings-danger-box {
     padding: var(--space-4);
     border-radius: var(--radius-md);
@@ -5639,4 +5711,37 @@ summary:focus-visible,
     width: 72px;
     height: 72px;
     filter: drop-shadow(3px 3px 0 var(--brand-ink));
+}
+
+/* ── Offscreen rendering skip for long grids and lists ──────────────────
+   A large library renders hundreds of series cards, issue cards and file
+   rows. content-visibility: auto lets the browser skip style, layout and
+   paint for the ones outside the viewport (cheap virtualization), while
+   keeping them in the DOM, the accessibility tree, find-in-page and the tab
+   order. contain-intrinsic-block-size reserves an estimated height for a
+   skipped item so the scrollbar stays stable; the `auto` keyword makes the
+   browser remember an item's real height once it has been rendered.
+
+   Applied to the individual items only, never to the containers: sticky
+   headers (the app header, settings nav/save bar) live outside these items,
+   and the paint containment this implies clips only an item's descendants,
+   not its own outline or shadow. The cards already clip their content
+   (overflow: hidden), the rows pad their focusable children well inside
+   their edges, and row/card action menus are portaled to <body> when open,
+   so focus rings and dropdowns are unaffected. Inline size is left
+   unconstrained so grid/flex stretching still sizes the items' width. */
+.series-card,
+.series-issue-card {
+    content-visibility: auto;
+    contain-intrinsic-block-size: auto 300px;
+}
+
+.series-list-row {
+    content-visibility: auto;
+    contain-intrinsic-block-size: auto 84px;
+}
+
+.file-item {
+    content-visibility: auto;
+    contain-intrinsic-block-size: auto 56px;
 }

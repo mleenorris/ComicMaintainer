@@ -14,15 +14,20 @@ namespace ComicMaintainer.Core.Services;
 /// Default <see cref="IFileCoverCacheService"/> implementation.
 ///
 /// Layout under the cache directory:
-///   <hash>.img   raw bytes of page 1 of the source archive
-///   <hash>.meta  JSON sidecar { sourceLength, sourceMtimeUtcTicks, contentType }
+///   <hash>.img   cover thumbnail: page 1 of the source archive downscaled to
+///                <see cref="AppSettings.FileCoverThumbnailMaxWidth"/> and
+///                re-encoded (WebP by default), or the raw page bytes when
+///                the max width is 0 or encoding fails
+///   <hash>.meta  JSON sidecar { sourceLength, sourceMtimeUtcTicks, contentType, variant }
 ///
 /// Cache key is SHA-256 of the absolute file path (avoids long filenames,
 /// path separators, and platform case-sensitivity gotchas). Each entry is
 /// validated on read against the current file length and last-write-time:
 /// any mismatch triggers a regeneration, so the cache self-heals when a
 /// file is replaced or modified even if an explicit invalidation hook is
-/// missed.
+/// missed. The thumbnail variant (format + width + quality) is stored in
+/// the sidecar too, so changing the thumbnail settings (or upgrading from a
+/// version that cached raw page bytes) is treated as a cache miss.
 ///
 /// Concurrent requests for the same file are coalesced via a
 /// <see cref="SemaphoreSlim"/> registered per cache key.
@@ -71,10 +76,14 @@ public class FileCoverCacheService : IFileCoverCacheService
         var settings = _settings.CurrentValue;
         var sourceMtime = new DateTimeOffset(info.LastWriteTimeUtc, TimeSpan.Zero);
         var sourceLength = info.Length;
+        var variant = CoverThumbnailEncoder.BuildVariant(
+            settings.FileCoverThumbnailMaxWidth,
+            settings.FileCoverThumbnailFormat,
+            settings.FileCoverThumbnailQuality);
 
         if (!settings.FileCoverCacheEnabled)
         {
-            return await ExtractAsync(filePath, sourceMtime, cancellationToken);
+            return await ExtractAsync(filePath, sourceMtime, settings, variant, cancellationToken);
         }
 
         var key = ComputeKey(filePath);
@@ -82,7 +91,7 @@ public class FileCoverCacheService : IFileCoverCacheService
         var (blobPath, metaPath) = GetPaths(dir, key);
 
         // Fast path: read without taking the per-key lock.
-        var cached = TryReadCached(blobPath, metaPath, sourceMtime, sourceLength);
+        var cached = TryReadCached(blobPath, metaPath, sourceMtime, sourceLength, variant);
         if (cached is not null)
         {
             return cached;
@@ -93,13 +102,13 @@ public class FileCoverCacheService : IFileCoverCacheService
         try
         {
             // Re-check after acquiring the lock in case another caller raced ahead.
-            cached = TryReadCached(blobPath, metaPath, sourceMtime, sourceLength);
+            cached = TryReadCached(blobPath, metaPath, sourceMtime, sourceLength, variant);
             if (cached is not null)
             {
                 return cached;
             }
 
-            var generated = await ExtractAsync(filePath, sourceMtime, cancellationToken);
+            var generated = await ExtractAsync(filePath, sourceMtime, settings, variant, cancellationToken);
             if (generated is null)
             {
                 return null;
@@ -114,6 +123,7 @@ public class FileCoverCacheService : IFileCoverCacheService
                     SourceLength = sourceLength,
                     SourceMtimeUtcTicks = sourceMtime.UtcTicks,
                     ContentType = generated.Value.ContentType,
+                    Variant = variant,
                 };
                 WriteAtomic(metaPath, JsonSerializer.SerializeToUtf8Bytes(meta));
             }
@@ -171,6 +181,8 @@ public class FileCoverCacheService : IFileCoverCacheService
     private async Task<FileCoverCacheEntry?> ExtractAsync(
         string filePath,
         DateTimeOffset sourceMtime,
+        AppSettings settings,
+        string variant,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -180,14 +192,32 @@ public class FileCoverCacheService : IFileCoverCacheService
             return null;
         }
         var (data, contentType) = page.Value;
-        return new FileCoverCacheEntry(data, contentType, sourceMtime);
+
+        var maxWidth = settings.FileCoverThumbnailMaxWidth;
+        if (maxWidth > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var thumb = CoverThumbnailEncoder.TryCreateThumbnail(
+                data, maxWidth, settings.FileCoverThumbnailFormat, settings.FileCoverThumbnailQuality);
+            if (thumb is not null)
+            {
+                return new FileCoverCacheEntry(thumb.Value.Data, thumb.Value.ContentType, sourceMtime, variant);
+            }
+            // Encoding failed (unsupported/corrupt image): serve the original
+            // bytes. The entry is still stamped with the current variant so we
+            // don't retry the failing encode on every request.
+            _logger.LogDebug("FileCoverCache: thumbnail encode failed for {FilePath}; using original bytes",
+                LoggingHelper.SanitizePathForLog(filePath));
+        }
+        return new FileCoverCacheEntry(data, contentType, sourceMtime, variant);
     }
 
     private FileCoverCacheEntry? TryReadCached(
         string blobPath,
         string metaPath,
         DateTimeOffset sourceMtime,
-        long sourceLength)
+        long sourceLength,
+        string variant)
     {
         try
         {
@@ -204,7 +234,8 @@ public class FileCoverCacheService : IFileCoverCacheService
             if (meta is null
                 || meta.SourceLength != sourceLength
                 || meta.SourceMtimeUtcTicks != sourceMtime.UtcTicks
-                || string.IsNullOrEmpty(meta.ContentType))
+                || string.IsNullOrEmpty(meta.ContentType)
+                || !string.Equals(meta.Variant, variant, StringComparison.Ordinal))
             {
                 return null;
             }
@@ -214,7 +245,7 @@ public class FileCoverCacheService : IFileCoverCacheService
             try { File.SetLastAccessTimeUtc(blobPath, DateTime.UtcNow); }
             catch { /* ignore */ }
 
-            return new FileCoverCacheEntry(data, meta.ContentType, sourceMtime);
+            return new FileCoverCacheEntry(data, meta.ContentType, sourceMtime, variant);
         }
         catch (Exception ex)
         {
@@ -315,5 +346,7 @@ public class FileCoverCacheService : IFileCoverCacheService
         public long SourceLength { get; set; }
         public long SourceMtimeUtcTicks { get; set; }
         public string ContentType { get; set; } = string.Empty;
+        // Null for entries written before thumbnails existed -> cache miss.
+        public string? Variant { get; set; }
     }
 }

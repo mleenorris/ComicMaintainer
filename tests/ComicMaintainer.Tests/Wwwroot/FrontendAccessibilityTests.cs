@@ -54,7 +54,7 @@ public class FrontendAccessibilityTests
     [Fact]
     public void MainJs_MarksErrorMessagesAsAlerts()
     {
-        var contents = Read("js", "main.js");
+        var contents = WwwrootFiles.ReadAppScripts();
 
         // #messageContainer is polite, which is right for progress chatter but
         // lets a failure queue behind it. Errors must opt into role="alert" so

@@ -5712,8 +5712,13 @@ summary:focus-visible,
     min-width: 0;
 }
 
-.scheduled-job-status-slot {
-    flex-shrink: 0;
+/* The last-run status sits beside the job name, wrapping under it when the
+   card is too narrow for both. */
+.scheduled-job-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1) var(--space-3);
 }
 
 .scheduled-job-status {

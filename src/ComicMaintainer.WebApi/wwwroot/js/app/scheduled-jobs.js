@@ -223,10 +223,12 @@
                     <header class="settings-card-header">
                         <span class="settings-card-icon" aria-hidden="true">${scheduledJobIcon(job.jobKey)}</span>
                         <div class="scheduled-job-heading">
-                            <h3 class="settings-card-title" id="${id}-title">${name}</h3>
+                            <div class="scheduled-job-title-row">
+                                <h3 class="settings-card-title" id="${id}-title">${name}</h3>
+                                <span data-job-part="status">${renderScheduledJobStatus(job)}</span>
+                            </div>
                             ${job.description ? html`<p class="settings-card-desc">${job.description}</p>` : ''}
                         </div>
-                        <span class="scheduled-job-status-slot" data-job-part="status">${renderScheduledJobStatus(job)}</span>
                     </header>
                     <dl class="scheduled-job-runs" data-job-part="runs">${renderScheduledJobRuns(job)}</dl>
                     <div class="form-group">

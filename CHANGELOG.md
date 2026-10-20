@@ -66,8 +66,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **File sizes above 1 GB are shown in GB/TB.** They were previously reported in megabytes,
   so free disk space read as "84258.8 MB".
+- **Scheduled Jobs is a page of the app, like Settings and the Library.** It used to be a
+  separate `jobs.html` with its own layout, no sidebar and only a "Back to Library" link. It now
+  opens at `#/jobs` inside the app shell (sidebar, ⋮ menu or <kbd>g</kbd> <kbd>j</kbd>), with
+  the same page header, cards, toasts and dark mode as the other pages. Each job's card shows
+  its last-run status, last and next run, schedule and options; **Run now** follows the run
+  and reports how it went, and status refreshes only while the page is open, without
+  discarding unsaved edits. Old links to `/jobs.html` redirect to the new page.
+- **Scheduled jobs are administrator-only.** The page and its menu entries are only offered to
+  administrators, and `/api/scheduled-jobs` now requires the `CanAdminister` policy for reads
+  as well as changes. The jobs include database backups and library-wide auto-corrections,
+  which other accounts could previously change or run.
 
 ### Fixed
+- **Scheduled job run times are shown in local time.** The API reports them in UTC without a
+  time-zone suffix, and the old Scheduled Jobs page read them as local time, so they were off
+  by the browser's UTC offset. Saving a job also no longer drops options its card does not
+  show (the metadata backfill's `maxBatch`).
 - **The Reload button on the "new version available" banner reloads the page again.** The
   service worker relayed the page's live-update event stream, which stays open indefinitely, so
   the old worker always had a request in flight. Chrome does not let a waiting service worker

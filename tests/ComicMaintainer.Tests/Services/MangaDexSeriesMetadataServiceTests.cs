@@ -51,7 +51,8 @@ public class MangaDexSeriesMetadataServiceTests
         using var listener = new MeterListener();
         listener.InstrumentPublished = (instrument, meterListener) =>
         {
-            if (instrument.Name == "comicmaintainer.metadata_provider.requests")
+            if (ReferenceEquals(instrument.Meter, metrics.Meter)
+                && instrument.Name == "comicmaintainer.metadata_provider.requests")
             {
                 meterListener.EnableMeasurementEvents(instrument);
             }

@@ -272,6 +272,9 @@
                 } else if (key === 's') {
                     event.preventDefault();
                     navigate('#/settings');
+                } else if (key === 'j') {
+                    event.preventDefault();
+                    navigate('#/jobs');
                 }
                 return;
             }

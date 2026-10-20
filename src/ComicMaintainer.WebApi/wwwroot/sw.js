@@ -38,6 +38,7 @@ const APP_SCRIPTS = [
   '/js/app/file-actions.js',
   '/js/app/jobs.js',
   '/js/app/settings.js',
+  '/js/app/scheduled-jobs.js',
   '/js/app/email.js',
   '/js/app/menus.js',
   '/js/app/series-metadata.js',

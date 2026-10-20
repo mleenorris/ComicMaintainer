@@ -457,6 +457,10 @@
                 const button = document.getElementById(id);
                 if (button) button.disabled = !settingsLoaded || !userCapabilities.canAdminister;
             });
+
+            // Scheduled jobs are visible to everyone, but changing or running
+            // them requires permission to modify the library.
+            applyScheduledJobsCapabilities();
         }
 
         // Fetch and display version

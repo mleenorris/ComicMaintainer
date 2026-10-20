@@ -1,4 +1,4 @@
-        // ComicMaintainer SPA — hash routing (#/home, #/library, #/series/{id}, #/settings) and the overview page.
+        // ComicMaintainer SPA — hash routing (#/home, #/library, #/series/{id}, #/settings, #/jobs) and the overview page.
         //
         // Classic (non-module) script: its top-level declarations are globals
         // shared with the other app scripts and with inline onclick handlers.
@@ -15,17 +15,21 @@
         //   #/library       → full series library (grid/list, filters, bulk)
         //   #/series/{id}    → a single series' page (synopsis + files)
         //   #/settings      → the settings page
-        let currentView = 'home';           // 'home' | 'library' | 'series' | 'settings'
+        //   #/jobs          → the scheduled jobs page
+        let currentView = 'home';           // 'home' | 'library' | 'series' | 'settings' | 'jobs'
         let settingsReturnHash = '#/home';  // where leaving Settings goes back to
         let lastRoutedPage = null;          // top-level page last shown (see enterPage)
 
-        // Overview, Library and Settings are separate pages that share one
-        // document. Give each its own tab title and, when the user moves to a
-        // different page, start it at the top and move focus to the content so
-        // assistive tech announces the change like a real navigation. Moving
-        // between the library and a series stays on the "library" page so its
-        // scroll position survives the round trip.
-        const PAGE_TITLES = { home: 'Overview', library: 'Library', settings: 'Settings' };
+        // Overview, Library, Settings and Scheduled Jobs are separate pages
+        // that share one document. Give each its own tab title and, when the
+        // user moves to a different page, start it at the top and move focus
+        // to the content so assistive tech announces the change like a real
+        // navigation. Moving between the library and a series stays on the
+        // "library" page so its scroll position survives the round trip.
+        const PAGE_TITLES = { home: 'Overview', library: 'Library', settings: 'Settings', jobs: 'Scheduled Jobs' };
+        // Pages that scroll inside their own section (on desktop) rather than
+        // the document.
+        const PAGE_SCROLLERS = { settings: 'settingsView', jobs: 'jobsView' };
         function enterPage(view) {
             const page = view === 'series' ? 'library' : view;
             document.title = (PAGE_TITLES[page] || 'Overview') + ' · Comic Maintainer';
@@ -34,8 +38,8 @@
             lastRoutedPage = page;
             if (isInitialLoad || !changed) return;
             window.scrollTo(0, 0);
-            const settingsPage = document.getElementById('settingsView');
-            if (page === 'settings' && settingsPage) settingsPage.scrollTop = 0;
+            const pageScroller = PAGE_SCROLLERS[page] && document.getElementById(PAGE_SCROLLERS[page]);
+            if (pageScroller) pageScroller.scrollTop = 0;
             const main = document.getElementById('mainContent');
             if (main && !main.contains(document.activeElement)) {
                 main.focus({ preventScroll: true });
@@ -51,6 +55,7 @@
             }
             if (raw === '/library') return { view: 'library' };
             if (raw === '/settings') return { view: 'settings' };
+            if (raw === '/jobs') return { view: 'jobs' };
             return { view: 'home' };
         }
 
@@ -75,16 +80,24 @@
             if (route.view !== 'settings') {
                 settingsReturnHash = window.location.hash || '#/home';
             }
+            if (route.view !== 'jobs') {
+                // Scheduled Jobs polls for status only while it is on screen.
+                stopScheduledJobsRefresh();
+            }
             applyViewVisibility(route.view);
             enterPage(route.view);
-            if (route.view === 'settings') {
+            if (route.view === 'settings' || route.view === 'jobs') {
                 if (currentSeriesDetailId) {
                     disconnectSeriesIssuesObserver();
                     currentSeriesDetailId = null;
                     currentSeriesDetailTitleKeys = null;
                     currentSeriesDetailSeries = null;
                 }
-                loadSettings();
+                if (route.view === 'settings') {
+                    loadSettings();
+                } else {
+                    loadScheduledJobs();
+                }
             } else if (route.view === 'home') {
                 // The overview/home page is not a series detail. Clear any
                 // lingering detail state so it can't leak into the reader
@@ -119,14 +132,17 @@
         function applyViewVisibility(view) {
             const isHome = view === 'home';
             const isSettings = view === 'settings';
+            const isJobs = view === 'jobs';
             const isLibraryList = view === 'library';
-            const hideLibrary = isHome || isSettings;
+            const hideLibrary = isHome || isSettings || isJobs;
             const overview = document.getElementById('overviewView');
             const health = document.getElementById('libraryHealthDashboard');
             const files = document.getElementById('libraryFilesView');
             const settings = document.getElementById('settingsView');
+            const jobs = document.getElementById('jobsView');
             if (overview) overview.hidden = !isHome;
             if (settings) settings.hidden = !isSettings;
+            if (jobs) jobs.hidden = !isJobs;
             if (health) health.style.display = hideLibrary ? 'none' : '';
             if (files) files.style.display = hideLibrary ? 'none' : '';
             document.body.classList.toggle('view-settings', isSettings);
@@ -153,11 +169,12 @@
                 navLibraryBtn: currentView === 'library' || currentView === 'series',
                 sidebarOverviewBtn: currentView === 'home',
                 sidebarLibraryBtn: currentView === 'library' || currentView === 'series',
-                sidebarSettingsBtn: currentView === 'settings'
+                sidebarSettingsBtn: currentView === 'settings',
+                sidebarJobsBtn: currentView === 'jobs'
             };
             const topbarTitle = document.getElementById('topbarTitle');
             if (topbarTitle) {
-                topbarTitle.textContent = ({ home: 'Overview', library: 'Library', series: 'Library', settings: 'Settings' })[currentView] || '';
+                topbarTitle.textContent = ({ home: 'Overview', library: 'Library', series: 'Library', settings: 'Settings', jobs: 'Scheduled Jobs' })[currentView] || '';
             }
             Object.entries(activeByView).forEach(([id, active]) => {
                 const el = document.getElementById(id);

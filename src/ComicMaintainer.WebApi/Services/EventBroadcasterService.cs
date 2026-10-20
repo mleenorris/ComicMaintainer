@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Utilities;
 using Microsoft.AspNetCore.SignalR;
 using ComicMaintainer.WebApi.Hubs;
 
@@ -113,7 +114,7 @@ public class EventBroadcasterService : IEventBroadcaster
 
         await BroadcastEventAsync(eventData);
         
-        _logger.LogDebug("Broadcasted file processed: {Filename} - {Success}", filename, success);
+        _logger.LogDebug("Broadcasted file processed: {Filename} - {Success}", LoggingHelper.SanitizeForLog(filename), success);
     }
 
     public async Task BroadcastWatcherStatusAsync(bool running, bool enabled)

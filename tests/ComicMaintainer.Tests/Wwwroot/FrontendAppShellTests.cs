@@ -128,6 +128,29 @@ public class FrontendAppShellTests
     }
 
     [Fact]
+    public void Settings_SaveRequestsIncludeAuthenticationHeaders()
+    {
+        var js = Read("js", "main.js");
+
+        foreach (var path in new[]
+        {
+            "/api/settings/filename-format",
+            "/api/settings/log-max-bytes",
+            "/api/settings/issue-number-padding",
+            "/api/settings/database-cleanup-interval-hours",
+            "/api/settings/external-series-metadata"
+        })
+        {
+            var requestStart = js.IndexOf($"fetch(apiUrl('{path}')", StringComparison.Ordinal);
+            Assert.True(requestStart >= 0, $"Expected a save request for {path}");
+
+            var requestEnd = js.IndexOf("});", requestStart, StringComparison.Ordinal);
+            Assert.True(requestEnd > requestStart, $"Could not find the end of the save request for {path}");
+            Assert.Contains("...getAuthHeaders()", js[requestStart..requestEnd]);
+        }
+    }
+
+    [Fact]
     public void MainCss_SidebarGridIsScopedToTheAppShell()
     {
         // jobs.html and reader.html load main.css too; an unscoped body grid

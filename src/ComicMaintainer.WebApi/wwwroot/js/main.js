@@ -10073,7 +10073,8 @@
                 const formatResponse = await fetch(apiUrl('/api/settings/filename-format'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ format: format })
                 });
@@ -10092,7 +10093,8 @@
                 const logResponse = await fetch(apiUrl('/api/settings/log-max-bytes'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ maxMB: logMaxSize })
                 });
@@ -10111,7 +10113,8 @@
                 const paddingResponse = await fetch(apiUrl('/api/settings/issue-number-padding'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ padding: issueNumberPadding })
                 });
@@ -10130,7 +10133,8 @@
                 const cleanupResponse = await fetch(apiUrl('/api/settings/database-cleanup-interval-hours'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ hours: dbCleanupInterval })
                 });
@@ -10149,7 +10153,8 @@
                 const metadataResponse = await fetch(apiUrl('/api/settings/external-series-metadata'), {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({
                         enabled: enableExternalSeriesMetadata,

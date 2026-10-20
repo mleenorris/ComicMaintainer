@@ -83,6 +83,7 @@ jobs:
     - name: Add Testing Policy Note to Coverage Report
       if: github.event_name == 'pull_request'
       run: |
+        sudo chown "$(id -u):$(id -g)" code-coverage-results.md
         echo "" >> code-coverage-results.md
         echo "---" >> code-coverage-results.md
         echo "" >> code-coverage-results.md

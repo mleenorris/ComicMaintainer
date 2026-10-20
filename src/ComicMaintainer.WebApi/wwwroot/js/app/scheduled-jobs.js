@@ -424,7 +424,9 @@
         function stopScheduledJobsRefresh() {
             clearTimeout(scheduledJobsRefreshTimer);
             scheduledJobsRefreshTimer = null;
-            scheduledJobRunRequests.clear();
+            for (const [jobKey, request] of scheduledJobRunRequests) {
+                if (!request.pending) scheduledJobRunRequests.delete(jobKey);
+            }
         }
 
         // Follow a run started from this page until it finishes, then say how

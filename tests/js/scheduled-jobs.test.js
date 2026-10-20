@@ -135,7 +135,7 @@ test('the library-scan card renders every pass with its default', () => {
     }
 });
 
-test('a status refresh while Run now is pending cannot let it be submitted again', async () => {
+test('status refresh and leaving the jobs view while Run now is pending cannot resubmit it', async () => {
     const job = { jobKey: 'library-scan', displayName: 'Library scan', lastStatus: 'Success', lastRunUtc: '2026-10-20T16:40:13' };
     const runButton = { disabled: false, replaceChildren() {} };
     const part = () => ({ replaceChildren() {} });
@@ -180,6 +180,15 @@ test('a status refresh while Run now is pending cannot let it be submitted again
     assert.equal(runButton.disabled, true, 'Run now must stay disabled while the request is pending');
     assert.equal(sandbox.run(`scheduledJobRunRequests.has('library-scan')`), true);
     assert.deepEqual(messages, [], 'nothing is announced before the run is accepted');
+
+    // Leaving the page stops refreshes but must not lose the pending submission.
+    sandbox.run("currentView = 'home'; stopScheduledJobsRefresh()");
+    assert.equal(sandbox.run(`scheduledJobRunRequests.has('library-scan')`), true);
+
+    // Returning to the page must still render the action as busy.
+    sandbox.run("currentView = 'jobs'");
+    await sandbox.run('loadScheduledJobs')();
+    assert.equal(runButton.disabled, true, 'Run now must stay disabled after returning');
 
     await run(job.jobKey);
     assert.equal(posts.length, 1, 'a second click must not send another POST');

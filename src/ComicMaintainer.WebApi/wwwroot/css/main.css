@@ -5225,8 +5225,8 @@ summary:focus-visible,
 }
 
 @media (min-width: 1025px) {
-    /* Only the main app page (index.html) has the sidebar; jobs.html and
-       reader.html share this stylesheet and keep their own layouts. */
+    /* Only the main app page (index.html) has the sidebar; reader.html
+       shares this stylesheet and keeps its own layout. */
     body.app-shell {
         display: grid;
         grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
@@ -5299,9 +5299,11 @@ summary:focus-visible,
    ---------------------------------------------------------------------------
    A full page rather than a modal: a sticky section index on the left, one
    card per settings group, and a sticky save bar so Save is always in reach
-   however far down the form the user is.
+   however far down the form the user is. The Scheduled Jobs page (#/jobs)
+   shares the page shell and cards.
 =========================================================================== */
-.settings-page {
+.settings-page,
+.jobs-page {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
@@ -5399,7 +5401,8 @@ summary:focus-visible,
     color: var(--text-error);
 }
 
-.settings-page-body {
+.settings-page-body,
+.jobs-page-body {
     display: flex;
     flex-direction: column;
     gap: var(--space-5);
@@ -5408,14 +5411,16 @@ summary:focus-visible,
     padding-bottom: var(--space-6);
 }
 
-.settings-page-body .settings-readonly-notice {
+.settings-page-body .settings-readonly-notice,
+.jobs-page-body .settings-readonly-notice {
     display: flex;
     align-items: center;
     gap: 8px;
     margin: 0;
 }
 
-.settings-page-body .settings-readonly-notice[hidden] {
+.settings-page-body .settings-readonly-notice[hidden],
+.jobs-page-body .settings-readonly-notice[hidden] {
     display: none;
 }
 
@@ -5653,7 +5658,8 @@ summary:focus-visible,
 
 @media (max-width: 768px) {
     /* Phones let the document scroll (see .content-wrapper). */
-    .settings-page {
+    .settings-page,
+    .jobs-page {
         flex: none;
         overflow: visible;
     }
@@ -5687,6 +5693,156 @@ summary:focus-visible,
         overflow-x: clip;
         overflow-y: visible;
     }
+}
+
+/* ===========================================================================
+   Scheduled Jobs page (#/jobs)
+   ---------------------------------------------------------------------------
+   One settings-style card per job: last-run status, schedule, options and
+   actions, plus the metadata audit's findings table.
+=========================================================================== */
+.scheduled-jobs-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+}
+
+.scheduled-job-heading {
+    flex: 1;
+    min-width: 0;
+}
+
+.scheduled-job-status-slot {
+    flex-shrink: 0;
+}
+
+.scheduled-job-status {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill);
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.scheduled-job-status--success {
+    background: rgba(39, 174, 96, 0.15);
+    color: var(--status-ok-text);
+}
+
+.scheduled-job-status--running {
+    background: rgba(243, 156, 18, 0.18);
+    color: var(--status-warn-text);
+}
+
+.scheduled-job-status--failed {
+    background: rgba(231, 76, 60, 0.15);
+    color: var(--status-bad-text);
+}
+
+.scheduled-job-runs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--space-3) var(--space-5);
+    margin: 0 0 var(--space-4);
+}
+
+.scheduled-job-run {
+    min-width: 0;
+}
+
+.scheduled-job-run--message {
+    grid-column: 1 / -1;
+}
+
+.scheduled-job-run dt {
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.scheduled-job-run dd {
+    margin: 2px 0 0;
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    overflow-wrap: anywhere;
+}
+
+.scheduled-job-options {
+    min-width: 0;
+    margin: 0 0 var(--space-4);
+    padding: 0;
+    border: none;
+}
+
+.scheduled-job-options legend {
+    padding: 0;
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.scheduled-job-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin: 0 0 var(--space-4);
+}
+
+.scheduled-job-findings {
+    margin: 0 0 var(--space-4);
+}
+
+.scheduled-job-findings .form-hint {
+    margin: 0 0 var(--space-2);
+}
+
+.scheduled-job-findings-scroll {
+    max-height: 420px;
+    overflow: auto;
+    border: 1px solid var(--border-secondary);
+    border-radius: var(--radius-md);
+}
+
+.scheduled-job-findings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+}
+
+.scheduled-job-findings-table th,
+.scheduled-job-findings-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-secondary);
+    text-align: left;
+    vertical-align: top;
+}
+
+.scheduled-job-findings-table th {
+    position: sticky;
+    top: 0;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.scheduled-job-findings-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.scheduled-job-findings-path {
+    min-width: 220px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    overflow-wrap: anywhere;
 }
 
 /* Current page name in the desktop top bar; the sidebar replaces the

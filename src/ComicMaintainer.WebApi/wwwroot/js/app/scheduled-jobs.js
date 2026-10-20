@@ -69,7 +69,9 @@
                 throw error;
             }
             if (!response.ok) {
-                let message = `HTTP error! status: ${response.status}`;
+                let message = response.status === 403
+                    ? 'Only administrators can manage scheduled jobs.'
+                    : `HTTP error! status: ${response.status}`;
                 try {
                     const body = await response.json();
                     if (body && (body.error || body.message)) message = body.error || body.message;
@@ -123,11 +125,12 @@
             return isScheduledJobRunning(job) || scheduledJobRunRequests.has(job.jobKey);
         }
 
-        // The API reports UTC times without an offset ("2026-01-02T03:04:05.6"),
-        // which Date would otherwise read as local time.
+        // The API reports UTC times without an offset ("2026-01-02T03:04:05.6789012"),
+        // which Date would otherwise read as local time. The fraction is cut
+        // to milliseconds, the precision Date's ISO format defines.
         function parseScheduledJobDate(value) {
             if (!value) return null;
-            const text = String(value);
+            const text = String(value).replace(/\.(\d+)/, (_, fraction) => '.' + (fraction + '00').slice(0, 3));
             const date = new Date(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text) ? text : text + 'Z');
             return Number.isNaN(date.getTime()) ? null : date;
         }
@@ -249,8 +252,8 @@
                         </fieldset>
                     ` : ''}
                     <div class="scheduled-job-actions">
-                        <button type="button" class="btn btn-primary" data-requires-write data-job-action="save" onclick="saveScheduledJob('${jsArg(job.jobKey)}')">${uiIcon('check')} Save</button>
-                        <button type="button" class="btn" data-requires-write data-job-action="run" onclick="runScheduledJob('${jsArg(job.jobKey)}')" ${isScheduledJobBusy(job) ? 'disabled' : ''}>${renderScheduledJobRunLabel(job)}</button>
+                        <button type="button" class="btn btn-primary" data-job-action="save" onclick="saveScheduledJob('${jsArg(job.jobKey)}')">${uiIcon('check')} Save</button>
+                        <button type="button" class="btn" data-job-action="run" onclick="runScheduledJob('${jsArg(job.jobKey)}')" ${isScheduledJobBusy(job) ? 'disabled' : ''}>${renderScheduledJobRunLabel(job)}</button>
                         ${isMetadataAudit ? html`<button type="button" class="btn btn-ghost" data-job-action="findings" aria-expanded="false" aria-controls="${id}-findings" onclick="toggleMetadataAuditFindings('${jsArg(job.jobKey)}')">${uiIcon('list')} View findings</button>` : ''}
                     </div>
                     ${isMetadataAudit ? html`<div class="scheduled-job-findings" id="${id}-findings" data-job-part="findings" hidden></div>` : ''}
@@ -266,7 +269,6 @@
                 return;
             }
             renderHtml(list, html`${scheduledJobs.map(renderScheduledJobCard)}`);
-            applyScheduledJobsCapabilities();
         }
 
         /**
@@ -306,16 +308,26 @@
             if (hint) hint.textContent = formatScheduledJobInterval(input.value);
         }
 
-        // Everyone can review the jobs; changing or running them needs
-        // CanModifyLibrary, which the API enforces. Save / Run now are hidden
-        // through [data-requires-write]; the inputs stay visible but locked.
+        // Scheduled jobs are administrator-only, as is their API; applyCapabilities
+        // hides the entry points from everyone else. Anyone who still reaches
+        // the page (an old link, or before their capabilities have loaded)
+        // gets a notice in place of the jobs.
         function applyScheduledJobsCapabilities() {
-            const readOnly = !userCapabilities.canModifyLibrary;
-            const notice = document.getElementById('scheduledJobsReadOnlyNotice');
-            if (notice) notice.hidden = !readOnly;
-            document.querySelectorAll('#scheduledJobsList [data-job-field], #scheduledJobsList [data-job-option]').forEach(input => {
-                input.disabled = readOnly;
-            });
+            if (!userCapabilities.canAdminister) showScheduledJobsAdminOnly();
+        }
+
+        function showScheduledJobsAdminOnly() {
+            ++scheduledJobsLoadRequest;
+            stopScheduledJobsRefresh();
+            scheduledJobs = [];
+            const notice = document.getElementById('scheduledJobsAdminNotice');
+            if (notice) notice.hidden = false;
+            const list = document.getElementById('scheduledJobsList');
+            if (list) {
+                list.hidden = true;
+                list.setAttribute('aria-busy', 'false');
+                clearChildren(list);
+            }
         }
 
         function sameScheduledJobKeys(a, b) {
@@ -330,12 +342,18 @@
         async function loadScheduledJobs({ statusOnly = false } = {}) {
             const list = document.getElementById('scheduledJobsList');
             if (!list) return;
+            if (!userCapabilities.canAdminister) {
+                showScheduledJobsAdminOnly();
+                return;
+            }
             clearTimeout(scheduledJobsRefreshTimer);
             scheduledJobsRefreshTimer = null;
             const loadRequest = ++scheduledJobsLoadRequest;
             const hasCards = () => !!list.querySelector('[data-job-key]');
             if (!statusOnly) {
-                applyScheduledJobsCapabilities();
+                const notice = document.getElementById('scheduledJobsAdminNotice');
+                if (notice) notice.hidden = true;
+                list.hidden = false;
                 list.setAttribute('aria-busy', 'true');
                 if (!hasCards()) {
                     renderHtml(list, html`<div class="loading"><div class="spinner"></div><p>Loading scheduled jobs...</p></div>`);
@@ -355,6 +373,10 @@
                 scheduledJobs.forEach(followScheduledJobRun);
             } catch (error) {
                 if (loadRequest !== scheduledJobsLoadRequest || error.authHandled) return;
+                if (error.status === 403) {
+                    showScheduledJobsAdminOnly();
+                    return;
+                }
                 if (statusOnly && hasCards()) {
                     // Keep the last known status on screen; the next refresh retries.
                     console.warn('Failed to refresh scheduled jobs:', error);

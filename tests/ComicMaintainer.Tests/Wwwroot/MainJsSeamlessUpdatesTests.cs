@@ -45,12 +45,12 @@ public class MainJsSeamlessUpdatesTests
     public void MainJs_DoesNotHardNavigateToScheduledJobsHtml()
     {
         var contents = ReadMainJs();
-        // The Scheduled Jobs page is being migrated to an in-SPA modal.
-        // Forbid new hard navigations to /jobs.html from JS handlers so we
-        // don't regress.
+        // Scheduled Jobs is a routed page of the SPA (#/jobs); jobs.html only
+        // redirects there. Forbid hard navigations to /jobs.html from JS
+        // handlers so we don't regress.
         var matches = Regex.Matches(contents, @"window\.location\.href\s*=\s*['""]/jobs\.html");
         Assert.True(matches.Count == 0,
-            "main.js must not hard-navigate to /jobs.html: open the scheduled-jobs modal in the SPA instead.");
+            "main.js must not hard-navigate to /jobs.html: navigate to #/jobs in the SPA instead.");
     }
 
     [Fact]

@@ -255,7 +255,7 @@
                         <button class="settings-dropdown-item" onclick="openEmailDeliveryHistoryModal(); closeSettingsMenu();">
                             <svg class="icon" aria-hidden="true"><use href="#i-send"/></svg> Email Delivery History
                         </button>
-                        <button class="settings-dropdown-item" onclick="openScheduledJobs(); closeSettingsMenu();">
+                        <button class="settings-dropdown-item" id="scheduledJobsMenuItem" onclick="openScheduledJobs(); closeSettingsMenu();">
                             <svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg> Scheduled Jobs
                         </button>
                         <div class="settings-dropdown-section-label">View</div>
@@ -1181,8 +1181,8 @@
                 </div>
             </div>
             <div class="jobs-page-body">
-                <div class="settings-readonly-notice" id="scheduledJobsReadOnlyNotice" hidden>
-                    <svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg> You can review scheduled jobs here, but changing or running them requires permission to modify the library.
+                <div class="settings-readonly-notice" id="scheduledJobsAdminNotice" hidden>
+                    <svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg> Scheduled jobs are managed by administrators.
                 </div>
                 <div id="scheduledJobsList" class="scheduled-jobs-list" aria-busy="true">
                     <div class="loading"><div class="spinner"></div><p>Loading scheduled jobs...</p></div>
@@ -1575,7 +1575,7 @@
                     <li><kbd>g</kbd> <kbd>h</kbd><span>Go to Overview</span></li>
                     <li><kbd>g</kbd> <kbd>l</kbd><span>Go to Library</span></li>
                     <li><kbd>g</kbd> <kbd>s</kbd><span>Go to Settings</span></li>
-                    <li><kbd>g</kbd> <kbd>j</kbd><span>Go to Scheduled Jobs</span></li>
+                    <li id="scheduledJobsShortcutItem"><kbd>g</kbd> <kbd>j</kbd><span>Go to Scheduled Jobs</span></li>
                     <li><kbd>r</kbd><span>Refresh the file list <em>(Library)</em></span></li>
                     <li><kbd>f</kbd><span>Open the filter menu <em>(Library)</em></span></li>
                     <li><kbd>?</kbd><span>Show this help</span></li>

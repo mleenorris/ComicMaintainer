@@ -272,7 +272,7 @@
                 } else if (key === 's') {
                     event.preventDefault();
                     navigate('#/settings');
-                } else if (key === 'j') {
+                } else if (key === 'j' && userCapabilities.canAdminister) {
                     event.preventDefault();
                     navigate('#/jobs');
                 }

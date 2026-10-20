@@ -80,7 +80,7 @@ public class FrontendAppShellTests
 
         Assert.Matches(@"<aside class=""app-sidebar"" id=""appSidebar""", html);
         Assert.Matches(@"<nav class=""sidebar-nav"" aria-label=""[^""]+""", html);
-        foreach (var id in new[] { "sidebarOverviewBtn", "sidebarLibraryBtn", "sidebarSettingsBtn" })
+        foreach (var id in new[] { "sidebarOverviewBtn", "sidebarLibraryBtn", "sidebarSettingsBtn", "sidebarJobsBtn" })
         {
             Assert.Contains($"id=\"{id}\"", html);
         }
@@ -153,8 +153,8 @@ public class FrontendAppShellTests
     [Fact]
     public void MainCss_SidebarGridIsScopedToTheAppShell()
     {
-        // jobs.html and reader.html load main.css too; an unscoped body grid
-        // squeezed their content into the empty sidebar column.
+        // reader.html (and formerly jobs.html) loads main.css too; an unscoped
+        // body grid squeezed its content into the empty sidebar column.
         var css = Read("css", "main.css");
         Assert.Contains("body.app-shell {", css);
         Assert.DoesNotMatch(@"\n\s*body\s*\{\s*display:\s*grid", css);
@@ -181,11 +181,61 @@ public class FrontendAppShellTests
     }
 
     [Fact]
+    public void ScheduledJobs_IsARoutedPageLikeSettings()
+    {
+        var html = Read("index.html");
+        var js = WwwrootFiles.ReadAppScripts();
+
+        // Scheduled Jobs used to be a standalone page with its own layout and
+        // a "Back to Library" link; it is a page of the app shell now.
+        var main = Regex.Match(html, @"<main\b[\s\S]*?</main>");
+        Assert.True(main.Success, "index.html has no <main> element.");
+        Assert.Contains("id=\"jobsView\"", main.Value);
+        Assert.DoesNotContain("href=\"/jobs.html\"", html);
+
+        Assert.Contains("if (raw === '/jobs') return { view: 'jobs' };", js);
+        Assert.Matches(@"function openScheduledJobs\(\)\s*\{\s*navigate\('#/jobs'\);", js);
+        Assert.Matches(@"id=""sidebarJobsBtn""[^>]*onclick=""openScheduledJobs\(\)""", html);
+        Assert.Contains("sidebarJobsBtn: currentView === 'jobs'", js);
+
+        // Status is polled only while the page is on screen.
+        Assert.Matches(@"if \(route\.view !== 'jobs'\) \{[^}]*stopScheduledJobsRefresh\(\);", js);
+        Assert.Contains("if (currentView !== 'jobs') return;", js);
+
+        // Old links and bookmarks to /jobs.html land on the routed page.
+        var stub = Read("jobs.html");
+        Assert.Contains("window.location.replace('/#/jobs')", stub);
+        Assert.Contains("url=/#/jobs", stub);
+        Assert.Contains("<a href=\"/#/jobs\">", stub);
+    }
+
+    [Fact]
+    public void ScheduledJobs_IsOnlyOfferedToAdministrators()
+    {
+        var html = Read("index.html");
+        var js = WwwrootFiles.ReadAppScripts();
+
+        // /api/scheduled-jobs is administrator-only, so every entry point is
+        // hidden from everyone else ...
+        foreach (var id in new[] { "sidebarJobsBtn", "scheduledJobsMenuItem", "scheduledJobsShortcutItem" })
+        {
+            Assert.Contains($"id=\"{id}\"", html);
+            Assert.Matches(new Regex("'" + id + @"'[\s\S]{0,300}?\.hidden = !userCapabilities\.canAdminister"), js);
+        }
+        Assert.Contains("} else if (key === 'j' && userCapabilities.canAdminister) {", js);
+
+        // ... and anyone who still reaches the page sees a notice, not a 403.
+        Assert.Matches(@"id=""scheduledJobsAdminNotice""[^>]*hidden", html);
+        Assert.Matches(@"if \(!userCapabilities\.canAdminister\) \{\s*showScheduledJobsAdminOnly\(\);", js);
+        Assert.Matches(@"if \(error\.status === 403\) \{\s*showScheduledJobsAdminOnly\(\);", js);
+    }
+
+    [Fact]
     public void Router_TreatsOverviewLibraryAndSettingsAsSeparatePages()
     {
         var js = WwwrootFiles.ReadAppScripts();
 
-        Assert.Contains("const PAGE_TITLES = { home: 'Overview', library: 'Library', settings: 'Settings' };", js);
+        Assert.Contains("const PAGE_TITLES = { home: 'Overview', library: 'Library', settings: 'Settings', jobs: 'Scheduled Jobs' };", js);
         Assert.Matches(@"applyViewVisibility\(route\.view\);\s*enterPage\(route\.view\);", js);
         // A series page belongs to the library so returning keeps its scroll.
         Assert.Contains("const page = view === 'series' ? 'library' : view;", js);

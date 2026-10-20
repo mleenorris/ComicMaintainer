@@ -29,7 +29,7 @@ public class RequestTimeoutEndpointTests : IClassFixture<WebApplicationFactory<P
 
     public RequestTimeoutEndpointTests(WebApplicationFactory<Program> factory)
     {
-        _configDirectory = Path.Combine(Path.GetTempPath(), "ComicMaintainer.Tests", Guid.NewGuid().ToString("N"));
+        _configDirectory = Path.Join(Path.GetTempPath(), "ComicMaintainer.Tests", Guid.NewGuid().ToString("N"));
         _factory = factory.WithWebHostBuilder(builder =>
             builder.ConfigureAppConfiguration((_, configuration) =>
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>

@@ -413,7 +413,7 @@ The .NET version offers significant advantages in performance, type safety, and 
 ## References
 
 - [Original Python README](README.md)
-- [.NET Version README](../README.DOTNET.md)
+- [.NET Version README](../../README.md)
 - [Migration Guide](../MIGRATION_GUIDE.md)
 - [MAUI Android Setup](../MAUI_ANDROID_SETUP.md)
 - [.NET Documentation](https://docs.microsoft.com/dotnet/)

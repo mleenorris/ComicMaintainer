@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Telemetry;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -20,14 +21,16 @@ public class ComicVineSeriesMetadataService : IExternalSeriesMetadataService
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly IMemoryCache _cache;
     private readonly ILogger<ComicVineSeriesMetadataService> _logger;
-    private readonly ProviderHealthTracker _health = new("ComicVine");
+    private readonly ProviderHealthTracker _health;
 
     public ComicVineSeriesMetadataService(
         IHttpClientFactory httpClientFactory,
         IOptionsMonitor<AppSettings> settings,
         IMemoryCache cache,
-        ILogger<ComicVineSeriesMetadataService> logger)
+        ILogger<ComicVineSeriesMetadataService> logger,
+        ComicMaintainerMetrics? metrics = null)
     {
+        _health = new ProviderHealthTracker("ComicVine", metrics);
         _httpClientFactory = httpClientFactory;
         _settings = settings;
         _cache = cache;

@@ -44,6 +44,7 @@ public class WriteOperationAuthorizationConvention : IActionModelConvention
         // Reads are already restricted by the controller-level Admin policy;
         // listing it here keeps write endpoints added later covered by default.
         ["ErrorReports"] = AuthorizationPolicies.CanAdminister,
+        ["Backups"] = AuthorizationPolicies.CanAdminister,
         ["Settings"] = AuthorizationPolicies.CanAdminister
     };
 

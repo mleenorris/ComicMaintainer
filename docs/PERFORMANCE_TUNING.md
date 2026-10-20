@@ -145,6 +145,27 @@ For processing thousands of files:
    - Jobs are persistent and survive page refreshes
    - Real-time progress updates via SSE
 
+### Incremental Library Scans
+
+The **Library Scan** scheduled job (`library-scan`) loads the tracked file
+list once per run and reuses it for the additions, deletions and
+modified-file passes, so a scan costs one directory walk plus one in-memory
+lookup per file. Its options (JSON, editable via
+`PUT /api/scheduled-jobs/library-scan`) are:
+
+| Option | Default | Effect |
+|--------|---------|--------|
+| `scanForNew` | `true` | Add and fully process files present on disk but not tracked. |
+| `reconcileDeletions` | `true` | Drop tracked rows whose files no longer exist. |
+| `retagStale` | `true` | Re-normalize files whose series-metadata stamp is older than the cache record. |
+| `reprocessModified` | `false` | Re-normalize tracked files whose on-disk size or last-write time differs from the stored values (±2 s tolerance for coarse filesystem timestamps). |
+
+`reprocessModified` is useful when other tools replace or edit archives in
+place. Stored size/mtime are refreshed before and after the re-normalize (and
+after every in-place metadata write by ComicMaintainer), so the app's own
+writes never re-trigger the pass. Leave it off for very large libraries on
+slow network storage if the extra `stat` per file is noticeable.
+
 ## Web Interface Performance
 
 ### Frontend Optimizations
@@ -155,6 +176,27 @@ The web interface includes several performance optimizations:
 2. **Search Debouncing:** 300ms delay reduces API calls by 87%
 3. **Server-Side Processing:** Filtering, sorting, and searching on backend
 4. **Real-time Updates:** Server-Sent Events (SSE) instead of polling
+
+### Cover Thumbnails
+
+File-list covers (`/api/comicreader/cover`) are served from an on-disk cache
+of downscaled thumbnails rather than full-size page 1 images, which typically
+shrinks each cover from several hundred KB to a few tens of KB. Settings
+(set via environment, e.g. `AppSettings__FileCoverThumbnailMaxWidth=360`):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `FileCoverThumbnailMaxWidth` | `480` | Max thumbnail width in px. Images are never upscaled. `0` serves the original page bytes without re-encoding. |
+| `FileCoverThumbnailFormat` | `webp` | `webp` or `jpeg`. |
+| `FileCoverThumbnailQuality` | `80` | Encoder quality (1–100). |
+| `FileCoverCacheEnabled` | `true` | Persist thumbnails under `FileCoverCacheDirectory` (default `{ConfigDirectory}/file-covers`). |
+| `FileCoverCacheMaxMegabytes` | `512` | Soft cap; least-recently-used entries are pruned. |
+
+The thumbnail variant (format + width + quality) is recorded with each cache
+entry and included in the cover `ETag`, so changing any of these settings
+regenerates entries on next request and browsers revalidate (304 responses
+are still returned for unchanged covers). If a page cannot be decoded, the
+original bytes are served instead.
 
 ### Response Optimization
 
@@ -257,7 +299,26 @@ curl http://localhost:5000/health
 
 ### Performance Metrics
 
-Key metrics to monitor:
+ComicMaintainer publishes OpenTelemetry metrics. Enable Prometheus scraping
+with `TELEMETRY__PROMETHEUSENABLED=true` (optionally protected by
+`TELEMETRY__METRICSTOKEN`) or push via OTLP with `OTEL_EXPORTER_OTLP_ENDPOINT`.
+Useful series (Prometheus names):
+
+| Metric | What it tells you |
+| --- | --- |
+| `comicmaintainer_files_processed_total{operation,outcome}` | Processing throughput and failure rate |
+| `comicmaintainer_processing_job_duration_seconds{operation,status}` | Batch job duration — compare against `MAX_WORKERS` changes |
+| `comicmaintainer_scheduled_job_runs_total{job,outcome}` / `comicmaintainer_scheduled_job_duration_seconds` | Scheduled job health (library scan, audits, backups) |
+| `comicmaintainer_metadata_provider_requests_total{provider,outcome}` | External metadata lookups |
+| `comicmaintainer_metadata_provider_rate_limit_waits_total{provider,kind}` | Time lost to provider throttling (`kind=client` local limiter, `kind=server` HTTP 429) — lower `MANGADEX_REQUESTS_PER_SECOND` / `ANILIST_REQUESTS_PER_MINUTE` if `server` waits climb |
+| `comicmaintainer_email_queue_depth` / `comicmaintainer_email_sends_total{outcome}` | Ereader email backlog |
+| `http_server_request_duration_seconds` | API latency (ASP.NET Core instrumentation) |
+| `process_runtime_dotnet_gc_*`, `dotnet_*` | GC / memory pressure (runtime instrumentation) |
+
+Exact names can vary slightly with the exporter version (unit suffixes); check
+`/metrics` for the list.
+
+Other things to watch:
 
 1. **File processing time:** Check logs for individual file processing duration
 2. **Batch job completion time:** Monitor job progress in web interface

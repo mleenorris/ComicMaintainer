@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Telemetry;
 using Microsoft.Extensions.Logging;
 
 namespace ComicMaintainer.Core.Services;
@@ -28,10 +29,14 @@ public class ComicEmailQueue : IComicEmailQueue
     /// Resolves the delivery service lazily; the service itself enqueues work,
     /// so constructor injection would form a dependency cycle.
     /// </param>
-    public ComicEmailQueue(Func<IComicEmailService> serviceFactory, ILogger<ComicEmailQueue> logger)
+    public ComicEmailQueue(
+        Func<IComicEmailService> serviceFactory,
+        ILogger<ComicEmailQueue> logger,
+        ComicMaintainerMetrics? metrics = null)
     {
         _serviceFactory = serviceFactory;
         _logger = logger;
+        metrics?.SetEmailQueueDepthProvider(() => _channel.Reader.Count);
     }
 
     public void Enqueue(int deliveryId)

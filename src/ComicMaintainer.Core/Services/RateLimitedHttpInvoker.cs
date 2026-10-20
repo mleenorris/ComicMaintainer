@@ -42,8 +42,10 @@ internal static class RateLimitedHttpInvoker
         HttpResponseMessage? response = null;
         for (var attempt = 0; attempt < 2; attempt++)
         {
+            var acquireStarted = System.Diagnostics.Stopwatch.GetTimestamp();
             using (await limiter.AcquireAsync(cancellationToken))
             {
+                health.RecordClientThrottleWait(System.Diagnostics.Stopwatch.GetElapsedTime(acquireStarted));
                 // Lease is released as soon as we exit this scope; the actual
                 // HTTP call below is not counted against the rate limit again,
                 // matching the typical "one permit per outbound request" model.

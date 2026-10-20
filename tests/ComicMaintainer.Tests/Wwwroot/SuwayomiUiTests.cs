@@ -6,19 +6,8 @@ public class SuwayomiUiTests
 {
     private static string ReadMainJs()
     {
-        var current = AppContext.BaseDirectory;
-        for (var i = 0; i < 10 && current != null; i++)
-        {
-            var candidate = Path.Combine(current, "src", "ComicMaintainer.WebApi", "wwwroot", "js", "main.js");
-            if (File.Exists(candidate))
-            {
-                return File.ReadAllText(candidate);
-            }
-
-            current = Path.GetDirectoryName(current);
-        }
-
-        throw new FileNotFoundException("Could not locate main.js relative to test binaries.");
+        // main.js is now split into several ordered scripts; scan all of them.
+        return WwwrootFiles.ReadAppScripts();
     }
 
     [Fact]

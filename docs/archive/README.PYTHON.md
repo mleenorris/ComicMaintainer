@@ -1,0 +1,1049 @@
+
+# ComicTagger Watcher Service
+
+> **Archived:** This is the README of the legacy Python-based version of ComicMaintainer and is no longer maintained. The current .NET version (v2.0) is documented in the [main README](../../README.md).
+
+This service automatically watches a directory for new or changed comic archive files (`.cbz`/`.cbr`), tags them using ComicTagger, and manages duplicates. It is designed to run in a Docker container and is fully automated. **The container supports custom user and group IDs (PUID/PGID) to ensure proper file permissions when working with host-mounted directories.**
+
+## Features
+- Watches a directory for file changes (create, modify, move/rename, delete)
+- Processes `.cbz` and `.cbr` files only
+- Uses ComicTagger to set comic metadata (title, issue, series, etc.)
+- Renames files based on customizable filename format templates
+- Handles duplicate files: moves them to a duplicate directory, preserving the original folder structure
+- **Processing Status Tracking**: Both the watcher and web interface automatically mark files as processed
+- **Duplicate File Tracking**: Files that would have the same name after processing are automatically marked as duplicates
+- **Web Interface** for managing comic files:
+  - One-click button to process all files in the watched directory
+  - Process only selected files with the "Process Selected" button
+  - Folder selection: click folder checkbox to select all files in a folder
+  - View and edit tags for individual files
+  - Batch update tags for multiple selected files
+  - Configurable filename format with support for metadata placeholders
+  - Smart handling to prevent watcher conflicts with web-modified files
+  - **Filter by processing status**: View all files, only processed files, only unprocessed files, or only duplicates
+  - **Scan for unmarked files**: Quickly identify how many files haven't been processed yet
+  - **Visual status indicators**: Each file shows ✅ (processed), ⚠️ (unprocessed), or 🔁 (duplicate) icon
+  - **Combine Folders workflow**: Interactively review folders that contain the same series across multiple locations. The Library Health "Combine Folders" tile opens a side-by-side comparison of every folder in a group (path, file count, total size, newest/oldest file dates, sample file names). The folder containing the most recently added file is highlighted as the suggested destination, but any folder in the group can be selected. A "Preview Merge" action shows the exact list of file moves and any name conflicts (collisions are auto-renamed with a numeric suffix) before any changes are written to disk.
+  - **Server-side preferences**: Theme, page size, reading mode, library view, filter and sort settings are stored per user in the database, so they persist across browsers and devices
+  - **Job resumption**: Batch processing jobs automatically resume after page refresh or browser restart
+  - **Robust batch processing**: Three-layer defense system ensures progress updates are never stuck
+    - Real-time SSE updates for instant feedback
+    - Automatic reconnection and status sync when connection drops
+    - Watchdog timer detects stuck jobs and auto-polls status after 60 seconds of inactivity
+- Logs all actions to `ComicMaintainer.log` (with optional separate debug log when `DEBUG_MODE=true`)
+- Containerized with Docker for easy deployment
+- **Supports custom user and group IDs (PUID/PGID) for proper file permissions**
+- **Installable Web App (PWA)**: Install the web interface as a standalone app on your device
+  - Works on desktop (Windows, macOS, Linux) and mobile (iOS, Android)
+  - App-like experience with dedicated window
+  - Add to home screen on mobile devices
+  - Offline-ready with cached assets, including a dedicated offline page when the server is unreachable
+  - Download individual comics for offline reading straight from the reader
+  - Easy access from your app drawer or desktop
+
+## How It Works
+1. The watcher service monitors a specified directory for new or changed `.cbz`/`.cbr` files.
+2. When a file is detected and stable, it runs `process_file.py` to:
+   - **Check if the file is already normalized**: If the metadata (title, series) and filename already match the expected format, the file is immediately marked as processed without making any changes
+   - Read and update comic metadata using ComicTagger (if normalization is needed)
+   - Rename the file using the configured filename format (e.g., `{series} - Chapter {issue}` → `Batman - Chapter 0001.cbz` or `.cbr` depending on original format) (if normalization is needed)
+   - If a file with the new name already exists, the file is marked as a duplicate and, if `DUPLICATE_DIR` is set, moved to the duplicate directory preserving the original parent folder
+3. All actions and errors are logged.
+
+## Usage
+
+### Build the Docker image
+```sh
+docker build -t iceburn1/comictagger-watcher:latest .
+```
+
+### Docker Images
+
+Pre-built Docker images are available on Docker Hub:
+
+- **`iceburn1/comictagger-watcher:latest`** - Built from the `master` branch with the latest features and updates
+- **`iceburn1/comictagger-watcher:stable`** - Built from the `stable` branch, providing a tested baseline for production deployments
+- **`iceburn1/comictagger-watcher:<version>`** - Specific version tags (e.g., `1.0.23`) built from `master` branch releases
+
+For production environments, using the `stable` tag is recommended for a more reliable experience.
+
+**Permissions Note:** By default, the container runs as user `nobody` (UID 99) and group `users` (GID 100). You can customize these by setting the `PUID` and `PGID` environment variables to match your host user. This ensures that files created or modified by the container have the correct ownership on your host system.
+
+
+### Run the container
+
+**Basic usage:**
+```sh
+docker run -d \
+  -v <host_dir_to_watch>:/watched_dir \
+  -v <host_dir_for_duplicates>:/duplicates \
+  -v <host_dir_for_config>:/Config \
+  -e WATCHED_DIR=/watched_dir \
+  -e DUPLICATE_DIR=/duplicates \
+  -p 5000:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+**With custom user/group (recommended for host-mounted directories):**
+```sh
+docker run -d \
+  -v <host_dir_to_watch>:/watched_dir \
+  -v <host_dir_for_duplicates>:/duplicates \
+  -v <host_dir_for_config>:/Config \
+  -e WATCHED_DIR=/watched_dir \
+  -e DUPLICATE_DIR=/duplicates \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -p 5000:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+- Replace `<host_dir_to_watch>` with the path to your comics folder.
+- Replace `<host_dir_for_config>` with the path to store persistent configuration data.
+- `WATCHED_DIR` **must** be set to the directory to watch (usually `/watched_dir` if using the example above).
+- Optionally, mount a host directory to `/duplicates` to persist duplicates.
+- **Required**: Mount a host directory to `/Config` to persist:
+  - Unified database (`/Config/store/comicmaintainer.db`) containing:
+    - File list for fast access
+    - Processing markers (processed files, duplicates, web-modified files)
+    - Metadata (last sync timestamp, configuration)
+  - Configuration settings (filename format, watcher enabled, log rotation)
+  - User preferences (theme, pagination settings) stored in SQLite
+  - Active job tracking for batch processing resumption
+  - Log files (stored in `/Config/Log/`)
+- The `-p 5000:5000` flag exposes the web interface on port 5000.
+- Set `PUID` and `PGID` to match your host user for proper file permissions (use `id -u` and `id -g` on Linux/macOS).
+- Access the web interface at `http://localhost:5000`
+
+### Environment Variables
+- `WATCHED_DIR`: **(Required)** Directory to watch for comics. The service will not start if this is not set.
+- `PROCESS_SCRIPT`: Script to run for processing (default: `/app/process_file.py`)
+- `DUPLICATE_DIR`: Directory where duplicates are moved (required for duplicate handling)
+- `TEMP_FILE_DIR`: Directory where temporary files are created during processing (default: `/Config/temp`). Temporary files are automatically cleaned up after processing.
+- `WEB_PORT`: Port for the web interface (default: `5000`)
+- `GUNICORN_WORKERS`: Number of Gunicorn worker processes (default: `2`). Job state is shared across workers via SQLite.
+- `PUID`: User ID to run the service as (default: `99` for user `nobody`)
+- `PGID`: Group ID to run the service as (default: `100` for group `users`)
+- `LOG_MAX_BYTES`: Maximum log file size in bytes before rotation (default: `5242880` = 5MB). Can also be configured via the Settings UI.
+- `MAX_WORKERS`: Number of concurrent worker threads for file processing (default: `4`). Recommendations:
+  - For CPU-bound systems: 2-4 workers
+  - For systems with fast storage: 4-8 workers
+  - For systems with slow storage: 2-4 workers
+- `DB_CACHE_SIZE_MB`: SQLite database cache size in megabytes (default: `64`). Higher values improve read performance but use more RAM. Recommendations:
+  - Small libraries (<1000 files): 32MB
+  - Medium libraries (1000-5000 files): 64MB (default)
+  - Large libraries (>5000 files): 128-256MB
+  - See [Performance Tuning Guide](docs/PERFORMANCE_TUNING.md) for detailed recommendations
+
+#### HTTPS/SSL Configuration (Optional)
+For direct HTTPS support without a reverse proxy:
+- `SSL_CERTFILE`: Path to SSL certificate file (e.g., `/Config/ssl/cert.crt`)
+- `SSL_KEYFILE`: Path to SSL private key file (e.g., `/Config/ssl/cert.key`)
+- `SSL_CA_CERTS`: Path to CA certificate bundle (optional, for certificate chains)
+
+**Note**: For production deployments, use certificates from a trusted Certificate Authority (e.g., Let's Encrypt). For development/testing, you can generate a self-signed certificate using the included script. See the [HTTPS Configuration](#https-configuration) section below for detailed setup instructions.
+
+#### Reverse Proxy Support (Optional)
+- `BASE_PATH`: Path prefix for subdirectory deployments (default: empty). Set to serve the application from a subdirectory, e.g., `/comics` to access at `example.com/comics`. Must start with a forward slash. The application automatically handles reverse proxy headers (`X-Forwarded-*`) for proper URL generation and **automatically enables security headers (HSTS, CSP) when accessed via HTTPS**. See [Reverse Proxy Guide](docs/REVERSE_PROXY.md) for detailed configuration examples (SWAG, Nginx, Traefik, Apache, Caddy). **Ready-to-use SWAG configuration files** are available in [docs/swag-configs/](docs/swag-configs/).
+
+#### Authelia Integration (Optional)
+ComicMaintainer supports [Authelia](https://www.authelia.com/) for forward authentication with 2FA and SSO:
+- `AUTHELIA_ENABLED`: Enable Authelia authentication mode (default: `false`). When enabled, the application trusts authentication headers from Authelia.
+- `AUTHELIA_DEFAULT_ROLE`: Default role for authenticated users (default: `User`). Options: `Admin`, `User`, `ReadOnly`.
+- `AUTHELIA_ADMIN_GROUPS`: Comma-separated list of Authelia groups that receive Admin role (e.g., `admins,administrators`).
+- See [Authelia Integration Guide](docs/AUTHELIA.md) for complete setup instructions.
+
+#### Debug Logging and Error Reporting (Optional)
+- `DEBUG_MODE`: Enable extensive debug logging throughout the application (default: `false`). Set to `true` to enable detailed debug output including function entry/exit, parameter values, and operation details.
+- `GITHUB_TOKEN`: GitHub Personal Access Token for automatic issue creation on errors (optional). When set, errors will automatically create GitHub issues with full context and stack traces.
+- `GITHUB_REPOSITORY`: GitHub repository in `owner/repo` format (default: `mleenorris/ComicMaintainer`). Used for issue creation.
+- `GITHUB_ISSUE_ASSIGNEE`: Username to assign auto-generated issues to (default: `copilot`). Issues are also tagged with `bug` and `auto-generated` labels.
+
+**Example with debug logging and GitHub integration:**
+```sh
+docker run -d \
+  -v <host_dir_to_watch>:/watched_dir \
+  -v <host_dir_for_config>:/Config \
+  -e WATCHED_DIR=/watched_dir \
+  -e DEBUG_MODE=true \
+  -e GITHUB_TOKEN=ghp_your_token_here \
+  -e GITHUB_ISSUE_ASSIGNEE=your_username \
+  -p 5000:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+**Note:** GitHub issue creation creates detailed error reports automatically when errors occur.
+
+## Web Interface
+The service includes a web-based interface for managing your comic files:
+
+### Features
+- **Optimized for Large Libraries**: Pagination (100 files per page) and fast SQLite database ensure quick loading even with thousands of files
+- **Search Functionality**: Find files across all pages by searching file names and paths - pagination automatically adjusts to show only matching results
+- **Asynchronous Processing**: Files are processed concurrently in the background for faster completion
+- **Real-time Progress Updates**: Job progress is pushed via Server-Sent Events (SSE) for instant feedback without polling
+- **Process All Files**: One-click button to process all comic files in the watched directory asynchronously
+- **Process Selected Files**: Process only the files you've selected with checkboxes, with concurrent execution
+- **Folder Selection**: Click the checkbox next to any folder name to select/deselect all files in that folder
+- **View/Edit Individual Tags**: Use the Actions dropdown menu on any file to view and edit its metadata tags
+- **Batch Update**: Select multiple files and update common tags (series, publisher, year, writer) for all of them at once
+- **Filename Format Settings**: Configure how files are renamed when processed using customizable templates
+- **Smart Processing**: Files modified through the web interface are marked to prevent the watcher from re-processing them automatically
+- **Processing Status Tracking**: Both the watcher and web interface mark files as processed, with visual indicators (✅ for processed, ⚠️ for unprocessed)
+- **Duplicate File Tracking**: Files detected as duplicates are automatically marked with a 🔁 icon
+- **Filter by Status**: Easily filter files to show all files, only marked (processed), only unmarked (unprocessed), or only duplicates - filters work across all pages
+- **Scan for Unmarked Files**: Quickly identify how many files have not been processed yet
+- **Clear Processed Status**: When a series' metadata `<Series>` tag or filename refuses to update after a manual match or canonical-title change, use the **♻️ Reset Processed Status** button on the Series detail view (or **♻️ Clear Processed Status** in the Process dropdown for selected files) to clear the renamed/normalized and duplicate flags so the next Process / Rename / Normalize run will re-apply them. This avoids a full database reset. The same operation is exposed in the API as `POST /api/status/clear-selected`, `POST /api/status/clear-series/{seriesId}`, and `POST /api/status/clear-folder`.
+
+### Usage
+1. Access the web interface at `http://localhost:5000` (or your configured host/port)
+2. The interface will display all `.cbz` and `.cbr` files in your watched directory, organized by folder
+3. Navigate through pages using the pagination controls at the bottom if you have many files
+4. **Use the search box** to find files across all pages - search works on both file names and paths
+5. Use the checkboxes to select files for batch operations:
+   - Check individual files one at a time
+   - Check the folder checkbox to select/deselect all files in that folder
+   - In a series' issue grid, check one issue and then **Shift-click** another to apply that issue's new state to every issue between the two
+   - Use "Select All" to select everything
+6. Click "Process All Files" to run the standard processing on all files
+7. Click "Process Selected" to run processing only on your selected files
+8. Use the "Actions" dropdown menu on any file to:
+   - **View/Edit**: View and edit tags for the file
+   - **Process**: Run full processing (rename + normalize metadata)
+   - **Rename**: Rename the file based on metadata
+   - **Normalize**: Normalize metadata only
+   - **Delete**: Remove the file
+10. Select multiple files and click "Update Selected" to batch update common tags
+11. Use the **three-dot menu (⋮)** in the top-right header to access:
+    - **Settings**: Configure the filename format for renamed files, theme, watcher, and log rotation
+    - **View Logs**: View application logs directly in the browser
+    - **System Diagnostics**: A one-screen snapshot of the instance (administrators only) — see [System Diagnostics](#system-diagnostics)
+    - **Keyboard Shortcuts**: The shortcut reference, also reachable by pressing <kbd>?</kbd>
+    - **Toggle Theme**: Switch between light and dark mode
+    - **Refresh**: Update the file list
+    - **Scan Unmarked**: See a count of processed vs unprocessed files
+12. Use the **expand/collapse button (▼/▶)** at the top of the file list to expand or collapse all folders at once
+13. Use the filter buttons to view:
+    - **All Files**: Show all files in the directory
+    - **Unmarked Only**: Show only files that haven't been processed yet
+    - **Marked Only**: Show only files that have been processed
+    - **Duplicates Only**: Show only files marked as duplicates
+    - Search and filters can be combined and work across all pages
+14. Look for the status icon next to each filename:
+    - ✅ = processed
+    - ⚠️ = not processed yet
+    - 🔁 = duplicate file
+
+### Keyboard Shortcuts
+
+The library page accepts the following shortcuts. Press <kbd>?</kbd> at any time to see this
+list in the browser. Shortcuts are ignored while you are typing in a field and while a dialog
+is open, and the library-only ones do nothing on the Overview page where the control is hidden.
+
+| Key | Action |
+| --- | --- |
+| <kbd>/</kbd> | Focus the search box (Library) |
+| <kbd>Esc</kbd> | Clear the search box, while it is focused |
+| <kbd>g</kbd> <kbd>h</kbd> | Go to Overview |
+| <kbd>g</kbd> <kbd>l</kbd> | Go to Library |
+| <kbd>r</kbd> | Refresh the file list (Library) |
+| <kbd>f</kbd> | Open the filter menu (Library) |
+| <kbd>?</kbd> | Show the shortcut help |
+| <kbd>Esc</kbd> | Close the open dialog |
+
+The reader has its own, separate set of shortcuts — press <kbd>?</kbd> there to see them.
+
+### Installing as an App (PWA)
+
+The web interface can be installed as a standalone application on your device, providing an app-like experience:
+
+**Desktop Installation (Chrome, Edge, Brave):**
+1. Open the web interface in your browser (`http://localhost:5000`)
+2. Look for the install button in the browser's address bar (usually a ⊕ or ⬇️ icon)
+3. Click "Install" or use the **three-dot menu (⋮)** in the header and select **"📱 Install App"**
+4. The app will be installed and can be launched from your applications menu or desktop
+
+**Mobile Installation (iOS Safari):**
+1. Open the web interface in Safari
+2. Tap the Share button (□ with arrow)
+3. Scroll down and tap "Add to Home Screen"
+4. Tap "Add" to confirm
+5. The app icon will appear on your home screen
+
+**Mobile Installation (Android Chrome):**
+1. Open the web interface in Chrome
+2. Look for the automatic install prompt that appears at the bottom of the screen
+   - Alternatively, tap the three-dot menu (⋮) and select "Install app" or "Add to Home Screen"
+   - Or use the custom **"📱 Install App"** button in the web interface settings menu
+3. Tap "Install" to confirm
+4. The app will be installed and available in your app drawer
+
+**Benefits of Installing:**
+- Dedicated app window without browser UI
+- Faster access from home screen or app drawer
+- Works offline with cached assets
+- Full-screen experience on mobile devices
+- Feels like a native app
+
+### Offline Reading
+
+Individual comics can be downloaded to the device so they stay readable without a
+connection (on a plane, commute, or anywhere the library server is unreachable):
+
+1. Open a comic in the reader
+2. Click **⬇ Save offline** in the reader header
+3. The button shows progress while every page is downloaded, then reads **Saved**
+
+Once saved:
+- Opening that comic works with no network — pages are served from the device
+- Clicking **Saved** again removes the download and frees the storage
+- While offline, the offline page lists everything saved and links straight into the reader
+
+Notes:
+- Downloads require the PWA service worker, so the site must be served over HTTPS (or `localhost`)
+- Downloads persist across sign-out and app updates; remove them with the **Saved** button when you no longer need them
+- Reading progress made while offline is queued on the device and sent to the server automatically once the connection returns
+
+### Performance
+- **Fast initial page load**: HTML reduced from 217KB to 43KB by extracting CSS/JS to external cached files (see [PERFORMANCE_IMPROVEMENT_INITIAL_LOAD.md](docs/archive/PERFORMANCE_IMPROVEMENT_INITIAL_LOAD.md))
+- **Aggressive browser caching**: Static assets cached for 1 year, reducing repeat visit load time by 80%
+- **Optimized search and filtering**: Server-side processing with efficient database queries
+- **Search debouncing**: 300ms delay reduces API calls by 87% while typing
+- **Real-time updates via Server-Sent Events (SSE)**: 100% event-driven architecture with zero polling. All updates (file processing, watcher status, job progress) are pushed instantly to clients via SSE. Background tasks use event-based timers and file system watchers instead of sleep-based polling
+- Files are loaded in pages of 100 to ensure fast initial load times
+- Pagination controls allow easy navigation through large libraries
+- Search and filters are applied server-side before pagination for efficient handling of large libraries
+- **SQLite-based file store**: File list is managed in a SQLite database for atomic operations, better concurrency, and excellent performance (160k+ lookups/sec, <3ms reads for 5000 files)
+- See [FILE_LIST_IMPROVEMENTS.md](docs/archive/FILE_LIST_IMPROVEMENTS.md), [docs/EVENT_BROADCASTING_SYSTEM.md](docs/EVENT_BROADCASTING_SYSTEM.md), and [docs/PROGRESS_CALLBACKS.md](docs/PROGRESS_CALLBACKS.md) for detailed performance metrics and architecture
+
+### Filename Format Configuration
+The filename format can be customized through the web interface Settings modal. The format uses placeholders that are replaced with actual metadata values:
+
+**Available Placeholders:**
+- `{series}` - Series name
+- `{issue}` - Issue number (padded based on settings, default 4 digits, e.g., 0001, or 0071.4 for decimals)
+- `{issue_no_pad}` - Issue number (no padding, e.g., 1, or 71.4 for decimals)
+- `{title}` - Issue title
+- `{volume}` - Volume number
+- `{year}` - Publication year
+- `{publisher}` - Publisher name
+
+**Examples:**
+- `{series} - Chapter {issue}` → `Batman - Chapter 0005.cbz` or `.cbr` (default, with 4-digit padding)
+- `{series} - Chapter {issue}` → `Manga - Chapter 0071.4.cbz` or `.cbr` (decimal chapters)
+- `{series} v{volume} #{issue_no_pad}` → `Batman v1 #5.cbz` or `.cbr`
+- `{series} ({year}) - {title}` → `Batman (2023) - Dark Knight.cbz` or `.cbr`
+- `{series} #{issue} - {title}` → `Batman #0005 - Dark Knight.cbz` or `.cbr`
+
+**Issue Number Padding:**
+The padding for the `{issue}` placeholder is configurable in Settings (default: 4 digits). This allows you to control how issue numbers are formatted:
+- **Padding 4** (default): Issue 5 → `0005`, Issue 71.4 → `0071.4`
+- **Padding 3**: Issue 5 → `005`, Issue 71.4 → `071.4`
+- **Padding 0**: Issue 5 → `5`, Issue 71.4 → `71.4` (no padding)
+- **Padding 6**: Issue 5 → `000005`, Issue 71.4 → `000071.4`
+
+**Note:** 
+- The `{issue_no_pad}` placeholder is always unpadded regardless of the padding setting.
+- Decimal chapter numbers (e.g., 71.4, 71.11) are preserved without trailing zeros.
+- The original file extension (`.cbz` or `.cbr`) is automatically preserved when renaming files.
+
+The filename format and padding settings are saved in `config.json` (located in `/Config`) and apply to both web interface processing and watcher service processing. **Mount `/Config` as a volume to persist this configuration across container restarts.**
+
+## API Endpoints
+
+The web interface exposes several REST API endpoints:
+
+### Asynchronous Processing (New!)
+The service now supports asynchronous file processing with persistent job storage in SQLite:
+
+- **POST** `/api/jobs/process-all` - Start async processing of all files
+  - Returns: `{"job_id": "...", "total_items": 123}`
+  - Files are processed concurrently using a thread pool (default: 4 workers)
+  
+- **POST** `/api/jobs/process-selected` - Start async processing of selected files
+  - Body: `{"files": ["path/to/file1.cbz", "path/to/file2.cbz"]}`
+  - Returns: `{"job_id": "...", "total_items": 2}`
+  
+- **GET** `/api/jobs/<job_id>` - Get status and results of a job
+  - Returns: Job status including progress, results, and any errors
+  
+- **GET** `/api/jobs` - List all jobs
+  - Returns: `{"jobs": [...]}`
+  
+- **DELETE** `/api/jobs/<job_id>` - Delete a job from history
+  
+- **POST** `/api/jobs/<job_id>/cancel` - Cancel a running job
+
+**Benefits of Async Processing:**
+- ✅ **Concurrent execution**: Multiple files processed simultaneously
+- ✅ **Non-blocking**: Web interface remains responsive during processing
+- ✅ **Progress tracking**: Real-time status updates via SSE (Server-Sent Events) with minimal fallback polling
+- ✅ **Persistent storage**: Jobs survive server restarts (stored in SQLite)
+- ✅ **Multi-worker support**: Multiple Gunicorn workers can share job state
+- ✅ **Scalable**: Handles large libraries efficiently with horizontal scaling
+- ✅ **Page refresh protection**: Warning dialog prevents accidental interruption; jobs auto-resume on return
+
+**Note:** The original streaming endpoints (`/api/process-all?stream=true`, etc.) remain available for backward compatibility, but the async endpoints are now used by default in the web interface.
+
+### Version Information
+- **GET** `/api/version` - Returns the current version of the application
+  ```json
+  {
+    "version": "1.0.0"
+  }
+  ```
+  
+The version is displayed in the web interface header for easy identification of the running instance.
+
+### System Diagnostics
+
+- **GET** `/api/diagnostics` — one snapshot of the running instance. Requires an administrator.
+  The settings menu entry **🩺 System Diagnostics** renders the same data, with a **Copy report**
+  button that puts a plain-text version on the clipboard for pasting into a bug report.
+
+  The response covers:
+
+  | Section | Contents |
+  | --- | --- |
+  | `application` | Version, environment, start time, uptime |
+  | `runtime` | Framework, OS, architecture, processor count, working set, managed heap, thread count |
+  | `health` | The result of every registered health check (the same data as `/health/ready`) |
+  | `watcher` | Whether the watcher is running, and its rename/normalize/stability settings |
+  | `library` | Total, processed, unprocessed and duplicate file counts |
+  | `jobs` | Total, running, interrupted and failed batch jobs, plus the last start time |
+  | `storage` | For the watched, duplicate and config directories: exists, writable, free/total bytes |
+  | `logs` | The log directory and the name, size and last-write time of each log file |
+
+  Each section is gathered independently: a section that cannot be read reports
+  `{ "error": "..." }` rather than failing the whole request.
+
+### Request Correlation
+
+Every request is assigned a correlation ID, returned in the **`X-Correlation-Id`** response
+header. If the caller (or a reverse proxy) supplies that header the value is reused, so a trace
+can span several hops; supplied values are sanitised and truncated before use.
+
+The id appears in three places, which is what makes a user-visible failure traceable:
+
+- On **every log line** the request produces in the debug log (`[{CorrelationId}]`). Lines not
+  produced by a request show `-`.
+- In the **`correlationId`** field of the RFC 7807 problem document returned for errors. Unhandled
+  exceptions produce a problem document rather than a bare 500; the exception detail itself is
+  only included when running in the Development environment.
+- In the **web interface**, appended as `(ref: …)` to the error notification for a failed
+  API call.
+
+So a report of "it failed, ref `0HN…:0000001`" can be matched to the exact server log lines with
+`grep '0HN…:0000001' /Config/*.log`.
+
+### External Series Metadata (Manual)
+
+External series metadata lookups (ComicVine / MangaDex) are run manually, and results — together with any aliases you add — are persisted in the database. The library view groups folders into a single series card whenever they share any canonical title, provider alias, or user-defined alias.
+
+#### Library view (paged & lazy)
+
+- **GET** `/api/files/series` — paged list of **summary cards only** (no per-issue payload). Cheap enough to render very large libraries without timing out.
+  - Query: `page`, `per_page`, `filter`, `search`, `sort`, `direction`.
+  - Response includes `lookup_status` and `last_lookup_utc` per card so the UI can render a per-series status badge.
+  - Pass `?include_issues=true` to opt into the legacy heavyweight payload (kept for older clients/tests; not used by the web UI).
+- **GET** `/api/files/series/{seriesId}/issues` — paged issue list for one series card (`page`, `per_page`, `filter`). Loaded lazily by the web UI when a card is opened.
+
+- **POST** `/api/metadata/refresh-all` — queue an external lookup for every series in the library.
+  - Returns: `{ "jobId": "...", "totalSeries": N }`
+- **POST** `/api/metadata/refresh-selected` — refresh a specific subset of series titles.
+  - Body: `{ "series": ["Batman", "Superman"] }`
+  - Returns: `{ "jobId": "...", "totalSeries": N }`
+- **POST** `/api/metadata/refresh/{seriesTitle}` — refresh one series. Synchronous by default (returns the updated cache record). Pass `?queue=true` to instead queue a background job and return `{ jobId, totalSeries }`.
+- **POST** `/api/metadata/refresh/folder` — queue a refresh for every title that maps to one series-card id (i.e. the canonical title plus any folder/alias titles grouped under it).
+  - Body: `{ "seriesId": "batman" }` (or `{ "titles": ["Batman", "Dark Knight"] }`, or both — they're merged).
+  - Returns: `{ "jobId": "...", "totalSeries": N, "titles": [...] }`
+- **GET** `/api/metadata/refresh/job/{jobId}` — poll the status of a refresh job. Includes a rolling `recentResults` ring (last ~20 per-series outcomes) so the UI can show a live "last lookup" trail.
+- **GET** `/api/metadata/providers` — runtime health of every external metadata provider. Returns `{ "providers": [{ "name": "ComicVine", "enabled": true, "configured": true, "reachable": true, "status_message": "Reachable", "last_error": null, "last_success_utc": ..., "last_failure_utc": ..., "success_count": N, "failure_count": N, "rate_limited": false, "rate_limited_until_utc": null }, ...] }`. Reachability is probed lazily and cached for ~60s. When a provider returns HTTP 429 the response is marked `rate_limited: true` with the back-off deadline, and the status message becomes `Degraded - rate limited`.
+- **GET** `/api/metadata/search?query=...&limit=10` — search the configured providers for candidate series matches, useful for finding alternative names.
+  - Returns: `{ "query": "...", "results": [{ "canonical_title": "...", "aliases": [...], "source": "ComicVine" }, ...] }`
+- **GET** `/api/metadata/series/{seriesTitle}` — read the cached record (canonical title, provider aliases, user aliases) for a series.
+- **PUT** `/api/metadata/series/{seriesTitle}/aliases` — replace the user-managed alias list and optionally override the canonical title.
+  - Body: `{ "aliases": ["The Dark Knight"], "canonicalTitle": "Batman" }`
+- **DELETE** `/api/metadata/series/{seriesTitle}/aliases/{alias}` — remove a single user alias.
+
+**Web UI:**
+- The Library toolbar exposes a **Metadata → Refresh All External Metadata** action.
+- Each series card includes a **🏷️ Manage Names** button that opens a modal where you can:
+  - View provider-supplied aliases and edit user-managed aliases,
+  - Search external providers for alternative names,
+  - Adopt a candidate's canonical title or copy its aliases into the user list,
+  - Refresh metadata from the provider on demand,
+  - Upload a custom series cover image, **fetch a cover on demand from a configured external provider** (with a thumbnail picker across all providers), or clear the cached one.
+
+User-defined aliases drive the library's folder-combination matching: two folders are merged into the same series card as soon as one names the other in its alias list.
+
+#### Provider rate limits
+
+To stay under each provider's published API quota and avoid being blocked, ComicMaintainer applies a client-side rate limiter to every outbound request and honors HTTP 429 `Retry-After` headers:
+
+| Provider | Published limit | Default client throttle | Env var |
+|---|---|---|---|
+| MangaDex | 5 req/s per IP (returns `X-RateLimit-Retry-After`) | 4 req/s | `MANGADEX_REQUESTS_PER_SECOND` |
+| AniList | 90 req/min (currently degraded to 30/min) | 28 req/min (shared across Manga + Manhwa lookups) | `ANILIST_REQUESTS_PER_MINUTE` |
+
+When a provider returns HTTP 429 the request is automatically retried once after the server-indicated `Retry-After` interval (capped at 2 minutes), the failure is recorded against the provider's health tracker, and the `/api/metadata/providers` endpoint surfaces a `rate_limited: true` flag with a `Degraded - rate limited` status message until the back-off window passes. All outbound requests are also tagged with a descriptive `User-Agent` so providers can identify our traffic.
+
+### Suwayomi Downloads
+
+ComicMaintainer can connect to a [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) server and ask it to download the issues a series is missing. The series detail view already highlights gaps in the issue numbering; when the integration is enabled and reachable, the "Missing N issues" banner gains a **⬇️ Download from Suwayomi** button that queues the matching chapters on the Suwayomi side.
+
+How matching works:
+
+- The local series title is matched against the titles in the **Suwayomi library** (exact match first, then prefix/substring, ignoring punctuation and case). Only library entries are considered, because Suwayomi only tracks chapters for series that have been added to its library.
+- Suwayomi names a series after its source, which may differ from the title shown here, so the series' other titles — its canonical title and its aliases (provider-supplied or added under **🏷️ Manage Names**) — are tried as well. An exact match on the shown title wins, then an exact match on one of the other titles (in that order), and only then a prefix/substring match on the shown title, which is often a sequel or spin-off. The other titles are only matched exactly, so a short alias such as an acronym cannot pick an unrelated series; if a series is still not found, add the title Suwayomi uses as an alias.
+- Each missing whole issue number is matched to a chapter whose chapter number floors to it (so `3.5` can satisfy issue `3`). Chapters Suwayomi has already downloaded are skipped, and issue numbers with no chapter at all are reported back as unmatched.
+- Matched chapters are added to Suwayomi's download queue (`enqueueChapterDownloads`). Suwayomi writes the files into **its own** download directory, so mount that directory inside ComicMaintainer's watched directory for the new files to be picked up and processed automatically.
+
+**Configuration:**
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| `EnableSuwayomi` | `ENABLE_SUWAYOMI` | `false` | Master switch for the integration. |
+| `SuwayomiBaseUrl` | `SUWAYOMI_BASE_URL` | `http://localhost:4567` | Base URL of the Suwayomi server; the GraphQL endpoint `{BaseUrl}/api/graphql` is derived from it. Only `http`/`https` URLs are accepted. |
+| `SuwayomiUsername` | `SUWAYOMI_USERNAME` | _(unset)_ | Optional user name when the server requires basic auth. |
+| `SuwayomiPassword` | `SUWAYOMI_PASSWORD` | _(unset)_ | Optional password. Stored as a secret: it is never logged and never returned by the settings API. |
+
+Settings are editable in **Settings → Suwayomi Downloads**, which also has a **Test Connection** button.
+
+**Automatic missing-issue checks:** the **Missing Issues Check** scheduled job (`missing-issues-check`, on the **Scheduled Jobs** page) scans the whole library for series with gaps in their issue numbering — the same gaps the series detail view shows — and lists them in the job's last-run summary. It is disabled by default and runs daily once enabled. Turn on its **Auto-download missing issues from Suwayomi** option (`autoDownload`) to also queue each series' missing issues on Suwayomi automatically, exactly as the **⬇️ Download from Suwayomi** button does; a series Suwayomi can't match is skipped without stopping the run.
+
+**API endpoints** (see [API Documentation](docs/API.md)):
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/suwayomi/status` | Probe the configured server. |
+| `GET` | `/api/suwayomi/series?query=` | Search the Suwayomi library. |
+| `GET` | `/api/suwayomi/series/{id}/chapters` | List the chapters of a Suwayomi series. |
+| `POST` | `/api/suwayomi/download-missing` | Queue downloads for `{ seriesTitle, alternateTitles?, suwayomiSeriesId?, issueNumbers[] }`. |
+
+### External Series Images
+
+When external metadata refreshes succeed, ComicMaintainer also tries to download a series-level cover image from the chosen provider (ComicVine `image.super_url`, MangaDex `cover_art`, AniList `coverImage.extraLarge`) and persist it under `{ConfigDirectory}/series-images/`. The downloaded image is rendered on series cards and the series detail view in place of the first-page-of-first-issue cover, with automatic fallback to the file-based cover when the external image fails to load.
+
+**Configuration:**
+
+| Setting | Env var | Default | Description |
+|---|---|---|---|
+| `DownloadExternalSeriesImages` | `DOWNLOAD_EXTERNAL_SERIES_IMAGES` | `true` | Disable to keep metadata-only refreshes (no image download). |
+| `SeriesImageCacheDirectory` | `SERIES_IMAGE_CACHE_DIR` | `{ConfigDirectory}/series-images` | Directory where cached images are stored. |
+| `SeriesImageMaxBytes` | `SERIES_IMAGE_MAX_BYTES` | `5242880` (5 MiB) | Per-image size cap for the persisted cover. Oversized downloads are downscaled to fit; uploads over this cap are rejected. |
+| `SeriesImageMaxDownloadBytes` | `SERIES_IMAGE_MAX_DOWNLOAD_BYTES` | `26214400` (25 MiB) | Hard ceiling for the raw source image fetched before downscaling. Downloads above this are rejected. |
+| `SeriesImageMaxDimension` | `SERIES_IMAGE_MAX_DIMENSION` | `2048` | Largest width/height (px) an oversized cover is resized to before being re-encoded as JPEG. |
+
+**Endpoints:**
+
+- **GET** `/api/series-images/{normalizedKey}` — stream the cached series image (404 when none).
+- **PUT** `/api/series-images/{seriesTitle}` — upload a user-supplied image (multipart form field `file`). User uploads are sticky and never overwritten by future external refreshes. Allowed types: `image/jpeg`, `image/png`, `image/webp`.
+- **GET** `/api/series-images/candidates?query={text}&limit={n}` — search every configured external provider for series whose records expose a cover image. Returns `{ "query": "...", "candidates": [{ "source": "ComicVine", "canonical_title": "...", "image_url": "...", "thumbnail_url": "..." }, ...] }`. Used by the Manage Names modal's "🌐 Fetch from Provider" picker.
+- **POST** `/api/series-images/{seriesTitle}/from-provider` — body `{ "imageUrl": "...", "source": "ComicVine" }`. Downloads the URL via `ISeriesImageStore` (same SSRF / content-type / magic-byte / size checks as auto-refresh), persists it, and marks the cached image as `downloaded`. Returns `409 Conflict` when a user-uploaded image is already set (clear it first), `400` on URL validation failure.
+- **DELETE** `/api/series-images/{normalizedKey}` — clear the cached image; the next refresh is then free to re-download from the external provider.
+
+**Security:**
+
+- Remote URLs are restricted to `http`/`https`; hostnames that resolve to private, loopback, link-local, CGNAT or AWS-metadata addresses are rejected to mitigate SSRF.
+- All payloads are validated against the configured content-type allowlist and verified by magic-byte inspection (rejects SVG/HTML/scripts).
+- Filenames in the cache directory are derived from the normalized series key plus a SHA-256 of the payload; provider-supplied paths never influence the on-disk filename.
+
+## Smart Processing
+The service intelligently detects files that are already properly formatted to avoid unnecessary processing:
+
+### Already Normalized Detection
+When processing a file, the service first checks if:
+1. **Title metadata** matches the expected format (`Chapter {issue_number}`)
+2. **Series metadata** matches the folder name (with appropriate character conversions)
+3. **Filename** matches the configured filename format template
+
+If all three conditions are met, the file is marked as processed **without making any changes**. This:
+- ✅ Prevents unnecessary file I/O operations
+- ✅ Avoids redundant metadata updates
+- ✅ Speeds up processing for large libraries
+- ✅ Properly tracks already-correct files in the processing status
+
+### When Processing is Skipped
+Files are marked as processed without changes when:
+- The metadata and filename are already in the correct format
+- The file has been manually curated and matches the expected format
+- A file was previously processed and hasn't been modified
+
+### When Processing Occurs
+Files are processed and updated when:
+- Metadata (title/series) doesn't match the expected format
+- The filename doesn't match the configured format
+- The file is new or has been modified since last processing
+
+## ComicTagger Integration
+- ComicTagger is installed in the container from the **develop branch** and used via its Python API.
+- The service supports both `.cbz` (zip) and `.cbr` (rar) files.
+- **Note**: The code is compatible with both master and develop branch APIs of ComicTagger, automatically detecting which version is in use.
+
+## Production Server
+- The web interface runs on **Gunicorn**, a production-ready WSGI server for Python web applications
+- Configured with multiple worker processes for better concurrency
+- Concurrent file processing provided by ThreadPoolExecutor (4 threads) within each worker
+- 600-second timeout (10 minutes) to accommodate batch processing operations on large libraries
+- No development server warnings - ready for production deployment
+
+## Data Persistence
+
+The application stores all persistent data in `/Config`. **To preserve your data across container restarts, mount this directory as a volume.**
+
+### What is Persisted
+
+When you mount `/Config`, the following data is preserved:
+
+1. **File Store Database** - Tracks all comic files in the watched directory
+   - Located in `/Config/file_store/files.db` (SQLite database)
+   - Provides atomic operations for file list management
+   - Automatically syncs with filesystem on startup
+
+2. **Marker Database** - Track which files have been processed, duplicates, and web modifications
+   - Located in `/Config/markers/markers.db` (SQLite database)
+   - Automatically migrates from legacy JSON files on first startup
+   - More efficient and reliable than JSON files
+
+3. **Configuration Settings** - Saved via the web interface Settings menu
+   - Located at `/Config/config.json`
+   - Includes: filename format template, watcher state, log rotation settings
+
+4. **Log Files** - Application logs
+   - Located in `/Config/Log/`
+   - `ComicMaintainer.log` (regular application log) with automatic rotation
+   - `ComicMaintainer_debug.log` (debug log, only when DEBUG_MODE=true) with automatic rotation
+
+### Example with Persistence
+
+```sh
+docker run -d \
+  -v /host/comics:/watched_dir \
+  -v /host/config:/Config \
+  -e WATCHED_DIR=/watched_dir \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -p 5000:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+**Important**: The `/host/config` directory on your host will contain the marker database, configuration, and logs. Make sure it's backed up if you want to preserve your processing history and settings.
+
+### Migrating from Previous Versions
+
+**Marker Storage Migration (JSON to SQLite):**
+- Marker data has been migrated from JSON files to a SQLite database for better performance and reliability
+- On first startup, existing JSON marker files will be automatically imported into the database
+- Original JSON files are preserved as backups (e.g., `processed_files.json.migrated.TIMESTAMP`)
+- No action required - migration happens automatically
+
+**Previous Versions:**
+If upgrading from a version where configuration and logs were stored in `/app` or used the `CACHE_DIR` environment variable:
+- Your old configuration will not be automatically migrated
+- The application will use default settings on first run
+- To preserve settings: manually copy configuration files from the old container to `/Config` in the new setup
+- **Note**: The `CACHE_DIR` environment variable has been removed. All persistent data is now stored in `/Config` by default.
+
+## HTTPS Configuration
+
+The application supports HTTPS in two ways:
+
+### Option 1: Direct HTTPS Support (Native)
+Run the application with HTTPS directly without a reverse proxy:
+
+#### Using Your Own Certificates (Production)
+
+For production use, obtain certificates from a trusted Certificate Authority (e.g., Let's Encrypt):
+
+```sh
+docker run -d \
+  -v /path/to/comics:/watched_dir \
+  -v /path/to/config:/Config \
+  -v /path/to/certs:/certs \
+  -e WATCHED_DIR=/watched_dir \
+  -e SSL_CERTFILE=/certs/fullchain.pem \
+  -e SSL_KEYFILE=/certs/privkey.pem \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -p 5000:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+Access the application at `https://your-domain:5000`
+
+#### Using Self-Signed Certificates (Development/Testing)
+
+For development or testing, generate a self-signed certificate:
+
+**Step 1: Generate the certificate**
+```sh
+docker run --rm \
+  -v /path/to/config:/Config \
+  iceburn1/comictagger-watcher:latest \
+  /generate_self_signed_cert.sh /Config/ssl 365 localhost
+```
+
+**Step 2: Run with HTTPS**
+```sh
+docker run -d \
+  -v /path/to/comics:/watched_dir \
+  -v /path/to/config:/Config \
+  -e WATCHED_DIR=/watched_dir \
+  -e SSL_CERTFILE=/Config/ssl/selfsigned.crt \
+  -e SSL_KEYFILE=/Config/ssl/selfsigned.key \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -p 5000:5000 \
+  iceburn1/comictagger-watcher:latest
+```
+
+Access the application at `https://localhost:5000` (you'll need to accept the browser security warning for self-signed certificates)
+
+**Docker Compose Example with Self-Signed Cert:**
+```yaml
+version: '3.8'
+services:
+  comictagger-watcher:
+    image: iceburn1/comictagger-watcher:latest
+    environment:
+      - WATCHED_DIR=/watched_dir
+      - SSL_CERTFILE=/Config/ssl/selfsigned.crt
+      - SSL_KEYFILE=/Config/ssl/selfsigned.key
+    volumes:
+      - /path/to/comics:/watched_dir
+      - /path/to/config:/Config
+    ports:
+      - "5000:5000"
+```
+
+### Option 2: HTTPS via Reverse Proxy (Recommended for Production)
+
+For production deployments, using a reverse proxy is recommended as it provides:
+- Better security and SSL/TLS configuration options
+- Built-in certificate management (e.g., automatic Let's Encrypt renewal)
+- Additional features like caching, load balancing, and access control
+
+See the [Reverse Proxy Setup Guide](docs/REVERSE_PROXY.md) for detailed configuration examples with Nginx, Traefik, Apache, and Caddy.
+
+**Benefits of Reverse Proxy:**
+- ✅ Automatic certificate renewal (Let's Encrypt)
+- ✅ Advanced security features (rate limiting, WAF)
+- ✅ Better performance (caching, compression)
+- ✅ Centralized SSL/TLS management for multiple services
+- ✅ Additional authentication layers
+
+**Benefits of Direct HTTPS:**
+- ✅ Simpler setup for single-service deployments
+- ✅ No additional software required
+- ✅ Good for development and testing
+- ✅ Works well for private networks
+
+## Logging
+
+The application maintains two separate log files in `/Config/Log/`:
+
+### Regular Application Log
+- **File**: `ComicMaintainer.log`
+- **Content**: Standard operational messages (INFO, WARNING, ERROR levels)
+- All actions and errors are logged here
+- View logs directly in the web interface via the "View Logs" option in the settings menu
+
+### Debug Log (Optional)
+- **File**: `ComicMaintainer_debug.log`
+- **Created**: Only when `DEBUG_MODE=true` is set
+- **Content**: All messages including detailed DEBUG level information
+- When enabled, debug logs include:
+  - Function entry and exit with parameters and return values
+  - Detailed operation tracking (file checks, database operations, metadata processing)
+  - Variable values and state at key decision points
+  - Performance insights for troubleshooting
+- Useful for troubleshooting issues, understanding file processing flow, and monitoring system behavior
+- Example: `docker run -e DEBUG_MODE=true ...`
+
+### Log Rotation
+Both log files use automatic rotation:
+- **Rotation trigger**: When file reaches configurable size limit (default: 5MB)
+- **Backup count**: Up to 3 backup files are kept (`.log.1`, `.log.2`, `.log.3`)
+- **Configuration**:
+  - Via the **Settings** menu in the web interface (changes take effect on restart)
+  - Via the `LOG_MAX_BYTES` environment variable (in bytes, e.g., `LOG_MAX_BYTES=10485760` for 10MB)
+
+### Correlating a Failure With Its Log Lines
+Every request is tagged with a correlation ID that appears in the `X-Correlation-Id` response
+header, on every debug-log line the request produces, in the `correlationId` field of error
+responses, and appended as `(ref: …)` to web interface notifications reporting a failed API call.
+To find the server-side detail behind a reported failure:
+
+```bash
+grep '0HNOU94L3SUDV:00000001' /Config/*.log
+```
+
+See [Request Correlation](#request-correlation) for details.
+
+### Automatic Error Reporting
+
+**Disabled by default.** When you opt in, errors and fatal failures logged by this instance are
+redacted, deduplicated, and filed as GitHub issues on the ComicMaintainer project repository
+(`mleenorris/ComicMaintainer`), so a coding agent (or the maintainers) can start on them without
+waiting for a manual bug report. The destination is fixed — that repository is the only place a
+defect in this service can actually be fixed.
+
+How it works:
+
+1. A Serilog sink captures `Error`/`Fatal` events, including every unhandled web request failure
+   and every background-service failure. The library page also posts its uncaught browser errors
+   and unhandled promise rejections to `POST /api/client-errors`, so a defect that lives entirely
+   in that page — a broken button, a failed render — is reported through the same pipeline instead
+   of only showing the user a banner. The standalone pages (the reader, jobs, login and setup) do
+   not load the shared script and are not covered yet.
+2. Each event is reduced to a **fingerprint** — a hash of the exception type, source context, the
+   message *template*, and the top normalized stack frames. Per-file and per-path detail does not
+   fragment the grouping, so one defect produces one issue. Browser errors are normalized first so
+   that the same fault reported by different browsers, or from a differently-versioned asset URL,
+   still lands on one issue.
+3. Every field is **redacted** before it leaves the machine: absolute paths are shortened to a
+   relative marker, email addresses and URL credentials are masked, and any value matching a stored
+   secret (SMTP password, ComicVine key, the reporting token itself) is replaced. Request bodies,
+   headers, environment variables and connection strings are never sent.
+4. A background dispatcher posts the issue with retry, backoff and a circuit breaker, so GitHub
+   being unreachable can never wedge the application. The first occurrence of a fingerprint creates
+   an issue; later occurrences only bump a counter, and optionally add a "still happening" comment
+   once per dedupe window. Issue creation is capped per day.
+
+Issues are titled `[field error] {ExceptionType} in {SourceContext}` and labelled `field-error`,
+`automated` and a severity label. Browser-side failures use `Browser` as the source context. If you
+set an assignee, new issues are assigned to that login — set it to the GitHub coding agent's login
+to have it pick the issue up and open a pull request.
+
+#### Configuration
+
+Configure it under **Settings → Automated Error Reporting** in the web interface, or with
+environment variables:
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `ERROR_REPORTING_ENABLED` | `false` | Master switch. |
+| `ERROR_REPORTING_GITHUB_TOKEN` | _(none)_ | Token used to create issues. Stored as a secret and never logged. |
+| `ERROR_REPORTING_ASSIGNEE` | _(none)_ | Optional GitHub login to assign new issues to. |
+| `ERROR_REPORTING_MAX_ISSUES_PER_DAY` | `10` | Rolling 24-hour cap on issue creation. |
+| `ERROR_REPORTING_DEDUPE_WINDOW_HOURS` | `24` | How long before a recurring failure earns a comment. |
+| `ERROR_REPORTING_COMMENT_ON_RECURRENCE` | `true` | Whether recurrences comment on the existing issue. |
+
+**Token scope:** use a fine-grained personal access token (or GitHub App installation token) with
+**`Issues: Read and write` on `mleenorris/ComicMaintainer` only**. No `contents`/code access is
+needed.
+
+**Privacy:** error data from your library is yours. Nothing is sent anywhere until you explicitly
+enable the feature and supply a token, and everything that is sent is redacted first — absolute
+paths, email addresses, URL credentials and stored secrets never leave the machine.
+
+#### Operator tools
+
+Administrators can list recent reports, see which ones produced issues, mute a noisy fingerprint,
+and send a harmless test report from the settings page or via `/api/error-reports`.
+
+To suppress reporting for a known-noisy log call without silencing the log itself, wrap it in
+`ILogger.BeginScope(ErrorReportLogProperties.Exclude("reason"))`.
+
+## GitHub Actions / CI
+- The repository includes a GitHub Actions workflow to automatically build and push the Docker image to Docker Hub on every push or pull request to `master`.
+- **Automatic Version Bumping**: Every merge to `master` automatically increments the patch version (e.g., 1.0.0 → 1.0.1), updates `CHANGELOG.md`, creates a Git tag, and publishes a GitHub release
+- Docker images are tagged with both `latest` and the specific version number (e.g., `1.0.1`)
+- Automated security scanning runs on every push, pull request, and weekly schedule
+
+## Security
+
+This project implements automated security vulnerability scanning to ensure code and dependency safety.
+
+### Security Scanning
+
+The project uses multiple security scanning tools:
+
+1. **Bandit** - Scans Python code for common security issues
+2. **pip-audit** - Checks dependencies for known vulnerabilities
+3. **Trivy** - Scans Docker images for OS and library vulnerabilities
+
+Security scans run automatically:
+- On every push and pull request
+- Weekly scheduled scans (Mondays at 9:00 AM UTC)
+- Manual trigger available via GitHub Actions
+
+### Running Security Scans Locally
+
+```bash
+# Install security tools
+pip install -r requirements-dev.txt
+
+# Scan code for security issues
+bandit -r src/
+
+# Check dependencies for vulnerabilities
+pip-audit -r requirements.txt
+
+# Scan Docker image
+docker build -t comictagger-watcher:scan .
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy image comictagger-watcher:scan
+```
+
+For more information, see [SECURITY.md](SECURITY.md).
+
+### Security Best Practices
+
+- Use custom PUID/PGID for proper file permissions
+- Expose only necessary ports
+- Use reverse proxy with HTTPS for external access
+- Keep the Docker image updated regularly
+- Review [SECURITY.md](SECURITY.md) for detailed security guidelines
+
+## Performance & Reliability
+
+### High-Performance Database
+The application uses SQLite for fast, reliable data access:
+- **SQLite with WAL mode**: Provides extremely fast reads (<3ms for 5000 files) with excellent concurrency
+- **Batch operations**: Marker data (processed/duplicate status) is fetched in batch for efficiency
+- **On-demand processing**: Filter/search/sort operations are computed as needed
+- **Multi-worker safe**: Designed for concurrent access by multiple Gunicorn workers
+- **Real-time updates**: Frontend receives instant updates via Server-Sent Events (SSE)
+
+This design provides excellent performance through efficient database queries without complex caching layers.
+
+### Event-Driven Architecture
+The application is 100% event-driven with zero polling:
+- **Frontend**: All updates received via Server-Sent Events (SSE) - no polling loops
+- **Backend**: Uses file system watchers (watchdog) and event-based timers instead of sleep polling
+- **Watcher**: Main loop uses Event.wait() instead of sleep(1) polling
+- **Cleanup tasks**: Scheduled with threading.Timer instead of infinite sleep loops
+- **Job tracking**: Real-time progress updates via SSE, no fallback polling needed
+- **Resource efficient**: Eliminates unnecessary CPU usage from polling loops
+
+## Requirements
+- Docker
+- (Optional) Docker Hub account for pushing images
+
+## Branches
+
+- **`master`** - Main development branch with the latest features and updates
+- **`stable`** - Stable branch based on PR #344 (mobile action bar fix), providing a tested baseline for production deployments
+
+See [STABLE_BRANCH_CREATION.md](docs/STABLE_BRANCH_CREATION.md) for details about the stable branch.
+
+## Documentation
+
+- **[API Documentation](docs/API.md)** - Complete REST API reference
+- **[Postman API Collection](docs/POSTMAN_API_COLLECTION.md)** - Import into Postman for easy API testing (.NET version)
+- **[HTTPS Setup Guide](docs/HTTPS_SETUP.md)** - Configure HTTPS with native support or reverse proxy
+- **[Reverse Proxy Setup Guide](docs/REVERSE_PROXY.md)** - Deploy behind SWAG, Nginx, Traefik, Apache, or Caddy
+- **[Authelia Integration Guide](docs/AUTHELIA.md)** - Configure Authelia for 2FA and SSO authentication
+- **[SWAG Configuration Guide](docs/swag-configs/README.md)** - Ready-to-use SWAG proxy configs
+- **[Performance Tuning Guide](docs/PERFORMANCE_TUNING.md)** - Optimize performance for your system
+- **[Email to E-Reader](docs/EMAIL_DELIVERY.md)** - Send issues, series or selections to a Kindle/Kobo, with optional EPUB or AZW3 (Kindle) conversion
+- **[Automated Versioning](docs/AUTOMATED_VERSIONING.md)** - How automatic version bumping works
+- **[Contributing Guide](CONTRIBUTING.md)** - How to contribute to the project
+- **[Testing Policy](docs/TESTING_POLICY.md)** - Testing requirements and best practices
+- **[Debug Logging Guide](docs/DEBUG_LOGGING_GUIDE.md)** - Debug logging and error reporting
+- **[Security Policy](SECURITY.md)** - Security guidelines and vulnerability reporting
+- **[Changelog](CHANGELOG.md)** - Version history and changes
+
+## Quick Start with Docker Compose
+
+Use the provided `docker-compose.yml` for easy setup:
+
+```bash
+# Edit docker-compose.yml to set your paths
+# Then start the service
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop the service
+docker-compose down
+```
+
+## Windows Installation
+
+For users who prefer to run ComicMaintainer natively on Windows without Docker:
+
+### Download
+
+Download the latest Windows release from the [Releases page](https://github.com/mleenorris/ComicMaintainer/releases):
+- `ComicMaintainer-vX.X.X-win-x64.zip` - For 64-bit Windows (recommended)
+- `ComicMaintainer-vX.X.X-win-x86.zip` - For 32-bit Windows
+
+### Installation Steps
+
+1. Extract the ZIP file to a folder of your choice (e.g., `C:\ComicMaintainer`)
+2. Copy `.env.example` to `.env` and edit it to configure your settings:
+   ```
+   WATCHED_DIR=C:\Comics\ToProcess
+   DUPLICATE_DIR=C:\Comics\Duplicates
+   WEB_PORT=5000
+   ```
+3. Double-click `ComicMaintainer.WebApi.exe` to start the application
+4. Open your browser and navigate to `http://localhost:5000`
+
+### Running as a Windows Service
+
+To run ComicMaintainer as a Windows service (starts automatically with Windows):
+
+1. Download [NSSM (Non-Sucking Service Manager)](https://nssm.cc/download)
+2. Open Command Prompt as Administrator
+3. Install the service:
+   ```cmd
+   nssm install ComicMaintainer "C:\ComicMaintainer\ComicMaintainer.WebApi.exe"
+   ```
+4. Configure environment variables in the NSSM GUI
+5. Start the service:
+   ```cmd
+   nssm start ComicMaintainer
+   ```
+
+For more details, see the `README.txt` included in the Windows release.
+
+## Android App
+
+ComicMaintainer is also available as an Android mobile app that connects to your server:
+
+### Download
+
+Download the latest Android APK from the [Releases page](https://github.com/mleenorris/ComicMaintainer/releases):
+- `ComicMaintainer-vX.X.X-android.apk`
+
+### Installation
+
+1. Download the APK file to your Android device
+2. Enable "Install from Unknown Sources" in your device settings
+3. Tap the APK file to install
+4. Open the ComicMaintainer app
+
+### Setup
+
+1. Navigate to the **Settings** tab in the app
+2. Enter your ComicMaintainer server URL:
+   - Local network: `http://192.168.1.100:5000` (replace with your server's IP)
+   - Remote/domain: `https://comics.example.com`
+3. Tap **Test Connection** to verify
+4. Tap **Save Settings**
+5. Go to the **Home** tab and browse your files
+
+### Features
+
+- Browse and search comic files on your server
+- Process individual files
+- Filter by status (all, unprocessed, processed, duplicates)
+- Real-time connection monitoring
+- Modern Material Design UI
+
+### Requirements
+
+- Android 5.0 (API 21) or later
+- Network connectivity to your ComicMaintainer server
+- Your server must be accessible from your device
+
+For more details, see `ANDROID_README.txt` included with the APK release.
+
+## License
+MIT

@@ -1975,10 +1975,34 @@
         
     </script>
 
-    <!-- main.js loaded with server-injected version for cache busting.
+    <!-- App scripts, loaded with a server-injected version for cache busting.
          The __APP_VERSION__ placeholder is replaced by
-         HtmlVersionInjectionMiddleware so the URL is always versioned without
-         requiring a round-trip to /api/version. -->
+         HtmlVersionInjectionMiddleware so the URLs are always versioned
+         without requiring a round-trip to /api/version.
+
+         These are classic (non-module) scripts sharing one global scope, so
+         inline onclick handlers can call their functions. ORDER MATTERS:
+         shared.js and templating.js first, main.js (bootstrap) last. Keep this
+         list in sync with APP_SCRIPTS in /sw.js. -->
+    <script src="/js/shared.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/templating.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/api.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/state.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/events.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/shell.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/service-worker.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/router.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/library.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/series.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/file-list.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/file-actions.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/jobs.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/settings.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/email.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/menus.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/series-metadata.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/modals.js?v=__APP_VERSION__"></script>
+    <script src="/js/app/error-reporting.js?v=__APP_VERSION__"></script>
     <script src="/js/main.js?v=__APP_VERSION__"></script>
 </body>
 </html>

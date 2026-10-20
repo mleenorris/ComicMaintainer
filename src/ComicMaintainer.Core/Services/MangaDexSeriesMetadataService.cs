@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Telemetry;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using ComicMaintainer.Core.Configuration;
@@ -19,15 +20,17 @@ public class MangaDexSeriesMetadataService : IExternalSeriesMetadataService
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly IMemoryCache _cache;
     private readonly ILogger<MangaDexSeriesMetadataService> _logger;
-    private readonly ProviderHealthTracker _health = new("MangaDex");
+    private readonly ProviderHealthTracker _health;
     private readonly Lazy<ProviderRateLimiter> _rateLimiter;
 
     public MangaDexSeriesMetadataService(
         IHttpClientFactory httpClientFactory,
         IOptionsMonitor<AppSettings> settings,
         IMemoryCache cache,
-        ILogger<MangaDexSeriesMetadataService> logger)
+        ILogger<MangaDexSeriesMetadataService> logger,
+        ComicMaintainerMetrics? metrics = null)
     {
+        _health = new ProviderHealthTracker("MangaDex", metrics);
         _httpClientFactory = httpClientFactory;
         _settings = settings;
         _cache = cache;

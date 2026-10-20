@@ -1,3 +1,4 @@
+using ComicMaintainer.Core.Telemetry;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -54,15 +55,17 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly IMemoryCache _cache;
     private readonly ILogger<AniListMangaSeriesMetadataService> _logger;
-    private readonly ProviderHealthTracker _health = new("AniListManga");
+    private readonly ProviderHealthTracker _health;
     private readonly Lazy<ProviderRateLimiter> _rateLimiter;
 
     public AniListMangaSeriesMetadataService(
         IHttpClientFactory httpClientFactory,
         IOptionsMonitor<AppSettings> settings,
         IMemoryCache cache,
-        ILogger<AniListMangaSeriesMetadataService> logger)
+        ILogger<AniListMangaSeriesMetadataService> logger,
+        ComicMaintainerMetrics? metrics = null)
     {
+        _health = new ProviderHealthTracker("AniListManga", metrics);
         _httpClientFactory = httpClientFactory;
         _settings = settings;
         _cache = cache;

@@ -160,4 +160,141 @@ public class LibraryScanJobHandlerTests : IDisposable
         Assert.NotNull(handler.Defaults.OptionsJson);
         Assert.Equal("library-scan", handler.JobKey);
     }
+
+    private const string ModifiedOnlyOptions = """{"scanForNew":true,"reconcileDeletions":true,"retagStale":false,"reprocessModified":true}""";
+
+    private string CreateTrackedFile(string name, out ComicFile tracked, long? sizeOverride = null, TimeSpan? mtimeOffset = null)
+    {
+        var dir = Path.Combine(_watchDir, "Series");
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, name);
+        File.WriteAllBytes(path, new byte[] { 0x50, 0x4B, 0x03, 0x04 });
+        var info = new FileInfo(path);
+        tracked = new ComicFile
+        {
+            FilePath = path,
+            FileName = name,
+            Directory = dir,
+            FileSize = sizeOverride ?? info.Length,
+            LastModified = info.LastWriteTime + (mtimeOffset ?? TimeSpan.Zero),
+        };
+        return path;
+    }
+
+    private Guid SetupNormalizeJob()
+    {
+        var jobId = Guid.NewGuid();
+        _processor.Setup(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()))
+                  .ReturnsAsync(jobId);
+        _processor.Setup(p => p.GetJob(jobId)).Returns(CompletedJob(1));
+        return jobId;
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ReprocessModified_SizeChanged_RenormalizesAndRefreshesStats()
+    {
+        var path = CreateTrackedFile("c001.cbz", out var tracked, sizeOverride: 999);
+        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new[] { tracked });
+        SetupNormalizeJob();
+
+        var summary = await BuildHandler().ExecuteAsync(ModifiedOnlyOptions, CancellationToken.None);
+
+        _processor.Verify(p => p.NormalizeFilesAsync(
+            It.Is<IEnumerable<string>>(paths => paths.SequenceEqual(new[] { path })),
+            true, It.IsAny<CancellationToken>()), Times.Once);
+        // Before queuing (record the external change) and after the job (absorb our own write).
+        _fileStore.Verify(f => f.RefreshFileStatsAsync(
+            It.Is<IEnumerable<string>>(paths => paths.Contains(path)),
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
+        Assert.Contains("1 modified reprocessed", summary);
+        Assert.Contains("[modified: 1/1 ok", summary);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ReprocessModified_MtimeBeyondTolerance_Renormalizes()
+    {
+        var path = CreateTrackedFile("c001.cbz", out var tracked, mtimeOffset: TimeSpan.FromMinutes(-10));
+        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new[] { tracked });
+        SetupNormalizeJob();
+
+        var summary = await BuildHandler().ExecuteAsync(ModifiedOnlyOptions, CancellationToken.None);
+
+        _processor.Verify(p => p.NormalizeFilesAsync(
+            It.Is<IEnumerable<string>>(paths => paths.Contains(path)), true, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains("1 modified reprocessed", summary);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1500)]
+    [InlineData(-1500)]
+    public async Task ExecuteAsync_ReprocessModified_UnchangedOrWithinTolerance_IsNoOp(int offsetMs)
+    {
+        CreateTrackedFile("c001.cbz", out var tracked, mtimeOffset: TimeSpan.FromMilliseconds(offsetMs));
+        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new[] { tracked });
+
+        var summary = await BuildHandler().ExecuteAsync(ModifiedOnlyOptions, CancellationToken.None);
+
+        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        _fileStore.Verify(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+        _fileStore.Verify(f => f.AddFileAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Contains("0 modified reprocessed", summary);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ReprocessModified_OffByDefault()
+    {
+        CreateTrackedFile("c001.cbz", out var tracked, sizeOverride: 999);
+        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new[] { tracked });
+
+        var summary = await BuildHandler().ExecuteAsync(null, CancellationToken.None);
+        var summaryWithDefaults = await BuildHandler().ExecuteAsync(BuildHandler().Defaults.OptionsJson, CancellationToken.None);
+
+        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        _fileStore.Verify(f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.DoesNotContain("modified", summary);
+        Assert.DoesNotContain("modified", summaryWithDefaults);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ReprocessModified_ExcludesStaleFiles()
+    {
+        var path = CreateTrackedFile("c001.cbz", out var tracked, sizeOverride: 999);
+        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new[] { tracked });
+        _cache.Setup(c => c.GetAsync("series", It.IsAny<CancellationToken>()))
+              .ReturnsAsync(new SeriesMetadataCacheRecord { NormalizedKey = "series", MetadataVersion = 5 });
+        _fileStore.Setup(f => f.GetFilesWithStaleSeriesMetadataAsync(It.IsAny<IEnumerable<string>>(), 5, It.IsAny<CancellationToken>()))
+                  .ReturnsAsync(new[] { path });
+        SetupNormalizeJob();
+
+        var summary = await BuildHandler().ExecuteAsync(
+            """{"retagStale":true,"reprocessModified":true}""", CancellationToken.None);
+
+        // Only the stale pass queues it; the modified pass skips it.
+        _processor.Verify(p => p.NormalizeFilesAsync(It.IsAny<IEnumerable<string>>(), true, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains("1 stale retagged", summary);
+        Assert.Contains("0 modified reprocessed", summary);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_LoadsTrackedSnapshotOnce_AndNeverCallsFileExists()
+    {
+        CreateTrackedFile("c001.cbz", out var tracked);
+        var newFile = Path.Combine(_watchDir, "Series", "c002.cbz");
+        File.WriteAllBytes(newFile, new byte[] { 0x50, 0x4B });
+        _fileStore.Setup(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(new[] { tracked });
+
+        await BuildHandler().ExecuteAsync(ModifiedOnlyOptions, CancellationToken.None);
+
+        _fileStore.Verify(f => f.GetAllFilesAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.FileExistsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _fileStore.Verify(f => f.AddFileAsync(newFile, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.AddFileAsync(tracked.FilePath, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public void Defaults_IncludeReprocessModifiedFalse()
+    {
+        Assert.Contains("\"reprocessModified\":false", BuildHandler().Defaults.OptionsJson);
+    }
 }

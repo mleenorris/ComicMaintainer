@@ -154,24 +154,52 @@ docker run -d \
 
 ### Backup Database
 
-```bash
-# The SQLite database is stored in /Config/comicmaintainer.db
-docker exec comicmaintainer-dotnet \
-  cp /Config/comicmaintainer.db /Config/backup-$(date +%Y%m%d).db
+The SQLite database lives in `/Config/comicmaintainer.db`. Do **not** copy it
+with `cp` while the app is running — it uses WAL mode, so a plain copy can miss
+recent writes or be inconsistent. Use the built-in backups instead:
 
-# Or from host (if volume mounted)
-cp config/comicmaintainer.db config/backup-$(date +%Y%m%d).db
+- The **`database-backup` scheduled job** (enabled by default, daily) writes
+  `/Config/backups/comicmaintainer-yyyyMMdd-HHmmss.db` using SQLite's
+  `VACUUM INTO` (consistent while the app is live) and keeps the newest 7.
+  Tune with `APPSETTINGS__DATABASEBACKUPRETENTION` and
+  `APPSETTINGS__DATABASEBACKUPDIRECTORY`; change the schedule under
+  **Scheduled Jobs**.
+- **On demand** (admin token required):
+
+```bash
+# Create a backup now
+curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:5000/api/backups
+# List backups
+curl -H "Authorization: Bearer $TOKEN" http://localhost:5000/api/backups
+# Download one
+curl -OJ -H "Authorization: Bearer $TOKEN" \
+  http://localhost:5000/api/backups/comicmaintainer-20261020-040000.db/download
 ```
+
+Backups contain password hashes and stored credentials (SMTP, API keys), so
+keep `/Config/backups` private and copy it off-host as part of your normal
+backup routine.
 
 ### Restore Database
 
 ```bash
-docker exec comicmaintainer-dotnet \
-  cp /Config/backup-20231031.db /Config/comicmaintainer.db
+# Restore an existing backup (or upload one with POST /api/backups/upload-restore, field "file")
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  http://localhost:5000/api/backups/comicmaintainer-20261020-040000.db/restore
 
-# Restart container to apply
+# Restart the container to apply it
 docker restart comicmaintainer-dotnet
 ```
+
+The restore endpoint validates the file (SQLite header, `PRAGMA
+integrity_check`, ComicMaintainer schema), takes a `-prerestore` safety backup
+of the current database, and stages the file as
+`/Config/comicmaintainer.db.restore-pending`. On the next start — before
+migrations — the pending file replaces the database and the old `-wal`/`-shm`
+files are removed. Cancel a staged restore with
+`DELETE /api/backups/restore-pending`. To restore manually, stop the container,
+copy the backup over `comicmaintainer.db`, delete `comicmaintainer.db-wal` and
+`comicmaintainer.db-shm`, and start it again.
 
 ### View Database
 
@@ -316,6 +344,47 @@ services:
         max-size: "10m"
         max-file: "3"
 ```
+
+### 5. Container Hardening
+
+`docker-compose.dotnet.yml` ships with:
+
+```yaml
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN         # chown -R the volumes to PUID:PGID
+      - FOWNER        # chmod files the root user does not own
+      - DAC_OVERRIDE  # traverse host-owned volumes; edit /etc/passwd, /etc/group
+      - SETUID        # gosu: switch to PUID
+      - SETGID        # gosu: switch to PGID / setgroups
+```
+
+The entrypoint runs as root only long enough to create the PUID/PGID user,
+fix volume ownership and `exec gosu` into the app; `no-new-privileges` is
+compatible with that because gosu only drops privileges. The app listens on
+port 5000, so `NET_BIND_SERVICE` is not needed. If you remove a capability and
+the container fails at startup, check the entrypoint output for the failing
+`useradd`/`chown`/`gosu` step.
+
+A read-only root filesystem is offered as a commented example
+(`read_only: true` plus `tmpfs: /tmp`). All application state lives in the
+mounted volumes, but the entrypoint edits `/etc/passwd`/`/etc/group` when the
+PUID/PGID user does not already exist in the image, so test it in your
+environment before enabling it.
+
+### 6. Monitoring
+
+- **Prometheus:** set `TELEMETRY__PROMETHEUSENABLED=true` to expose `/metrics`.
+  Set `TELEMETRY__METRICSTOKEN` to require `Authorization: Bearer <token>`
+  (configure the same value as the scrape job's `authorization.credentials`).
+  Without a token the endpoint is anonymous — block `/metrics` at your reverse
+  proxy if the app is reachable from untrusted networks.
+- **OTLP:** set `OTEL_EXPORTER_OTLP_ENDPOINT` (e.g. `http://otel-collector:4317`)
+  to push metrics and traces to an OpenTelemetry collector.
+- **Swagger:** set `API__ENABLESWAGGER=true` to serve `/swagger` outside Development.
 
 ## Upgrading
 

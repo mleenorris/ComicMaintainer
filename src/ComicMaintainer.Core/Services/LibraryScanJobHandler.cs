@@ -30,6 +30,11 @@ namespace ComicMaintainer.Core.Services;
 ///     all bump the cache record's version on write, so the very next
 ///     scheduled scan retags every affected file without anyone clicking
 ///     a button.</item>
+///   <item><b>Modified-file reprocess</b> — opt-in via
+///     <c>reprocessModified</c>: tracked files whose on-disk size or
+///     last-write time differs from the stored stats (beyond a ~2s
+///     tolerance) are force-normalized, and their stored stats are refreshed
+///     afterwards so our own metadata writes don't retrigger them.</item>
 /// </list>
 ///
 /// The handler is disabled by default in this step so existing
@@ -66,14 +71,14 @@ public class LibraryScanJobHandler : IScheduledJobHandler
     public string JobKey => Key;
     public string DisplayName => "Library Scan";
     public string Description =>
-        "Walks the watched directory, adds new files, reconciles deletions, and re-normalizes files whose series-metadata stamp is older than the current cache record (stale-metadata retag). Designed to replace the live file-system watcher as the primary per-file metadata refresher.";
+        "Walks the watched directory, adds new files, reconciles deletions, and re-normalizes files whose series-metadata stamp is older than the current cache record (stale-metadata retag). Options: scanForNew, reconcileDeletions, retagStale, and reprocessModified (opt-in; re-normalizes tracked files whose on-disk size or modified time changed). Designed to replace the live file-system watcher as the primary per-file metadata refresher.";
 
     // Default: disabled with an hourly cadence. Operators opt in deliberately
     // until step 4 of the plan, which flips the default and deprecates the
     // live watcher.
     public ScheduledJobDefaults Defaults =>
         new(Enabled: false, IntervalMinutes: 60,
-            OptionsJson: """{"scanForNew":true,"reconcileDeletions":true,"retagStale":true}""");
+            OptionsJson: """{"scanForNew":true,"reconcileDeletions":true,"retagStale":true,"reprocessModified":false}""");
 
     public async Task<string> ExecuteAsync(string? optionsJson, CancellationToken cancellationToken)
     {
@@ -88,13 +93,14 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         var addedCount = 0;
         var removedCount = 0;
         var staleCount = 0;
+        var modifiedCount = 0;
 
         // Pass 1: enumerate the filesystem and add unknown files.
         // Mirrors FileWatcherService.ScanExistingFilesAsync but also queues
         // a full ProcessFileAsync for additions (the watcher's scan path
         // only adds rows; live FS events were what triggered processing).
         HashSet<string>? diskPaths = null;
-        if (options.ScanForNew || options.ReconcileDeletions)
+        if (options.ScanForNew || options.ReconcileDeletions || options.ReprocessModified)
         {
             diskPaths = new HashSet<string>(
                 Directory.EnumerateFiles(watchedDir, "*.*", SearchOption.AllDirectories)
@@ -105,19 +111,21 @@ public class LibraryScanJobHandler : IScheduledJobHandler
                 diskPaths.Count, LoggingHelper.SanitizePathForLog(watchedDir));
         }
 
+        // Load the tracked set once and reuse it for every pass instead of
+        // issuing a FileExistsAsync / GetAllFilesAsync per pass or per file.
+        var tracked = await LoadTrackedSnapshotAsync(cancellationToken);
+
         var newPaths = new List<string>();
         if (options.ScanForNew && diskPaths is not null)
         {
             foreach (var path in diskPaths)
             {
                 if (cancellationToken.IsCancellationRequested) break;
+                if (tracked.ContainsKey(path)) continue;
                 try
                 {
-                    if (!await _fileStore.FileExistsAsync(path, cancellationToken))
-                    {
-                        await _fileStore.AddFileAsync(path, cancellationToken);
-                        newPaths.Add(path);
-                    }
+                    await _fileStore.AddFileAsync(path, cancellationToken);
+                    newPaths.Add(path);
                 }
                 catch (Exception ex)
                 {
@@ -133,36 +141,25 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         // ghosts when the live watcher is off.
         if (options.ReconcileDeletions && diskPaths is not null)
         {
-            try
+            foreach (var path in tracked.Keys.ToList())
             {
-                var tracked = (await _fileStore.GetAllFilesAsync(cancellationToken))
-                    .Select(f => f.FilePath)
-                    .Where(p => !string.IsNullOrWhiteSpace(p))
-                    .ToList();
-
-                foreach (var path in tracked)
+                if (cancellationToken.IsCancellationRequested) break;
+                if (diskPaths.Contains(path)) continue;
+                try
                 {
-                    if (cancellationToken.IsCancellationRequested) break;
-                    if (!diskPaths.Contains(path))
-                    {
-                        try
-                        {
-                            await _fileStore.RemoveFileAsync(path, cancellationToken);
-                            removedCount++;
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Library scan: failed to remove deleted file {Path}",
-                                LoggingHelper.SanitizePathForLog(path));
-                        }
-                    }
+                    await _fileStore.RemoveFileAsync(path, cancellationToken);
+                    tracked.Remove(path);
+                    removedCount++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Library scan: failed to remove deleted file {Path}",
+                        LoggingHelper.SanitizePathForLog(path));
                 }
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Library scan: reconcile-deletions pass failed");
-            }
         }
+
+        var newSet = new HashSet<string>(newPaths, StringComparer.OrdinalIgnoreCase);
 
         // Pass 3: stale-metadata retag. Group tracked files by their
         // folder-derived series key (the same key the resolver uses), look
@@ -174,11 +171,9 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         {
             try
             {
-                var allFiles = (await _fileStore.GetAllFilesAsync(cancellationToken)).ToList();
                 var byKey = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-                foreach (var file in allFiles)
+                foreach (var file in tracked.Values)
                 {
-                    if (string.IsNullOrWhiteSpace(file.FilePath)) continue;
                     var folder = Path.GetFileName(Path.GetDirectoryName(file.FilePath));
                     if (string.IsNullOrWhiteSpace(folder)) continue;
                     var key = _seriesCache.NormalizeKey(folder);
@@ -207,7 +202,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
                 // De-duplicate (newly-added files already enqueued above
                 // would otherwise be normalized twice).
                 staleToFix = staleToFix
-                    .Where(p => !newPaths.Contains(p, StringComparer.OrdinalIgnoreCase))
+                    .Where(p => !newSet.Contains(p))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
                 staleCount = staleToFix.Count;
@@ -215,6 +210,31 @@ public class LibraryScanJobHandler : IScheduledJobHandler
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Library scan: stale-metadata pass failed");
+            }
+        }
+
+        // Pass 4 (opt-in): files modified on disk since they were last
+        // tracked (size or last-write time differs from the stored stats),
+        // e.g. replaced by an external tool. Refresh the stored stats and
+        // force a re-normalize.
+        var modifiedToFix = new List<string>();
+        if (options.ReprocessModified && diskPaths is not null)
+        {
+            var staleSet = new HashSet<string>(staleToFix, StringComparer.OrdinalIgnoreCase);
+            foreach (var file in tracked.Values)
+            {
+                if (cancellationToken.IsCancellationRequested) break;
+                if (newSet.Contains(file.FilePath) || staleSet.Contains(file.FilePath)) continue;
+                if (!diskPaths.Contains(file.FilePath)) continue;
+                if (IsModifiedOnDisk(file)) modifiedToFix.Add(file.FilePath);
+            }
+            modifiedCount = modifiedToFix.Count;
+
+            if (modifiedToFix.Count > 0)
+            {
+                _logger.LogInformation("Library scan: {Count} tracked file(s) changed on disk; re-normalizing",
+                    modifiedToFix.Count);
+                await RefreshStatsSafeAsync(modifiedToFix, cancellationToken);
             }
         }
 
@@ -227,9 +247,65 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         // use NormalizeFilesAsync with forceReprocess=true so the
         // IsProcessed gate doesn't short-circuit them.
         var newProcessedSummary = await ProcessNewFilesAndWaitAsync(newPaths, cancellationToken);
-        var staleProcessedSummary = await NormalizeStaleFilesAndWaitAsync(staleToFix, cancellationToken);
+        var staleProcessedSummary = await NormalizeFilesAndWaitAsync(staleToFix, "stale", cancellationToken);
+        var modifiedProcessedSummary = await NormalizeFilesAndWaitAsync(modifiedToFix, "modified", cancellationToken);
 
-        return $"Library scan: +{addedCount} added, -{removedCount} removed, {staleCount} stale retagged.{newProcessedSummary}{staleProcessedSummary}";
+        // Our own metadata writes change size/mtime; re-sync the stored
+        // stats so the next scan doesn't see them as modified again.
+        if (modifiedToFix.Count > 0)
+        {
+            await RefreshStatsSafeAsync(modifiedToFix, cancellationToken);
+        }
+
+        var modifiedPart = options.ReprocessModified ? $", {modifiedCount} modified reprocessed" : string.Empty;
+        return $"Library scan: +{addedCount} added, -{removedCount} removed, {staleCount} stale retagged{modifiedPart}.{newProcessedSummary}{staleProcessedSummary}{modifiedProcessedSummary}";
+    }
+
+    /// <summary>
+    /// Stored <see cref="ComicFile.LastModified"/> comes from
+    /// <see cref="FileInfo.LastWriteTime"/> (local time); allow a small skew
+    /// for filesystems with coarse timestamp resolution (FAT/SMB: 2s).
+    /// </summary>
+    private static readonly TimeSpan ModifiedTimeTolerance = TimeSpan.FromSeconds(2);
+
+    private bool IsModifiedOnDisk(ComicFile file)
+    {
+        try
+        {
+            var info = new FileInfo(file.FilePath);
+            if (!info.Exists) return false;
+            if (info.Length != file.FileSize) return true;
+            var delta = (info.LastWriteTime - file.LastModified).Duration();
+            return delta > ModifiedTimeTolerance;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Library scan: stat failed for {Path}", LoggingHelper.SanitizePathForLog(file.FilePath));
+            return false;
+        }
+    }
+
+    private async Task RefreshStatsSafeAsync(IReadOnlyList<string> files, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _fileStore.RefreshFileStatsAsync(files, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Library scan: failed to refresh stored stats for {Count} file(s)", files.Count);
+        }
+    }
+
+    private async Task<Dictionary<string, ComicFile>> LoadTrackedSnapshotAsync(CancellationToken cancellationToken)
+    {
+        var tracked = new Dictionary<string, ComicFile>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in await _fileStore.GetAllFilesAsync(cancellationToken) ?? Enumerable.Empty<ComicFile>())
+        {
+            if (file is null || string.IsNullOrWhiteSpace(file.FilePath)) continue;
+            tracked.TryAdd(file.FilePath, file);
+        }
+        return tracked;
     }
 
     private async Task<string> ProcessNewFilesAndWaitAsync(IReadOnlyList<string> files, CancellationToken cancellationToken)
@@ -248,7 +324,7 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         return await WaitForJobAsync(jobId, files.Count, "added", cancellationToken);
     }
 
-    private async Task<string> NormalizeStaleFilesAndWaitAsync(IReadOnlyList<string> files, CancellationToken cancellationToken)
+    private async Task<string> NormalizeFilesAndWaitAsync(IReadOnlyList<string> files, string label, CancellationToken cancellationToken)
     {
         if (files.Count == 0) return string.Empty;
         Guid jobId;
@@ -258,10 +334,10 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Library scan: failed to queue {Count} stale file(s)", files.Count);
-            return " [stale: queue failed]";
+            _logger.LogWarning(ex, "Library scan: failed to queue {Count} {Label} file(s)", files.Count, label);
+            return $" [{label}: queue failed]";
         }
-        return await WaitForJobAsync(jobId, files.Count, "stale", cancellationToken);
+        return await WaitForJobAsync(jobId, files.Count, label, cancellationToken);
     }
 
     private async Task<string> WaitForJobAsync(Guid jobId, int requested, string label, CancellationToken cancellationToken)
@@ -300,5 +376,6 @@ public class LibraryScanJobHandler : IScheduledJobHandler
         public bool ScanForNew { get; set; } = true;
         public bool ReconcileDeletions { get; set; } = true;
         public bool RetagStale { get; set; } = true;
+        public bool ReprocessModified { get; set; }
     }
 }

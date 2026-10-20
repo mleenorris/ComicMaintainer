@@ -171,13 +171,16 @@ public class ReaderIntegrationTests
     public void MainJs_ContainsReadComicAction()
     {
         // Arrange
-        var mainJsPath = Path.Combine(_wwwrootPath, "js", "main.js");
-        var content = File.ReadAllText(mainJsPath);
+        // The SPA is split across several classic scripts that share one global scope.
+        var content = string.Concat(
+            Directory.EnumerateFiles(Path.Combine(_wwwrootPath, "js"), "*.js", SearchOption.AllDirectories)
+                .Select(File.ReadAllText));
 
-        // Assert - Verify the Read Comic action is available in the file actions dropdown
+        // Assert - Verify the Read Comic action is available in the file actions dropdown.
+        // UI icons come from the SVG sprite via uiIcon(), never emoji.
         Assert.Contains("Read Comic", content);
         Assert.Contains("readComic", content);
-        Assert.Contains("📖 Read Comic", content);
+        Assert.Contains("${uiIcon('book-open')} Read Comic", content);
     }
 
     [Fact]

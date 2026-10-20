@@ -95,8 +95,10 @@ coverage.cobertura.xml
 *.coverage
 *.coveragexml
 coveragereport/
-
-# Code coverage reports
-coveragereport/
 coverage/
-coveragereport/
+
+# Node
+node_modules/
+
+# Local tool caches
+ComicMaintainer/dotnet/

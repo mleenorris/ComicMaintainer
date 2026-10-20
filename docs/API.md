@@ -14,6 +14,7 @@ This document provides detailed information about the ComicMaintainer REST API e
 - [Settings](#settings)
 - [Suwayomi Downloads](#suwayomi-downloads)
 - [Events](#events)
+- [Database Backups](#database-backups)
 - [Request Correlation](#request-correlation)
 - [Error Responses](#error-responses)
 
@@ -585,6 +586,84 @@ Get event broadcasting statistics.
   "total_events_broadcast": 1234
 }
 ```
+
+## Database Backups
+
+Online backups of the SQLite database (taken with `VACUUM INTO`, so they are
+consistent while the app is running). Backups are written to
+`{CONFIG_DIR}/backups` (override with `AppSettings__DatabaseBackupDirectory`)
+and named `comicmaintainer-yyyyMMdd-HHmmss.db` (UTC; safety backups taken before
+a restore end in `-prerestore`).
+
+**Every endpoint — including the reads — requires the `Admin` role
+(`CanAdminister` policy).** A backup is a full copy of the database and
+contains password hashes and stored credentials (SMTP, ComicVine, Suwayomi).
+The `{name}` parameter must be a generated backup name; anything else
+(including path traversal attempts) is rejected with `400`.
+
+### GET /api/backups
+
+List backups, newest first.
+
+```json
+{
+  "backups": [
+    { "name": "comicmaintainer-20261020-040000.db", "size_bytes": 1048576, "created_utc": "2026-10-20T04:00:00Z" }
+  ],
+  "restore_pending": false
+}
+```
+
+### POST /api/backups
+
+Create a backup now. Returns the new backup (`name`, `size_bytes`, `created_utc`).
+Returns `409` if the database file does not exist.
+
+### GET /api/backups/{name}/download
+
+Download a backup (`application/vnd.sqlite3`). `404` if it does not exist.
+
+### DELETE /api/backups/{name}
+
+Delete a backup. `404` if it does not exist.
+
+### POST /api/backups/{name}/restore
+
+Stage a restore from an existing backup. The file is validated (SQLite header,
+`PRAGMA integrity_check`, ComicMaintainer schema), a safety backup of the
+current database is taken, and the file is staged as
+`comicmaintainer.db.restore-pending`. **The restore is applied on the next
+restart**, before migrations run.
+
+```json
+{
+  "source": "comicmaintainer-20261020-040000.db",
+  "safety_backup": { "name": "comicmaintainer-20261021-090000-prerestore.db", "size_bytes": 1050000, "created_utc": "2026-10-21T09:00:00Z" },
+  "restart_required": true,
+  "message": "Restore staged. Restart ComicMaintainer to apply it."
+}
+```
+
+`400` when the backup fails validation, `404` when it does not exist.
+
+### POST /api/backups/upload-restore
+
+Upload a database file as `multipart/form-data` (field `file`, max 2 GiB) and
+stage it as a restore. Same validation, safety backup and response as above.
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" \
+  -F "file=@comicmaintainer-20261020-040000.db" \
+  http://localhost:5000/api/backups/upload-restore
+```
+
+### DELETE /api/backups/restore-pending
+
+Discard a staged restore before restarting. `404` when none is pending.
+
+A `database-backup` scheduled job (enabled by default, every 1440 minutes)
+creates a backup and prunes old ones down to `DatabaseBackupRetention`
+(default 7). Manage it like any other job under **Scheduled Jobs**.
 
 ## Version
 

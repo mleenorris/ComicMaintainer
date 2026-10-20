@@ -118,6 +118,22 @@ dotnet test --collect:"XPlat Code Coverage"
 dotnet test --verbosity normal
 ```
 
+### Run JavaScript Unit Tests
+
+The web UI's helpers (templating/escaping, routing, shared fetch helpers) and
+the load order of the SPA's scripts are covered by dependency-free tests using
+Node's built-in `node:test` and `node:vm` (Node.js 22+, no `npm install`):
+
+```bash
+npm test
+```
+
+The SPA is split into ordered classic scripts under
+`src/ComicMaintainer.WebApi/wwwroot/js/` (`shared.js`, `app/*.js`, then
+`main.js` last). When adding a script, add it to the `<script>` list in
+`index.html`, `APP_SCRIPTS` in `sw.js`, and `WwwrootFiles.AppScripts` in the
+C# tests.
+
 ### Run End-to-End Container Smoke Test
 
 The Docker-based smoke test verifies that the published image starts, serves

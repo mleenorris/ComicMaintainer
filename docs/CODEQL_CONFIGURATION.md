@@ -20,6 +20,7 @@ The CodeQL workflow is defined in `.github/workflows/codeql-analysis.yml` and co
 **Languages Analyzed**:
 - **C#**: For .NET Core/ASP.NET Core code
 - **JavaScript**: For frontend and Node.js code
+- **Actions**: The GitHub Actions workflow files themselves (this replaced the separate `codeql.yml` workflow, so there is a single CodeQL workflow)
 
 **Build Process**:
 - Sets up .NET 10.0.x

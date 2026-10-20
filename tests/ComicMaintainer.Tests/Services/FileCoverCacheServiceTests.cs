@@ -1,6 +1,7 @@
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Services;
+using ImageMagick;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -171,5 +172,133 @@ public class FileCoverCacheServiceTests : IDisposable
         await Task.WhenAll(t1, t2);
 
         Assert.Equal(1, callCount);
+    }
+
+    private static byte[] MakeImage(uint width, uint height, MagickFormat format = MagickFormat.Png)
+    {
+        using var image = new MagickImage(MagickColors.SteelBlue, width, height);
+        image.Format = format;
+        return image.ToByteArray();
+    }
+
+    [Fact]
+    public async Task GetOrCreateAsync_LargeCover_ReturnsWebpThumbnailWithinMaxWidth()
+    {
+        var file = CreateFile("big.cbz");
+        var source = MakeImage(1200, 1800);
+        SetupPage(source, "image/png");
+
+        var entry = await _service.GetOrCreateAsync(file);
+
+        Assert.NotNull(entry);
+        Assert.Equal("image/webp", entry!.Value.ContentType);
+        Assert.Equal("webp-w480-q80", entry.Value.Variant);
+        using var thumb = new MagickImage(entry.Value.Data);
+        Assert.Equal(MagickFormat.WebP, thumb.Format);
+        Assert.True(thumb.Width <= 480);
+        Assert.Equal(480u, thumb.Width);
+        Assert.Equal(720u, thumb.Height);
+
+        // Served from disk the second time with the same variant/format.
+        var again = await _service.GetOrCreateAsync(file);
+        Assert.Equal("image/webp", again!.Value.ContentType);
+        Assert.Equal(entry.Value.Data, again.Value.Data);
+        _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), 1), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetOrCreateAsync_JpegFormat_ReturnsJpegThumbnail()
+    {
+        _settings.FileCoverThumbnailFormat = "jpeg";
+        var file = CreateFile("big.cbz");
+        SetupPage(MakeImage(1000, 1500), "image/png");
+
+        var entry = await _service.GetOrCreateAsync(file);
+
+        Assert.Equal("image/jpeg", entry!.Value.ContentType);
+        using var thumb = new MagickImage(entry.Value.Data);
+        Assert.Equal(MagickFormat.Jpeg, thumb.Format);
+        Assert.Equal(480u, thumb.Width);
+    }
+
+    [Fact]
+    public async Task GetOrCreateAsync_SmallCover_IsNotUpscaled()
+    {
+        var file = CreateFile("small.cbz");
+        SetupPage(MakeImage(200, 300), "image/png");
+
+        var entry = await _service.GetOrCreateAsync(file);
+
+        using var thumb = new MagickImage(entry!.Value.Data);
+        Assert.Equal(200u, thumb.Width);
+        Assert.Equal(300u, thumb.Height);
+    }
+
+    [Fact]
+    public async Task GetOrCreateAsync_VariantChange_Regenerates()
+    {
+        var file = CreateFile("big.cbz");
+        SetupPage(MakeImage(1200, 1800), "image/png");
+
+        var first = await _service.GetOrCreateAsync(file);
+        _settings.FileCoverThumbnailMaxWidth = 240;
+        var second = await _service.GetOrCreateAsync(file);
+
+        _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), 1), Times.Exactly(2));
+        Assert.NotEqual(first!.Value.Variant, second!.Value.Variant);
+        using var thumb = new MagickImage(second.Value.Data);
+        Assert.Equal(240u, thumb.Width);
+
+        // Quality change is a variant change too.
+        _settings.FileCoverThumbnailQuality = 50;
+        _ = await _service.GetOrCreateAsync(file);
+        _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), 1), Times.Exactly(3));
+    }
+
+    [Fact]
+    public async Task GetOrCreateAsync_LegacyMetaWithoutVariant_IsCacheMiss()
+    {
+        var file = CreateFile("a.cbz");
+        SetupPage(MakeImage(1200, 1800), "image/png");
+        _ = await _service.GetOrCreateAsync(file);
+
+        // Simulate an entry written by a pre-thumbnail version.
+        var metaPath = Directory.EnumerateFiles(_cacheDir, "*.meta").Single();
+        var info = new FileInfo(file);
+        File.WriteAllText(metaPath,
+            $"{{\"SourceLength\":{info.Length},\"SourceMtimeUtcTicks\":{info.LastWriteTimeUtc.Ticks},\"ContentType\":\"image/png\"}}");
+
+        var entry = await _service.GetOrCreateAsync(file);
+
+        Assert.Equal("image/webp", entry!.Value.ContentType);
+        _reader.Verify(r => r.GetPageAsync(It.IsAny<string>(), 1), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task GetOrCreateAsync_MaxWidthZero_ReturnsOriginalBytes()
+    {
+        _settings.FileCoverThumbnailMaxWidth = 0;
+        var file = CreateFile("big.cbz");
+        var source = MakeImage(1200, 1800);
+        SetupPage(source, "image/png");
+
+        var entry = await _service.GetOrCreateAsync(file);
+
+        Assert.Equal(source, entry!.Value.Data);
+        Assert.Equal("image/png", entry.Value.ContentType);
+        Assert.Equal("orig", entry.Value.Variant);
+    }
+
+    [Fact]
+    public async Task GetOrCreateAsync_UndecodableImage_FallsBackToOriginalBytes()
+    {
+        var file = CreateFile("a.cbz");
+        var garbage = new byte[] { 0xFF, 0xD8, 0x00, 0x01, 0x02 };
+        SetupPage(garbage, "image/jpeg");
+
+        var entry = await _service.GetOrCreateAsync(file);
+
+        Assert.Equal(garbage, entry!.Value.Data);
+        Assert.Equal("image/jpeg", entry.Value.ContentType);
     }
 }

@@ -30,7 +30,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'csharp', 'javascript' ]
+        # 'actions' scans the workflow files themselves (formerly a separate codeql.yml workflow).
+        language: [ 'csharp', 'javascript', 'actions' ]
 
     steps:
     - name: Checkout repository

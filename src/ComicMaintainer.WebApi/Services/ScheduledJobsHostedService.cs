@@ -3,6 +3,7 @@ using System.Diagnostics;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
+using ComicMaintainer.Core.Telemetry;
 using ComicMaintainer.Core.Utilities;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -24,14 +25,17 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
 {
     private readonly ScheduledJobService _service;
     private readonly ILogger<ScheduledJobsHostedService> _logger;
+    private readonly ComicMaintainerMetrics? _metrics;
     private readonly ConcurrentDictionary<string, JobSlot> _slots = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _shutdownCts;
     private bool _started;
 
     public ScheduledJobsHostedService(
         IScheduledJobService service,
-        ILogger<ScheduledJobsHostedService> logger)
+        ILogger<ScheduledJobsHostedService> logger,
+        ComicMaintainerMetrics? metrics = null)
     {
+        _metrics = metrics;
         // The hosted service depends on the concrete ScheduledJobService for
         // the Handlers enumeration, but interacts with state through the
         // IScheduledJobService surface. The DI container resolves both to the
@@ -189,6 +193,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             _logger.LogInformation("Skipping {JobKey} run because previous run still in progress", safeKey);
             if (fromTimer)
             {
+                _metrics?.RecordScheduledJobRun(handler.JobKey, "skipped", TimeSpan.Zero);
                 await _service.RecordCompletionAsync(jobKey, ScheduledJobStatus.Skipped,
                     "Skipped: previous run still in progress.", durationMs: 0);
             }
@@ -206,6 +211,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
             _logger.LogInformation("Scheduled job {JobKey} starting", safeKey);
             var summary = await handler.ExecuteAsync(optionsJson, token);
             stopwatch.Stop();
+            _metrics?.RecordScheduledJobRun(handler.JobKey, "success", stopwatch.Elapsed);
             await _service.RecordCompletionAsync(
                 jobKey, ScheduledJobStatus.Success, summary, stopwatch.ElapsedMilliseconds, token);
             _logger.LogInformation("Scheduled job {JobKey} completed in {Ms}ms: {Summary}",
@@ -214,6 +220,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
             stopwatch.Stop();
+            _metrics?.RecordScheduledJobRun(handler.JobKey, "cancelled", stopwatch.Elapsed);
             await _service.RecordCompletionAsync(
                 jobKey, ScheduledJobStatus.Cancelled, "Run cancelled.", stopwatch.ElapsedMilliseconds);
             _logger.LogInformation("Scheduled job {JobKey} was cancelled", safeKey);
@@ -221,6 +228,7 @@ public sealed class ScheduledJobsHostedService : IHostedService, IDisposable
         catch (Exception ex)
         {
             stopwatch.Stop();
+            _metrics?.RecordScheduledJobRun(handler.JobKey, "failed", stopwatch.Elapsed);
             await _service.RecordCompletionAsync(
                 jobKey, ScheduledJobStatus.Failed, ex.Message, stopwatch.ElapsedMilliseconds);
             _logger.LogError(ex, "Scheduled job {JobKey} failed", safeKey);

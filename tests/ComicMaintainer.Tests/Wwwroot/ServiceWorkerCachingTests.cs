@@ -88,7 +88,7 @@ public class ServiceWorkerCachingTests
     public void ServiceWorker_ClearsImageCacheOnRequest()
     {
         var swContents = ReadServiceWorker();
-        var mainJs = File.ReadAllText(Path.Combine(WwwRoot, "js", "main.js"));
+        var mainJs = WwwrootFiles.ReadAppScripts();
 
         // Cached covers/pages are authenticated content, so signing out must
         // purge them. Both halves of the contract are asserted so neither side

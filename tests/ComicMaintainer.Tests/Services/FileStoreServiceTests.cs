@@ -815,6 +815,33 @@ public class FileStoreServiceTests
     }
 
     [Fact]
+    public async Task RefreshFileStatsAsync_UpdatesSizeAndMtimeInMemoryAndDb()
+    {
+        var filePath = Path.Combine(_testDirectory, "stats.cbz");
+        File.WriteAllText(filePath, "abc");
+        await _service.AddFileAsync(filePath);
+
+        File.WriteAllText(filePath, "a much longer payload");
+        var newMtime = DateTime.Now.AddMinutes(-30);
+        File.SetLastWriteTime(filePath, newMtime);
+
+        var changed = await _service.RefreshFileStatsAsync(new[] { filePath, Path.Combine(_testDirectory, "missing.cbz") });
+        var again = await _service.RefreshFileStatsAsync(new[] { filePath });
+
+        Assert.Equal(1, changed);
+        Assert.Equal(0, again);
+        var info = new FileInfo(filePath);
+        var tracked = (await _service.GetAllFilesAsync()).Single();
+        Assert.Equal(info.Length, tracked.FileSize);
+        Assert.Equal(info.LastWriteTime, tracked.LastModified);
+
+        await using var db = await _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>().CreateDbContextAsync();
+        var entity = await db.ComicFiles.SingleAsync(e => e.FilePath == filePath);
+        Assert.Equal(info.Length, entity.FileSize);
+        Assert.Equal(info.LastWriteTime, entity.LastModified);
+    }
+
+    [Fact]
     public async Task FileExistsAsync_ExistingFile_ReturnsTrue()
     {
         // Arrange

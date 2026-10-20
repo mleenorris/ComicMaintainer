@@ -2,20 +2,26 @@ namespace ComicMaintainer.Core.Interfaces;
 
 /// <summary>
 /// Result of a successful <see cref="IFileCoverCacheService.GetOrCreateAsync"/>
-/// call: the raw cover image bytes (page 1 of the source archive), the
-/// associated content type, and the underlying file's last-write timestamp
-/// at the moment the cache entry was generated. The timestamp is suitable
-/// for ETag/Last-Modified headers because cache entries are invalidated
-/// whenever the source file's mtime or length changes.
+/// call: the cover thumbnail bytes (page 1 of the source archive, downscaled
+/// and re-encoded according to the <c>FileCoverThumbnail*</c> settings), the
+/// associated content type, the underlying file's last-write timestamp at
+/// the moment the cache entry was generated, and the thumbnail
+/// <paramref name="Variant"/> token (format/width/quality, or <c>orig</c>
+/// for untouched page bytes). Timestamp + variant are suitable for
+/// ETag/Last-Modified headers because cache entries are invalidated whenever
+/// the source file's mtime or length, or the thumbnail settings, change.
 /// </summary>
 public readonly record struct FileCoverCacheEntry(
     byte[] Data,
     string ContentType,
-    DateTimeOffset LastModified);
+    DateTimeOffset LastModified,
+    string Variant = "orig");
 
 /// <summary>
-/// Persistent, on-disk cache of comic-file cover images (page 1 of each
-/// archive). The cache speeds up file-list rendering by avoiding a fresh
+/// Persistent, on-disk cache of comic-file cover thumbnails (page 1 of each
+/// archive, downscaled and re-encoded — WebP by default). Consumers that
+/// need full-resolution page bytes must use
+/// <see cref="IComicReaderService.GetPageAsync"/> instead. The cache speeds up file-list rendering by avoiding a fresh
 /// archive open + image extract on every request. Cached entries
 /// self-invalidate when the source file's <c>LastWriteTimeUtc</c> or
 /// <c>Length</c> changes.

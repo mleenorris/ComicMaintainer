@@ -152,7 +152,7 @@
                 <span class="sidebar-brand-name sidebar-brand-name--accent">Maintainer</span>
             </span>
         </a>
-        <div class="watcher-status-indicator sidebar-watcher" id="watcherStatusSidebar" title="Watcher Status">
+        <div class="watcher-status-indicator sidebar-watcher" id="watcherStatusSidebar" title="Watcher Status" role="status" aria-live="polite" aria-label="Watcher status">
             <span class="watcher-icon" aria-hidden="true"></span>
             <span class="watcher-text">Checking...</span>
         </div>
@@ -177,6 +177,9 @@
             <button type="button" class="sidebar-link" onclick="openLogsModal()"><svg class="icon" aria-hidden="true"><use href="#i-file-text"/></svg><span>Logs</span></button>
             <button type="button" class="sidebar-link" onclick="openExternalProvidersModal()"><svg class="icon" aria-hidden="true"><use href="#i-globe"/></svg><span>External Providers</span></button>
             <button type="button" class="sidebar-link" id="sidebarDiagnosticsItem" onclick="openDiagnosticsModal()"><svg class="icon" aria-hidden="true"><use href="#i-activity"/></svg><span>Diagnostics</span></button>
+            <button type="button" class="sidebar-link" id="installAppSidebarButton" onclick="installApp()" style="display: none;">
+                <svg class="icon" aria-hidden="true"><use href="#i-download"/></svg><span>Install App</span>
+            </button>
         </nav>
         <div class="sidebar-footer">
             <div class="sidebar-user" id="sidebarUser" hidden>
@@ -580,6 +583,10 @@
                     <h2 class="page-title" id="settingsPageTitle">Settings</h2>
                     <p class="page-subtitle">Configure processing, delivery, integrations and maintenance for this ComicMaintainer instance.</p>
                 </div>
+            </div>
+            <div id="settingsLoadStatus" class="settings-load-status" role="status" aria-live="polite" hidden>
+                <span id="settingsLoadMessage"></span>
+                <button type="button" class="btn btn-ghost" id="settingsRetryButton" onclick="loadSettings()" hidden>Retry</button>
             </div>
             <div class="settings-layout">
                 <nav class="settings-nav" aria-label="Settings sections">
@@ -1124,8 +1131,8 @@
                 <span class="settings-savebar-hint">Changes apply when you save. Some take effect after a restart.</span>
                 <div class="settings-savebar-actions">
                     <button type="button" class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
-                    <button type="button" class="btn btn-warning" onclick="resetFilenameFormat()" title="Reset the filename format to its default"><svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg> Reset Filename Format</button>
-                    <button type="button" class="btn btn-primary" onclick="saveFilenameFormat()"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg> Save Settings</button>
+                    <button type="button" class="btn btn-warning" id="resetFilenameFormatBtn" onclick="resetFilenameFormat()" title="Reset the filename format to its default"><svg class="icon" aria-hidden="true"><use href="#i-rotate-ccw"/></svg> Reset Filename Format</button>
+                    <button type="button" class="btn btn-primary" id="saveSettingsBtn" onclick="saveFilenameFormat()"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg> Save Settings</button>
                 </div>
             </div>
         </section>

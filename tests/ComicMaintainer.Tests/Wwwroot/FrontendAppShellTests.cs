@@ -87,6 +87,36 @@ public class FrontendAppShellTests
     }
 
     [Fact]
+    public void Sidebar_PreservesWatcherAnnouncementsAndInstallAction()
+    {
+        var html = Read("index.html");
+        var js = Read("js", "main.js");
+
+        Assert.Matches(
+            @"id=""watcherStatusSidebar""[^>]*role=""status""[^>]*aria-live=""polite""",
+            html);
+        Assert.Contains("id=\"installAppSidebarButton\"", html);
+        Assert.Contains("'installAppButton', 'installAppSidebarButton'", js);
+        Assert.Contains("setInstallAppButtonsVisible(true)", js);
+        Assert.Contains("setInstallAppButtonsVisible(false)", js);
+    }
+
+    [Fact]
+    public void Settings_RemainsUnavailableUntilLoadSucceedsAndCanBeRetried()
+    {
+        var html = Read("index.html");
+        var js = Read("js", "main.js");
+
+        Assert.Contains("id=\"settingsLoadStatus\"", html);
+        Assert.Contains("id=\"settingsRetryButton\" onclick=\"loadSettings()\"", html);
+        Assert.Contains("el.disabled = !settingsLoaded || (!isUserSetting && !userCapabilities.canAdminister);", js);
+        Assert.Contains("button.disabled = !settingsLoaded || !userCapabilities.canAdminister;", js);
+        Assert.Contains("if (!settingsLoaded || !userCapabilities.canAdminister) return;", js);
+        Assert.Contains("setSettingsLoadStatus('error'", js);
+        Assert.Contains("settingsLoaded = true;", js);
+    }
+
+    [Fact]
     public void MainCss_SidebarGridIsScopedToTheAppShell()
     {
         // jobs.html and reader.html load main.css too; an unscoped body grid

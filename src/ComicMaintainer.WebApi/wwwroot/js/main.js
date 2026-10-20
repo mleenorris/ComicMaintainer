@@ -1747,6 +1747,8 @@
         // default to true so the UI stays fully functional if the capability
         // lookup fails — the API is the real enforcement point.
         let userCapabilities = { canModifyLibrary: true, canAdminister: true };
+        let settingsLoaded = false;
+        let settingsLoadRequest = 0;
 
         // Fetch the signed-in user and hide controls they are not allowed to use.
         // The server still enforces the same rules via authorization policies;
@@ -1794,10 +1796,15 @@
             const settingsBody = document.getElementById('settingsPageBody');
             if (settingsBody) {
                 settingsBody.querySelectorAll('input, select, textarea, button').forEach(el => {
-                    if (el.closest('[data-user-setting]')) return;
-                    el.disabled = !userCapabilities.canAdminister;
+                    const isUserSetting = !!el.closest('[data-user-setting]');
+                    el.disabled = !settingsLoaded || (!isUserSetting && !userCapabilities.canAdminister);
                 });
             }
+
+            ['resetFilenameFormatBtn', 'saveSettingsBtn'].forEach(id => {
+                const button = document.getElementById(id);
+                if (button) button.disabled = !settingsLoaded || !userCapabilities.canAdminister;
+            });
         }
 
         // Fetch and display version
@@ -2032,23 +2039,25 @@
             e.preventDefault();
             // Stash the event so we can trigger it later via our custom install button
             deferredPrompt = e;
-            // Show the custom install button
-            const installButton = document.getElementById('installAppButton');
-            if (installButton) {
-                installButton.style.display = 'block';
-            }
+            setInstallAppButtonsVisible(true);
         });
         
         // Handle successful installation
         window.addEventListener('appinstalled', (evt) => {
             console.log('PWA: App successfully installed');
-            // Hide the install button after installation
-            const installButton = document.getElementById('installAppButton');
-            if (installButton) {
-                installButton.style.display = 'none';
-            }
+            setInstallAppButtonsVisible(false);
             deferredPrompt = null;
         });
+
+        function setInstallAppButtonsVisible(visible) {
+            ['installAppButton', 'installAppSidebarButton'].forEach(id => {
+                const button = document.getElementById(id);
+                if (!button) return;
+                button.style.display = visible
+                    ? (id === 'installAppSidebarButton' ? 'flex' : 'block')
+                    : 'none';
+            });
+        }
         
         // Function to trigger installation
         function installApp() {
@@ -7711,9 +7720,20 @@
             navigate('#/settings');
         }
 
+        function setSettingsLoadStatus(state, message = '') {
+            const status = document.getElementById('settingsLoadStatus');
+            const messageElement = document.getElementById('settingsLoadMessage');
+            const retryButton = document.getElementById('settingsRetryButton');
+            if (!status) return;
+            status.hidden = state === 'loaded';
+            if (messageElement) messageElement.textContent = message;
+            if (retryButton) retryButton.hidden = state !== 'error';
+        }
+
         async function loadSettings() {
-            // Re-assert capability gating in case the page contents were
-            // re-rendered since the last check.
+            const loadRequest = ++settingsLoadRequest;
+            settingsLoaded = false;
+            setSettingsLoadStatus('loading', 'Loading settings…');
             applyCapabilities();
             try {
                 // Load all settings
@@ -7735,6 +7755,7 @@
                 }
                 
                 const settingsData = await settingsResponse.json();
+                if (loadRequest !== settingsLoadRequest) return;
                 console.log('[SETTINGS] Settings data loaded:', settingsData);
                 
                 document.getElementById('filenameFormat').value = settingsData.filename_format || '';
@@ -7903,8 +7924,13 @@
                  
                 console.log('[SETTINGS] All settings loaded successfully');
                 updateSettingsNavActive();
+                settingsLoaded = true;
+                setSettingsLoadStatus('loaded');
+                applyCapabilities();
             } catch (error) {
+                if (loadRequest !== settingsLoadRequest) return;
                 console.error('[SETTINGS] Error in loadSettings():', error);
+                setSettingsLoadStatus('error', 'Settings could not be loaded. Retry before making changes.');
                 showMessage('Failed to load settings: ' + error.message, 'error');
             }
         }
@@ -9953,6 +9979,7 @@
         }
 
         async function saveFilenameFormat() {
+            if (!settingsLoaded || !userCapabilities.canAdminister) return;
             const format = document.getElementById('filenameFormat').value.trim();
             const logMaxSize = parseFloat(document.getElementById('logMaxSize').value);
             const issueNumberPadding = parseInt(document.getElementById('issueNumberPadding').value);
@@ -10296,6 +10323,7 @@
         }
 
         async function resetFilenameFormat() {
+            if (!settingsLoaded || !userCapabilities.canAdminister) return;
             try {
                 const response = await fetch(apiUrl('/api/settings/filename-format'), {
                     headers: getAuthHeaders()

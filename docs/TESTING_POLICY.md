@@ -203,6 +203,11 @@ If tests fail in CI:
 3. Push the fix and verify CI tests pass
 4. Do not merge PRs with failing tests
 
+Once the `COPILOT_AUTOFIX_TOKEN` secret is set, failures are also handed to Copilot
+automatically: it is asked to push a fix to the failing pull request, and failures on the
+default branch become `ci-failure` issues assigned to it. See
+[COPILOT_CI_AUTOFIX.md](COPILOT_CI_AUTOFIX.md). Review its fixes like any other change.
+
 ## Test Automation
 
 ### GitHub Actions Workflows
@@ -219,6 +224,13 @@ The project uses GitHub Actions for automated testing:
 - Verifies that test files were modified when source files change
 - Helps ensure tests are not forgotten
 - Can be overridden for documentation-only changes
+
+**Copilot CI Autofix Workflow** (`.github/workflows/copilot-ci-autofix.yml`):
+- Runs when a test workflow completes
+- Asks Copilot to fix failed runs on pull requests, and opens `ci-failure` issues assigned
+  to Copilot for failed runs on the default branch
+- Closes those issues when the tests pass on the default branch again
+- See [COPILOT_CI_AUTOFIX.md](COPILOT_CI_AUTOFIX.md) for setup and limits
 
 ## Testing Best Practices
 

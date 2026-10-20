@@ -251,8 +251,8 @@ function buildIssueBody({ run, workflowName, serverUrl, repoFullName, branch, jo
         `**Failed run:** ${formatRunReference({ run, workflowName, serverUrl, repoFullName })}`,
         `**Failed jobs:**\n${formatFailedJobs(jobs)}`,
         formatExcerpts(jobs, excerpts),
-        `<sub>Opened by [Copilot CI Autofix](${autofixRunUrl}). While this issue is open, later failures of this workflow on `
-            + `${inlineCode(branch)} are added to it as comments instead of opening new issues.</sub>`,
+        `<sub>Opened by [Copilot CI Autofix](${autofixRunUrl}). Later failures of this workflow on ${inlineCode(branch)} are `
+            + 'added to this issue as comments, and it is closed once the workflow passes again.</sub>',
         issueMarker(run),
     ], 5);
 }

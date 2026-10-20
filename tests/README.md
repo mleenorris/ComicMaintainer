@@ -135,6 +135,10 @@ All three jobs must pass for a PR to be considered green. To make them
 required for merge, add their check names to branch protection for
 `main`/`develop` in repository settings.
 
+When one of these workflows fails, `.github/workflows/copilot-ci-autofix.yml`
+hands the failure to Copilot to fix; see
+[docs/COPILOT_CI_AUTOFIX.md](../docs/COPILOT_CI_AUTOFIX.md).
+
 ## Test Categories
 
 ### Unit Tests

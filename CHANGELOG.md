@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Failed test runs are handed to Copilot to fix.** The new Copilot CI Autofix workflow
+  reacts to the `.NET Tests` and `Integration Tests (E2E Container)` workflows. When one
+  fails on a pull request, it comments `@copilot` on the pull request with the failed jobs
+  and the failing tests' errors, and Copilot pushes a fix to the branch: once per commit, at
+  most three times per pull request, and never for pull requests from forks or with the
+  `no-copilot-autofix` label. When one fails on the default branch, it opens a `ci-failure`
+  issue assigned to Copilot, and closes it once the workflow passes again. It needs a
+  Copilot user's token in the `COPILOT_AUTOFIX_TOKEN` secret; see
+  `docs/COPILOT_CI_AUTOFIX.md`.
 - **Condensed sends can be delivered as AZW3.** Combining issues into one book used to pin
   the format picker to EPUB, so a Kindle could not receive a condensed book in its native
   format. The picker now stays available while a condense mode is selected and offers both

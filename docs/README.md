@@ -50,6 +50,7 @@ documentation that still describes how the project works today.
 ## Development
 
 - [TESTING_POLICY.md](TESTING_POLICY.md) - Testing requirements for all changes
+- [COPILOT_CI_AUTOFIX.md](COPILOT_CI_AUTOFIX.md) - Copilot fixing failed test runs automatically
 - [GITHUB_ACTIONS_DOTNET.md](GITHUB_ACTIONS_DOTNET.md) - CI workflows
 - [STABLE_BRANCH_CREATION.md](STABLE_BRANCH_CREATION.md) - The stable branch process
 

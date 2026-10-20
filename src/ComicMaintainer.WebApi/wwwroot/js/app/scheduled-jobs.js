@@ -36,8 +36,8 @@
         const SCHEDULED_JOB_STATUSES = ['neverrun', 'running', 'success', 'failed', 'skipped', 'cancelled'];
 
         // Status is polled only while the page is on screen: every couple of
-        // seconds while a job is running (or a run was just requested), and
-        // slowly otherwise so timer-driven runs still show up.
+        // seconds while following a run started from this page, and slowly
+        // otherwise so timer-driven runs still show up.
         const SCHEDULED_JOBS_IDLE_REFRESH_MS = 30000;
         const SCHEDULED_JOBS_ACTIVE_REFRESH_MS = 2000;
         // A requested run that has neither started nor finished by then (e.g.
@@ -121,8 +121,12 @@
             return String(job && job.lastStatus).toLowerCase() === 'running';
         }
 
+        // Only a run started from this page blocks Run now. A stored "Running"
+        // status is not proof of a live run: a restart mid-run leaves it set
+        // until the job next completes, and the server already skips a run
+        // requested while another is in progress.
         function isScheduledJobBusy(job) {
-            return isScheduledJobRunning(job) || scheduledJobRunRequests.has(job.jobKey);
+            return scheduledJobRunRequests.has(job.jobKey);
         }
 
         // The API reports UTC times without an offset ("2026-01-02T03:04:05.6789012"),
@@ -206,9 +210,8 @@
         }
 
         function renderScheduledJobRunLabel(job) {
-            if (isScheduledJobRunning(job)) return html`${uiIcon('play')} Running…`;
-            if (scheduledJobRunRequests.has(job.jobKey)) return html`${uiIcon('play')} Starting…`;
-            return html`${uiIcon('play')} Run now`;
+            if (!isScheduledJobBusy(job)) return html`${uiIcon('play')} Run now`;
+            return html`${uiIcon('play')} ${isScheduledJobRunning(job) ? 'Running…' : 'Starting…'}`;
         }
 
         function renderScheduledJobCard(job) {
@@ -404,7 +407,7 @@
             clearTimeout(scheduledJobsRefreshTimer);
             scheduledJobsRefreshTimer = null;
             if (currentView !== 'jobs') return;
-            const active = scheduledJobRunRequests.size > 0 || scheduledJobs.some(isScheduledJobRunning);
+            const active = scheduledJobRunRequests.size > 0;
             scheduledJobsRefreshTimer = setTimeout(() => {
                 scheduledJobsRefreshTimer = null;
                 // A background tab does not need fresh status; check again later.

@@ -562,6 +562,25 @@ public class FileWatcherServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task StartAsync_IgnoresTemporaryArchivesDuringInitialScan()
+    {
+        var tempFile = Path.Combine(_testDirectory, ".tmp_existing.cbz");
+        File.WriteAllText(tempFile, "fake cbz content");
+
+        await _service.StartAsync();
+        await Task.Delay(SimpleEventDelayMs);
+
+        _mockFileStore.Verify(
+            fs => fs.AddFileAsync(tempFile, It.IsAny<CancellationToken>()),
+            Times.Never,
+            "Temporary archives should be ignored by the initial scan");
+        _mockProcessor.Verify(
+            p => p.ProcessFileAsync(tempFile, It.IsAny<CancellationToken>()),
+            Times.Never,
+            "Temporary archives should not be processed by the initial scan");
+    }
+
+    [Fact]
     public async Task SettingsChange_DisablesProcessing_KeepsWatcherRunning()
     {
         // Arrange — use a TestOptionsMonitor so we can simulate a live settings change.

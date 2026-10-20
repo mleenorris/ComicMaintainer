@@ -794,7 +794,7 @@ public class FileWatcherService : IFileWatcherService, IDisposable
 
     private static bool IsComicFile(string path)
     {
-        return ComicFileExtensions.IsComicArchive(path);
+        return ComicFileExtensions.IsComicArchive(path) && !IsTemporaryFile(path);
     }
 
     /// <summary>

@@ -74,8 +74,7 @@ public partial class SeriesLibraryService
         {
             if (string.IsNullOrWhiteSpace(alias)) continue;
             if (string.Equals(alias, canonicalTitle, StringComparison.OrdinalIgnoreCase)) continue;
-            if (accumulator.Aliases.Any(existing => string.Equals(existing, alias, StringComparison.OrdinalIgnoreCase))) continue;
-            accumulator.Aliases.Add(alias);
+            accumulator.TryAddAlias(alias);
         }
     }
 
@@ -174,8 +173,7 @@ public partial class SeriesLibraryService
         }
     }
 
-    private static SeriesMetadataCacheRecord? ResolveRecordForGroup(
-        string representative,
+    private static Dictionary<string, SeriesMetadataCacheRecord> BuildBestRecordByRepresentative(
         IReadOnlyList<SeriesMetadataCacheRecord> records,
         UnionFind<string> unionFind)
     {
@@ -190,25 +188,31 @@ public partial class SeriesLibraryService
         // instead: positive-match statuses (manual_match / manual / success)
         // outrank not_found / error / cleared, with the most recent lookup
         // winning ties.
-        SeriesMetadataCacheRecord? best = null;
-        var bestRank = int.MinValue;
-        DateTime? bestLookup = null;
-
+        //
+        // Computed for every union-find component in a single pass over the
+        // records (rather than rescanning every record for every file), so
+        // grouping stays linear in files + records on large libraries.
+        var best = new Dictionary<string, SeriesMetadataCacheRecord>(StringComparer.OrdinalIgnoreCase);
         foreach (var record in records)
         {
-            if (!unionFind.Contains(record.NormalizedKey)
-                || !string.Equals(unionFind.Find(record.NormalizedKey), representative, StringComparison.OrdinalIgnoreCase))
+            if (!unionFind.Contains(record.NormalizedKey))
             {
                 continue;
             }
 
-            var rank = RankLookupStatus(record.LookupStatus);
-            if (rank > bestRank
-                || (rank == bestRank && IsMoreRecent(record.LastLookupUtc, bestLookup)))
+            var representative = unionFind.Find(record.NormalizedKey);
+            if (!best.TryGetValue(representative, out var current))
             {
-                best = record;
-                bestRank = rank;
-                bestLookup = record.LastLookupUtc;
+                best[representative] = record;
+                continue;
+            }
+
+            var rank = RankLookupStatus(record.LookupStatus);
+            var currentRank = RankLookupStatus(current.LookupStatus);
+            if (rank > currentRank
+                || (rank == currentRank && IsMoreRecent(record.LastLookupUtc, current.LastLookupUtc)))
+            {
+                best[representative] = record;
             }
         }
 
@@ -224,35 +228,31 @@ public partial class SeriesLibraryService
     /// the most recently downloaded/uploaded image breaking ties, so the
     /// library card surfaces the same image the Manage Names modal shows.
     /// </summary>
-    private static SeriesMetadataCacheRecord? ResolveImageRecordForGroup(
-        string representative,
+    private static Dictionary<string, SeriesMetadataCacheRecord> BuildBestImageRecordByRepresentative(
         IReadOnlyList<SeriesMetadataCacheRecord> records,
         UnionFind<string> unionFind)
     {
-        SeriesMetadataCacheRecord? best = null;
-        var bestIsUser = false;
-        DateTime? bestDownloaded = null;
-
+        var best = new Dictionary<string, SeriesMetadataCacheRecord>(StringComparer.OrdinalIgnoreCase);
         foreach (var record in records)
         {
-            if (!record.HasImage)
+            if (!record.HasImage || !unionFind.Contains(record.NormalizedKey))
             {
                 continue;
             }
-            if (!unionFind.Contains(record.NormalizedKey)
-                || !string.Equals(unionFind.Find(record.NormalizedKey), representative, StringComparison.OrdinalIgnoreCase))
+
+            var representative = unionFind.Find(record.NormalizedKey);
+            if (!best.TryGetValue(representative, out var current))
             {
+                best[representative] = record;
                 continue;
             }
 
             var isUser = record.IsUserImage;
-            if (best is null
-                || (isUser && !bestIsUser)
-                || (isUser == bestIsUser && IsMoreRecent(record.ImageDownloadedUtc, bestDownloaded)))
+            var currentIsUser = current.IsUserImage;
+            if ((isUser && !currentIsUser)
+                || (isUser == currentIsUser && IsMoreRecent(record.ImageDownloadedUtc, current.ImageDownloadedUtc)))
             {
-                best = record;
-                bestIsUser = isUser;
-                bestDownloaded = record.ImageDownloadedUtc;
+                best[representative] = record;
             }
         }
 

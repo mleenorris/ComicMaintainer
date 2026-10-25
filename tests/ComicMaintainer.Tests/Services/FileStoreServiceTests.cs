@@ -1529,4 +1529,32 @@ public class FileStoreServiceTests
         Assert.True(((ComicMetadataFieldFlags)row.Metadata.UserLockedFieldsMask).HasFlag(ComicMetadataFieldFlags.Series));
         Assert.True(((ComicMetadataFieldFlags)row.Metadata.UserLockedFieldsMask).HasFlag(ComicMetadataFieldFlags.Issue));
     }
+
+    [Fact]
+    public async Task ChangeVersion_BumpsOnFileAndReadStateMutations()
+    {
+        var filePath = Path.Combine(_testDirectory, "versioned.cbz");
+        File.WriteAllText(filePath, "content");
+
+        var v0 = _service.ChangeVersion;
+        await _service.AddFileAsync(filePath);
+        var v1 = _service.ChangeVersion;
+        Assert.True(v1 > v0);
+
+        await _service.MarkFileRenamedAsync(filePath, true);
+        var v2 = _service.ChangeVersion;
+        Assert.True(v2 > v1);
+
+        await _service.MarkFileReadAsync(filePath, true);
+        var v3 = _service.ChangeVersion;
+        Assert.True(v3 > v2);
+
+        // Pure reads never bump the version.
+        await _service.GetAllFilesAsync();
+        await _service.GetFilteredFilesAsync("read");
+        Assert.Equal(v3, _service.ChangeVersion);
+
+        await _service.RemoveFileAsync(filePath);
+        Assert.True(_service.ChangeVersion > v3);
+    }
 }

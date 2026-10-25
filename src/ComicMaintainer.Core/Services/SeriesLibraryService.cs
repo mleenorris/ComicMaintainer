@@ -29,6 +29,20 @@ public partial class SeriesLibraryService : ISeriesLibraryService
     private readonly IOptionsMonitor<AppSettings> _settings;
     private readonly ILogger<SeriesLibraryService> _logger;
     private readonly ISeriesNameResolver? _seriesNameResolver;
+    private readonly IUserContextAccessor? _userContext;
+
+    /// <summary>
+    /// Safety net on top of version-based invalidation: a snapshot is never
+    /// served for longer than this, so any change that slips past the change
+    /// counters (e.g. an out-of-band database edit) self-heals quickly.
+    /// </summary>
+    private static readonly TimeSpan SnapshotMaxAge = TimeSpan.FromMinutes(5);
+
+    /// <summary>Upper bound on cached summary views per snapshot (filter/search/sort combos).</summary>
+    private const int MaxSummaryViewsPerSnapshot = 32;
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<GroupsCacheKey, GroupsSnapshot> _snapshotCache = new();
+    private readonly SemaphoreSlim _snapshotBuildLock = new(1, 1);
 
     public SeriesLibraryService(
         IFileStoreService fileStore,
@@ -36,8 +50,10 @@ public partial class SeriesLibraryService : ISeriesLibraryService
         ISeriesMetadataCacheService metadataCache,
         IOptionsMonitor<AppSettings> settings,
         ILogger<SeriesLibraryService> logger,
-        ISeriesNameResolver? seriesNameResolver = null)
+        ISeriesNameResolver? seriesNameResolver = null,
+        IUserContextAccessor? userContext = null)
     {
+        _userContext = userContext;
         _fileStore = fileStore;
         _processor = processor;
         _metadataCache = metadataCache;

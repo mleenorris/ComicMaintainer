@@ -93,6 +93,7 @@ public partial class FileStoreService
         };
 
         _files.AddOrUpdate(filePath, comicFile, (_, _) => comicFile);
+        MarkChanged();
 
         // Persist to database
         try
@@ -170,6 +171,7 @@ public partial class FileStoreService
     {
         _files.TryRemove(filePath, out _);
         _duplicateFiles.TryRemove(filePath, out _);
+        MarkChanged();
 
         // Remove from database
         try
@@ -260,6 +262,7 @@ public partial class FileStoreService
             _files[newPath] = newFile;
             if (newFile.IsDuplicate)
                 _duplicateFiles[newPath] = true;
+            MarkChanged();
 
             _logger.LogDebug("Updated file path in memory store: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
         }
@@ -429,6 +432,7 @@ public partial class FileStoreService
             if (_files.TryGetValue(filePath, out var file))
             {
                 file.SeriesMetadataVersion = version;
+                MarkChanged();
             }
         }
         catch (Exception ex)
@@ -459,6 +463,7 @@ public partial class FileStoreService
 
         var updated = ToComicFile(entity);
         _files.AddOrUpdate(filePath, updated, (_, _) => updated);
+        MarkChanged();
         await BroadcastFileListUpdateSafeAsync();
     }
 }

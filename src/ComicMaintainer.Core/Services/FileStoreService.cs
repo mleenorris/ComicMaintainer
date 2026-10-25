@@ -13,7 +13,7 @@ namespace ComicMaintainer.Core.Services;
 /// <summary>
 /// In-memory file store service (can be replaced with database implementation)
 /// </summary>
-public partial class FileStoreService : IFileStoreService
+public partial class FileStoreService : IFileStoreService, IChangeVersionSource
 {
     private const string UnmarkedCountCacheKey = "FileStore.UnmarkedCount";
     private static readonly TimeSpan UnmarkedCountCacheTtl = TimeSpan.FromSeconds(10);
@@ -33,6 +33,18 @@ public partial class FileStoreService : IFileStoreService
     private readonly IEventBroadcaster? _eventBroadcaster;
     private readonly IMemoryCache? _memoryCache;
     private readonly IUserContextAccessor? _userContext;
+    private long _changeVersion;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Bumped whenever the in-memory file snapshot or any user's read state
+    /// changes. Derived views (series library snapshot, combinable folders,
+    /// folder-key maps) key their caches on this value.
+    /// </remarks>
+    public long ChangeVersion => Interlocked.Read(ref _changeVersion);
+
+    /// <summary>Records that the file snapshot or read state changed.</summary>
+    private void MarkChanged() => Interlocked.Increment(ref _changeVersion);
 
     public FileStoreService(
         IOptionsMonitor<AppSettings> settings,
@@ -162,6 +174,7 @@ public partial class FileStoreService : IFileStoreService
         // Invalidate cached aggregates whose values depend on the file list,
         // so the next request recomputes them from the database.
         _memoryCache?.Remove(UnmarkedCountCacheKey);
+        MarkChanged();
 
         if (_eventBroadcaster is null) return;
         try

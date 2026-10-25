@@ -20,19 +20,15 @@ public partial class SeriesLibraryService
         // Use the unfiltered grouping so adjacency reflects the whole series
         // regardless of any active library filter, and never reads archives
         // off disk so the reader's next/previous prefetch stays fast.
-        var groupingKeyByFile = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var groups = await BuildGroupsAsync(filter: null, allowDiskRead: false, cancellationToken, groupingKeyByFile);
+        var snapshot = await GetGroupsSnapshotAsync(filter: null, allowDiskRead: false, cancellationToken);
+        var groupingKeyByFile = snapshot.GroupingKeyByFile;
 
-        var owningSeries = groups.Values.FirstOrDefault(accumulator =>
-            accumulator.Issues.Any(issue =>
-                string.Equals(issue.FilePath, filePath, StringComparison.Ordinal)));
-
-        if (owningSeries is null)
+        if (!snapshot.OwnerByFilePath.TryGetValue(filePath, out var owningSeries))
         {
             return new AdjacentIssueResult { Found = false };
         }
 
-        var sortedIssues = SortIssues(owningSeries.Issues);
+        var sortedIssues = owningSeries.GetSortedIssues().ToList();
 
         // A library card can legitimately span several distinct source series:
         // union-find merges groups through cache aliases / shared metadata, and
@@ -180,7 +176,9 @@ public partial class SeriesLibraryService
         // Best-effort upgrade: for issues with empty title metadata, try the
         // archive on disk. Bounded to the requested page so we never read more
         // archives than the user actually sees.
-        var sortedIssues = SortIssues(accumulator.Issues);
+        // Copy: the page list below may be patched in place, and the sorted
+        // list can be shared with other requests through the library snapshot.
+        var sortedIssues = new List<SeriesIssueDto>(accumulator.GetSortedIssues());
         var totalIssues = sortedIssues.Count;
         var effectivePerPage = perPage == -1 ? totalIssues : Math.Max(1, perPage);
         var totalPages = perPage == -1 ? 1 : (int)Math.Ceiling((double)totalIssues / effectivePerPage);

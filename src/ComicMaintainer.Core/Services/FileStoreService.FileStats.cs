@@ -67,6 +67,7 @@ public partial class FileStoreService
                 file.LastModified = lastWrite;
             }
         }
+        MarkChanged();
 
         return changed;
     }

@@ -41,6 +41,7 @@ public partial class FileStoreService
                 }
             }
 
+            MarkChanged();
             var loadedCount = _files.Count;
             var processedCount = _files.Values.Count(f => f.IsProcessed);
             var duplicateCount = _duplicateFiles.Count;
@@ -70,6 +71,7 @@ public partial class FileStoreService
 
         var updated = ToComicFile(entity);
         _files.AddOrUpdate(filePath, updated, (_, _) => updated);
+        MarkChanged();
     }
 
     public async Task<int> MarkFilesNeedingBackfillAsync(IEnumerable<string> filePaths, CancellationToken cancellationToken = default)
@@ -121,6 +123,7 @@ public partial class FileStoreService
                         var updated = ToComicFile(entity);
                         _files.AddOrUpdate(entity.FilePath, updated, (_, _) => updated);
                     }
+                    MarkChanged();
                 }
             }
         }
@@ -161,6 +164,7 @@ public partial class FileStoreService
                     // Also remove from in-memory store
                     _files.TryRemove(entity.FilePath, out _);
                     _duplicateFiles.TryRemove(entity.FilePath, out _);
+                    MarkChanged();
                 }
             }
             

@@ -38,6 +38,7 @@ public partial class FileStoreService
         {
             file.IsDuplicate = duplicate;
         }
+        MarkChanged();
 
         // Persist to database
         try
@@ -102,6 +103,7 @@ public partial class FileStoreService
             // Update IsProcessed based on both renamed and normalized states
             file.IsProcessed = file.IsRenamed && file.IsNormalized;
         }
+        MarkChanged();
 
         // Persist to database
         try
@@ -170,6 +172,7 @@ public partial class FileStoreService
             // Update IsProcessed based on both renamed and normalized states
             file.IsProcessed = file.IsRenamed && file.IsNormalized;
         }
+        MarkChanged();
 
         // Persist to database
         try
@@ -295,6 +298,7 @@ public partial class FileStoreService
                 }
                 _duplicateFiles.TryRemove(path, out _);
             }
+            MarkChanged();
 
             if (updated > 0)
             {

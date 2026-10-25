@@ -44,6 +44,7 @@ public partial class FileStoreService
     private void InvalidateUserReadPaths(string userId)
     {
         _memoryCache?.Remove(ReadPathsCacheKey(userId));
+        MarkChanged();
     }
 
     /// <summary>

@@ -116,6 +116,18 @@
             return confirm(`${actionDescription}\n\nClick OK to include files already marked as ${statusDescription}, or Cancel to skip them.`);
         }
 
+        // In-flight list requests. A fresh (non-append) reload requested while
+        // one of these is running aborts it, so a stale response for the old
+        // filter/search/sort is never rendered and the new query starts as
+        // soon as the aborted request settles instead of after a full
+        // (possibly slow, on large libraries) response.
+        let seriesLoadController = null;
+        let folderLoadController = null;
+
+        function isAbortError(error) {
+            return !!error && error.name === 'AbortError';
+        }
+
         async function loadSeriesLibrary(opts, legacyRefresh) {
             // Backwards-compat: callers used to pass (page, refresh) numerically.
             // The page argument is ignored — pagination is now offset-based and
@@ -142,6 +154,9 @@
                 // (label updated, content stale) until a manual page refresh.
                 if (!append) {
                     seriesReloadPending = true;
+                    if (seriesLoadController) {
+                        seriesLoadController.abort();
+                    }
                 }
                 return;
             }
@@ -166,6 +181,8 @@
             }
 
             seriesLoading = true;
+            const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            seriesLoadController = controller;
             try {
                 let url = apiUrl(`/api/files/series?offset=${seriesOffset}&limit=${SERIES_PAGE_SIZE}`);
                 if (refresh) {
@@ -185,7 +202,8 @@
                 }
 
                 const response = await fetch(url, {
-                    headers: getAuthHeaders()
+                    headers: getAuthHeaders(),
+                    signal: controller ? controller.signal : undefined
                 });
                 if (handleAuthError(response)) return;
                 if (!response.ok) {
@@ -202,7 +220,7 @@
 
                 if (currentSeriesDetailId) {
                     renderSeriesDetail(currentSeriesDetailId);
-                } else {
+                } else if (!(append && appendSeriesLibraryItems(newSeries))) {
                     renderSeriesLibrary();
                 }
 
@@ -214,8 +232,15 @@
                     loadLibraryHealth();
                 }
             } catch (error) {
-                showMessage('Failed to load series: ' + error.message, 'error', { reference: true });
+                // Superseded by a newer reload (see seriesLoadController); the
+                // pending reload below fetches the current selection.
+                if (!isAbortError(error)) {
+                    showMessage('Failed to load series: ' + error.message, 'error', { reference: true });
+                }
             } finally {
+                if (seriesLoadController === controller) {
+                    seriesLoadController = null;
+                }
                 seriesLoading = false;
                 if (seriesReloadPending) {
                     // A filter/search/sort change arrived while this load was in
@@ -242,6 +267,9 @@
                 // reload requested while a load is in flight; re-run it after.
                 if (!append) {
                     folderReloadPending = true;
+                    if (folderLoadController) {
+                        folderLoadController.abort();
+                    }
                 }
                 return;
             }
@@ -263,6 +291,8 @@
             }
 
             folderLoading = true;
+            const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            folderLoadController = controller;
             try {
                 let url = apiUrl(`/api/files/folders?offset=${folderOffset}&limit=${FOLDER_PAGE_SIZE}`);
                 if (refresh) {
@@ -282,7 +312,8 @@
                 }
 
                 const response = await fetch(url, {
-                    headers: getAuthHeaders()
+                    headers: getAuthHeaders(),
+                    signal: controller ? controller.signal : undefined
                 });
                 if (handleAuthError(response)) return;
                 if (!response.ok) {
@@ -315,8 +346,13 @@
                     loadLibraryHealth();
                 }
             } catch (error) {
-                showMessage('Failed to load files: ' + error.message, 'error', { reference: true });
+                if (!isAbortError(error)) {
+                    showMessage('Failed to load files: ' + error.message, 'error', { reference: true });
+                }
             } finally {
+                if (folderLoadController === controller) {
+                    folderLoadController = null;
+                }
                 folderLoading = false;
                 if (folderReloadPending) {
                     folderReloadPending = false;
@@ -773,6 +809,40 @@
             updateSelectInfo();
         }
 
+        // Infinite-scroll pages only add cards, so append them to the existing
+        // grid/list instead of re-rendering every loaded series. A full render
+        // per page made scrolling through a large library O(n^2) in DOM work
+        // and re-ran image hydration for every card already on screen.
+        // Returns false when there is no rendered container to append to, so
+        // the caller falls back to renderSeriesLibrary().
+        function appendSeriesLibraryItems(newSeries) {
+            const fileList = document.getElementById('fileList');
+            if (!fileList) return false;
+            const layout = getEffectiveSeriesLayout();
+            const selector = (layout === 'list')
+                ? '.series-list'
+                : (layout === 'grid') ? '.series-grid--titled' : '.series-grid--compact';
+            const container = fileList.querySelector(selector);
+            if (!container) return false;
+            if (!newSeries.length) return true;
+
+            const markup = (layout === 'list')
+                ? renderSeriesLibraryList(newSeries)
+                : (layout === 'grid')
+                    ? renderSeriesLibraryGrid(newSeries)
+                    : renderSeriesLibraryCompact(newSeries);
+            const scratch = document.createElement('div');
+            appendHtml(scratch, rawHtml(markup));
+            const source = scratch.querySelector(selector);
+            if (!source) return false;
+            const added = Array.from(source.children);
+            container.append(...added);
+            added.forEach(node => hydrateProtectedImages(node));
+            syncSeriesSelectionControls();
+            updateSelectInfo();
+            return true;
+        }
+
         // Small toolbar shown above the series grid/list letting the user
         // select every loaded series at once (so the bulk process / rename /
         // normalize actions in the Library Health dropdown operate on them) or
@@ -936,10 +1006,10 @@
         }
 
         // Cover-only cards with title overlaid on the cover (original behaviour).
-        function renderSeriesLibraryCompact() {
+        function renderSeriesLibraryCompact(items = seriesLibrary) {
             return `
                 <div class="series-grid series-grid--compact">
-                    ${seriesLibrary.map(series => `
+                    ${items.map(series => `
                         <button class="series-card${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
                             ${renderSeriesSelectBox(series)}
                             <div class="series-cover-wrapper">
@@ -960,10 +1030,10 @@
 
         // Grid of cards with the title rendered *below* the cover (not overlaid),
         // allowing it to wrap onto multiple lines so long names remain readable.
-        function renderSeriesLibraryGrid() {
+        function renderSeriesLibraryGrid(items = seriesLibrary) {
             return `
                 <div class="series-grid series-grid--titled">
-                    ${seriesLibrary.map(series => `
+                    ${items.map(series => `
                         <button class="series-card series-card--titled${selectedSeries.has(series.id) ? ' series-card--selected' : ''}" type="button" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
                             ${renderSeriesSelectBox(series)}
                             <div class="series-cover-wrapper">
@@ -984,10 +1054,10 @@
         // Single-column list rows optimised for phones in portrait: small thumbnail
         // on the left, full-width title (wraps to 2 lines) and meta on the right,
         // issue count on the far right.
-        function renderSeriesLibraryList() {
+        function renderSeriesLibraryList(items = seriesLibrary) {
             return `
                 <div class="series-list" role="list">
-                    ${seriesLibrary.map(series => `
+                    ${items.map(series => `
                         <button class="series-list-row${selectedSeries.has(series.id) ? ' series-list-row--selected' : ''}" type="button" role="listitem" aria-expanded="${currentSeriesDetailId === series.id ? 'true' : 'false'}" aria-controls="seriesDetailPanel" aria-label="Open series ${escapeHtml(series.title)}" onclick="openSeriesDetail('${escapeJs(series.id)}')">
                             ${renderSeriesSelectBox(series)}
                             <div class="series-list-thumb-wrapper">

@@ -15,7 +15,7 @@ namespace ComicMaintainer.Core.Services;
 /// </summary>
 public partial class FileStoreService : IFileStoreService, IChangeVersionSource
 {
-    private const string UnmarkedCountCacheKey = "FileStore.UnmarkedCount";
+    private const string UnmarkedCountCacheKeyPrefix = "FileStore.UnmarkedCount";
     private static readonly TimeSpan UnmarkedCountCacheTtl = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ReadPathsCacheTtl = TimeSpan.FromSeconds(30);
 
@@ -181,7 +181,6 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
     {
         // Invalidate cached aggregates whose values depend on the file list,
         // so the next request recomputes them from the database.
-        _memoryCache?.Remove(UnmarkedCountCacheKey);
         MarkChanged();
 
         if (_eventBroadcaster is null) return;

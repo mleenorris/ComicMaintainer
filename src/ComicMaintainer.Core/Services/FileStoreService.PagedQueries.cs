@@ -260,7 +260,9 @@ public partial class FileStoreService
 
     public async Task<int> GetUnmarkedCountAsync(CancellationToken cancellationToken = default)
     {
-        if (_memoryCache != null && _memoryCache.TryGetValue(UnmarkedCountCacheKey, out int cached))
+        var changeVersion = ChangeVersion;
+        var cacheKey = $"{UnmarkedCountCacheKeyPrefix}.{changeVersion}";
+        if (_memoryCache != null && _memoryCache.TryGetValue(cacheKey, out int cached))
         {
             return cached;
         }
@@ -270,7 +272,7 @@ public partial class FileStoreService
             .AsNoTracking()
             .CountAsync(f => !(f.IsRenamed && f.IsNormalized) && !f.IsDuplicate, cancellationToken);
 
-        _memoryCache?.Set(UnmarkedCountCacheKey, count, UnmarkedCountCacheTtl);
+        _memoryCache?.Set(cacheKey, count, UnmarkedCountCacheTtl);
         return count;
     }
 

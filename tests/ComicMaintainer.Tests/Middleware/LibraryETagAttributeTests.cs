@@ -45,7 +45,7 @@ public class LibraryETagAttributeTests
     }
 
     private async Task<(HttpContext Http, IActionResult? Result, bool Executed)> InvokeAsync(
-        IServiceProvider services, string? ifNoneMatch = null, string query = "?page=1")
+        IServiceProvider services, string? ifNoneMatch = null, string query = "?page=1", int actionStatus = StatusCodes.Status200OK)
     {
         var http = new DefaultHttpContext { RequestServices = services };
         http.Request.Method = HttpMethods.Get;
@@ -59,15 +59,19 @@ public class LibraryETagAttributeTests
         var actionContext = new ActionContext(http, new RouteData(), new ActionDescriptor());
         var executing = new ActionExecutingContext(actionContext, new List<IFilterMetadata>(), new Dictionary<string, object?>(), controller: new object());
         var executed = false;
+        ActionExecutedContext? actionExecuted = null;
 
         await new LibraryETagAttribute().OnActionExecutionAsync(executing, () =>
         {
             executed = true;
-            var result = new OkObjectResult(new { ok = true });
-            return Task.FromResult(new ActionExecutedContext(actionContext, new List<IFilterMetadata>(), new object()) { Result = result });
+            IActionResult result = actionStatus == StatusCodes.Status200OK
+                ? new OkObjectResult(new { ok = true })
+                : new StatusCodeResult(actionStatus);
+            actionExecuted = new ActionExecutedContext(actionContext, new List<IFilterMetadata>(), new object()) { Result = result };
+            return Task.FromResult(actionExecuted!);
         });
 
-        return (http, executing.Result, executed);
+        return (http, executing.Result ?? actionExecuted?.Result, executed);
     }
 
     [Fact]
@@ -91,6 +95,29 @@ public class LibraryETagAttributeTests
 
         Assert.False(executed);
         Assert.Equal(StatusCodes.Status304NotModified, Assert.IsType<StatusCodeResult>(result).StatusCode);
+    }
+
+    [Fact]
+    public async Task WildcardIfNoneMatch_RunsActionAndReturns304ForSuccessfulRepresentation()
+    {
+        var (http, result, executed) = await InvokeAsync(BuildServices(), "*");
+
+        Assert.True(executed);
+        Assert.Equal(StatusCodes.Status304NotModified, Assert.IsType<StatusCodeResult>(result).StatusCode);
+        Assert.True(http.Response.Headers.ContainsKey("ETag"));
+    }
+
+    [Fact]
+    public async Task WildcardIfNoneMatch_PreservesNotFoundResult()
+    {
+        var (http, result, executed) = await InvokeAsync(
+            BuildServices(),
+            "*",
+            actionStatus: StatusCodes.Status404NotFound);
+
+        Assert.True(executed);
+        Assert.Equal(StatusCodes.Status404NotFound, Assert.IsType<StatusCodeResult>(result).StatusCode);
+        Assert.False(http.Response.Headers.ContainsKey("ETag"));
     }
 
     [Theory]

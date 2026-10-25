@@ -53,7 +53,8 @@ public sealed class LibraryETagAttribute : Attribute, IAsyncActionFilter
             return;
         }
 
-        if (IfNoneMatchMatches(httpContext.Request, etag))
+        var wildcard = IfNoneMatchContainsWildcard(httpContext.Request);
+        if (!wildcard && IfNoneMatchMatches(httpContext.Request, etag))
         {
             SetCacheHeaders(httpContext.Response, etag);
             context.Result = new StatusCodeResult(StatusCodes.Status304NotModified);
@@ -71,6 +72,10 @@ public sealed class LibraryETagAttribute : Attribute, IAsyncActionFilter
             if (status == StatusCodes.Status200OK)
             {
                 SetCacheHeaders(httpContext.Response, etag);
+                if (wildcard)
+                {
+                    executed.Result = new StatusCodeResult(StatusCodes.Status304NotModified);
+                }
             }
         }
     }
@@ -121,13 +126,20 @@ public sealed class LibraryETagAttribute : Attribute, IAsyncActionFilter
         var current = EntityTagHeaderValue.Parse(etag);
         foreach (var tag in tags)
         {
-            if (tag.Equals(EntityTagHeaderValue.Any) || tag.Compare(current, useStrongComparison: false))
+            if (tag.Compare(current, useStrongComparison: false))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static bool IfNoneMatchContainsWildcard(HttpRequest request)
+    {
+        var header = request.Headers[HeaderNames.IfNoneMatch];
+        return EntityTagHeaderValue.TryParseList(header, out var tags)
+            && tags.Any(tag => tag.Equals(EntityTagHeaderValue.Any));
     }
 
     private static void SetCacheHeaders(HttpResponse response, string etag)

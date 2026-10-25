@@ -78,7 +78,8 @@ public partial class SeriesLibraryService
             // bounded to (filters x active users) live entries.
             foreach (var entry in _snapshotCache)
             {
-                if (!entry.Value.Versions.Equals(versions))
+                if (!entry.Value.Versions.Equals(versions)
+                    || DateTime.UtcNow - entry.Value.BuiltAtUtc >= SnapshotMaxAge)
                 {
                     _snapshotCache.TryRemove(entry);
                 }

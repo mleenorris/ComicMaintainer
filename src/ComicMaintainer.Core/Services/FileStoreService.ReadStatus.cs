@@ -111,7 +111,6 @@ public partial class FileStoreService
                 row.UpdatedAt = now;
             }
 
-            InvalidateUserReadPaths(row.UserId);
         }
 
         var sourceProgress = await dbContext.ReadingProgresses
@@ -147,6 +146,10 @@ public partial class FileStoreService
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        foreach (var userId in sourceRows.Select(row => row.UserId).Distinct(StringComparer.Ordinal))
+        {
+            InvalidateUserReadPaths(userId);
+        }
         _logger.LogDebug(
             "Moved read status/progress for {Count} user(s): {OldPath} -> {NewPath}",
             sourceRows.Count, SanitizeForLogging(oldPath), SanitizeForLogging(newPath));

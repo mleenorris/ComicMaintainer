@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
@@ -354,12 +355,9 @@ public partial class SeriesLibraryService
         foreach (var accumulator in collapsed.Values)
         {
             accumulator.SortedIssues = SortIssues(accumulator.Issues);
-            foreach (var issue in accumulator.Issues)
+            foreach (var issue in accumulator.Issues.Where(issue => !string.IsNullOrEmpty(issue.FilePath)))
             {
-                if (!string.IsNullOrEmpty(issue.FilePath))
-                {
-                    ownerByFilePath.TryAdd(issue.FilePath, accumulator);
-                }
+                ownerByFilePath.TryAdd(issue.FilePath, accumulator);
             }
         }
 

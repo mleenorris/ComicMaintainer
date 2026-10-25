@@ -1533,7 +1533,7 @@ public class FileStoreServiceTests
     [Fact]
     public async Task ChangeVersion_BumpsOnFileAndReadStateMutations()
     {
-        var filePath = Path.Combine(_testDirectory, "versioned.cbz");
+        var filePath = Path.Join(_testDirectory, "versioned.cbz");
         File.WriteAllText(filePath, "content");
 
         var v0 = _service.ChangeVersion;

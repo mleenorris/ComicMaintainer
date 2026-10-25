@@ -27,7 +27,7 @@ public class SeriesLibrarySnapshotCacheTests
     private readonly TestUserContextAccessor _user = new("alice");
     private long _fileVersion = 1;
     private long _metadataVersion = 1;
-    private List<ComicFile> _files;
+    private readonly List<ComicFile> _files;
 
     public SeriesLibrarySnapshotCacheTests()
     {

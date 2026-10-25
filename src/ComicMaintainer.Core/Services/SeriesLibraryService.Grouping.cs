@@ -77,13 +77,11 @@ public partial class SeriesLibraryService
 
             // Drop snapshots that can never be served again so memory stays
             // bounded to (filters x active users) live entries.
-            foreach (var entry in _snapshotCache)
+            foreach (var entry in _snapshotCache.Where(entry =>
+                         !entry.Value.Versions.Equals(versions)
+                         || DateTime.UtcNow - entry.Value.BuiltAtUtc >= SnapshotMaxAge))
             {
-                if (!entry.Value.Versions.Equals(versions)
-                    || DateTime.UtcNow - entry.Value.BuiltAtUtc >= SnapshotMaxAge)
-                {
-                    _snapshotCache.TryRemove(entry);
-                }
+                _snapshotCache.TryRemove(entry);
             }
             _snapshotCache[cacheKey] = snapshot;
             return snapshot;

@@ -52,7 +52,7 @@ public partial class SeriesLibraryService
 
         var cacheKey = new GroupsCacheKey(
             string.IsNullOrWhiteSpace(filter) ? null : filter.Trim().ToLowerInvariant(),
-            _userContext?.UserId);
+            _userContext.UserId);
 
         // Capture versions BEFORE reading any inputs: a write that lands while
         // we build bumps the version afterwards, so the stored snapshot is

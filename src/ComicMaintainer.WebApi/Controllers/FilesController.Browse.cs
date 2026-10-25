@@ -1,10 +1,12 @@
 using ComicMaintainer.Core.Utilities;
+using ComicMaintainer.WebApi.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
 public partial class FilesController
 {
+    [LibraryETag]
     [HttpGet]
     public async Task<ActionResult<object>> GetFiles(
         [FromQuery] string? filter = null,
@@ -47,6 +49,7 @@ public partial class FilesController
         }
     }
 
+    [LibraryETag]
     [HttpGet("series")]
     public async Task<ActionResult<object>> GetSeries(
         [FromQuery] string? filter = null,
@@ -119,6 +122,7 @@ public partial class FilesController
         }
     }
 
+    [LibraryETag]
     [HttpGet("folders")]
     public async Task<ActionResult<object>> GetFolders(
         [FromQuery] string? filter = null,
@@ -156,6 +160,7 @@ public partial class FilesController
         }
     }
 
+    [LibraryETag]
     [HttpGet("folders/{encodedPath}/files")]
     public async Task<ActionResult<object>> GetFolderFiles(
         string encodedPath,
@@ -187,6 +192,7 @@ public partial class FilesController
         }
     }
 
+    [LibraryETag]
     [HttpGet("series/{seriesId}/issues")]
     public async Task<ActionResult<object>> GetSeriesIssues(
         string seriesId,
@@ -269,7 +275,7 @@ public partial class FilesController
                     var seriesDirs = new HashSet<string>(
                         result.Folders.Select(f => f.Directory),
                         StringComparer.OrdinalIgnoreCase);
-                    var groups = await BuildCombinableFolderGroupsAsync(cancellationToken);
+                    var groups = await GetCombinableFolderGroupsCachedAsync(cancellationToken);
                     var match = groups.FirstOrDefault(g =>
                         g.Folders.Count(f => seriesDirs.Contains(f.Directory)) >= 2);
                     if (match is not null)
@@ -313,6 +319,7 @@ public partial class FilesController
         }
     }
 
+    [LibraryETag]
     [HttpGet("counts")]
     public async Task<ActionResult<object>> GetFileCounts()
     {
@@ -323,7 +330,7 @@ public partial class FilesController
 
             try
             {
-                combinableFolders = await GetCombinableFolderCountAsync();
+                combinableFolders = await GetCombinableFolderCountAsync(HttpContext?.RequestAborted ?? default);
             }
             catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException)
             {

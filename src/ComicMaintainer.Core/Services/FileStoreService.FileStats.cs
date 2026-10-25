@@ -50,6 +50,7 @@ public partial class FileStoreService
             if (changed > 0)
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
+                MarkChanged();
             }
         }
         catch (Exception ex)

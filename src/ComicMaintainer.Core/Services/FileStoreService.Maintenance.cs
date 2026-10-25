@@ -68,6 +68,7 @@ public partial class FileStoreService
         }
         entity.UpdatedAt = DateTime.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
+        MarkChanged();
 
         var updated = ToComicFile(entity);
         _files.AddOrUpdate(filePath, updated, (_, _) => updated);
@@ -115,6 +116,7 @@ public partial class FileStoreService
                 if (entities.Count > 0)
                 {
                     await dbContext.SaveChangesAsync(cancellationToken);
+                    MarkChanged();
 
                     // Mirror the bumped versions into the in-memory snapshot so
                     // subsequent reads agree with the database.
@@ -173,6 +175,7 @@ public partial class FileStoreService
             {
                 dbContext.ComicFiles.RemoveRange(filesToRemove);
                 await dbContext.SaveChangesAsync(cancellationToken);
+                MarkChanged();
                 removedCount = filesToRemove.Count;
                 
                 _logger.LogInformation("Removed {Count} stale database entries", removedCount);

@@ -20,6 +20,14 @@ public partial class FileStoreService : IFileStoreService, IChangeVersionSource
     private static readonly TimeSpan ReadPathsCacheTtl = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// Lifetime of values derived from the file table (page counts, distinct
+    /// directories). Their cache keys embed <see cref="ChangeVersion"/>, so a
+    /// mutation makes them unreachable immediately; the TTL just evicts the
+    /// orphaned entries and bounds staleness from out-of-band DB edits.
+    /// </summary>
+    private static readonly TimeSpan DerivedCacheTtl = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Batch size for IN-list queries. SQLite defaults to a 999-parameter limit per
     /// statement; 500 leaves headroom for the other predicates in the same query.
     /// </summary>

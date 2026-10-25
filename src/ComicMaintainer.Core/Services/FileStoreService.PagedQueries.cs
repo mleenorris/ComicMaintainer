@@ -114,7 +114,14 @@ public partial class FileStoreService
         query = ApplyEntityFilter(dbContext, query, filter);
         query = ApplyEntitySearch(query, search);
 
-        var totalFiles = await query.CountAsync(cancellationToken);
+        // Page-through requests for the same view re-ask for the same total,
+        // so memoize it against the store's change version.
+        var countCacheKey = $"FileStore.PageCount|{ChangeVersion}|{readUserId}|{filter}|{search}";
+        if (_memoryCache == null || !_memoryCache.TryGetValue(countCacheKey, out int totalFiles))
+        {
+            totalFiles = await query.CountAsync(cancellationToken);
+            _memoryCache?.Set(countCacheKey, totalFiles, DerivedCacheTtl);
+        }
 
         var ordered = ApplyEntityOrder(query, sort, direction);
 
@@ -190,11 +197,7 @@ public partial class FileStoreService
         // so loading and mapping in memory is cheap, and lets us do the
         // file-level filter as `WHERE Directory IN (...)` which uses the
         // Directory index.
-        var distinctDirs = await dbContext.ComicFiles
-            .AsNoTracking()
-            .Select(f => f.Directory)
-            .Distinct()
-            .ToListAsync(cancellationToken);
+        var distinctDirs = await GetDistinctDirectoriesAsync(dbContext, cancellationToken);
 
         var matchedDirs = distinctDirs
             .Where(d => string.Equals(ComputeFolderKeyFromDirectory(d, watchedDir), key, StringComparison.Ordinal))
@@ -228,6 +231,31 @@ public partial class FileStoreService
         }).ToListAsync(cancellationToken);
 
         return rows.Select(ToFileDto).ToList();
+    }
+
+    /// <summary>
+    /// Distinct raw <c>Directory</c> values, cached until the file store
+    /// changes so opening folders in a large library doesn't re-run a
+    /// DISTINCT over every row each time.
+    /// </summary>
+    private async Task<List<string>> GetDistinctDirectoriesAsync(
+        ComicMaintainerDbContext dbContext,
+        CancellationToken cancellationToken)
+    {
+        var cacheKey = $"FileStore.DistinctDirectories|{ChangeVersion}";
+        if (_memoryCache != null && _memoryCache.TryGetValue(cacheKey, out List<string>? cached) && cached != null)
+        {
+            return cached;
+        }
+
+        var directories = await dbContext.ComicFiles
+            .AsNoTracking()
+            .Select(f => f.Directory)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        _memoryCache?.Set(cacheKey, directories, DerivedCacheTtl);
+        return directories;
     }
 
     public async Task<int> GetUnmarkedCountAsync(CancellationToken cancellationToken = default)

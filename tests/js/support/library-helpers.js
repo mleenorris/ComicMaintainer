@@ -90,11 +90,11 @@ function encodeFolder(path) {
 
 /**
  * Route matcher for GET /api/files/folders/{b64}/files; the handler gets
- * `call.folder` decoded. (The library root, path '', encodes to an empty
- * segment: /api/files/folders//files.)
+ * `call.folder` decoded. The library root (path '') has its own URL,
+ * GET /api/files/folders/files, which this does not match: route it by name.
  */
 function folderFilesMatcher(call) {
-    const match = /^\/api\/files\/folders\/([^/]*)\/files$/.exec(call.path);
+    const match = /^\/api\/files\/folders\/([^/]+)\/files$/.exec(call.path);
     if (!match || call.method !== 'GET') return false;
     call.folder = Buffer.from(match[1], 'base64url').toString('utf8');
     return true;

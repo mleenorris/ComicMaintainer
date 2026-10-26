@@ -322,6 +322,29 @@ public class SeriesLibraryServiceCoverageTests
     }
 
     [Fact]
+    public async Task Grouping_ManualMatchOutranksNewerManualRecord()
+    {
+        _records = new List<SeriesMetadataCacheRecord>
+        {
+            new() { NormalizedKey = "kappa", CanonicalTitle = "Kappa", LookupStatus = "manual", LastLookupUtc = BaseTime.AddDays(9), Source = "AniList" },
+            new() { NormalizedKey = "lambda", CanonicalTitle = "Lambda", LookupStatus = "Manual_Match", LastLookupUtc = BaseTime, Source = "ComicVine" },
+        };
+        _files = new List<ComicFile>
+        {
+            File("/lib/Pair/Pair 001.cbz", series: "Kappa", issue: "1"),
+            File("/lib/Pair/Pair 002.cbz", series: "Lambda", issue: "2"),
+        };
+
+        var result = await CreateService().GetSeriesSummariesAsync();
+
+        var series = Assert.Single(result.Series);
+        Assert.Equal("Lambda", series.Title);
+        Assert.Equal("Manual_Match", series.LookupStatus);
+        Assert.Equal("ComicVine", series.MetadataSource);
+        Assert.Equal(BaseTime, series.LastLookupUtc);
+    }
+
+    [Fact]
     public async Task Grouping_CollapsedDuplicate_PromotesImageSourceAndLatestModified()
     {
         _records = new List<SeriesMetadataCacheRecord>
@@ -734,6 +757,21 @@ public class SeriesLibraryServiceCoverageTests
         Assert.Null(failed.Title);
         Assert.Equal("/lib/Upgrade/noname", all.Issues[^1].FilePath);
         _processor.Verify(p => p.GetSeriesMetadataAsync("/lib/Upgrade/Upgrade 002.cbz", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetSeriesIssuesAsync_UpgradeFillsMissingTitleButKeepsCachedIssueNumber()
+    {
+        _files = new List<ComicFile> { File("/lib/Keep/Keep 001.cbz", series: "Keep", issue: "7") };
+        _processor.Setup(p => p.GetSeriesMetadataAsync("/lib/Keep/Keep 001.cbz", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SeriesMetadata { Title = "Disk Title", Issue = "99" });
+
+        var result = await CreateService().GetSeriesIssuesAsync("keep");
+
+        Assert.NotNull(result);
+        var issue = Assert.Single(result.Issues);
+        Assert.Equal("Disk Title", issue.Title);
+        Assert.Equal("7", issue.Issue);
     }
 
     [Fact]

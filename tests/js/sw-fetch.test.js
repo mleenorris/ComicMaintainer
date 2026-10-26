@@ -512,6 +512,33 @@ test('an uncached stylesheet is fetched and kept; failed and cross-origin answer
     assert.equal(allCached(sw).includes('https://cdn.example.com/js/lib.js'), false);
 });
 
+test('offline, a script or stylesheet that was never cached fails with the network error', async () => {
+    const sw = await installedWorker();
+    sw.network.offline = true;
+
+    for (const path of ['/js/never-cached.js', '/css/never-cached.css']) {
+        await assert.rejects(sw.respond(path), { name: 'TypeError', message: 'Failed to fetch' }, path);
+    }
+});
+
+test('a stylesheet, script or icon that cannot be stored is still served, and the failure is logged', async () => {
+    const sw = await installedWorker();
+    sw.network.route('GET /css/styles.css', reply(200, 'body{}', { headers: { 'Content-Type': 'text/css' } }));
+    sw.network.route('GET /js/main.js', script('// main.js, hotfixed'));
+    const cache = await sw.caches.open(VERSIONED_CACHE);
+    cache.put = async () => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    };
+
+    assert.equal(await (await sw.respond('/css/styles.css')).text(), 'body{}');
+    // A precached script is served at once, and refreshing it fails in the background.
+    assert.equal(await (await sw.respond(`/js/main.js?v=${APP_VERSION}`)).text(), `// /js/main.js?v=${APP_VERSION}`);
+    assert.equal(await (await sw.respond('/icons/badge.png')).text(), 'png');
+    await sw.idle();
+
+    assert.deepEqual(sw.logged('Failed to cache asset').map(entry => entry.args[1]).sort(), ['/css/styles.css', '/icons/badge.png', '/js/main.js']);
+});
+
 test('the runtime asset cache keeps at most 120 entries, evicting the oldest first', async () => {
     const sw = loadServiceWorker();
     installRoutes(sw.network);
@@ -530,6 +557,41 @@ test('the runtime asset cache keeps at most 120 entries, evicting the oldest fir
     assert.equal(urls.length, 120);
     assert.equal(urls[0], absolute('/icons/runtime-2.png'));
     assert.deepEqual(urls.slice(-2), [absolute('/css/theme.css'), absolute('/icons/badge.png')]);
+});
+
+test('the runtime entry bound never evicts what install precached, also in a woken-up worker', async () => {
+    for (const label of ['the worker that installed', 'a woken-up worker']) {
+        const installed = await installedWorker();
+        const sw = label === 'a woken-up worker' ? installed.restart() : installed;
+        const precached = sw.caches.urls(VERSIONED_CACHE);
+        // 120 runtime entries, all of them newer than the precache.
+        const entries = {};
+        for (let i = 0; i < 120; i++) entries[`/icons/runtime-${i}.png`] = image(`icon ${i}`);
+        await sw.caches.seed(VERSIONED_CACHE, entries);
+        sw.network.route('GET /css/theme.css', reply(200, 'body{}', { headers: { 'Content-Type': 'text/css' } }));
+        sw.network.route('GET /reader.html', html(READER_PAGE));
+        sw.network.route('GET /js/main.js', script('// main.js, refreshed'));
+
+        await sw.respond('/css/theme.css');
+        await sw.respond(navigationRequest('/reader.html?file=a.cbz'));
+        // Refreshing a precached script stores it anew, as the latest entry.
+        await sw.respond(`/js/main.js?v=${APP_VERSION}`);
+        await sw.respond('/icons/badge.png');
+        await sw.idle();
+
+        const urls = sw.caches.urls(VERSIONED_CACHE);
+        assert.deepEqual(urls.filter(url => precached.includes(url)).sort(), [...precached].sort(), label);
+        assert.equal(await sw.caches.text(VERSIONED_CACHE, `/js/main.js?v=${APP_VERSION}`), '// main.js, refreshed', label);
+        const runtime = urls.filter(url => !precached.includes(url));
+        assert.equal(runtime.length, 120, label);
+        assert.equal(runtime[0], absolute('/icons/runtime-3.png'), label);
+        assert.deepEqual(runtime.slice(-3), [absolute('/css/theme.css'), absolute('/reader.html'), absolute('/icons/badge.png')], label);
+
+        // An offline launch still finds the offline page and the reader's script.
+        sw.network.offline = true;
+        assert.equal(await (await sw.respond(navigationRequest('/series/42'))).text(), OFFLINE_PAGE, label);
+        assert.equal(await (await sw.respond(`/js/pages/reader.js?v=${APP_VERSION}`)).text(), `// /js/pages/reader.js?v=${APP_VERSION}`, label);
+    }
 });
 
 // --- other static files ----------------------------------------------------------

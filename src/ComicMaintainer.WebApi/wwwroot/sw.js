@@ -78,9 +78,10 @@ async function updateCacheName() {
   }
 }
 
-// Where install and activate record CACHE_NAME. There are two records because
-// an update installs (filling its own cache) while the previous version is
-// still in control and still serving from its cache.
+// Where install and activate record CACHE_NAME, together with the APP_VERSION
+// whose scripts install precached (see precachedUrls). There are two records
+// because an update installs (filling its own cache) while the previous
+// version is still in control and still serving from its cache.
 const STATE_CACHE_NAME = `${CACHE_PREFIX}sw-state-v1`;
 const INSTALLED_CACHE_KEY = '/__sw-state/installed-cache';
 const ACTIVE_CACHE_KEY = '/__sw-state/active-cache';
@@ -92,7 +93,7 @@ async function recordCacheName(key) {
   cacheNameReady = Promise.resolve(CACHE_NAME);
   try {
     const cache = await caches.open(STATE_CACHE_NAME);
-    await cache.put(key, new Response(CACHE_NAME));
+    await cache.put(key, new Response(JSON.stringify({ cacheName: CACHE_NAME, version: APP_VERSION })));
   } catch (error) {
     console.log('Service Worker: Failed to record the cache name', CACHE_NAME, error);
   }
@@ -102,7 +103,9 @@ async function recallCacheName(key, fallback) {
   try {
     const record = await caches.match(key, { cacheName: STATE_CACHE_NAME });
     if (record) {
-      CACHE_NAME = await record.text();
+      const recorded = await record.json();
+      CACHE_NAME = recorded.cacheName;
+      APP_VERSION = recorded.version;
       return CACHE_NAME;
     }
   } catch (error) {
@@ -133,10 +136,11 @@ function installedCacheName() {
   return cacheNameReady;
 }
 
-// Maximum number of entries kept in the runtime asset cache. Icons, fonts and
-// other static assets accumulate over time (especially on long-lived installs),
-// so trim the cache to a bounded size using a simple FIFO/LRU-style eviction of
-// the oldest inserted entries.
+// Maximum number of runtime entries kept in the versioned cache. Documents,
+// icons, stylesheets and scripts cached as they are fetched accumulate over
+// time (especially on long-lived installs), so the oldest added are evicted
+// first once there are more. What install precached is never evicted and does
+// not count towards the limit (see trimCache).
 const MAX_RUNTIME_CACHE_ENTRIES = 120;
 
 // Comic covers and page images are content-addressed by file path and do not
@@ -426,10 +430,15 @@ async function serveImageFromCache(request) {
   return networkFetch;
 }
 
+// Evict the oldest entries beyond maxEntries. What install precached is never
+// evicted, and does not count towards maxEntries either: an offline launch
+// needs all of it, however many files were cached since. (The image cache holds
+// none of it.)
 async function trimCache(cacheName, maxEntries) {
   try {
     const cache = await caches.open(cacheName);
-    const keys = await cache.keys();
+    const precached = precachedUrls();
+    const keys = (await cache.keys()).filter((request) => !precached.has(request.url));
     if (keys.length <= maxEntries) {
       return;
     }
@@ -458,6 +467,10 @@ async function offlineFallbackResponse() {
   );
 }
 
+function versionedScriptUrl(script) {
+  return `${script}?v=${APP_VERSION}`;
+}
+
 // Precache the versioned app and page scripts. Best effort: without a known
 // version the URLs the pages will request cannot be predicted, and a failed
 // script must not abort installation (cache.addAll would reject on any 404).
@@ -466,10 +479,17 @@ function precacheAppScripts(cache) {
     return Promise.resolve();
   }
   return Promise.all([...APP_SCRIPTS, ...PAGE_SCRIPTS].map((script) =>
-    cache.add(`${script}?v=${APP_VERSION}`).catch((error) => {
+    cache.add(versionedScriptUrl(script)).catch((error) => {
       console.log('Service Worker: Failed to precache', script, error);
     })
   ));
+}
+
+// The absolute URLs of everything install puts in the versioned cache. A
+// woken-up worker knows them too: recallCacheName restores APP_VERSION.
+function precachedUrls() {
+  const scripts = APP_VERSION ? [...APP_SCRIPTS, ...PAGE_SCRIPTS].map(versionedScriptUrl) : [];
+  return new Set([...urlsToCache, ...scripts].map((path) => new URL(path, self.location.origin).href));
 }
 
 // Install event - cache essential resources
@@ -666,13 +686,21 @@ self.addEventListener('fetch', (event) => {
             .then((networkResponse) => {
               if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
                 cache.put(request, networkResponse.clone())
-                  .then(() => trimCache(cacheName, MAX_RUNTIME_CACHE_ENTRIES));
+                  .then(() => trimCache(cacheName, MAX_RUNTIME_CACHE_ENTRIES))
+                  .catch((error) => {
+                    console.log('Service Worker: Failed to cache asset', url.pathname, error);
+                  });
               }
               return networkResponse;
-            })
-            .catch(() => cachedResponse);
-          // Return cached immediately if present, otherwise wait for network.
-          return cachedResponse || networkFetch;
+            });
+          if (cachedResponse) {
+            // Serve the cached copy at once; the fetch above refreshes it in
+            // the background, and failing to (offline) changes nothing.
+            networkFetch.catch(() => { /* offline; keep the cached copy */ });
+            return cachedResponse;
+          }
+          // Nothing cached: wait for the network, and fail as it does offline.
+          return networkFetch;
         })
       ))
     );
@@ -703,20 +731,15 @@ self.addEventListener('fetch', (event) => {
             activeCacheName().then((cacheName) => caches.open(cacheName).then((cache) =>
               cache.put(request, responseToCache)
                 .then(() => trimCache(cacheName, MAX_RUNTIME_CACHE_ENTRIES))
-            ));
+            )).catch((error) => {
+              console.log('Service Worker: Failed to cache asset', url.pathname, error);
+            });
           }
           
           return response;
         });
       })
-      .catch(() => {
-        // Return a friendly offline page for HTML requests
-        if (request.headers.get('Accept')?.includes('text/html')) {
-          return offlineFallbackResponse();
-        }
-
-        return new Response('Offline', { status: 503 });
-      })
+      .catch(() => new Response('Offline', { status: 503 }))
   );
 });
 

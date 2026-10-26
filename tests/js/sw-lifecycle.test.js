@@ -233,6 +233,32 @@ test('an upgrade replaces the previous release\'s cache when every step runs in 
     assert.equal(await (await sw.respond(`/js/main.js?v=${APP_VERSION}`)).text(), `// /js/main.js?v=${APP_VERSION}`);
 });
 
+test('after an upgrade activated in a woken-up worker, trimming the runtime entries keeps the new release\'s precache', async () => {
+    const previous = loadServiceWorker();
+    installRoutes(previous.network, { version: '2.0.350.0' });
+    await previous.install();
+    await previous.activate();
+    const update = previous.restart();
+    update.network.route('GET /api/version', { version: APP_VERSION });
+    await update.install();
+    const precached = update.caches.urls(VERSIONED_CACHE);
+    await update.restart().activate();
+
+    const sw = update.restart();
+    const entries = {};
+    for (let i = 0; i < 121; i++) entries[`/icons/runtime-${i}.png`] = image(`icon ${i}`);
+    await sw.caches.seed(VERSIONED_CACHE, entries);
+    sw.network.route('GET /css/theme.css', reply(200, 'body{}', { headers: { 'Content-Type': 'text/css' } }));
+    await sw.respond('/css/theme.css');
+    await sw.idle();
+
+    const urls = sw.caches.urls(VERSIONED_CACHE);
+    assert.deepEqual(urls.slice(0, precached.length), precached);
+    assert.equal(urls.length, precached.length + 120);
+    assert.equal(urls[precached.length], absolute('/icons/runtime-2.png'));
+    assert.equal(urls.at(-1), absolute('/css/theme.css'));
+});
+
 test('a later release that fails to install does not make the waiting update discard its cache', async () => {
     const sw = loadServiceWorker();
     installRoutes(sw.network);

@@ -62,6 +62,24 @@ internal static class AuthServiceCollectionExtensions
             autheliaSettings.Enabled = autheliaEnabled.Equals("true", StringComparison.OrdinalIgnoreCase);
         }
 
+        var autheliaTrustedProxies = Environment.GetEnvironmentVariable("AUTHELIA_TRUSTED_PROXIES");
+        if (!string.IsNullOrEmpty(autheliaTrustedProxies))
+        {
+            autheliaSettings.TrustedProxies = autheliaTrustedProxies;
+        }
+
+        // Anyone who can reach the app directly could forge the Authelia headers, so the reverse proxies
+        // allowed to send them must be configured; refuse to start otherwise.
+        if (autheliaSettings.Enabled)
+        {
+            if (!TrustedProxyAllowlist.TryParse(autheliaSettings.TrustedProxies, out var trustedProxies, out var error))
+            {
+                throw new InvalidOperationException(error);
+            }
+
+            Log.Information("Authelia headers will only be accepted from {TrustedProxies}", string.Join(", ", trustedProxies.Networks));
+        }
+
         // Configure authentication schemes
         var authBuilder = services.AddAuthentication(options =>
         {

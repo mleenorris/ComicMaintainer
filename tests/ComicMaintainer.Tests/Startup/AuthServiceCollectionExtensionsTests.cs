@@ -15,8 +15,8 @@ namespace ComicMaintainer.Tests.Startup;
 
 /// <summary>
 /// Tests for the Identity/JWT/Authelia registrations made by <c>AuthServiceCollectionExtensions</c>.
-/// The method also reads JWT_SECRET and AUTHELIA_ENABLED from the process environment, so the
-/// tests run in the non-parallel environment collection with those variables cleared.
+/// The method also reads JWT_SECRET, AUTHELIA_ENABLED and AUTHELIA_TRUSTED_PROXIES from the process
+/// environment, so the tests run in the non-parallel environment collection with those variables cleared.
 /// </summary>
 [Collection(AppSettingsEnvironmentPostConfigureTests.EnvironmentCollection.Name)]
 public sealed class AuthServiceCollectionExtensionsTests : IDisposable
@@ -24,13 +24,16 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
     private const string ConfiguredSecret = "configured-secret-configured-secret-0123456789";
     private const string EnvironmentSecret = "environment-secret-environment-secret-0123456789";
 
+    // Authelia refuses to start without an allowlist of reverse proxies (see AutheliaTrustedProxyStartupTests).
+    private const string TrustedProxies = "172.18.0.0/16";
+
     // The extension class is internal to the WebApi assembly (no InternalsVisibleTo).
     private static readonly Func<IServiceCollection, IConfiguration, IServiceCollection> AddComicMaintainerAuth = typeof(Program).Assembly
         .GetType("ComicMaintainer.WebApi.Startup.AuthServiceCollectionExtensions", throwOnError: true)!
         .GetMethod("AddComicMaintainerAuth", BindingFlags.Static | BindingFlags.Public)!
         .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
 
-    private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment = new("JWT_SECRET", "AUTHELIA_ENABLED");
+    private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment = new("JWT_SECRET", "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES");
 
     public void Dispose() => _environment.Dispose();
 
@@ -112,7 +115,8 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
     [Fact]
     public async Task WithAutheliaEnabled_MakesAutheliaTheDefaultSchemeAndKeepsAcceptingJwt()
     {
-        using var provider = BuildProvider(("JwtSettings:Secret", ConfiguredSecret), ("AutheliaSettings:Enabled", "true"));
+        using var provider = BuildProvider(
+            ("JwtSettings:Secret", ConfiguredSecret), ("AutheliaSettings:Enabled", "true"), ("AutheliaSettings:TrustedProxies", TrustedProxies));
 
         await AssertAutheliaAndJwtAsync(provider);
     }
@@ -126,7 +130,8 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
     {
         _environment.Set("AUTHELIA_ENABLED", environmentValue);
 
-        using var provider = BuildProvider(("JwtSettings:Secret", ConfiguredSecret), ("AutheliaSettings:Enabled", configuredValue));
+        using var provider = BuildProvider(
+            ("JwtSettings:Secret", ConfiguredSecret), ("AutheliaSettings:Enabled", configuredValue), ("AutheliaSettings:TrustedProxies", TrustedProxies));
 
         if (autheliaExpected)
         {
@@ -153,7 +158,8 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
         using var provider = BuildProvider(
             ("JwtSettings:Secret", ConfiguredSecret),
             ("AutheliaSettings:Enabled", autheliaEnabled.ToString()),
-            ("AutheliaSettings:AdminGroups", adminGroups));
+            ("AutheliaSettings:AdminGroups", adminGroups),
+            ("AutheliaSettings:TrustedProxies", TrustedProxies));
 
         var result = await provider.GetRequiredService<IAuthorizationService>()
             .AuthorizeAsync(CreateUser(role), AuthorizationPolicies.CanAdminister);
@@ -179,7 +185,8 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
     [Fact]
     public async Task Policies_RejectAnonymousUsers()
     {
-        using var provider = BuildProvider(("JwtSettings:Secret", ConfiguredSecret), ("AutheliaSettings:Enabled", "true"));
+        using var provider = BuildProvider(
+            ("JwtSettings:Secret", ConfiguredSecret), ("AutheliaSettings:Enabled", "true"), ("AutheliaSettings:TrustedProxies", TrustedProxies));
         var authorization = provider.GetRequiredService<IAuthorizationService>();
         var anonymous = new ClaimsPrincipal(new ClaimsIdentity());
 

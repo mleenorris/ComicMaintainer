@@ -7,9 +7,17 @@ public class AutheliaSettings
 {
     /// <summary>
     /// Enable Authelia forward authentication mode
-    /// When enabled, the application will trust authentication headers from Authelia
+    /// When enabled, the application will trust authentication headers from the proxies in <see cref="TrustedProxies"/>
     /// </summary>
     public bool Enabled { get; set; } = false;
+
+    /// <summary>
+    /// Comma-separated IP addresses and/or CIDR ranges (IPv4 or IPv6) of the reverse proxies allowed to send
+    /// the Authelia headers, e.g. "172.18.0.0/16, 10.0.0.5, fd00::/8" (environment variable AUTHELIA_TRUSTED_PROXIES).
+    /// Required when <see cref="Enabled"/> is true: the application refuses to start without a valid list, and the
+    /// headers are ignored on requests from any other address. Hostnames are not supported.
+    /// </summary>
+    public string? TrustedProxies { get; set; }
     
     /// <summary>
     /// Header name for the authenticated username (default: Remote-User)

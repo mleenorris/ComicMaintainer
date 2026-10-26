@@ -193,12 +193,14 @@ include /config/nginx/authelia-location.conf;
 ```yaml
 environment:
   - AUTHELIA_ENABLED=true              # Enable Authelia mode
+  - AUTHELIA_TRUSTED_PROXIES=172.18.0.0/16  # Required: SWAG's address or its Docker network subnet
   - AUTHELIA_DEFAULT_ROLE=User         # Default role for users
   - AUTHELIA_ADMIN_GROUPS=admins,admin # Groups that get Admin role
 ```
 
 **Important**: When using Authelia, ComicMaintainer will:
-- Trust authentication headers from Authelia
+- Trust authentication headers only on connections from the addresses in `AUTHELIA_TRUSTED_PROXIES` (required: the
+  container refuses to start without it; see [Choosing `AUTHELIA_TRUSTED_PROXIES`](../AUTHELIA.md#choosing-authelia_trusted_proxies))
 - Automatically create user accounts on first login
 - Synchronize user information (email, display name) from Authelia
 - Map Authelia groups to application roles

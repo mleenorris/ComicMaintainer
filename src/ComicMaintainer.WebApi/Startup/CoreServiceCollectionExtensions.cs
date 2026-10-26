@@ -59,6 +59,10 @@ internal static class CoreServiceCollectionExtensions
             var autheliaAdminGroups = Environment.GetEnvironmentVariable("AUTHELIA_ADMIN_GROUPS");
             if (!string.IsNullOrEmpty(autheliaAdminGroups))
                 options.AdminGroups = autheliaAdminGroups;
+
+            var autheliaTrustedProxies = Environment.GetEnvironmentVariable("AUTHELIA_TRUSTED_PROXIES");
+            if (!string.IsNullOrEmpty(autheliaTrustedProxies))
+                options.TrustedProxies = autheliaTrustedProxies;
         });
 
         return services;

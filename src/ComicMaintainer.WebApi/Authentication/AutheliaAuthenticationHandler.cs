@@ -21,6 +21,11 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
     private readonly IDbContextFactory<ComicMaintainerDbContext> _dbContextFactory;
     private readonly ILogger<AutheliaAuthenticationHandler> _logger;
 
+    // Untrusted peers already reported at Warning level (later requests log at Debug); bounded so that
+    // a scan from many addresses cannot grow it without limit.
+    private const int MaxReportedUntrustedPeers = 1000;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ReportedUntrustedPeers = new();
+
     public AutheliaAuthenticationHandler(
         IOptionsMonitor<AutheliaAuthenticationOptions> options,
         ILoggerFactory logger,
@@ -50,6 +55,12 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
         if (!Request.Headers.TryGetValue(_autheliaSettings.UserHeader, out var usernameValues))
         {
             _logger.LogDebug("No {HeaderName} header found, skipping Authelia authentication", _autheliaSettings.UserHeader);
+            return AuthenticateResult.NoResult();
+        }
+
+        // Only the reverse proxy may assert an identity: anyone reaching the app directly could forge these headers.
+        if (!IsFromTrustedProxy())
+        {
             return AuthenticateResult.NoResult();
         }
 
@@ -109,6 +120,35 @@ public class AutheliaAuthenticationHandler : AuthenticationHandler<AutheliaAuthe
             username, string.Join(", ", roles));
 
         return AuthenticateResult.Success(ticket);
+    }
+
+    /// <summary>
+    /// Whether the direct peer of the connection is in <c>AUTHELIA_TRUSTED_PROXIES</c>. X-Forwarded-For is not
+    /// consulted: it is just another header the client controls.
+    /// </summary>
+    private bool IsFromTrustedProxy()
+    {
+        var remoteIp = Context.Connection.RemoteIpAddress;
+        if (TrustedProxyAllowlist.TryParse(_autheliaSettings.TrustedProxies, out var trustedProxies, out _)
+            && trustedProxies.Contains(remoteIp))
+        {
+            return true;
+        }
+
+        var peer = ComicMaintainer.Core.Utilities.LoggingHelper.SanitizeForLog(
+            remoteIp is null ? "unknown" : TrustedProxyAllowlist.Normalize(remoteIp).ToString());
+        if (ReportedUntrustedPeers.Count < MaxReportedUntrustedPeers && ReportedUntrustedPeers.TryAdd(peer, 0))
+        {
+            _logger.LogWarning(
+                "Ignoring Authelia headers from {RemoteIp}: the address is not in AUTHELIA_TRUSTED_PROXIES. " +
+                "If this is your reverse proxy, add its IP address or subnet to AUTHELIA_TRUSTED_PROXIES.", peer);
+        }
+        else
+        {
+            _logger.LogDebug("Ignoring Authelia headers from {RemoteIp} (not in AUTHELIA_TRUSTED_PROXIES)", peer);
+        }
+
+        return false;
     }
 
     private async Task<ApplicationUser?> EnsureUserExistsAsync(string username, string? email, string? displayName, string? groups)

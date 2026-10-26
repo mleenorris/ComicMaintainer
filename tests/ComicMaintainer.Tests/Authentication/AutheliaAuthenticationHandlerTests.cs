@@ -435,11 +435,13 @@ public class AutheliaAuthenticationHandlerTests
         Assert.Equal(StatusCodes.Status403Forbidden, forbidContext.Response.StatusCode);
     }
 
-    private static AutheliaSettings Enabled() => new() { Enabled = true };
+    // Requests come from a reverse proxy inside the allowlist; AutheliaTrustedProxyTests covers the allowlist itself.
+    private static AutheliaSettings Enabled() => new() { Enabled = true, TrustedProxies = "10.0.0.0/8" };
 
     private static DefaultHttpContext CreateContext(params (string Name, string Value)[] headers)
     {
         var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("10.0.0.2");
         foreach (var (name, value) in headers)
         {
             context.Request.Headers[name] = value;

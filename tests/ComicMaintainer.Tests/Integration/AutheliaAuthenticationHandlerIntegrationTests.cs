@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using ComicMaintainer.Core.Models.Auth;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -161,6 +162,13 @@ public sealed class AutheliaAuthenticationHandlerIntegrationTests : IClassFixtur
     /// <summary>One app instance with Authelia enabled, on its own temp directories and SQLite database.</summary>
     public sealed class AutheliaHost : IAsyncLifetime
     {
+        /// <summary>
+        /// The reverse proxy (inside the configured <c>AutheliaSettings:TrustedProxies</c>, as an IPv4 peer of a
+        /// dual-mode socket) that requests come from when a test does not set the connection's remote address
+        /// itself; TestServer leaves it null.
+        /// </summary>
+        public static readonly IPAddress ProxyAddress = IPAddress.Parse("::ffff:172.18.0.2");
+
         private readonly string _root = Path.Join(Path.GetTempPath(), "ComicMaintainer.Tests", "Authelia-" + Guid.NewGuid().ToString("N"));
         private readonly WebApplicationFactory<Program> _baseFactory = new();
 
@@ -182,6 +190,8 @@ public sealed class AutheliaAuthenticationHandlerIntegrationTests : IClassFixtur
                 builder.UseSetting("AppSettings:ConfigDirectory", config);
                 builder.UseSetting("AutheliaSettings:Enabled", "true");
                 builder.UseSetting("AutheliaSettings:AdminGroups", "admins, operators");
+                builder.UseSetting("AutheliaSettings:TrustedProxies", "172.18.0.0/16");
+                builder.ConfigureServices(services => services.AddSingleton<IStartupFilter, ProxyPeerStartupFilter>());
             });
             Client = Factory.CreateClient();
             return Task.CompletedTask;
@@ -233,6 +243,20 @@ public sealed class AutheliaAuthenticationHandlerIntegrationTests : IClassFixtur
             using var scope = Factory.Services.CreateScope();
             var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
             return await users.GetRolesAsync(Assert.IsType<ApplicationUser>(await users.FindByIdAsync(id)));
+        }
+
+        /// <summary>Makes requests without a remote address come from <see cref="ProxyAddress"/>.</summary>
+        private sealed class ProxyPeerStartupFilter : IStartupFilter
+        {
+            public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next) => app =>
+            {
+                app.Use((context, nextMiddleware) =>
+                {
+                    context.Connection.RemoteIpAddress ??= ProxyAddress;
+                    return nextMiddleware(context);
+                });
+                next(app);
+            };
         }
     }
 }

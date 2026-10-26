@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes
+- **⚠️ Upgrade note: Authelia mode now requires `AUTHELIA_TRUSTED_PROXIES`.** With
+  `AUTHELIA_ENABLED=true`, the app used to accept the `Remote-User`, `Remote-Groups`,
+  `Remote-Email` and `Remote-Name` headers from any client, so anyone who could reach the
+  container without going through the reverse proxy could sign in as any user (creating the
+  account if needed) and, without `AUTHELIA_ADMIN_GROUPS`, administer the instance. The
+  headers are now only accepted on connections that come directly from an address listed in
+  `AUTHELIA_TRUSTED_PROXIES`: comma-separated IPv4/IPv6 addresses and CIDR ranges, such as
+  `172.18.0.0/16, 10.0.0.5, fd00::/8`. From any other address they are ignored (the request
+  is anonymous unless it carries a JWT) and a warning names the address. **Before upgrading a
+  deployment that uses Authelia, set `AUTHELIA_TRUSTED_PROXIES`** to your reverse proxy's IP
+  address or its Docker network's subnet: without a valid value the container refuses to
+  start with `AUTHELIA_TRUSTED_PROXIES is required when Authelia is enabled` or
+  `Invalid AUTHELIA_TRUSTED_PROXIES entry '…'`. Hostnames are not supported. See
+  [Choosing `AUTHELIA_TRUSTED_PROXIES`](docs/AUTHELIA.md#choosing-authelia_trusted_proxies).
+  Deployments without Authelia are not affected.
+
 ### Added
 - **Condensed sends can be delivered as AZW3.** Combining issues into one book used to pin
   the format picker to EPUB, so a Kindle could not receive a condensed book in its native

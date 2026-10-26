@@ -470,6 +470,7 @@ landmark.
 - **Non-Root Container**: Docker image runs as dedicated user (UID 1000)
 - **Secrets Management**: Environment-based configuration for sensitive data
 - **JWT Security**: HMAC SHA256 signing with configurable expiration
+- **Authelia Header Trust**: With Authelia enabled, the forward-auth headers are only accepted from the reverse proxies listed in the required `AUTHELIA_TRUSTED_PROXIES` (see [AUTHELIA.md](docs/AUTHELIA.md#choosing-authelia_trusted_proxies))
 
 See [SECURITY_FIXES_DOTNET.md](docs/archive/SECURITY_FIXES_DOTNET.md) for complete security documentation.
 

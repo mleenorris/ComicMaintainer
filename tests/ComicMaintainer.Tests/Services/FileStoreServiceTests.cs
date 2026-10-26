@@ -1563,7 +1563,7 @@ public class FileStoreServiceTests
     [Fact]
     public async Task GetUserReadPathsAsync_InFlightReadDoesNotPublishUnderNewVersion()
     {
-        var filePath = Path.Combine(_testDirectory, "read-cache-race.cbz");
+        var filePath = Path.Join(_testDirectory, "read-cache-race.cbz");
         File.WriteAllText(filePath, "content");
         FileStoreService? service = null;
         using var memoryCache = new InterleavingMemoryCache(() =>

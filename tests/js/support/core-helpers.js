@@ -4,7 +4,9 @@
 // router, pwa, error-reporting): realistic boot responses, a layout shim for
 // the parts of the page jsdom cannot lay out, and small query helpers.
 
-const { bootApp, validToken } = require('./app');
+const { bootApp, bootRoutes, validToken } = require('./app');
+const { loadPage } = require('./dom');
+const { indexHtmlScripts } = require('./sandbox');
 
 // GET /api/files/counts (FilesController.Browse GetCounts).
 function fileCounts(overrides = {}) {
@@ -151,6 +153,26 @@ function boot({ routes = {}, layout = true, beforeScripts, ...options } = {}) {
     });
 }
 
+/**
+ * boot() without the settle: returns the page synchronously, while the
+ * document is still 'loading' (DOMContentLoaded, and so initializeApp(), has
+ * not run yet). `withoutMain: true` runs every index.html script except
+ * js/main.js, so a test can run main.js itself later (runWwwrootScript).
+ */
+function loadApp({ hash = '#/home', routes = {}, user = {}, localStorage = {}, layout = true, withoutMain = false, beforeScripts, ...options } = {}) {
+    return loadPage({
+        url: `http://localhost/index.html${hash}`,
+        ...options,
+        ...(withoutMain ? { scripts: indexHtmlScripts().filter(script => script !== 'js/main.js') } : {}),
+        localStorage: { jwt_token: validToken(), username: 'alice', ...localStorage },
+        routes: { ...bootRoutes(user), ...coreRoutes(routes) },
+        beforeScripts(window, page) {
+            if (layout) installLayout(window);
+            if (beforeScripts) beforeScripts(window, page);
+        }
+    });
+}
+
 /** Recorded fetch calls for METHOD + path (query ignored). */
 function requests(page, method, path) {
     return page.fetchCalls.filter(call => call.method === method && call.path === path);
@@ -197,6 +219,7 @@ module.exports = {
     consoleLines,
     fileCounts,
     installLayout,
+    loadApp,
     messages,
     overview,
     preferences,

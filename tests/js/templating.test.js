@@ -4,9 +4,20 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { loadScripts } = require('./support/sandbox');
+const { loadPage } = require('./support/dom');
 
 function load() {
     return loadScripts(['js/shared.js', 'js/app/templating.js']);
+}
+
+// A real (jsdom) document with only the two scripts, for the DOM helpers.
+async function loadDocument() {
+    const page = loadPage({
+        markup: '<!doctype html><html><body><div id="target"><p>old</p></div></body></html>',
+        scripts: ['js/shared.js', 'js/app/templating.js']
+    });
+    await page.settle();
+    return page;
 }
 
 // Unwrap an html``/rawHtml marker (created inside the sandbox) to its markup.
@@ -123,4 +134,45 @@ test('getParsedTemplate evicts the least recently used entry when full', () => {
     assert.equal(sandbox.run('TEMPLATE_CACHE.size'), max);
     assert.equal(sandbox.run('TEMPLATE_CACHE.has("<i>0</i>")'), true);
     assert.equal(sandbox.run('TEMPLATE_CACHE.has("<i>1</i>")'), false);
+});
+
+test('renderHtml replaces, appendHtml adds and clearChildren empties a real element', async () => {
+    const page = await loadDocument();
+    const target = page.$('#target');
+
+    assert.equal(page.run("renderHtml(document.getElementById('target'), html`<b>${'1 < 2'}</b>`)"), target);
+    assert.equal(target.innerHTML, '<b>1 &lt; 2</b>');
+
+    page.run("appendHtml(document.getElementById('target'), html`<i>more</i>`)");
+    page.run("appendHtml(document.getElementById('target'), html`<i>more</i>`)");
+    assert.equal(target.innerHTML, '<b>1 &lt; 2</b><i>more</i><i>more</i>');
+    const [first, second] = target.querySelectorAll('i');
+    assert.notEqual(first, second, 'each render clones the cached template');
+
+    assert.equal(page.run("clearChildren(document.getElementById('target'))"), target);
+    assert.equal(target.childNodes.length, 0);
+});
+
+test('a plain string is rendered as text, not parsed as markup', async () => {
+    const page = await loadDocument();
+    page.run("renderHtml(document.getElementById('target'), '<img src=x onerror=alert(1)>')");
+    assert.equal(page.$('#target').textContent, '<img src=x onerror=alert(1)>');
+    assert.equal(page.$('#target img'), null);
+});
+
+test('the DOM helpers do nothing when the target element is missing', async () => {
+    const page = await loadDocument();
+    for (const helper of ['renderHtml', 'appendHtml', 'clearChildren']) {
+        assert.equal(page.run(`${helper}(document.getElementById('missing'), html\`<p>x</p>\`)`), null, helper);
+        assert.equal(page.run(`${helper}(undefined, html\`<p>x</p>\`)`), undefined, helper);
+    }
+    assert.equal(page.$('#target').innerHTML, '<p>old</p>');
+});
+
+test('htmlToElement returns the first element of the markup, or null when there is none', async () => {
+    const page = await loadDocument();
+    const element = page.run("htmlToElement(html`text first <span class=\"a\">${'x'}</span><em>y</em>`)");
+    assert.equal(element.tagName, 'SPAN');
+    assert.equal(element.outerHTML, '<span class="a">x</span>');
+    assert.equal(page.run('htmlToElement(html`only text`)'), null);
 });

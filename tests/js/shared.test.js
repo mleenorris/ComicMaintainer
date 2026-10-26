@@ -42,3 +42,12 @@ test('buildCredentialedFetchOptions does not mutate the caller\'s headers', () =
     const { run } = load();
     assert.deepEqual(plain(run('const h = { A: "1" }; buildCredentialedFetchOptions({ headers: h }, "t"); h')), { A: '1' });
 });
+
+test('buildCredentialedFetchOptions creates the headers when the caller passes none', () => {
+    const { run } = load();
+    const authorization = ['Bearer', 'abc'].join(' ');
+    assert.deepEqual(plain(run('buildCredentialedFetchOptions({ method: "GET" }, "abc")')),
+        { credentials: 'include', method: 'GET', headers: { Authorization: authorization } });
+    assert.deepEqual(plain(run('buildCredentialedFetchOptions(undefined, "abc")')),
+        { credentials: 'include', headers: { Authorization: authorization } });
+});

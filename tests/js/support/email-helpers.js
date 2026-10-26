@@ -52,9 +52,13 @@ function condensePlan(overrides = {}) {
     };
 }
 
-// EmailController.ToBuildResponse.
+// EmailController.ToBuildResponse; `progress: null` leaves the progress out.
 function condenseBuild(overrides = {}) {
     const { progress, ...rest } = overrides;
+    if (progress === null) {
+        const { progress: _omitted, ...build } = condenseBuild(rest);
+        return build;
+    }
     return {
         build_id: 'build-1',
         status: 'running',
@@ -68,7 +72,7 @@ function condenseBuild(overrides = {}) {
         expires_at: null,
         delivery_format: 'epub',
         progress: {
-            phase: 'building',
+            phase: 'writing',
             completed_pages: 0,
             total_pages: 0,
             completed_issues: 0,
@@ -206,6 +210,43 @@ function messageTexts(page, type) {
     return messages(page).filter(message => message.type === type).map(message => message.text);
 }
 
+/**
+ * Records every toast shown from now on, as { text, type }. Toasts dismiss
+ * themselves after five seconds, which a test driving mock timers passes
+ * quickly, so messages() alone would miss them.
+ */
+function recordMessages(page) {
+    const shown = [];
+    const observer = new page.window.MutationObserver(records => {
+        for (const record of records) {
+            for (const node of record.addedNodes) {
+                if (node.nodeType !== 1 || !node.classList.contains('message')) continue;
+                shown.push({ text: node.textContent, type: [...node.classList].find(name => name !== 'message') });
+            }
+        }
+    });
+    observer.observe(page.$('#messageContainer'), { childList: true });
+    return shown;
+}
+
+/**
+ * Records the files the page saves by clicking a generated <a download> link,
+ * as { href, download, connected }. jsdom cannot save files and would report
+ * the link's navigation as not implemented; other links behave as before.
+ */
+function captureDownloads(page) {
+    const downloads = [];
+    const anchor = page.window.HTMLAnchorElement.prototype;
+    const click = anchor.click;
+    anchor.click = function () {
+        const name = this.getAttribute('download') ?? this.download;
+        if (!name) return click.call(this);
+        downloads.push({ href: this.href, download: name, connected: this.isConnected });
+        return undefined;
+    };
+    return downloads;
+}
+
 function isModalOpen(page, id) {
     return page.$(`#${id}`).classList.contains('active');
 }
@@ -325,6 +366,8 @@ module.exports = {
     bootSeriesPage,
     messages,
     messageTexts,
+    recordMessages,
+    captureDownloads,
     isModalOpen,
     pressEscape,
     activateInlineHandlers,

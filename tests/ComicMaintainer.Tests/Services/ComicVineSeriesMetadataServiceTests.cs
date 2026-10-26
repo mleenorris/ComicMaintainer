@@ -29,7 +29,7 @@ public class ComicVineSeriesMetadataServiceTests
         });
 
         var httpClientFactory = new Mock<IHttpClientFactory>();
-        httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient(handler));
+        httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient(handler, disposeHandler: false));
 
         var optionsMonitor = new Mock<IOptionsMonitor<AppSettings>>();
         optionsMonitor.Setup(options => options.CurrentValue).Returns(new AppSettings
@@ -184,7 +184,7 @@ public class ComicVineSeriesMetadataServiceTests
     private static ComicVineSeriesMetadataService CreateService(StubHttpMessageHandler handler, AppSettings settings)
     {
         var httpClientFactory = new Mock<IHttpClientFactory>();
-        httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient(handler));
+        httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient(handler, disposeHandler: false));
 
         var optionsMonitor = new Mock<IOptionsMonitor<AppSettings>>();
         optionsMonitor.Setup(o => o.CurrentValue).Returns(settings);

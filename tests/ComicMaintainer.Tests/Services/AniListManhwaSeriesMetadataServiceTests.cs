@@ -16,7 +16,7 @@ public class AniListManhwaSeriesMetadataServiceTests
         AppSettings settings)
     {
         var httpClientFactory = new Mock<IHttpClientFactory>();
-        httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient(handler));
+        httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient(handler, disposeHandler: false));
 
         var optionsMonitor = new Mock<IOptionsMonitor<AppSettings>>();
         optionsMonitor.Setup(options => options.CurrentValue).Returns(settings);

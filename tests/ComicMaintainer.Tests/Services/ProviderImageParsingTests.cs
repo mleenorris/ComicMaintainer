@@ -225,7 +225,7 @@ public class ProviderImageParsingTests
             });
             var httpClientFactory = new Mock<IHttpClientFactory>();
             httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>()))
-                .Returns(new HttpClient(handler));
+                .Returns(() => new HttpClient(handler, disposeHandler: false));
             var settings = new Mock<IOptionsMonitor<AppSettings>>();
             settings.Setup(s => s.CurrentValue).Returns(new AppSettings
             {
@@ -251,7 +251,7 @@ public class ProviderImageParsingTests
             });
             var httpClientFactory = new Mock<IHttpClientFactory>();
             httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>()))
-                .Returns(new HttpClient(handler));
+                .Returns(() => new HttpClient(handler, disposeHandler: false));
             var settings = new Mock<IOptionsMonitor<AppSettings>>();
             settings.Setup(s => s.CurrentValue).Returns(new AppSettings
             {
@@ -276,7 +276,7 @@ public class ProviderImageParsingTests
             });
             var httpClientFactory = new Mock<IHttpClientFactory>();
             httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>()))
-                .Returns(new HttpClient(handler));
+                .Returns(() => new HttpClient(handler, disposeHandler: false));
             var settings = new Mock<IOptionsMonitor<AppSettings>>();
             settings.Setup(s => s.CurrentValue).Returns(new AppSettings
             {

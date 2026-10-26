@@ -7,8 +7,19 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { pathToFileURL } = require('node:url');
 
 const WWWROOT = path.resolve(__dirname, '..', '..', '..', 'src', 'ComicMaintainer.WebApi', 'wwwroot');
+
+/**
+ * Run a wwwroot script in a vm context. The filename must be a file: URL:
+ * node's test coverage only attributes code to scripts whose URL is one, so a
+ * relative name would leave every SPA script out of the coverage report.
+ */
+function runWwwrootScript(script, context) {
+    const file = path.join(WWWROOT, ...script.split('/'));
+    vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: pathToFileURL(file).href });
+}
 
 /** Script paths (relative to wwwroot) index.html loads, in order. */
 function indexHtmlScripts() {
@@ -93,8 +104,7 @@ function loadScripts(scripts, overrides = {}) {
     // Browser scripts reach the global object as `window` and `self`.
     vm.runInContext('var window = globalThis; var self = globalThis;', context);
     for (const script of scripts) {
-        const file = path.join(WWWROOT, ...script.split('/'));
-        vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: script });
+        runWwwrootScript(script, context);
     }
     return {
         context,
@@ -105,4 +115,4 @@ function loadScripts(scripts, overrides = {}) {
     };
 }
 
-module.exports = { WWWROOT, indexHtmlScripts, loadScripts, createLocalStorage };
+module.exports = { WWWROOT, indexHtmlScripts, loadScripts, createLocalStorage, runWwwrootScript };

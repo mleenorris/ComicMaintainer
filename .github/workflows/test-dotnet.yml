@@ -26,10 +26,15 @@ jobs:
       uses: actions/setup-node@v7
       with:
         node-version: 'lts/*'
+        cache: npm
 
-    # Dependency-free (node:test + node:vm) unit tests for the web UI scripts.
-    - name: Run JavaScript unit tests
-      run: npm test
+    - name: Install JavaScript test dependencies
+      run: npm ci
+
+    # node:test unit tests for the web UI scripts (node:vm sandboxes and jsdom
+    # page tests), with coverage written to coverage/lcov.info.
+    - name: Run JavaScript unit tests with coverage
+      run: npm run test:coverage
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v6
@@ -54,6 +59,7 @@ jobs:
         --no-build --configuration Release --verbosity normal
         --filter "Category!=Integration"
         --collect:"XPlat Code Coverage"
+        --settings coverlet.runsettings
         --results-directory ./TestResults
         --logger "trx;LogFileName=unit-tests.trx"
 
@@ -109,6 +115,18 @@ jobs:
       if: github.event_name == 'push'
       with:
         files: ./TestResults/**/coverage.cobertura.xml
+        flags: dotnet-unit
+        fail_ci_if_error: false
+        verbose: true
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+    - name: Upload JavaScript coverage to Codecov
+      uses: codecov/codecov-action@v7
+      if: github.event_name == 'push'
+      with:
+        files: ./coverage/lcov.info
+        flags: javascript
         fail_ci_if_error: false
         verbose: true
       env:
@@ -148,6 +166,7 @@ jobs:
         --no-build --configuration Release --verbosity normal
         --filter "Category=Integration"
         --collect:"XPlat Code Coverage"
+        --settings coverlet.runsettings
         --results-directory ./TestResults
         --logger "trx;LogFileName=integration-tests.trx"
 
@@ -160,3 +179,14 @@ jobs:
           ./TestResults/**/*.trx
           ./TestResults/**/coverage.cobertura.xml
         if-no-files-found: warn
+
+    - name: Upload integration coverage to Codecov
+      uses: codecov/codecov-action@v7
+      if: github.event_name == 'push'
+      with:
+        files: ./TestResults/**/coverage.cobertura.xml
+        flags: dotnet-integration
+        fail_ci_if_error: false
+        verbose: true
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

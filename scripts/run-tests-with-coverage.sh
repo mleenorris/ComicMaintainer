@@ -6,9 +6,13 @@ set -e
 echo "Running unit tests with code coverage..."
 
 # Run tests with code coverage
-dotnet test \
+# (the test project directly: the solution also contains the MAUI app, which
+# needs a workload most machines don't have; coverlet.runsettings excludes
+# generated code such as EF migrations)
+dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj \
   --configuration Release \
   --collect:"XPlat Code Coverage" \
+  --settings coverlet.runsettings \
   --results-directory ./TestResults \
   --logger "console;verbosity=detailed"
 

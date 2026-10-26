@@ -102,3 +102,7 @@ node_modules/
 
 # Local tool caches
 ComicMaintainer/dotnet/
+
+# JavaScript test tooling
+node_modules/
+coverage/

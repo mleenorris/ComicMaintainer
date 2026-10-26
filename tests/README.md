@@ -10,7 +10,13 @@ tests/
 │   ├── Controllers/        # API Controller tests
 │   ├── Services/          # Service layer tests
 │   ├── Utilities/         # Utility class tests
+│   ├── Integration/       # In-process API tests (WebApplicationFactory, Category=Integration)
+│   ├── Wwwroot/           # Static checks over the shipped web UI files
 │   └── xunit.runner.json  # xUnit configuration
+├── js/                     # node:test tests for the web UI's JavaScript
+│   └── support/
+│       ├── sandbox.js     # Runs wwwroot scripts in a bare node:vm context
+│       └── dom.js         # Loads the real HTML pages in jsdom with browser stubs
 └── README.md
 ```
 
@@ -36,9 +42,47 @@ dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj
 # From the repository root
 ./scripts/run-tests-with-coverage.sh
 
-# Or manually:
-dotnet test --collect:"XPlat Code Coverage" --results-directory ./TestResults
+# Or manually (coverlet.runsettings excludes EF migrations and generated code):
+dotnet test tests/ComicMaintainer.Tests/ComicMaintainer.Tests.csproj \
+  --collect:"XPlat Code Coverage" --settings coverlet.runsettings \
+  --results-directory ./TestResults
 ```
+
+### JavaScript Tests
+```bash
+npm ci                  # installs jsdom, the only dependency
+npm test                # all tests/js/**/*.test.js
+npm run test:coverage   # plus a coverage table and coverage/lcov.info
+```
+
+Page-level tests load a real page from `wwwroot` with `loadPage()` from
+`tests/js/support/dom.js` and drive it like a browser:
+
+```js
+const { loadPage, respond } = require('./support/dom');
+
+test('shows the version', async () => {
+    const page = loadPage({                       // index.html by default
+        localStorage: { jwt_token: token },       // signed-in session
+        routes: { 'GET /api/version': { version: '1.2.3' } }
+    });
+    await page.settle();                          // let boot-time fetches resolve
+    page.route('POST /api/jobs', respond(409, { error: 'busy' }));
+    page.click('#startButton');
+    await page.waitFor(() => page.fetchCalls.some(c => c.path === '/api/jobs'));
+});
+```
+
+Use `t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] })` and
+`t.mock.timers.tick(ms)` for debounces and polling (tick one interval period at
+a time); `page.settle()`/`page.waitFor()` keep using real timers. Values read
+from the page (`page.run(code)`) belong to the page's realm: compare them with
+`assert.deepStrictEqual` via `page.evaluate(code)` or `plain(value)`.
+
+Unrouted requests answer 404 and are listed in `page.unmatchedRequests`;
+`page.navigations`, `page.dialogs`, `page.eventSources` and
+`page.serviceWorkerRegistrations` record what the page did. Scripts run with
+`file:` URLs so Node's coverage attributes them to the files under `wwwroot`.
 
 ## Code Coverage
 

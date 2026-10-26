@@ -111,8 +111,8 @@ dotnet test --filter "Category!=Integration"
 # Run only integration tests (in-process API via WebApplicationFactory)
 dotnet test --filter "Category=Integration"
 
-# Run tests with coverage
-dotnet test --collect:"XPlat Code Coverage"
+# Run tests with coverage (coverlet.runsettings excludes EF migrations)
+dotnet test --collect:"XPlat Code Coverage" --settings coverlet.runsettings
 
 # Run tests with verbose output
 dotnet test --verbosity normal
@@ -120,12 +120,20 @@ dotnet test --verbosity normal
 
 ### Run JavaScript Unit Tests
 
-The web UI's helpers (templating/escaping, routing, shared fetch helpers) and
-the load order of the SPA's scripts are covered by dependency-free tests using
-Node's built-in `node:test` and `node:vm` (Node.js 22+, no `npm install`):
+The web UI's scripts are covered by tests under `tests/js/` using Node's
+built-in `node:test`. Small helpers run in a bare `node:vm` sandbox
+(`tests/js/support/sandbox.js`); page-level behaviour runs the real HTML pages
+in [jsdom](https://github.com/jsdom/jsdom) through
+`tests/js/support/dom.js`, which stubs `fetch` (per-test routes), SSE,
+service workers, `matchMedia`, dialogs and navigation. jsdom is the only
+dependency (Node.js 22.22+, 24.15+ or 26+):
 
 ```bash
+npm ci
 npm test
+
+# With coverage (summary table + coverage/lcov.info)
+npm run test:coverage
 ```
 
 The SPA is split into ordered classic scripts under

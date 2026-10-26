@@ -38,6 +38,8 @@ function formValues(page) {
         cleanupHours: value('dbCleanupInterval'),
         externalMetadata: checked('enableExternalSeriesMetadata'),
         comicVineApiKey: value('comicVineApiKey'),
+        comicVineApiKeyHint: text('comicVineApiKeyHint'),
+        comicVineClearApiKey: checked('comicVineClearApiKeyCheckbox'),
         comicVineBaseUrl: value('comicVineBaseUrl'),
         mangaDex: checked('enableMangaDexMetadata'),
         mangaDexBaseUrl: value('mangaDexBaseUrl'),
@@ -83,7 +85,8 @@ function loadStatus(page) {
 }
 
 test('the settings page fills every group from GET /api/settings', async () => {
-    const page = await bootSettings();
+    // Like the other secrets, the ComicVine key is only reported as `*_set`.
+    const page = await bootSettings({ settings: { comicvine_api_key: undefined, comicvine_api_key_set: true } });
 
     assert.equal(callsTo(page, 'GET /api/settings').length, 1);
     assert.match(callsTo(page, 'GET /api/settings')[0].headers.authorization, /^Bearer /);
@@ -107,7 +110,9 @@ test('the settings page fills every group from GET /api/settings', async () => {
         padding: '3',
         cleanupHours: '12',
         externalMetadata: true,
-        comicVineApiKey: 'cv-key-123',
+        comicVineApiKey: '',
+        comicVineApiKeyHint: 'Leave blank to keep the stored key.',
+        comicVineClearApiKey: false,
         comicVineBaseUrl: 'https://comicvine.example/api',
         mangaDex: true,
         mangaDexBaseUrl: 'https://mangadex.example',
@@ -158,7 +163,9 @@ test('reloading the settings discards typed secrets and clear-secret ticks', asy
     page.$('#smtpPassword').value = 'typed smtp password';
     page.$('#suwayomiPassword').value = 'typed suwayomi password';
     page.$('#errorReportingToken').value = 'ghp_typed';
-    for (const id of ['smtpClearPasswordCheckbox', 'suwayomiClearPasswordCheckbox', 'errorReportingClearTokenCheckbox']) {
+    page.$('#comicVineApiKey').value = 'typed comicvine key';
+    for (const id of ['smtpClearPasswordCheckbox', 'suwayomiClearPasswordCheckbox', 'errorReportingClearTokenCheckbox',
+        'comicVineClearApiKeyCheckbox']) {
         page.$(`#${id}`).checked = true;
     }
 
@@ -168,10 +175,21 @@ test('reloading the settings discards typed secrets and clear-secret ticks', asy
     assert.equal(values.smtpPassword, '');
     assert.equal(values.suwayomiPassword, '');
     assert.equal(values.errorReportingToken, '');
+    assert.equal(values.comicVineApiKey, '');
     assert.equal(values.smtpClearPassword, false);
     assert.equal(values.suwayomiClearPassword, false);
     assert.equal(values.errorReportingClearToken, false);
+    assert.equal(values.comicVineClearApiKey, false);
     assert.equal(callsTo(page, 'GET /api/settings').length, 2);
+});
+
+test('a ComicVine API key in the settings response is never put into the form', async () => {
+    // GET /api/settings only reports whether a key is stored; should a server
+    // still return the key itself, it must not end up in the page.
+    const page = await bootSettings({ settings: { comicvine_api_key: 'cv-key-123', comicvine_api_key_set: true } });
+
+    assert.equal(page.$('#comicVineApiKey').value, '');
+    assert.equal(page.$('#comicVineApiKeyHint').textContent, 'Leave blank to keep the stored key.');
 });
 
 test('unset optional settings fall back to defaults and first-time hints', async () => {
@@ -179,7 +197,8 @@ test('unset optional settings fall back to defaults and first-time hints', async
         settings: {
             filename_format: '',
             enable_external_series_metadata: false,
-            comicvine_api_key: null,
+            comicvine_api_key: undefined,
+            comicvine_api_key_set: false,
             comicvine_base_url: '',
             enable_mangadex_metadata: false,
             mangadex_base_url: null,
@@ -220,6 +239,8 @@ test('unset optional settings fall back to defaults and first-time hints', async
     assert.equal(values.filenameFormat, '');
     assert.equal(values.currentFormat, '{series} - Chapter {issue}', 'the built-in default format is shown');
     assert.equal(values.comicVineApiKey, '');
+    assert.equal(values.comicVineApiKeyHint,
+        'Leave blank to disable ComicVine lookups. The key is stored in user settings on this instance.');
     assert.equal(values.comicVineBaseUrl, 'https://comicvine.gamespot.com/api');
     assert.equal(values.mangaDexBaseUrl, 'https://api.mangadex.org');
     assert.equal(values.aniListBaseUrl, 'https://graphql.anilist.co');

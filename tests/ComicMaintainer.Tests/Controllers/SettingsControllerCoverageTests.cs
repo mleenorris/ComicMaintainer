@@ -95,6 +95,7 @@ public class SettingsControllerCoverageTests
         _settings.SmtpPassword = "smtp-pw-do-not-echo";
         _settings.SuwayomiPassword = "suwayomi-pw-do-not-echo";
         _settings.ErrorReportingGitHubToken = "ghp_token_do_not_echo";
+        _settings.ComicVineApiKey = "cv-key-do-not-echo";
 
         var result = CreateController().GetAllSettings();
 
@@ -102,10 +103,14 @@ public class SettingsControllerCoverageTests
         Assert.True(json.GetProperty("smtp_password_set").GetBoolean());
         Assert.True(json.GetProperty("suwayomi_password_set").GetBoolean());
         Assert.True(json.GetProperty("error_reporting_github_token_set").GetBoolean());
+        Assert.True(json.GetProperty("comicvine_api_key_set").GetBoolean());
+        // Any signed-in user (read-only ones included) may read these settings.
+        Assert.False(json.TryGetProperty("comicvine_api_key", out _));
         var raw = json.GetRawText();
         Assert.DoesNotContain("smtp-pw-do-not-echo", raw);
         Assert.DoesNotContain("suwayomi-pw-do-not-echo", raw);
         Assert.DoesNotContain("ghp_token_do_not_echo", raw);
+        Assert.DoesNotContain("cv-key-do-not-echo", raw);
     }
 
     [Theory]
@@ -116,12 +121,14 @@ public class SettingsControllerCoverageTests
         _settings.SmtpPassword = secret;
         _settings.SuwayomiPassword = secret;
         _settings.ErrorReportingGitHubToken = secret;
+        _settings.ComicVineApiKey = secret;
 
         var json = OkJson(CreateController().GetAllSettings());
 
         Assert.False(json.GetProperty("smtp_password_set").GetBoolean());
         Assert.False(json.GetProperty("suwayomi_password_set").GetBoolean());
         Assert.False(json.GetProperty("error_reporting_github_token_set").GetBoolean());
+        Assert.False(json.GetProperty("comicvine_api_key_set").GetBoolean());
     }
 
     [Fact]
@@ -625,9 +632,9 @@ public class SettingsControllerCoverageTests
     }
 
     [Theory]
-    [InlineData(null)]
+    [InlineData("")]
     [InlineData("   ")]
-    public async Task SetExternalSeriesMetadata_BlankValues_ClearApiKeyAndKeepBaseUrls(string? blank)
+    public async Task SetExternalSeriesMetadata_BlankValues_ClearApiKeyAndKeepBaseUrls(string blank)
     {
         var request = new SettingsController.ExternalSeriesMetadataSettingsRequest
         {
@@ -645,6 +652,29 @@ public class SettingsControllerCoverageTests
         _settingsService.Verify(s => s.UpdateComicVineApiKeyAsync(null, It.IsAny<CancellationToken>()), Times.Once());
         _settingsService.Verify(s => s.UpdateMangaDexEnabledAsync(false, It.IsAny<CancellationToken>()), Times.Once());
         _settingsService.Verify(s => s.UpdateAniListEnabledAsync(false, It.IsAny<CancellationToken>()), Times.Once());
+        _settingsService.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateExternalSeriesMetadata_OmittedApiKey_KeepsTheStoredKey()
+    {
+        // GET /api/settings never returns the key, so the settings form leaves
+        // it out unless the user types a new one; that must not wipe it.
+        var request = new SettingsController.ExternalSeriesMetadataSettingsRequest
+        {
+            Enabled = true,
+            ComicVineApiKey = null,
+            EnableMangaDex = true,
+            EnableAniList = true,
+        };
+
+        var result = await CreateController().UpdateExternalSeriesMetadata(request);
+
+        Assert.IsType<OkObjectResult>(result);
+        _settingsService.Verify(s => s.UpdateComicVineApiKeyAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never());
+        _settingsService.Verify(s => s.UpdateExternalSeriesMetadataEnabledAsync(true, It.IsAny<CancellationToken>()), Times.Once());
+        _settingsService.Verify(s => s.UpdateMangaDexEnabledAsync(true, It.IsAny<CancellationToken>()), Times.Once());
+        _settingsService.Verify(s => s.UpdateAniListEnabledAsync(true, It.IsAny<CancellationToken>()), Times.Once());
         _settingsService.VerifyNoOtherCalls();
     }
 

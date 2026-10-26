@@ -252,6 +252,40 @@ test('a blank SMTP host and sender name are unset, and "clear password" clears t
     assert.equal(page.$('#suwayomiPassword').value, '');
 });
 
+test('the stored ComicVine API key is kept unless a new key is typed or "clear" is ticked', async () => {
+    const page = await bootSettings({ settings: { comicvine_api_key: undefined, comicvine_api_key_set: true } });
+    routeSaveSteps(page);
+
+    // Untouched (or only whitespace), the key is sent as null: keep the stored one.
+    let since = await save(page);
+    assert.deepEqual(body(page, 'metadata', since), {
+        enabled: true,
+        comicVineApiKey: null,
+        comicVineBaseUrl: 'https://comicvine.example/api',
+        enableMangaDex: true,
+        mangaDexBaseUrl: 'https://mangadex.example',
+        enableAniList: false,
+        aniListBaseUrl: 'https://anilist.example/graphql'
+    });
+    page.input('#comicVineApiKey', '   ');
+    since = await save(page);
+    assert.equal(body(page, 'metadata', since).comicVineApiKey, null);
+
+    page.input('#comicVineApiKey', ' cv-new-key ');
+    since = await save(page);
+    assert.equal(body(page, 'metadata', since).comicVineApiKey, 'cv-new-key');
+    assert.equal(page.$('#comicVineApiKey').value, '', 'the reload empties the input again');
+
+    // "Clear" wins over a typed key.
+    page.input('#comicVineApiKey', 'typed but cleared');
+    page.input('#comicVineClearApiKeyCheckbox', true);
+    since = await save(page);
+    assert.equal(body(page, 'metadata', since).comicVineApiKey, '');
+    assert.deepEqual(messages(page), [{ type: 'success', text: SAVED_MESSAGE }]);
+    assert.equal(page.$('#comicVineClearApiKeyCheckbox').checked, false, 'the tick is reset by the reload');
+    assert.equal(page.$('#comicVineApiKey').value, '');
+});
+
 test('groups whose controls are missing are not saved', async () => {
     const page = await bootSettings();
     routeSaveSteps(page);

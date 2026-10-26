@@ -294,6 +294,44 @@ public class AuthControllerTests
     }
 
     [Fact]
+    public async Task SetupAdmin_WhenSetupIsRequired_CreatesInitialAdmin()
+    {
+        _mockAuthService
+            .Setup(s => s.IsSetupRequiredAsync())
+            .ReturnsAsync(true);
+        _mockAuthService
+            .Setup(s => s.SetupAdminAsync("admin", "Password123!", null))
+            .ReturnsAsync((true, null));
+
+        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null));
+
+        Assert.IsType<OkObjectResult>(result);
+        _mockAuthService.Verify(s => s.SetupAdminAsync("admin", "Password123!", null), Times.Once);
+    }
+
+    [Fact]
+    public async Task SetupAdmin_WhenSetupIsCompleteAndUserIsNotAdmin_ReturnsForbid()
+    {
+        SetupEmptyUserContext();
+        _mockAuthService
+            .Setup(s => s.IsSetupRequiredAsync())
+            .ReturnsAsync(false);
+        _mockAuthorizationService
+            .Setup(s => s.AuthorizeAsync(
+                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
+                It.IsAny<object?>(),
+                AuthorizationPolicies.CanAdminister))
+            .ReturnsAsync(AuthorizationResult.Failed());
+
+        var result = await _controller.SetupAdmin(new SetupRequest("admin", "Password123!", null));
+
+        Assert.IsType<ForbidResult>(result);
+        _mockAuthService.Verify(
+            s => s.SetupAdminAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>()),
+            Times.Never);
+    }
+
+    [Fact]
     public void GetAuthStatus_WithAutheliaDisabled_ReturnsCorrectStatus()
     {
         // Arrange

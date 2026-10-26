@@ -133,6 +133,12 @@ public class AuthController : ControllerBase
     [HttpPost("setup")]
     public async Task<ActionResult> SetupAdmin([FromBody] SetupRequest request)
     {
+        if (!await _authService.IsSetupRequiredAsync()
+            && !(await _authorizationService.AuthorizeAsync(User, AuthorizationPolicies.CanAdminister)).Succeeded)
+        {
+            return Forbid();
+        }
+
         // Validate input
         if (string.IsNullOrWhiteSpace(request.Username) || request.Username.Length < 3)
         {

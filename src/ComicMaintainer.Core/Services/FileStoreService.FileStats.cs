@@ -50,6 +50,7 @@ public partial class FileStoreService
             if (changed > 0)
             {
                 await dbContext.SaveChangesAsync(cancellationToken);
+                MarkChanged();
             }
         }
         catch (Exception ex)
@@ -67,6 +68,7 @@ public partial class FileStoreService
                 file.LastModified = lastWrite;
             }
         }
+        MarkChanged();
 
         return changed;
     }

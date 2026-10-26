@@ -1174,4 +1174,15 @@ public class SeriesMetadataCacheServiceTests
         Assert.True(selected!.MetadataVersion > initialVersion,
             $"Expected MetadataVersion to be bumped (was {initialVersion}, now {selected.MetadataVersion}).");
     }
+
+    [Fact]
+    public async Task ChangeVersion_BumpsOnPersistedChangesOnly()
+    {
+        var v0 = _service.ChangeVersion;
+        await _service.GetAllAsync();
+        Assert.Equal(v0, _service.ChangeVersion);
+
+        await _service.SetUserAliasesAsync("Versioned Series", new[] { "Alias" });
+        Assert.True(_service.ChangeVersion > v0);
+    }
 }

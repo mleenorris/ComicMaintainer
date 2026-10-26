@@ -93,6 +93,7 @@ public partial class FileStoreService
         };
 
         _files.AddOrUpdate(filePath, comicFile, (_, _) => comicFile);
+        MarkChanged();
 
         // Persist to database
         try
@@ -110,6 +111,7 @@ public partial class FileStoreService
                     entity = CreateFileEntity(filePath);
                     dbContext.ComicFiles.Add(entity);
                     await dbContext.SaveChangesAsync(cancellationToken);
+                    MarkChanged();
                     _logger.LogDebug("Added new file to database: {FilePath}", SanitizeForLogging(filePath));
                 }
                 catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx && 
@@ -129,6 +131,7 @@ public partial class FileStoreService
                         entity.IsDuplicate = comicFile.IsDuplicate;
                         entity.UpdatedAt = DateTime.UtcNow;
                         await dbContext.SaveChangesAsync(cancellationToken);
+                        MarkChanged();
                         _logger.LogDebug("Updated existing file in database after retry: {FilePath}", SanitizeForLogging(filePath));
                     }
                 }
@@ -144,6 +147,7 @@ public partial class FileStoreService
                 entity.IsDuplicate = comicFile.IsDuplicate;
                 entity.UpdatedAt = DateTime.UtcNow;
                 await dbContext.SaveChangesAsync(cancellationToken);
+                MarkChanged();
                 _logger.LogDebug("Updated existing file in database: {FilePath}", SanitizeForLogging(filePath));
             }
         }
@@ -170,6 +174,7 @@ public partial class FileStoreService
     {
         _files.TryRemove(filePath, out _);
         _duplicateFiles.TryRemove(filePath, out _);
+        MarkChanged();
 
         // Remove from database
         try
@@ -183,6 +188,7 @@ public partial class FileStoreService
             {
                 dbContext.ComicFiles.Remove(entity);
                 await dbContext.SaveChangesAsync(cancellationToken);
+                MarkChanged();
                 _logger.LogDebug("Removed file from database");
             }
             else
@@ -260,6 +266,7 @@ public partial class FileStoreService
             _files[newPath] = newFile;
             if (newFile.IsDuplicate)
                 _duplicateFiles[newPath] = true;
+            MarkChanged();
 
             _logger.LogDebug("Updated file path in memory store: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
         }
@@ -300,6 +307,7 @@ public partial class FileStoreService
                     try
                     {
                         await dbContext.SaveChangesAsync(cancellationToken);
+                        MarkChanged();
                         _logger.LogDebug("Updated file path in database: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
                     }
                     catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
@@ -376,6 +384,7 @@ public partial class FileStoreService
 
                     dbContext.ComicFiles.Remove(entity);
                     await dbContext.SaveChangesAsync(cancellationToken);
+                    MarkChanged();
                     _logger.LogDebug("Merged processing state from stale old-path entry into existing new-path row: {OldPath} -> {NewPath}", SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
                 }
 
@@ -424,11 +433,13 @@ public partial class FileStoreService
             entity.SeriesMetadataVersion = version;
             entity.UpdatedAt = DateTime.UtcNow;
             await dbContext.SaveChangesAsync(cancellationToken);
+            MarkChanged();
 
             // Mirror into the in-memory snapshot so subsequent reads see the stamp.
             if (_files.TryGetValue(filePath, out var file))
             {
                 file.SeriesMetadataVersion = version;
+                MarkChanged();
             }
         }
         catch (Exception ex)
@@ -456,9 +467,11 @@ public partial class FileStoreService
         entity.MetadataSource = FileMetadataSource.UserEdit.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
+        MarkChanged();
 
         var updated = ToComicFile(entity);
         _files.AddOrUpdate(filePath, updated, (_, _) => updated);
+        MarkChanged();
         await BroadcastFileListUpdateSafeAsync();
     }
 }

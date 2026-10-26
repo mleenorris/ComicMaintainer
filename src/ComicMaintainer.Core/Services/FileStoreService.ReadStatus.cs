@@ -9,7 +9,8 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class FileStoreService
 {
-    private static string ReadPathsCacheKey(string userId) => $"FileStore.ReadPaths.{userId}";
+    private static string ReadPathsCacheKey(string userId, long changeVersion) =>
+        $"FileStore.ReadPaths.{userId}|{changeVersion}";
 
     /// <summary>
     /// Paths the given user has marked read. Cached because the in-memory file list
@@ -18,8 +19,10 @@ public partial class FileStoreService
     /// </summary>
     private async Task<HashSet<string>> GetUserReadPathsAsync(string userId, CancellationToken cancellationToken)
     {
+        var changeVersion = ChangeVersion;
+        var cacheKey = ReadPathsCacheKey(userId, changeVersion);
         if (_memoryCache != null &&
-            _memoryCache.TryGetValue(ReadPathsCacheKey(userId), out HashSet<string>? cached) &&
+            _memoryCache.TryGetValue(cacheKey, out HashSet<string>? cached) &&
             cached != null)
         {
             return cached;
@@ -33,7 +36,7 @@ public partial class FileStoreService
             .ToListAsync(cancellationToken);
 
         var set = new HashSet<string>(paths, StringComparer.Ordinal);
-        _memoryCache?.Set(ReadPathsCacheKey(userId), set, ReadPathsCacheTtl);
+        _memoryCache?.Set(cacheKey, set, ReadPathsCacheTtl);
         return set;
     }
 
@@ -43,7 +46,8 @@ public partial class FileStoreService
     /// </summary>
     private void InvalidateUserReadPaths(string userId)
     {
-        _memoryCache?.Remove(ReadPathsCacheKey(userId));
+        _memoryCache?.Remove(ReadPathsCacheKey(userId, ChangeVersion));
+        MarkChanged();
     }
 
     /// <summary>
@@ -110,7 +114,6 @@ public partial class FileStoreService
                 row.UpdatedAt = now;
             }
 
-            InvalidateUserReadPaths(row.UserId);
         }
 
         var sourceProgress = await dbContext.ReadingProgresses
@@ -146,6 +149,10 @@ public partial class FileStoreService
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        foreach (var userId in sourceRows.Select(row => row.UserId).Distinct(StringComparer.Ordinal))
+        {
+            InvalidateUserReadPaths(userId);
+        }
         _logger.LogDebug(
             "Moved read status/progress for {Count} user(s): {OldPath} -> {NewPath}",
             sourceRows.Count, SanitizeForLogging(oldPath), SanitizeForLogging(newPath));
@@ -203,10 +210,10 @@ public partial class FileStoreService
             status.UpdatedAt = DateTime.UtcNow;
 
             await SaveUserReadStatusAsync(dbContext, status, cancellationToken);
+            InvalidateUserReadPaths(userId);
             await SyncReadingProgressAsync(dbContext, userId, new[] { filePath }, read, DateTime.UtcNow, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            InvalidateUserReadPaths(userId);
             _logger.LogDebug(
                 "Updated read status for {FilePath} to {Status} for user {UserId}",
                 SanitizeForLogging(filePath), read, SanitizeForLogging(userId));

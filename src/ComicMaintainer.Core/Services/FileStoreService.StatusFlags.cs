@@ -38,6 +38,7 @@ public partial class FileStoreService
         {
             file.IsDuplicate = duplicate;
         }
+        MarkChanged();
 
         // Persist to database
         try
@@ -52,6 +53,7 @@ public partial class FileStoreService
                 entity.IsDuplicate = duplicate;
                 entity.UpdatedAt = DateTime.UtcNow;
                 await dbContext.SaveChangesAsync(cancellationToken);
+                MarkChanged();
                 _logger.LogDebug("Updated duplicate status for {FilePath} to {Status}", SanitizeForLogging(filePath), duplicate);
             }
             else
@@ -64,6 +66,7 @@ public partial class FileStoreService
                         entity = CreateFileEntity(filePath, isDuplicate: duplicate);
                         dbContext.ComicFiles.Add(entity);
                         await dbContext.SaveChangesAsync(cancellationToken);
+                        MarkChanged();
                         _logger.LogDebug("Created file entity and set duplicate status for {FilePath} to {Status}", SanitizeForLogging(filePath), duplicate);
                     }
                     catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
@@ -78,6 +81,7 @@ public partial class FileStoreService
                             entity.IsDuplicate = duplicate;
                             entity.UpdatedAt = DateTime.UtcNow;
                             await dbContext.SaveChangesAsync(cancellationToken);
+                            MarkChanged();
                             _logger.LogDebug("Updated duplicate status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), duplicate);
                         }
                     }
@@ -102,6 +106,7 @@ public partial class FileStoreService
             // Update IsProcessed based on both renamed and normalized states
             file.IsProcessed = file.IsRenamed && file.IsNormalized;
         }
+        MarkChanged();
 
         // Persist to database
         try
@@ -118,6 +123,7 @@ public partial class FileStoreService
                 entity.IsProcessed = ComputeProcessedState(entity.IsRenamed, entity.IsNormalized);
                 entity.UpdatedAt = DateTime.UtcNow;
                 await dbContext.SaveChangesAsync(cancellationToken);
+                MarkChanged();
                 _logger.LogDebug("Updated renamed status for {FilePath} to {Status}", SanitizeForLogging(filePath), renamed);
             }
             else
@@ -132,6 +138,7 @@ public partial class FileStoreService
                         entity.IsProcessed = ComputeProcessedState(renamed, entity.IsNormalized);
                         dbContext.ComicFiles.Add(entity);
                         await dbContext.SaveChangesAsync(cancellationToken);
+                        MarkChanged();
                         _logger.LogDebug("Created file entity and set renamed status for {FilePath} to {Status}", SanitizeForLogging(filePath), renamed);
                     }
                     catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
@@ -146,6 +153,7 @@ public partial class FileStoreService
                             entity.IsProcessed = ComputeProcessedState(entity.IsRenamed, entity.IsNormalized);
                             entity.UpdatedAt = DateTime.UtcNow;
                             await dbContext.SaveChangesAsync(cancellationToken);
+                            MarkChanged();
                             _logger.LogDebug("Updated renamed status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), renamed);
                         }
                     }
@@ -170,6 +178,7 @@ public partial class FileStoreService
             // Update IsProcessed based on both renamed and normalized states
             file.IsProcessed = file.IsRenamed && file.IsNormalized;
         }
+        MarkChanged();
 
         // Persist to database
         try
@@ -186,6 +195,7 @@ public partial class FileStoreService
                 entity.IsProcessed = ComputeProcessedState(entity.IsRenamed, entity.IsNormalized);
                 entity.UpdatedAt = DateTime.UtcNow;
                 await dbContext.SaveChangesAsync(cancellationToken);
+                MarkChanged();
                 _logger.LogDebug("Updated normalized status for {FilePath} to {Status}", SanitizeForLogging(filePath), normalized);
             }
             else
@@ -200,6 +210,7 @@ public partial class FileStoreService
                         entity.IsProcessed = ComputeProcessedState(entity.IsRenamed, normalized);
                         dbContext.ComicFiles.Add(entity);
                         await dbContext.SaveChangesAsync(cancellationToken);
+                        MarkChanged();
                         _logger.LogDebug("Created file entity and set normalized status for {FilePath} to {Status}", SanitizeForLogging(filePath), normalized);
                     }
                     catch (DbUpdateException ex) when (ex.InnerException is Microsoft.Data.Sqlite.SqliteException sqliteEx &&
@@ -214,6 +225,7 @@ public partial class FileStoreService
                             entity.IsProcessed = ComputeProcessedState(entity.IsRenamed, entity.IsNormalized);
                             entity.UpdatedAt = DateTime.UtcNow;
                             await dbContext.SaveChangesAsync(cancellationToken);
+                            MarkChanged();
                             _logger.LogDebug("Updated normalized status for {FilePath} to {Status} after retry", SanitizeForLogging(filePath), normalized);
                         }
                     }
@@ -277,6 +289,7 @@ public partial class FileStoreService
                 if (entities.Count > 0)
                 {
                     await dbContext.SaveChangesAsync(cancellationToken);
+                    MarkChanged();
                 }
             }
 
@@ -295,6 +308,7 @@ public partial class FileStoreService
                 }
                 _duplicateFiles.TryRemove(path, out _);
             }
+            MarkChanged();
 
             if (updated > 0)
             {

@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Linq;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
@@ -13,20 +15,115 @@ public partial class SeriesLibraryService
     /// and returns a dictionary of series accumulators keyed by their union-find
     /// representative (the series id surfaced to the API).
     /// </summary>
-    /// <param name="groupingKeyByFileOutput">
-    /// When supplied, receives the per-file grouping key (the normalized title the
-    /// file was grouped under, before any union-find / cache-record merging). The
-    /// reader uses it to keep next/previous navigation inside the file's own
-    /// source series instead of spilling into a different series that merely got
-    /// merged into the same library card.
-    /// </param>
+    /// <remarks>
+    /// Cache-only builds (<paramref name="allowDiskRead"/> = false) are served
+    /// from a <see cref="GroupsSnapshot"/> that is reused until the file store,
+    /// read state, metadata cache or relevant settings change. The returned
+    /// dictionary and its accumulators are shared between requests and MUST be
+    /// treated as read-only by callers.
+    /// </remarks>
     private async Task<Dictionary<string, SeriesAccumulator>> BuildGroupsAsync(
         string? filter,
         bool allowDiskRead,
-        CancellationToken cancellationToken,
-        Dictionary<string, string>? groupingKeyByFileOutput = null)
+        CancellationToken cancellationToken)
+        => (await GetGroupsSnapshotAsync(filter, allowDiskRead, cancellationToken)).Groups;
+
+    /// <summary>
+    /// Returns the grouped library for <paramref name="filter"/>, reusing a
+    /// cached snapshot when the inputs have not changed since it was built.
+    /// </summary>
+    private async Task<GroupsSnapshot> GetGroupsSnapshotAsync(
+        string? filter,
+        bool allowDiskRead,
+        CancellationToken cancellationToken)
     {
+        // Disk reads make the result depend on archive contents we don't
+        // version, and sources that don't report change versions (e.g. test
+        // doubles) can't be validated — build fresh in both cases. Snapshots
+        // carry per-user read state, so without a user context to key on we
+        // can't tell users apart and must not share them either.
+        if (allowDiskRead
+            || _userContext is null
+            || _fileStore is not IChangeVersionSource fileVersions
+            || _metadataCache is not IChangeVersionSource metadataVersions)
+        {
+            return await BuildGroupsSnapshotAsync(filter, allowDiskRead, default, cancellationToken);
+        }
+
+        var cacheKey = new GroupsCacheKey(
+            string.IsNullOrWhiteSpace(filter) ? null : filter.Trim().ToLowerInvariant(),
+            _userContext.UserId);
+
+        // Capture versions BEFORE reading any inputs: a write that lands while
+        // we build bumps the version afterwards, so the stored snapshot is
+        // detected as stale on the next request instead of being served forever.
+        var versions = CaptureSnapshotVersions(fileVersions, metadataVersions);
+        if (TryGetFreshSnapshot(cacheKey, versions, out var cached))
+        {
+            return cached;
+        }
+
+        await _snapshotBuildLock.WaitAsync(cancellationToken);
+        try
+        {
+            // Another request may have rebuilt it while we waited.
+            versions = CaptureSnapshotVersions(fileVersions, metadataVersions);
+            if (TryGetFreshSnapshot(cacheKey, versions, out cached))
+            {
+                return cached;
+            }
+
+            var snapshot = await BuildGroupsSnapshotAsync(filter, allowDiskRead: false, versions, cancellationToken);
+
+            // Drop snapshots that can never be served again so memory stays
+            // bounded to (filters x active users) live entries.
+            foreach (var entry in _snapshotCache.Where(entry =>
+                         !entry.Value.Versions.Equals(versions)
+                         || DateTime.UtcNow - entry.Value.BuiltAtUtc >= SnapshotMaxAge))
+            {
+                _snapshotCache.TryRemove(entry);
+            }
+            _snapshotCache[cacheKey] = snapshot;
+            return snapshot;
+        }
+        finally
+        {
+            _snapshotBuildLock.Release();
+        }
+    }
+
+    private SnapshotVersions CaptureSnapshotVersions(IChangeVersionSource fileVersions, IChangeVersionSource metadataVersions)
+        => new(
+            fileVersions.ChangeVersion,
+            metadataVersions.ChangeVersion,
+            _settings.CurrentValue?.DefaultPreferredLanguage);
+
+    private bool TryGetFreshSnapshot(GroupsCacheKey key, SnapshotVersions versions, out GroupsSnapshot snapshot)
+    {
+        if (_snapshotCache.TryGetValue(key, out var existing)
+            && existing.Versions.Equals(versions)
+            && DateTime.UtcNow - existing.BuiltAtUtc < SnapshotMaxAge)
+        {
+            snapshot = existing;
+            return true;
+        }
+
+        snapshot = null!;
+        return false;
+    }
+
+    /// <summary>Drops every cached library snapshot (used by tests and diagnostics).</summary>
+    internal void InvalidateSnapshots() => _snapshotCache.Clear();
+
+    private async Task<GroupsSnapshot> BuildGroupsSnapshotAsync(
+        string? filter,
+        bool allowDiskRead,
+        SnapshotVersions versions,
+        CancellationToken cancellationToken)
+    {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var files = (await _fileStore.GetFilteredFilesAsync(filter, cancellationToken)).ToList();
+        var loadedAt = stopwatch.Elapsed;
         var fileEntries = new List<(ComicFile File, SeriesMetadata Metadata, string GroupingTitle, List<string> MetadataAliases)>(files.Count);
 
         foreach (var file in files)
@@ -67,14 +164,6 @@ public partial class SeriesLibraryService
             groupingKeyByFile[entry.File.FilePath] = fileKey;
         }
 
-        if (groupingKeyByFileOutput is not null)
-        {
-            foreach (var kvp in groupingKeyByFile)
-            {
-                groupingKeyByFileOutput[kvp.Key] = kvp.Value;
-            }
-        }
-
         foreach (var record in cacheRecords)
         {
             var recordKey = record.NormalizedKey;
@@ -105,6 +194,13 @@ public partial class SeriesLibraryService
             }
         }
 
+        // Resolve the authoritative record (and image record) for every
+        // union-find component once, instead of rescanning every cache record
+        // for every file.
+        var bestRecordByRepresentative = BuildBestRecordByRepresentative(cacheRecords, unionFind);
+        var bestImageRecordByRepresentative = BuildBestImageRecordByRepresentative(cacheRecords, unionFind);
+        var displayTitleByRecordKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
         var groups = new Dictionary<string, SeriesAccumulator>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var entry in fileEntries)
@@ -115,7 +211,7 @@ public partial class SeriesLibraryService
             var fileKey = groupingKeyByFile[file.FilePath];
             var representative = unionFind.Find(fileKey);
 
-            var record = ResolveRecordForGroup(representative, cacheRecords, unionFind);
+            bestRecordByRepresentative.TryGetValue(representative, out var record);
             var canonicalTitle = record is null || string.IsNullOrWhiteSpace(record.CanonicalTitle)
                 ? groupingTitle
                 : record.CanonicalTitle;
@@ -128,11 +224,18 @@ public partial class SeriesLibraryService
             // (when registered) so this surface stays in lockstep with the
             // <Series> value that ComicProcessorService writes to ComicInfo.xml
             // for files reaching the same record — the same rule decides both.
-            var displayTitle = record is null
-                ? canonicalTitle
-                : (_seriesNameResolver is not null
+            string displayTitle;
+            if (record is null)
+            {
+                displayTitle = canonicalTitle;
+            }
+            else if (!displayTitleByRecordKey.TryGetValue(record.NormalizedKey, out displayTitle!))
+            {
+                displayTitle = (_seriesNameResolver is not null
                     ? _seriesNameResolver.ResolveForRecord(record)
-                    : SeriesDisplayTitleResolver.Resolve(record, _settings.CurrentValue.DefaultPreferredLanguage));
+                    : SeriesDisplayTitleResolver.Resolve(record, _settings.CurrentValue.DefaultPreferredLanguage)) ?? string.Empty;
+                displayTitleByRecordKey[record.NormalizedKey] = displayTitle;
+            }
             if (string.IsNullOrWhiteSpace(displayTitle))
             {
                 displayTitle = canonicalTitle;
@@ -148,7 +251,7 @@ public partial class SeriesLibraryService
                 // image independently so the library card shows the provider
                 // image whenever any record in the group has one, matching the
                 // Manage Names modal (which looks the image up by title).
-                var imageRecord = ResolveImageRecordForGroup(representative, cacheRecords, unionFind)
+                var imageRecord = bestImageRecordByRepresentative.GetValueOrDefault(representative)
                     ?? (record is not null && record.HasImage ? record : null)
                     // Final fallback: the image may live on a record that the
                     // union-find never bridged to this group because it is only
@@ -190,18 +293,16 @@ public partial class SeriesLibraryService
                 groups[representative] = accumulator;
             }
 
-            if (!string.Equals(groupingTitle, canonicalTitle, StringComparison.OrdinalIgnoreCase)
-                && accumulator.Aliases.All(alias => !string.Equals(alias, groupingTitle, StringComparison.OrdinalIgnoreCase)))
+            if (!string.Equals(groupingTitle, canonicalTitle, StringComparison.OrdinalIgnoreCase))
             {
-                accumulator.Aliases.Add(groupingTitle);
+                accumulator.TryAddAlias(groupingTitle);
             }
 
             foreach (var alias in entry.MetadataAliases)
             {
-                if (accumulator.Aliases.All(existing => !string.Equals(existing, alias, StringComparison.OrdinalIgnoreCase))
-                    && !string.Equals(alias, canonicalTitle, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(alias, canonicalTitle, StringComparison.OrdinalIgnoreCase))
                 {
-                    accumulator.Aliases.Add(alias);
+                    accumulator.TryAddAlias(alias);
                 }
             }
 
@@ -244,7 +345,27 @@ public partial class SeriesLibraryService
         // two distinct source folders to the same external series. Without
         // this pass the series view renders two cards labelled identically,
         // which is what users perceive as "duplicate series".
-        return CollapseDuplicateAccumulators(groups);
+        var collapsed = CollapseDuplicateAccumulators(groups);
+
+        // Precompute the per-series values every list/overview request needs,
+        // and an index from file path to owning series for reader navigation.
+        var ownerByFilePath = new Dictionary<string, SeriesAccumulator>(StringComparer.Ordinal);
+        foreach (var accumulator in collapsed.Values)
+        {
+            accumulator.SortedIssues = SortIssues(accumulator.Issues);
+            foreach (var issue in accumulator.Issues.Where(issue => !string.IsNullOrEmpty(issue.FilePath)))
+            {
+                ownerByFilePath.TryAdd(issue.FilePath, accumulator);
+            }
+        }
+
+        stopwatch.Stop();
+        _logger.LogDebug(
+            "Built series library snapshot: {FileCount} files, {RecordCount} cache records, {SeriesCount} series in {ElapsedMs} ms (file load {LoadMs} ms, filter {Filter})",
+            files.Count, cacheRecords.Count, collapsed.Count, stopwatch.ElapsedMilliseconds,
+            (long)loadedAt.TotalMilliseconds, LoggingHelper.SanitizeForLog(filter));
+
+        return new GroupsSnapshot(collapsed, groupingKeyByFile, ownerByFilePath, versions, DateTime.UtcNow);
     }
 
     /// <summary>
@@ -316,10 +437,12 @@ public partial class SeriesLibraryService
 
                 // Merge issues (de-dup by file path so a file that somehow
                 // ended up in both groups is not counted twice).
+                var survivorPaths = new HashSet<string>(
+                    survivor.Issues.Select(existing => existing.FilePath ?? string.Empty),
+                    StringComparer.OrdinalIgnoreCase);
                 foreach (var issue in other.Issues)
                 {
-                    if (string.IsNullOrEmpty(issue.FilePath)
-                        || !survivor.Issues.Any(existing => string.Equals(existing.FilePath, issue.FilePath, StringComparison.OrdinalIgnoreCase)))
+                    if (string.IsNullOrEmpty(issue.FilePath) || survivorPaths.Add(issue.FilePath))
                     {
                         survivor.Issues.Add(issue);
                     }
@@ -489,8 +612,96 @@ public partial class SeriesLibraryService
         return true;
     }
 
+    private readonly record struct GroupsCacheKey(string? Filter, string? UserId);
+
+    private readonly record struct SnapshotVersions(long FileVersion, long MetadataVersion, string? DefaultPreferredLanguage);
+
+    /// <summary>
+    /// An immutable (by convention) grouped view of the library for one file
+    /// filter and user. Shared across concurrent requests.
+    /// </summary>
+    private sealed class GroupsSnapshot
+    {
+        public GroupsSnapshot(
+            Dictionary<string, SeriesAccumulator> groups,
+            IReadOnlyDictionary<string, string> groupingKeyByFile,
+            IReadOnlyDictionary<string, SeriesAccumulator> ownerByFilePath,
+            SnapshotVersions versions,
+            DateTime builtAtUtc)
+        {
+            Groups = groups;
+            GroupingKeyByFile = groupingKeyByFile;
+            OwnerByFilePath = ownerByFilePath;
+            Versions = versions;
+            BuiltAtUtc = builtAtUtc;
+        }
+
+        public Dictionary<string, SeriesAccumulator> Groups { get; }
+
+        /// <summary>Per-file grouping key (normalized title before union-find merges).</summary>
+        public IReadOnlyDictionary<string, string> GroupingKeyByFile { get; }
+
+        /// <summary>File path → owning series, for O(1) reader navigation lookups.</summary>
+        public IReadOnlyDictionary<string, SeriesAccumulator> OwnerByFilePath { get; }
+
+        public SnapshotVersions Versions { get; }
+
+        public DateTime BuiltAtUtc { get; }
+
+        /// <summary>
+        /// Sorted/filtered summary lists keyed by (series filter, search, sort,
+        /// direction), so infinite-scroll pages over the same view are a cheap
+        /// slice instead of a full re-sort. Lives and dies with the snapshot.
+        /// </summary>
+        public ConcurrentDictionary<string, IReadOnlyList<SeriesAccumulator>> SummaryViews { get; } = new(StringComparer.Ordinal);
+    }
+
     private sealed class SeriesAccumulator
     {
+        private HashSet<string>? _aliasSet;
+        private string? _issueSearchText;
+        // 0 = not computed, 1 = false, 2 = true. An int (not bool?) so the
+        // lazily cached value is written atomically when requests race.
+        private int _hasMissingIssues;
+
+        /// <summary>
+        /// Adds <paramref name="alias"/> unless an equal alias (case-insensitive)
+        /// is already present. Backed by a set so large series don't pay a
+        /// linear scan per file.
+        /// </summary>
+        public bool TryAddAlias(string alias)
+        {
+            _aliasSet ??= new HashSet<string>(Aliases, StringComparer.OrdinalIgnoreCase);
+            if (!_aliasSet.Add(alias))
+            {
+                return false;
+            }
+            Aliases.Add(alias);
+            return true;
+        }
+
+        /// <summary>Issues in display order; populated once the snapshot is built.</summary>
+        public List<SeriesIssueDto>? SortedIssues { get; set; }
+
+        /// <summary>Issues in display order, computing them if the snapshot didn't.</summary>
+        public IReadOnlyList<SeriesIssueDto> GetSortedIssues() => SortedIssues ??= SortIssues(Issues);
+
+        /// <summary>Concatenated issue titles/numbers/file names used by library search (lazy).</summary>
+        public string IssueSearchText => _issueSearchText ??= string.Join(
+            "\n", GetSortedIssues().Select(i => $"{i.Title}\n{i.Issue}\n{i.FileName}"));
+
+        /// <summary>Cached result of the "missing" series filter (lazy).</summary>
+        public bool HasMissingIssues(Func<SeriesAccumulator, bool> compute)
+        {
+            var cached = Volatile.Read(ref _hasMissingIssues);
+            if (cached == 0)
+            {
+                cached = compute(this) ? 2 : 1;
+                Volatile.Write(ref _hasMissingIssues, cached);
+            }
+            return cached == 2;
+        }
+
         public string Id { get; set; } = string.Empty;
         public string DisplayTitle { get; set; } = string.Empty;
         public string CanonicalTitle { get; set; } = string.Empty;

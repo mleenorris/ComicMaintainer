@@ -253,7 +253,7 @@ public partial class SeriesLibraryService
                 continue;
             }
 
-            var sortedIssues = SortIssues(accumulator.Issues);
+            var sortedIssues = accumulator.GetSortedIssues();
             return sortedIssues
                 .Select(issue => issue.FilePath)
                 .FirstOrDefault(path => !string.IsNullOrWhiteSpace(path));

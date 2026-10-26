@@ -41,11 +41,25 @@ internal static class WebApplicationExtensions
             {
                 if (!await roleManager.RoleExistsAsync(roleName))
                 {
-                    await roleManager.CreateAsync(new ApplicationRole 
+                    var role = new ApplicationRole
                     { 
                         Name = roleName,
                         Description = $"{roleName} role"
-                    });
+                    };
+
+                    try
+                    {
+                        await roleManager.CreateAsync(role);
+                    }
+                    catch (DbUpdateException)
+                    {
+                        if (!await roleManager.RoleExistsAsync(roleName))
+                        {
+                            throw;
+                        }
+
+                        db.Entry(role).State = EntityState.Detached;
+                    }
                 }
             }
             

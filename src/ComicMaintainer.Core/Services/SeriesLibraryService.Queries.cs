@@ -24,7 +24,9 @@ public partial class SeriesLibraryService
             .Where(accumulator => MatchesSeriesFilter(accumulator, seriesFilter))
             .Select(accumulator =>
             {
-                accumulator.Issues = SortIssues(accumulator.Issues);
+                // Copy rather than re-assigning accumulator.Issues: accumulators
+                // may be shared with other requests via the library snapshot.
+                var sortedIssues = new List<SeriesIssueDto>(accumulator.GetSortedIssues());
 
                 return new SeriesLibraryDto
                 {
@@ -33,13 +35,13 @@ public partial class SeriesLibraryService
                     CanonicalTitle = accumulator.CanonicalTitle,
                     Aliases = NormalizeAliases(accumulator.Aliases),
                     MetadataSource = accumulator.MetadataSource,
-                    IssueCount = accumulator.Issues.Count,
+                    IssueCount = sortedIssues.Count,
                     TotalSize = accumulator.TotalSize,
                     LatestModified = ToUnixTime(accumulator.LatestModified),
-                    CoverFilePath = accumulator.Issues.FirstOrDefault()?.FilePath ?? string.Empty,
+                    CoverFilePath = sortedIssues.FirstOrDefault()?.FilePath ?? string.Empty,
                     HasExternalImage = accumulator.HasExternalImage,
                     ExternalImageUrl = BuildExternalImageUrl(accumulator),
-                    Issues = accumulator.Issues,
+                    Issues = sortedIssues,
                     Synopsis = accumulator.Synopsis
                 };
             })
@@ -98,39 +100,28 @@ public partial class SeriesLibraryService
         var (fileFilter, seriesFilter) = SplitFilter(filter);
         // Summary mode never opens an archive on disk, so even huge libraries
         // stay snappy. Per-issue details are loaded lazily by GetSeriesIssuesAsync.
-        var groups = await BuildGroupsAsync(fileFilter, allowDiskRead: false, cancellationToken);
+        var snapshot = await GetGroupsSnapshotAsync(fileFilter, allowDiskRead: false, cancellationToken);
 
-        var summaries = groups.Values
-            .Where(accumulator => MatchesSeriesFilter(accumulator, seriesFilter))
-            .Select(accumulator =>
-            {
-                var sortedIssues = SortIssues(accumulator.Issues);
-                return new
-                {
-                    Accumulator = accumulator,
-                    Cover = sortedIssues.FirstOrDefault()?.FilePath ?? string.Empty,
-                    SortedIssues = sortedIssues,
-                    IssueTitleSearch = string.Join("\n", sortedIssues.Select(i => $"{i.Title}\n{i.Issue}\n{i.FileName}"))
-                };
-            })
-            .ToList();
-
-        if (!string.IsNullOrWhiteSpace(search))
+        // The filtered + sorted list depends only on the snapshot and these
+        // inputs, so infinite-scroll requests for later pages reuse it and
+        // only pay for the slice.
+        var viewKey = string.Join("\u001f",
+            seriesFilter ?? string.Empty,
+            search ?? string.Empty,
+            (sort ?? string.Empty).ToLowerInvariant(),
+            (direction ?? string.Empty).ToLowerInvariant());
+        if (!snapshot.SummaryViews.TryGetValue(viewKey, out var view))
         {
-            summaries = summaries.Where(item =>
-                    Contains(item.Accumulator.DisplayTitle, search)
-                    || Contains(item.Accumulator.CanonicalTitle, search)
-                    || item.Accumulator.Aliases.Any(alias => Contains(alias, search))
-                    || Contains(item.IssueTitleSearch, search))
-                .ToList();
+            view = BuildSummaryView(snapshot.Groups.Values, seriesFilter, search, sort, direction);
+            if (snapshot.SummaryViews.Count >= MaxSummaryViewsPerSnapshot)
+            {
+                snapshot.SummaryViews.Clear();
+            }
+            snapshot.SummaryViews[viewKey] = view;
         }
 
-        summaries = SortSeries(summaries, sort, direction,
-            keyTitle: item => item.Accumulator.DisplayTitle,
-            keyDate: item => ToUnixTime(item.Accumulator.LatestModified),
-            keySize: item => item.Accumulator.TotalSize);
-
-        var totalSeries = summaries.Count;
+        IEnumerable<SeriesAccumulator> summaries = view;
+        var totalSeries = view.Count;
 
         bool offsetMode = offset.HasValue && limit.HasValue && limit.Value > 0;
         int effectiveOffset = 0;
@@ -140,7 +131,7 @@ public partial class SeriesLibraryService
         {
             effectiveOffset = Math.Max(0, offset!.Value);
             var lim = Math.Max(1, limit!.Value);
-            summaries = summaries.Skip(effectiveOffset).Take(lim).ToList();
+            summaries = view.Skip(effectiveOffset).Take(lim);
             totalPages = (int)Math.Ceiling((double)totalSeries / lim);
             page = 1;
         }
@@ -151,37 +142,65 @@ public partial class SeriesLibraryService
 
             if (perPage != -1)
             {
-                summaries = summaries
+                summaries = view
                     .Skip((page - 1) * perPage)
-                    .Take(perPage)
-                    .ToList();
+                    .Take(perPage);
             }
         }
 
         return new SeriesSummaryResult
         {
-            Series = summaries.Select(item => new SeriesSummaryDto
+            Series = summaries.Select(accumulator => new SeriesSummaryDto
             {
-                Id = item.Accumulator.Id,
-                Title = item.Accumulator.DisplayTitle,
-                CanonicalTitle = item.Accumulator.CanonicalTitle,
-                Aliases = NormalizeAliases(item.Accumulator.Aliases),
-                MetadataSource = item.Accumulator.MetadataSource,
-                IssueCount = item.Accumulator.Issues.Count,
-                TotalSize = item.Accumulator.TotalSize,
-                LatestModified = ToUnixTime(item.Accumulator.LatestModified),
-                CoverFilePath = item.Cover,
-                HasExternalImage = item.Accumulator.HasExternalImage,
-                ExternalImageUrl = BuildExternalImageUrl(item.Accumulator),
-                LookupStatus = item.Accumulator.LookupStatus,
-                LastLookupUtc = item.Accumulator.LastLookupUtc,
-                Synopsis = item.Accumulator.Synopsis
+                Id = accumulator.Id,
+                Title = accumulator.DisplayTitle,
+                CanonicalTitle = accumulator.CanonicalTitle,
+                Aliases = NormalizeAliases(accumulator.Aliases),
+                MetadataSource = accumulator.MetadataSource,
+                IssueCount = accumulator.Issues.Count,
+                TotalSize = accumulator.TotalSize,
+                LatestModified = ToUnixTime(accumulator.LatestModified),
+                CoverFilePath = accumulator.GetSortedIssues().FirstOrDefault()?.FilePath ?? string.Empty,
+                HasExternalImage = accumulator.HasExternalImage,
+                ExternalImageUrl = BuildExternalImageUrl(accumulator),
+                LookupStatus = accumulator.LookupStatus,
+                LastLookupUtc = accumulator.LastLookupUtc,
+                Synopsis = accumulator.Synopsis
             }).ToList(),
             Page = page,
             TotalPages = totalPages,
             TotalSeries = totalSeries,
             Offset = effectiveOffset
         };
+    }
+
+    /// <summary>
+    /// Applies the series-level filter, search and sort to a set of grouped
+    /// series. The result is shared through the snapshot's view cache, so it
+    /// is returned as a read-only list.
+    /// </summary>
+    private static IReadOnlyList<SeriesAccumulator> BuildSummaryView(
+        IEnumerable<SeriesAccumulator> groups,
+        string? seriesFilter,
+        string? search,
+        string? sort,
+        string? direction)
+    {
+        var filtered = groups.Where(accumulator => MatchesSeriesFilter(accumulator, seriesFilter));
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            filtered = filtered.Where(accumulator =>
+                Contains(accumulator.DisplayTitle, search)
+                || Contains(accumulator.CanonicalTitle, search)
+                || accumulator.Aliases.Any(alias => Contains(alias, search))
+                || Contains(accumulator.IssueSearchText, search));
+        }
+
+        return SortSeries(filtered.ToList(), sort, direction,
+            keyTitle: accumulator => accumulator.DisplayTitle,
+            keyDate: accumulator => ToUnixTime(accumulator.LatestModified),
+            keySize: accumulator => accumulator.TotalSize);
     }
 
     public async Task<IReadOnlyList<SeriesOverviewEntry>> GetSeriesOverviewEntriesAsync(
@@ -194,7 +213,7 @@ public partial class SeriesLibraryService
         var entries = new List<SeriesOverviewEntry>(groups.Count);
         foreach (var accumulator in groups.Values)
         {
-            var sortedIssues = SortIssues(accumulator.Issues);
+            var sortedIssues = accumulator.GetSortedIssues();
             var cover = sortedIssues.FirstOrDefault()?.FilePath ?? string.Empty;
 
             entries.Add(new SeriesOverviewEntry
@@ -271,7 +290,7 @@ public partial class SeriesLibraryService
 
         if (string.Equals(seriesFilter, MissingIssuesFilter, StringComparison.OrdinalIgnoreCase))
         {
-            return HasMissingIssues(accumulator);
+            return accumulator.HasMissingIssues(HasMissingIssues);
         }
 
         // A series counts as "matched" when EITHER it has a recorded metadata

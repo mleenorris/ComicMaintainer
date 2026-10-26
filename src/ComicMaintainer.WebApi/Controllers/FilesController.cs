@@ -7,6 +7,7 @@ using ComicMaintainer.WebApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using System.Text.RegularExpressions;
 
@@ -38,6 +39,7 @@ public partial class FilesController : ControllerBase
     private readonly ISeriesMetadataCacheService? _metadataCache;
     private readonly ISeriesNameResolver? _seriesNameResolver;
     private readonly ScheduledJobsHostedService? _scheduledJobsHostedService;
+    private readonly IMemoryCache? _memoryCache;
 
     public FilesController(
         IFileStoreService fileStore,
@@ -50,8 +52,10 @@ public partial class FilesController : ControllerBase
         IEventBroadcaster? eventBroadcaster = null,
         ISeriesMetadataCacheService? metadataCache = null,
         ISeriesNameResolver? seriesNameResolver = null,
-        ScheduledJobsHostedService? scheduledJobsHostedService = null)
+        ScheduledJobsHostedService? scheduledJobsHostedService = null,
+        IMemoryCache? memoryCache = null)
     {
+        _memoryCache = memoryCache;
         _fileStore = fileStore;
         _processor = processor;
         _historyService = historyService;

@@ -14,8 +14,16 @@ namespace ComicMaintainer.Core.Services;
 /// <summary>
 /// Persisted external-metadata cache + user-managed alias store.
 /// </summary>
-public class SeriesMetadataCacheService : ISeriesMetadataCacheService
+public class SeriesMetadataCacheService : ISeriesMetadataCacheService, IChangeVersionSource
 {
+    private long _changeVersion;
+
+    /// <inheritdoc />
+    /// <remarks>Bumped after every persisted change to the series metadata cache.</remarks>
+    public long ChangeVersion => Interlocked.Read(ref _changeVersion);
+
+    private void MarkChanged() => Interlocked.Increment(ref _changeVersion);
+
     // Unicode-aware: keep any Unicode letter (\p{L}) or number (\p{N}) so
     // non-ASCII titles (CJK, accented Latin, Cyrillic, etc.) produce rich,
     // distinguishable keys instead of collapsing to a bare digit when every
@@ -224,6 +232,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         }
 
         await db.SaveChangesAsync(cancellationToken);
+
+        MarkChanged();
         return ToRecord(entity);
     }
 
@@ -257,6 +267,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         entity.UpdatedAt = DateTime.UtcNow;
         BumpMetadataVersion(entity);
         await db.SaveChangesAsync(cancellationToken);
+        MarkChanged();
         return ToRecord(entity);
     }
 
@@ -356,6 +367,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         await TryDownloadImageAsync(entity, lookup, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
+
+        MarkChanged();
         return ToRecord(entity);
     }
 
@@ -474,6 +487,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         await TryWriteFolderCoverAsync(entity, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
+
+        MarkChanged();
         return ToRecord(entity);
     }
 
@@ -548,6 +563,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         await TryWriteFolderCoverAsync(entity, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
+
+        MarkChanged();
         return ToRecord(entity);
     }
 
@@ -599,6 +616,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         _archiveCoverQueue.EnqueueRemove(entity.NormalizedKey);
 
         await db.SaveChangesAsync(cancellationToken);
+
+        MarkChanged();
         return ToRecord(entity);
     }
 
@@ -798,6 +817,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         await TryDownloadImageAsync(entity, match, cancellationToken);
 
         await db.SaveChangesAsync(cancellationToken);
+
+        MarkChanged();
         return ToRecord(entity);
     }
 
@@ -854,6 +875,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
 
         entity.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(cancellationToken);
+        MarkChanged();
         return ToRecord(entity);
     }
 
@@ -1014,6 +1036,8 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
         }
 
         await db.SaveChangesAsync(cancellationToken);
+
+        MarkChanged();
         return ToRecord(entity);
     }
 
@@ -1066,6 +1090,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             };
             db.SeriesMetadataCache.Add(entity);
             await db.SaveChangesAsync(cancellationToken);
+            MarkChanged();
             return ToRecord(entity);
         }
 
@@ -1078,6 +1103,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
                 entity.UpdatedAt = DateTime.UtcNow;
                 BumpMetadataVersion(entity);
                 await db.SaveChangesAsync(cancellationToken);
+                MarkChanged();
             }
             return ToRecord(entity);
         }
@@ -1114,6 +1140,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
             entity.UpdatedAt = DateTime.UtcNow;
             BumpMetadataVersion(entity);
             await db.SaveChangesAsync(cancellationToken);
+            MarkChanged();
         }
 
         return ToRecord(entity);
@@ -1173,6 +1200,7 @@ public class SeriesMetadataCacheService : ISeriesMetadataCacheService
 
         db.SeriesMetadataCache.RemoveRange(toRemove);
         await db.SaveChangesAsync(cancellationToken);
+        MarkChanged();
 
         if (_logger.IsEnabled(LogLevel.Information))
         {

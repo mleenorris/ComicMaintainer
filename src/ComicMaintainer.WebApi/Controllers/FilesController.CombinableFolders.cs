@@ -1,15 +1,77 @@
 using ComicMaintainer.Core.Interfaces;
 using ComicMaintainer.Core.Models;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 using System.Text.RegularExpressions;
 
 namespace ComicMaintainer.WebApi.Controllers;
 
 public partial class FilesController
 {
+    private const string CombinableGroupsCacheKey = "FilesController.CombinableFolderGroups";
+    private static readonly TimeSpan CombinableGroupsCacheMaxAge = TimeSpan.FromMinutes(5);
+    private static readonly SemaphoreSlim CombinableGroupsBuildLock = new(1, 1);
+
+    private sealed record CombinableGroupsCacheEntry(
+        (long Files, long Metadata, string? Language) Versions,
+        IReadOnlyList<CombinableFolderGroup> Groups);
+
+    /// <summary>
+    /// Read-only view of the combinable-folder groups for display endpoints
+    /// (header counts, the combinable-folders list, per-series folder info).
+    /// The full rebuild scans every tracked file plus the metadata cache, so
+    /// the result is cached until the file store or metadata cache reports a
+    /// change. Mutating flows (the combine plan) still call
+    /// <see cref="BuildCombinableFolderGroupsAsync"/> directly so they always
+    /// act on fresh data. Callers must not modify the returned groups.
+    /// </summary>
+    private async Task<IReadOnlyList<CombinableFolderGroup>> GetCombinableFolderGroupsCachedAsync(CancellationToken cancellationToken = default)
+    {
+        if (_memoryCache is null
+            || _fileStore is not IChangeVersionSource fileVersions
+            || _metadataCache is not IChangeVersionSource metadataVersions)
+        {
+            return await BuildCombinableFolderGroupsAsync(cancellationToken);
+        }
+
+        (long, long, string?) CaptureVersions() =>
+            (fileVersions.ChangeVersion, metadataVersions.ChangeVersion, _settings.CurrentValue?.DefaultPreferredLanguage);
+
+        // Capture versions before building so a concurrent write marks the
+        // stored entry stale rather than being silently lost.
+        var versions = CaptureVersions();
+        if (_memoryCache.TryGetValue(CombinableGroupsCacheKey, out CombinableGroupsCacheEntry? cached)
+            && cached is not null && cached.Versions.Equals(versions))
+        {
+            return cached.Groups;
+        }
+
+        await CombinableGroupsBuildLock.WaitAsync(cancellationToken);
+        try
+        {
+            versions = CaptureVersions();
+            if (_memoryCache.TryGetValue(CombinableGroupsCacheKey, out cached)
+                && cached is not null && cached.Versions.Equals(versions))
+            {
+                return cached.Groups;
+            }
+
+            var groups = await BuildCombinableFolderGroupsAsync(cancellationToken);
+            _memoryCache.Set(
+                CombinableGroupsCacheKey,
+                new CombinableGroupsCacheEntry(versions, groups),
+                CombinableGroupsCacheMaxAge);
+            return groups;
+        }
+        finally
+        {
+            CombinableGroupsBuildLock.Release();
+        }
+    }
+
     private async Task<int> GetCombinableFolderCountAsync(CancellationToken cancellationToken = default)
     {
-        var groups = await BuildCombinableFolderGroupsAsync(cancellationToken);
+        var groups = await GetCombinableFolderGroupsCachedAsync(cancellationToken);
         // Mirror the previous behavior: every folder beyond the suggested destination counts as a source.
         return groups.Sum(g => Math.Max(0, g.Folders.Count - 1));
     }
@@ -208,7 +270,7 @@ public partial class FilesController
             seriesGroups = await _seriesLibrary.GetAllSeriesFolderGroupsAsync(filter: null, cancellationToken)
                 ?? Array.Empty<SeriesFoldersResult>();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogDebug(ex, "Failed to load series-library folder groups for combinable-folder reconciliation");
             return;
@@ -522,7 +584,7 @@ public partial class FilesController
     {
         try
         {
-            var groups = await BuildCombinableFolderGroupsAsync(cancellationToken);
+            var groups = await GetCombinableFolderGroupsCachedAsync(cancellationToken);
             var dtos = groups.Select(ToCombinableFolderGroupDto).ToList();
             return Ok(new { groups = dtos });
         }

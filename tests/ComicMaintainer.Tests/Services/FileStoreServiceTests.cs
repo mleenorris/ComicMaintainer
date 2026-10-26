@@ -1566,7 +1566,7 @@ public class FileStoreServiceTests
         var filePath = Path.Combine(_testDirectory, "read-cache-race.cbz");
         File.WriteAllText(filePath, "content");
         FileStoreService? service = null;
-        var memoryCache = new InterleavingMemoryCache(() =>
+        using var memoryCache = new InterleavingMemoryCache(() =>
             service!.MarkFileReadAsync(filePath, true).GetAwaiter().GetResult());
         var logger = new Mock<ILogger<FileStoreService>>().Object;
         var factory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
@@ -1584,7 +1584,6 @@ public class FileStoreServiceTests
         Assert.Single(inFlightResult);
         var refreshedFile = Assert.Single(refreshedResult);
         Assert.True(refreshedFile.IsRead);
-        memoryCache.Dispose();
     }
 
     [Fact]

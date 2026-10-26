@@ -2,7 +2,10 @@
 // Provides basic offline support and caching
 // Version is dynamically injected by the server to force browser updates
 
-// Cache version will be determined dynamically from the API
+// Cache version will be determined dynamically from the API. Install and
+// activate also record the name (see STATE_CACHE_NAME below): the browser
+// stops an idle worker and evaluates this script afresh for its next event,
+// and that new instance must keep using the same cache, not this default.
 let CACHE_NAME = 'comic-maintainer-v2'; // Default fallback
 const CACHE_PREFIX = 'comic-maintainer-';
 const urlsToCache = [
@@ -73,6 +76,61 @@ async function updateCacheName() {
   } catch (error) {
     console.log('Service Worker: Failed to fetch version, using default cache name', error);
   }
+}
+
+// Where install and activate record CACHE_NAME. There are two records because
+// an update installs (filling its own cache) while the previous version is
+// still in control and still serving from its cache.
+const STATE_CACHE_NAME = `${CACHE_PREFIX}sw-state-v1`;
+const INSTALLED_CACHE_KEY = '/__sw-state/installed-cache';
+const ACTIVE_CACHE_KEY = '/__sw-state/active-cache';
+
+// Resolves to CACHE_NAME once it is known in this instance of the worker.
+let cacheNameReady = null;
+
+async function recordCacheName(key) {
+  cacheNameReady = Promise.resolve(CACHE_NAME);
+  try {
+    const cache = await caches.open(STATE_CACHE_NAME);
+    await cache.put(key, new Response(CACHE_NAME));
+  } catch (error) {
+    console.log('Service Worker: Failed to record the cache name', CACHE_NAME, error);
+  }
+}
+
+async function recallCacheName(key, fallback) {
+  try {
+    const record = await caches.match(key, { cacheName: STATE_CACHE_NAME });
+    if (record) {
+      CACHE_NAME = await record.text();
+      return CACHE_NAME;
+    }
+  } catch (error) {
+    console.log('Service Worker: Failed to read the recorded cache name', error);
+  }
+  if (fallback) {
+    await fallback();
+  }
+  return CACHE_NAME;
+}
+
+// The cache to serve from and add runtime entries to: the one the last
+// activation recorded. Read once per instance, without asking the server.
+function activeCacheName() {
+  if (!cacheNameReady) {
+    cacheNameReady = recallCacheName(ACTIVE_CACHE_KEY);
+  }
+  return cacheNameReady;
+}
+
+// The cache this worker's install filled. Activation usually runs in a new
+// instance (a waiting update is stopped while idle), where only the record
+// tells which cache that was; /api/version is asked only when there is none.
+function installedCacheName() {
+  if (!cacheNameReady) {
+    cacheNameReady = recallCacheName(INSTALLED_CACHE_KEY, updateCacheName);
+  }
+  return cacheNameReady;
 }
 
 // Maximum number of entries kept in the runtime asset cache. Icons, fonts and
@@ -172,9 +230,10 @@ function documentCacheKey(url) {
 
 async function cacheDocumentResponse(url, response) {
   try {
-    const cache = await caches.open(CACHE_NAME);
+    const cacheName = await activeCacheName();
+    const cache = await caches.open(cacheName);
     await cache.put(documentCacheKey(url), response);
-    await trimCache(CACHE_NAME, MAX_RUNTIME_CACHE_ENTRIES);
+    await trimCache(cacheName, MAX_RUNTIME_CACHE_ENTRIES);
   } catch (error) {
     console.log('Service Worker: Failed to cache document', url.pathname, error);
   }
@@ -431,14 +490,19 @@ self.addEventListener('install', (event) => {
         console.log('Service Worker: Caching essential files with cache name:', CACHE_NAME);
         return cache.addAll(urlsToCache).then(() => precacheAppScripts(cache));
       })
+      .then(() => recordCacheName(INSTALLED_CACHE_KEY))
   );
 });
 
 // Activate event - clean up old caches
+//
+// The cache to keep is the one this worker's install filled, even when the
+// server is unreachable by now or already reports a newer release.
 self.addEventListener('activate', (event) => {
   console.log('Service Worker: Activating...');
   event.waitUntil(
-    updateCacheName()
+    installedCacheName()
+      .then(() => recordCacheName(ACTIVE_CACHE_KEY))
       .then(() => caches.keys())
       .then((cacheNames) => {
         return Promise.all(
@@ -447,9 +511,11 @@ self.addEventListener('activate', (event) => {
             // The image cache is deliberately preserved across releases: it
             // holds comic covers/pages, which are unrelated to the app
             // version. The offline cache holds user-requested downloads and
-            // must likewise never be discarded by an upgrade.
+            // must likewise never be discarded by an upgrade. The state cache
+            // holds the cache name records (see recordCacheName).
             if (cacheName.startsWith(CACHE_PREFIX) &&
                 cacheName !== CACHE_NAME &&
+                cacheName !== STATE_CACHE_NAME &&
                 cacheName !== IMAGE_CACHE_NAME &&
                 cacheName !== OFFLINE_CACHE_NAME) {
               console.log('Service Worker: Deleting old cache:', cacheName);
@@ -594,13 +660,13 @@ self.addEventListener('fetch', (event) => {
 
   if (isCssOrJs) {
     event.respondWith(
-      caches.open(CACHE_NAME).then((cache) =>
+      activeCacheName().then((cacheName) => caches.open(cacheName).then((cache) =>
         cache.match(request).then((cachedResponse) => {
           const networkFetch = fetch(request)
             .then((networkResponse) => {
               if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
                 cache.put(request, networkResponse.clone())
-                  .then(() => trimCache(CACHE_NAME, MAX_RUNTIME_CACHE_ENTRIES));
+                  .then(() => trimCache(cacheName, MAX_RUNTIME_CACHE_ENTRIES));
               }
               return networkResponse;
             })
@@ -608,7 +674,7 @@ self.addEventListener('fetch', (event) => {
           // Return cached immediately if present, otherwise wait for network.
           return cachedResponse || networkFetch;
         })
-      )
+      ))
     );
     return;
   }
@@ -634,10 +700,10 @@ self.addEventListener('fetch', (event) => {
           
           // Cache static assets
           if (url.pathname.startsWith('/icons/')) {
-            caches.open(CACHE_NAME).then((cache) =>
+            activeCacheName().then((cacheName) => caches.open(cacheName).then((cache) =>
               cache.put(request, responseToCache)
-                .then(() => trimCache(CACHE_NAME, MAX_RUNTIME_CACHE_ENTRIES))
-            );
+                .then(() => trimCache(cacheName, MAX_RUNTIME_CACHE_ENTRIES))
+            ));
           }
           
           return response;

@@ -8,6 +8,7 @@ const assert = require('node:assert/strict');
 const {
     APP_VERSION,
     VERSIONED_CACHE,
+    DEFAULT_CACHE,
     IMAGE_CACHE,
     OFFLINE_CACHE,
     OFFLINE_PAGE,
@@ -577,4 +578,93 @@ test('a POST outside the API is forwarded to the network, never answered from th
 
     assert.equal(response.status, 405);
     assert.deepEqual(sw.network.calls.map(call => call.method), ['POST']);
+});
+
+// --- a worker woken up again ------------------------------------------------------
+//
+// The browser stops an idle worker and evaluates sw.js afresh for its next
+// event, so most requests reach a worker that saw neither install nor
+// activate (worker.restart()).
+
+const STATE_CACHE = 'comic-maintainer-sw-state-v1';
+const stylesheet = reply(200, 'body{}', { headers: { 'Content-Type': 'text/css' } });
+
+test('a woken-up worker serves the precached scripts offline', async () => {
+    const sw = (await installedWorker()).restart();
+    sw.network.offline = true;
+
+    for (const path of ['/js/shared.js', '/js/pages/reader.js', '/js/main.js']) {
+        const response = await sw.respond(`${path}?v=${APP_VERSION}`);
+        assert.equal(response.status, 200, path);
+        assert.equal(await response.text(), `// ${path}?v=${APP_VERSION}`, path);
+    }
+    assert.deepEqual(sw.caches.names(), [VERSIONED_CACHE, STATE_CACHE]);
+});
+
+test('a woken-up worker stores documents, scripts, stylesheets and icons in the versioned cache without asking the server', async () => {
+    const sw = (await installedWorker()).restart();
+    sw.network.route('GET /reader.html', html(READER_PAGE));
+    sw.network.route('GET /css/styles.css', stylesheet);
+    sw.network.route('GET /js/main.js', script('// main.js, hotfixed'));
+
+    await sw.respond(navigationRequest('/reader.html?file=a.cbz'));
+    await sw.respond('/css/styles.css?v=1');
+    await sw.respond(`/js/main.js?v=${APP_VERSION}`);
+    await sw.respond('/icons/badge.png');
+    await sw.idle();
+
+    assert.equal(await sw.caches.text(VERSIONED_CACHE, '/reader.html'), READER_PAGE);
+    assert.equal(await sw.caches.text(VERSIONED_CACHE, '/css/styles.css?v=1'), 'body{}');
+    assert.equal(await sw.caches.text(VERSIONED_CACHE, `/js/main.js?v=${APP_VERSION}`), '// main.js, hotfixed');
+    assert.equal(await sw.caches.text(VERSIONED_CACHE, '/icons/badge.png'), 'png');
+    assert.deepEqual(sw.caches.names(), [VERSIONED_CACHE, STATE_CACHE]);
+    assert.equal(sw.run('CACHE_NAME'), VERSIONED_CACHE);
+    assert.deepEqual(sw.network.callsTo('/api/version'), []);
+
+    sw.network.offline = true;
+    assert.equal(await (await sw.restart().respond('/css/styles.css?v=1')).text(), 'body{}');
+});
+
+test('while an update waits to take over, a woken-up worker keeps to the cache of the version in control', async () => {
+    const active = await installedWorker();
+    // The next release installs next to it and waits for the user to accept it.
+    const update = active.restart();
+    update.network.route('GET /api/version', { version: '2.0.352.0' });
+    await update.install();
+
+    const sw = active.restart();
+    sw.network.route('GET /css/styles.css', stylesheet);
+    await sw.respond('/css/styles.css?v=1');
+    await sw.idle();
+    sw.network.offline = true;
+    const main = await sw.respond(`/js/main.js?v=${APP_VERSION}`);
+
+    assert.equal(await main.text(), `// /js/main.js?v=${APP_VERSION}`);
+    assert.ok(sw.caches.urls(VERSIONED_CACHE).includes(absolute('/css/styles.css?v=1')));
+    assert.equal(sw.caches.urls('comic-maintainer-2-0-352-0').includes(absolute('/css/styles.css?v=1')), false);
+});
+
+test('a worker that finds no recorded cache name uses the default cache', async () => {
+    const sw = loadServiceWorker();
+    sw.network.route('GET /reader.html', html(READER_PAGE));
+
+    await sw.respond(navigationRequest('/reader.html'));
+
+    assert.equal(await sw.caches.text(DEFAULT_CACHE, '/reader.html'), READER_PAGE);
+    assert.deepEqual(sw.caches.names(), [DEFAULT_CACHE]);
+    assert.deepEqual(sw.network.callsTo('/api/version'), []);
+});
+
+test('a recorded cache name that cannot be read is logged, and the default cache is used', async () => {
+    const sw = (await installedWorker()).restart();
+    sw.caches.match = async () => {
+        throw new DOMException('The operation is insecure.', 'SecurityError');
+    };
+    sw.network.route('GET /css/styles.css', stylesheet);
+
+    assert.equal(await (await sw.respond('/css/styles.css')).text(), 'body{}');
+    await sw.idle();
+
+    assert.equal(sw.logged('Failed to read the recorded cache name').length, 1);
+    assert.equal(await sw.caches.text(DEFAULT_CACHE, '/css/styles.css'), 'body{}');
 });

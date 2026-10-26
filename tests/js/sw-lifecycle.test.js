@@ -34,6 +34,10 @@ function scriptsOfflineDocumentsLoad() {
 
 const isScript = url => new URL(url).pathname.startsWith('/js/');
 
+// Where install and activate record the cache they set up, for the next
+// time the browser wakes the worker up.
+const STATE_CACHE = 'comic-maintainer-sw-state-v1';
+
 test('install names its cache after the server version and precaches the shell and every page script', async () => {
     const sw = loadServiceWorker();
     installRoutes(sw.network);
@@ -43,7 +47,7 @@ test('install names its cache after the server version and precaches the shell a
     assert.equal(sw.network.calls[0].path, '/api/version');
     assert.equal(sw.run('CACHE_NAME'), VERSIONED_CACHE);
     assert.equal(sw.run('APP_VERSION'), APP_VERSION);
-    assert.deepEqual(sw.caches.names(), [VERSIONED_CACHE]);
+    assert.deepEqual(sw.caches.names(), [VERSIONED_CACHE, STATE_CACHE]);
 
     const cached = sw.caches.urls(VERSIONED_CACHE);
     const shell = cached.filter(url => !isScript(url));
@@ -97,7 +101,7 @@ test('without a usable server version the default cache is used and no scripts a
         await sw.install();
 
         assert.equal(sw.run('CACHE_NAME'), DEFAULT_CACHE, label);
-        assert.deepEqual(sw.caches.names(), [DEFAULT_CACHE], label);
+        assert.deepEqual(sw.caches.names(), [DEFAULT_CACHE, STATE_CACHE], label);
         const cached = sw.caches.urls(DEFAULT_CACHE);
         assert.ok(cached.includes(absolute('/offline.html')), label);
         // Without the version the URLs the pages will request are unknown.
@@ -126,6 +130,8 @@ test('install fails, caching nothing, when an essential file cannot be fetched',
     await assert.rejects(sw.install(), TypeError);
 
     assert.deepEqual(sw.caches.urls(VERSIONED_CACHE), []);
+    // Nor does it record its cache for a later activation.
+    assert.deepEqual(sw.caches.names(), [VERSIONED_CACHE]);
     assert.deepEqual(sw.network.calls.filter(call => call.path.startsWith('/js/')), []);
 });
 
@@ -141,7 +147,7 @@ test('activate deletes caches of older versions but keeps image, offline-downloa
     await sw.install();
     await sw.activate();
 
-    assert.deepEqual(sw.caches.names(), [IMAGE_CACHE, OFFLINE_CACHE, 'another-app-v1', VERSIONED_CACHE]);
+    assert.deepEqual(sw.caches.names(), [IMAGE_CACHE, OFFLINE_CACHE, 'another-app-v1', VERSIONED_CACHE, STATE_CACHE]);
     assert.deepEqual(sw.logged('Deleting old cache').map(entry => entry.args[1]), ['comic-maintainer-2-0-350-0', DEFAULT_CACHE]);
     assert.deepEqual(sw.caches.urls(OFFLINE_CACHE), [offlineKey('a.cbz', 'page/1')]);
     assert.equal(sw.claims, 1);
@@ -166,6 +172,104 @@ test('activate takes control only after the old caches are gone', async () => {
     assert.deepEqual(order, ['delete comic-maintainer-1-0-0-0', 'claim']);
 });
 
+// The browser stops a waiting worker while it is idle, so an update usually
+// activates in a freshly evaluated worker (worker.restart()) that never saw
+// its own install.
+
+test('an update woken up to take over keeps the cache its install filled, whatever the server answers then', async () => {
+    const conditions = {
+        offline: network => {
+            network.offline = true;
+        },
+        'with the version lookup failing': network => network.route('GET /api/version', reply(503, { error: 'starting up' })),
+        'after the server moved on to a newer release': network => network.route('GET /api/version', { version: '2.0.352.0' })
+    };
+    for (const [label, setUp] of Object.entries(conditions)) {
+        const sw = loadServiceWorker();
+        installRoutes(sw.network);
+        await sw.caches.seed('comic-maintainer-2-0-350-0', { '/offline.html': html('old offline page') });
+        await sw.install();
+        const precached = sw.caches.urls(VERSIONED_CACHE);
+
+        const woken = sw.restart();
+        setUp(woken.network);
+        await woken.message({ type: 'SKIP_WAITING' });
+        await woken.activate();
+
+        assert.deepEqual(woken.caches.urls(VERSIONED_CACHE), precached, label);
+        assert.deepEqual(woken.caches.names(), [VERSIONED_CACHE, STATE_CACHE], label);
+        assert.deepEqual(woken.logged('Deleting old cache').map(entry => entry.args[1]), ['comic-maintainer-2-0-350-0'], label);
+        assert.equal(woken.claims, 1, label);
+
+        // Requests are answered from it from then on, also by a worker woken up later.
+        woken.network.offline = true;
+        const reader = await woken.restart().respond(`/js/pages/reader.js?v=${APP_VERSION}`);
+        assert.equal(await reader.text(), `// /js/pages/reader.js?v=${APP_VERSION}`, label);
+    }
+});
+
+test('an upgrade replaces the previous release\'s cache when every step runs in a newly woken-up worker', async () => {
+    const previous = loadServiceWorker();
+    installRoutes(previous.network, { version: '2.0.350.0' });
+    await previous.install();
+    await previous.activate();
+
+    // The server is upgraded and the browser installs the new release next to the old one...
+    const update = previous.restart();
+    update.network.route('GET /api/version', { version: APP_VERSION });
+    await update.install();
+    assert.deepEqual(update.caches.names(), ['comic-maintainer-2-0-350-0', STATE_CACHE, VERSIONED_CACHE]);
+
+    // ...which waits, is stopped while idle and is woken up when the user accepts the update.
+    const woken = update.restart();
+    await woken.message({ type: 'SKIP_WAITING' });
+    await woken.activate();
+
+    assert.deepEqual(woken.caches.names(), [STATE_CACHE, VERSIONED_CACHE]);
+    assert.deepEqual(woken.logged('Deleting old cache').map(entry => entry.args[1]), ['comic-maintainer-2-0-350-0']);
+    assert.equal(woken.claims, 1);
+    const sw = woken.restart();
+    sw.network.offline = true;
+    assert.equal(await (await sw.respond(`/js/main.js?v=${APP_VERSION}`)).text(), `// /js/main.js?v=${APP_VERSION}`);
+});
+
+test('a later release that fails to install does not make the waiting update discard its cache', async () => {
+    const sw = loadServiceWorker();
+    installRoutes(sw.network);
+    await sw.install();
+    const precached = sw.caches.urls(VERSIONED_CACHE);
+
+    const failed = sw.restart();
+    failed.network.route('GET /api/version', { version: '2.0.352.0' });
+    failed.network.route('GET /offline.html', reply(500, 'Internal Server Error'));
+    await assert.rejects(failed.install(), TypeError);
+
+    const woken = sw.restart();
+    await woken.activate();
+
+    assert.deepEqual(woken.caches.urls(VERSIONED_CACHE), precached);
+    // The failed release's empty cache is stale.
+    assert.deepEqual(woken.caches.names(), [VERSIONED_CACHE, STATE_CACHE]);
+});
+
+test('a cache name that cannot be recorded is logged, and activation still cleans up and takes control', async () => {
+    const sw = loadServiceWorker();
+    installRoutes(sw.network);
+    await sw.caches.seed('comic-maintainer-2-0-350-0', {});
+    const open = sw.caches.open.bind(sw.caches);
+    sw.caches.open = async name => {
+        if (name === STATE_CACHE) throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        return open(name);
+    };
+
+    await sw.install();
+    await sw.activate();
+
+    assert.deepEqual(sw.caches.names(), [VERSIONED_CACHE]);
+    assert.deepEqual(sw.logged('Failed to record the cache name').map(entry => entry.args[1]), [VERSIONED_CACHE, VERSIONED_CACHE]);
+    assert.equal(sw.claims, 1);
+});
+
 test('SKIP_WAITING lets an updated worker take over when the page accepts the update', async () => {
     const sw = await installedWorker();
 
@@ -181,7 +285,7 @@ test('CLEAR_IMAGE_CACHE (sign-out) drops cached covers and pages but keeps offli
 
     await sw.message({ type: 'CLEAR_IMAGE_CACHE' });
 
-    assert.deepEqual(sw.caches.names(), [VERSIONED_CACHE, OFFLINE_CACHE]);
+    assert.deepEqual(sw.caches.names(), [VERSIONED_CACHE, STATE_CACHE, OFFLINE_CACHE]);
     assert.deepEqual(sw.caches.urls(OFFLINE_CACHE), [offlineKey('a.cbz', 'page/1')]);
 });
 
@@ -195,7 +299,7 @@ test('messages without data or of an unknown type are ignored', async () => {
     }
 
     assert.equal(sw.skipWaitingCalls, 0);
-    assert.deepEqual(sw.caches.names(), [VERSIONED_CACHE, IMAGE_CACHE]);
+    assert.deepEqual(sw.caches.names(), [VERSIONED_CACHE, STATE_CACHE, IMAGE_CACHE]);
     assert.deepEqual(port.messages, []);
     assert.deepEqual(sw.network.calls, []);
 });

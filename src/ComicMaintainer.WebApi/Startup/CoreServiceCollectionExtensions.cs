@@ -38,32 +38,8 @@ internal static class CoreServiceCollectionExtensions
                 options.Secret = jwtSecret;
         });
 
-        // Configure Authelia settings
-        services.Configure<AutheliaSettings>(options =>
-        {
-            configuration.GetSection("AutheliaSettings").Bind(options);
-            
-            // Override with environment variables if present
-            var autheliaEnabled = Environment.GetEnvironmentVariable("AUTHELIA_ENABLED");
-            if (!string.IsNullOrEmpty(autheliaEnabled))
-                options.Enabled = autheliaEnabled.Equals("true", StringComparison.OrdinalIgnoreCase);
-            
-            var autheliaUserHeader = Environment.GetEnvironmentVariable("AUTHELIA_USER_HEADER");
-            if (!string.IsNullOrEmpty(autheliaUserHeader))
-                options.UserHeader = autheliaUserHeader;
-            
-            var autheliaDefaultRole = Environment.GetEnvironmentVariable("AUTHELIA_DEFAULT_ROLE");
-            if (!string.IsNullOrEmpty(autheliaDefaultRole))
-                options.DefaultRole = autheliaDefaultRole;
-            
-            var autheliaAdminGroups = Environment.GetEnvironmentVariable("AUTHELIA_ADMIN_GROUPS");
-            if (!string.IsNullOrEmpty(autheliaAdminGroups))
-                options.AdminGroups = autheliaAdminGroups;
-
-            var autheliaTrustedProxies = Environment.GetEnvironmentVariable("AUTHELIA_TRUSTED_PROXIES");
-            if (!string.IsNullOrEmpty(autheliaTrustedProxies))
-                options.TrustedProxies = autheliaTrustedProxies;
-        });
+        // Configure Authelia settings (configuration section + AUTHELIA_* environment variables)
+        services.Configure<AutheliaSettings>(options => AutheliaSettingsBinder.Bind(configuration, options));
 
         return services;
     }

@@ -352,7 +352,7 @@ enforced through two authorization policies:
 | Policy | Grants | Applied to |
 | --- | --- | --- |
 | `CanModifyLibrary` | Any authenticated user **except** `ReadOnly` | All non-`GET` endpoints on the files, jobs, process, metadata, status, series-image and watcher controllers |
-| `CanAdminister` | `Admin` (or any non-`ReadOnly` user when Authelia is enabled without `AdminGroups` configured) | All non-`GET` endpoints on the settings controller, every scheduled-jobs endpoint (reads included), plus service restart |
+| `CanAdminister` | `Admin` (or any non-`ReadOnly` user when Authelia is enabled without admin groups configured in `AUTHELIA_ADMIN_GROUPS`; see [Role Mapping](docs/AUTHELIA.md#role-mapping)) | All non-`GET` endpoints on the settings controller, every scheduled-jobs endpoint (reads included), plus service restart |
 
 The policies are applied centrally by a controller convention, so newly added
 write endpoints are protected by default. The web UI reads

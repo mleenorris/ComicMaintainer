@@ -15,8 +15,9 @@ namespace ComicMaintainer.Tests.Startup;
 
 /// <summary>
 /// Tests for the Identity/JWT/Authelia registrations made by <c>AuthServiceCollectionExtensions</c>.
-/// The method also reads JWT_SECRET, AUTHELIA_ENABLED and AUTHELIA_TRUSTED_PROXIES from the process
-/// environment, so the tests run in the non-parallel environment collection with those variables cleared.
+/// The method also reads JWT_SECRET and the AUTHELIA_* variables (AUTHELIA_ENABLED, AUTHELIA_TRUSTED_PROXIES and
+/// AUTHELIA_ADMIN_GROUPS affect its registrations) from the process environment, so the tests run in the
+/// non-parallel environment collection with those variables cleared.
 /// </summary>
 [Collection(AppSettingsEnvironmentPostConfigureTests.EnvironmentCollection.Name)]
 public sealed class AuthServiceCollectionExtensionsTests : IDisposable
@@ -33,7 +34,8 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
         .GetMethod("AddComicMaintainerAuth", BindingFlags.Static | BindingFlags.Public)!
         .CreateDelegate<Func<IServiceCollection, IConfiguration, IServiceCollection>>();
 
-    private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment = new("JWT_SECRET", "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES");
+    private readonly AppSettingsEnvironmentPostConfigureTests.EnvironmentScope _environment =
+        new("JWT_SECRET", "AUTHELIA_ENABLED", "AUTHELIA_TRUSTED_PROXIES", "AUTHELIA_ADMIN_GROUPS");
 
     public void Dispose() => _environment.Dispose();
 
@@ -160,6 +162,24 @@ public sealed class AuthServiceCollectionExtensionsTests : IDisposable
             ("AutheliaSettings:Enabled", autheliaEnabled.ToString()),
             ("AutheliaSettings:AdminGroups", adminGroups),
             ("AutheliaSettings:TrustedProxies", TrustedProxies));
+
+        var result = await provider.GetRequiredService<IAuthorizationService>()
+            .AuthorizeAsync(CreateUser(role), AuthorizationPolicies.CanAdminister);
+
+        Assert.Equal(expected, result.Succeeded);
+    }
+
+    // AUTHELIA_ADMIN_GROUPS is the documented way to configure the admin groups: it must turn the fallback off too.
+    [Theory]
+    [InlineData("Admin", true)]
+    [InlineData("User", false)]
+    [InlineData("ReadOnly", false)]
+    public async Task CanAdministerPolicy_HonoursAdminGroupsSetOnlyInTheEnvironment(string role, bool expected)
+    {
+        _environment.Set("AUTHELIA_ADMIN_GROUPS", "admins");
+
+        using var provider = BuildProvider(
+            ("JwtSettings:Secret", ConfiguredSecret), ("AutheliaSettings:Enabled", "true"), ("AutheliaSettings:TrustedProxies", TrustedProxies));
 
         var result = await provider.GetRequiredService<IAuthorizationService>()
             .AuthorizeAsync(CreateUser(role), AuthorizationPolicies.CanAdminister);

@@ -134,7 +134,7 @@ ComicMaintainer supports the following Authelia-related environment variables:
 | `AUTHELIA_NAME_HEADER` | `Remote-Name` | Header containing display name |
 | `AUTHELIA_GROUPS_HEADER` | `Remote-Groups` | Header containing groups |
 | `AUTHELIA_DEFAULT_ROLE` | `User` | Default role (User, Admin, ReadOnly) |
-| `AUTHELIA_ADMIN_GROUPS` | _(empty)_ | Comma-separated list of admin groups |
+| `AUTHELIA_ADMIN_GROUPS` | _(empty)_ | Comma-separated list of Authelia groups (case-insensitive) whose members get the Admin role. Without admin groups, every signed-in user who is not ReadOnly can administer ComicMaintainer; see [Role Mapping](#role-mapping) |
 
 ## Security Considerations
 
@@ -164,7 +164,9 @@ ComicMaintainer supports the following Authelia-related environment variables:
        internal: true  # Prevents direct external access
    ```
 
-3. **Role Assignment**: Configure `AUTHELIA_ADMIN_GROUPS` carefully to ensure only trusted groups receive admin access
+3. **Role Assignment**: Set `AUTHELIA_ADMIN_GROUPS`, and configure it carefully to ensure only trusted groups receive
+   admin access. Without admin groups, every signed-in user who is not ReadOnly can administer ComicMaintainer (see
+   [Role Mapping](#role-mapping))
 
 ### Choosing `AUTHELIA_TRUSTED_PROXIES`
 
@@ -255,6 +257,12 @@ When a user successfully authenticates via Authelia:
 1. **Default Role**: Specified by `AUTHELIA_DEFAULT_ROLE` (default: "User")
 2. **Admin Role**: Assigned if user is in any group listed in `AUTHELIA_ADMIN_GROUPS`
 3. **Automatic Updates**: User roles are updated on each login based on current group membership
+4. **No admin groups configured**: The administration features (for example settings, backups and scheduled jobs)
+   normally require the Admin role. If no admin groups are configured at all (neither `AUTHELIA_ADMIN_GROUPS` nor
+   `AutheliaSettings:AdminGroups` in `appsettings.json`), ComicMaintainer cannot tell which Authelia users are
+   administrators, so it lets **every signed-in user who is not ReadOnly administer it**, including users of local
+   accounts, rather than locking everyone out. Once admin groups are configured, only users with the Admin role can
+   administer.
 
 ### Available Roles
 

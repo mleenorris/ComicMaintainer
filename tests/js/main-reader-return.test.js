@@ -84,11 +84,15 @@ test('the search the user had is put back and the library reloaded with it', asy
 
 test('a series missing from the URL is reopened once the library has loaded it', async () => {
     const list = deferred();
-    const page = await boot({
+    const timestamp = Date.now();
+    const page = loadApp({
         hash: '#/library',
         routes: libraryRoutes({ 'GET /api/files/series': () => list.promise }),
-        sessionStorage: { [KEY]: snapshot({ currentSeriesDetailId: SAGA.id }) }
+        sessionStorage: { [KEY]: snapshot({ currentSeriesDetailId: SAGA.id, timestamp }) }
     });
+    // Stop the page's clock so the 2.5 s wait for the series can't run out on a busy machine.
+    page.run(`Date.now = () => ${timestamp}`);
+    await page.settle();
     assert.equal(page.evaluate('currentView'), 'library', 'waiting for the library');
 
     list.resolve(seriesPage([SAGA]));

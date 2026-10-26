@@ -14,6 +14,13 @@
         function isTerminalJobStatus(status) {
             return TERMINAL_JOB_STATUSES.includes(status);
         }
+
+        // JobsController answers a library-wide start that finds no file to
+        // work on with the empty Guid and no items instead of creating a job,
+        // so there is nothing to track.
+        function isEmptyJobStart(data) {
+            return !data.total_items || !data.job_id || data.job_id === '00000000-0000-0000-0000-000000000000';
+        }
         
         // Warn user before leaving page if there's an active batch job
         // Note: We can't use async in beforeunload, so we track the active job in a variable
@@ -65,6 +72,12 @@
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
+                if (isEmptyJobStart(data)) {
+                    closeProgressModal();
+                    showMessage('No files found to process', 'info');
+                    return;
+                }
+
                 console.log(`[BATCH] Created job ${jobId} for ${totalItems} files`);
                 showMessage(`Started processing ${totalItems} files in background`, 'info');
                 
@@ -110,6 +123,12 @@
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
+                if (isEmptyJobStart(data)) {
+                    closeProgressModal();
+                    showMessage('No files found to process', 'info');
+                    return;
+                }
+
                 console.log(`[BATCH] Created job ${jobId} for ${totalItems} files`);
                 showMessage(`Started processing ${totalItems} files in background`, 'info');
                 
@@ -303,7 +322,7 @@
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
 
-                if (!totalItems) {
+                if (isEmptyJobStart(data)) {
                     closeProgressModal();
                     showMessage('No files found in library', 'info');
                     return;
@@ -585,6 +604,12 @@
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
+                if (isEmptyJobStart(data)) {
+                    closeProgressModal();
+                    showMessage('No files found to rename', 'info');
+                    return;
+                }
+
                 console.log(`[BATCH] Created job ${jobId} for ${totalItems} files`);
                 showMessage(`Started renaming ${totalItems} files in background`, 'info');
                 
@@ -630,6 +655,12 @@
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
+                if (isEmptyJobStart(data)) {
+                    closeProgressModal();
+                    showMessage('No files found to normalize', 'info');
+                    return;
+                }
+
                 console.log(`[BATCH] Created job ${jobId} for ${totalItems} files`);
                 showMessage(`Started normalizing ${totalItems} files in background`, 'info');
                 
@@ -671,6 +702,12 @@
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
+                if (isEmptyJobStart(data)) {
+                    closeProgressModal();
+                    showMessage('No unmarked files found to process', 'info');
+                    return;
+                }
+
                 console.log(`[BATCH] Created job ${jobId} for ${totalItems} unmarked files`);
                 showMessage(`Started processing ${totalItems} unmarked files in background`, 'info');
                 
@@ -712,6 +749,12 @@
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
+                if (isEmptyJobStart(data)) {
+                    closeProgressModal();
+                    showMessage('No unmarked files found to rename', 'info');
+                    return;
+                }
+
                 console.log(`[BATCH] Created job ${jobId} for ${totalItems} unmarked files`);
                 showMessage(`Started renaming ${totalItems} unmarked files in background`, 'info');
                 
@@ -757,6 +800,12 @@
                 const jobId = data.job_id;
                 const totalItems = data.total_items;
                 
+                if (isEmptyJobStart(data)) {
+                    closeProgressModal();
+                    showMessage('No unmarked files found to normalize', 'info');
+                    return;
+                }
+
                 console.log(`[BATCH] Created job ${jobId} for ${totalItems} unmarked files`);
                 showMessage(`Started normalizing ${totalItems} unmarked files in background`, 'info');
                 

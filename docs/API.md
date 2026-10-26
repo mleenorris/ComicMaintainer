@@ -247,6 +247,12 @@ Start asynchronous processing of all files.
 }
 ```
 
+When there is no file to work on, no job is created and the response is
+`{ "job_id": "00000000-0000-0000-0000-000000000000", "total_items": 0 }`. The
+other library-wide starters (`rename-all`, `normalize-all`, `process-unmarked`,
+`rename-unmarked`, `normalize-unmarked`, `remove-metadata-all`) answer the same
+way; the web UI then reports that there is nothing to do instead of tracking a job.
+
 ### POST /api/jobs/process-selected
 
 Start asynchronous processing of selected files.

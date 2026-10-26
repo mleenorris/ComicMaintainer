@@ -3,7 +3,7 @@
 // Library-wide batch jobs started from the library toolbar's action menus
 // (js/app/jobs.js): confirm() → optional force-reprocess prompt → POST
 // /api/jobs/... → the progress modal tracks the job; plus the declined,
-// failed, network-error and signed-out paths.
+// nothing-to-do, failed, network-error and signed-out paths.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -26,6 +26,7 @@ const LIBRARY_ACTIONS = [
         path: '/api/jobs/process-all',
         starting: 'Starting async processing...',
         started: n => `Started processing ${n} files in background`,
+        nothingToDo: 'No files found to process',
         tracked: 'Processing Files...',
         failure: 'Failed to start processing: ',
         serverFailure: 'Failed to start processing job'
@@ -39,6 +40,7 @@ const LIBRARY_ACTIONS = [
         path: '/api/jobs/process-all',
         starting: 'Starting processing...',
         started: n => `Started processing ${n} files in background`,
+        nothingToDo: 'No files found to process',
         tracked: 'Processing All Files...',
         failure: 'Failed to start processing: ',
         serverFailure: 'Failed to start processing job'
@@ -50,6 +52,7 @@ const LIBRARY_ACTIONS = [
         path: '/api/jobs/process-unmarked',
         starting: 'Starting async processing...',
         started: n => `Started processing ${n} unmarked files in background`,
+        nothingToDo: 'No unmarked files found to process',
         tracked: 'Processing Unmarked Files...',
         failure: 'Failed to start processing: ',
         serverFailure: 'Failed to start processing job'
@@ -62,6 +65,7 @@ const LIBRARY_ACTIONS = [
         path: '/api/jobs/rename-all',
         starting: 'Starting rename...',
         started: n => `Started renaming ${n} files in background`,
+        nothingToDo: 'No files found to rename',
         tracked: 'Renaming All Files...',
         failure: 'Failed to start renaming: ',
         serverFailure: 'Failed to start renaming job'
@@ -73,6 +77,7 @@ const LIBRARY_ACTIONS = [
         path: '/api/jobs/rename-unmarked',
         starting: 'Starting async renaming...',
         started: n => `Started renaming ${n} unmarked files in background`,
+        nothingToDo: 'No unmarked files found to rename',
         tracked: 'Renaming Unmarked Files...',
         failure: 'Failed to start renaming: ',
         serverFailure: 'Failed to start renaming job'
@@ -85,6 +90,7 @@ const LIBRARY_ACTIONS = [
         path: '/api/jobs/normalize-all',
         starting: 'Starting normalize...',
         started: n => `Started normalizing ${n} files in background`,
+        nothingToDo: 'No files found to normalize',
         tracked: 'Normalizing All Files...',
         failure: 'Failed to start normalizing: ',
         serverFailure: 'Failed to start normalizing job'
@@ -97,6 +103,7 @@ const LIBRARY_ACTIONS = [
         path: '/api/jobs/normalize-unmarked',
         starting: 'Starting async normalizing...',
         started: n => `Started normalizing ${n} unmarked files in background`,
+        nothingToDo: 'No unmarked files found to normalize',
         tracked: 'Normalizing Unmarked Files...',
         failure: 'Failed to start normalizing: ',
         serverFailure: 'Failed to start normalizing job'
@@ -109,6 +116,7 @@ const LIBRARY_ACTIONS = [
         path: '/api/jobs/remove-metadata-all',
         starting: 'Starting metadata removal...',
         started: n => `Started removing metadata from ${n} files in background`,
+        nothingToDo: 'No files found in library',
         tracked: 'Removing Metadata from All Files...',
         failure: 'Failed to remove metadata: ',
         serverFailure: 'Failed to start remove metadata job'
@@ -220,6 +228,52 @@ for (const action of LIBRARY_ACTIONS) {
         assert.deepEqual(page.errors, []);
     });
 }
+
+// JobsController's answer when the library (or its unmarked part) has no file
+// to work on: no job is created, so there is nothing to track.
+const NOTHING_TO_DO = { job_id: '00000000-0000-0000-0000-000000000000', total_items: 0 };
+
+for (const action of LIBRARY_ACTIONS) {
+    test(`${action.name} with nothing to do says so instead of tracking an empty job`, async (t) => {
+        const page = await h.bootJobsApp(t, { routes: { [`POST ${action.path}`]: NOTHING_TO_DO } });
+
+        h.answerConfirms(page, true, ...(action.force ? [true] : []));
+        action.start(page);
+        await page.settle();
+        assert.deepEqual(h.takeConfirms(page), action.force ? [action.confirm, action.force] : [action.confirm]);
+        assert.equal(h.requests(page, 'POST', action.path).length, 1);
+        assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: action.nothingToDo }]);
+        assert.equal(h.requests(page, 'GET', `/api/jobs/${NOTHING_TO_DO.job_id}`).length, 0, 'there is no job to poll');
+        h.assertProgress(page, { open: false, cancelVisible: false, indicatorVisible: false });
+
+        // Nothing runs, so Cancel has nothing to cancel and leaving the page is not questioned.
+        page.run('cancelCurrentJob()');
+        await page.settle();
+        assert.deepEqual(h.takeConfirms(page), []);
+        assert.deepEqual(h.takeMessages(page), [{ type: 'error', text: 'No active job to cancel' }]);
+        const leave = new page.window.Event('beforeunload', { cancelable: true });
+        page.window.dispatchEvent(leave);
+        assert.equal(leave.defaultPrevented, false);
+        assert.deepEqual(page.errors, []);
+    });
+}
+
+test('a start answered without a real job id is not tracked either', async (t) => {
+    let answer;
+    const page = await h.bootJobsApp(t, { routes: { 'POST /api/jobs/process-unmarked': () => answer } });
+
+    for (const data of [{ job_id: NOTHING_TO_DO.job_id, total_items: 4 }, { job_id: '', total_items: 4 }, { total_items: 4 }]) {
+        answer = data;
+        h.chooseMenuItem(page, 'processDropdown', 'Process Unmarked');
+        await page.settle();
+        h.takeConfirms(page);
+        assert.deepEqual(h.takeMessages(page), [{ type: 'info', text: 'No unmarked files found to process' }], JSON.stringify(data));
+        assert.equal(h.progressView(page).open, false);
+    }
+    assert.equal(h.requests(page, 'POST', '/api/jobs/process-unmarked').length, 3);
+    assert.deepEqual(h.requests(page, 'GET', /^\/api\/jobs\//), [], 'no job is polled');
+    assert.deepEqual(page.errors, []);
+});
 
 test('Remove Metadata All sends JSON with the session cookie and handles empty and single-file libraries', async (t) => {
     let answer = () => ({ job_id: h.JOB_ID, total_items: 0 });

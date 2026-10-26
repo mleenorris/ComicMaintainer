@@ -85,8 +85,7 @@ function loadStatus(page) {
 }
 
 test('the settings page fills every group from GET /api/settings', async () => {
-    // Like the other secrets, the ComicVine key is only reported as `*_set`.
-    const page = await bootSettings({ settings: { comicvine_api_key: undefined, comicvine_api_key_set: true } });
+    const page = await bootSettings();
 
     assert.equal(callsTo(page, 'GET /api/settings').length, 1);
     assert.match(callsTo(page, 'GET /api/settings')[0].headers.authorization, /^Bearer /);
@@ -197,7 +196,6 @@ test('unset optional settings fall back to defaults and first-time hints', async
         settings: {
             filename_format: '',
             enable_external_series_metadata: false,
-            comicvine_api_key: undefined,
             comicvine_api_key_set: false,
             comicvine_base_url: '',
             enable_mangadex_metadata: false,

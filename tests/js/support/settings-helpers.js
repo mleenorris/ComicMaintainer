@@ -10,7 +10,8 @@ const { bootApp } = require('./app');
 const MB = 1048576;
 
 // GET /api/settings as SettingsController.GetAllSettings returns it. Secrets
-// (SMTP/Suwayomi passwords, the GitHub token) are only reported as `*_set`.
+// (the ComicVine key, SMTP/Suwayomi passwords, the GitHub token) are only
+// reported as `*_set`.
 function settingsResponse(overrides = {}) {
     return {
         filename_format: '{series} v{volume} #{issue}',
@@ -20,7 +21,7 @@ function settingsResponse(overrides = {}) {
         log_max_bytes: 10 * MB,
         database_cleanup_interval_hours: 12,
         enable_external_series_metadata: true,
-        comicvine_api_key: 'cv-key-123',
+        comicvine_api_key_set: true,
         comicvine_base_url: 'https://comicvine.example/api',
         enable_mangadex_metadata: true,
         mangadex_base_url: 'https://mangadex.example',

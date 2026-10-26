@@ -253,7 +253,7 @@ test('a blank SMTP host and sender name are unset, and "clear password" clears t
 });
 
 test('the stored ComicVine API key is kept unless a new key is typed or "clear" is ticked', async () => {
-    const page = await bootSettings({ settings: { comicvine_api_key: undefined, comicvine_api_key_set: true } });
+    const page = await bootSettings();
     routeSaveSteps(page);
 
     // Untouched (or only whitespace), the key is sent as null: keep the stored one.

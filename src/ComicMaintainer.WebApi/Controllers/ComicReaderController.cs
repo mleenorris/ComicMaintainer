@@ -47,21 +47,24 @@ public class ComicReaderController : ControllerBase
     }
 
     /// <summary>
-    /// Validates that a file path is within the watched directory to prevent path traversal attacks
+    /// Validates that a file path is within the watched directory to prevent path
+    /// traversal attacks. Symlinks and junctions are resolved first — on the path
+    /// itself and on every ancestor directory — and the comparison is
+    /// separator-aware, so neither a link nor a sibling directory sharing the
+    /// watched directory's name prefix can reach files outside it.
     /// </summary>
-    private bool IsPathSafe(string filePath)
-    {
-        try
-        {
-            var fullPath = Path.GetFullPath(filePath);
-            var watchedDir = Path.GetFullPath(_settings.CurrentValue.WatchedDirectory);
-            return fullPath.StartsWith(watchedDir, StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    private bool IsPathSafe(string filePath) => TryResolveSafePath(filePath, out _);
+
+    /// <summary>
+    /// Variant of <see cref="IsPathSafe"/> that also returns the validated
+    /// physical path. Archive access must use it, so the file that was checked
+    /// is the file that is read; library records keep the requested path.
+    /// </summary>
+    private bool TryResolveSafePath(string filePath, out string resolvedPath) =>
+        LibraryPathValidator.TryResolveWithin(
+            filePath,
+            out resolvedPath,
+            _settings.CurrentValue.WatchedDirectory);
 
     /// <summary>
     /// Get comic information including page count
@@ -75,20 +78,20 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is required" });
         }
 
-        if (!IsPathSafe(filePath))
+        if (!TryResolveSafePath(filePath, out var resolvedPath))
         {
             _logger.LogWarning("Attempt to access file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
-        if (!System.IO.File.Exists(filePath))
+        if (!System.IO.File.Exists(resolvedPath))
         {
             return NotFound(new { error = "File not found" });
         }
 
         try
         {
-            var pageCount = await _readerService.GetPageCountAsync(filePath);
+            var pageCount = await _readerService.GetPageCountAsync(resolvedPath);
             var fileName = Path.GetFileName(filePath);
 
             return Ok(new
@@ -119,13 +122,13 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is required" });
         }
 
-        if (!IsPathSafe(filePath))
+        if (!TryResolveSafePath(filePath, out var resolvedPath))
         {
             _logger.LogWarning("Attempt to access file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
-        if (!System.IO.File.Exists(filePath))
+        if (!System.IO.File.Exists(resolvedPath))
         {
             return NotFound(new { error = "File not found" });
         }
@@ -137,7 +140,7 @@ public class ComicReaderController : ControllerBase
 
         try
         {
-            var result = await _readerService.GetPageAsync(filePath, page);
+            var result = await _readerService.GetPageAsync(resolvedPath, page);
             
             if (result == null)
             {
@@ -174,20 +177,20 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is required" });
         }
 
-        if (!IsPathSafe(filePath))
+        if (!TryResolveSafePath(filePath, out var resolvedPath))
         {
             _logger.LogWarning("Attempt to access file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
-        if (!System.IO.File.Exists(filePath))
+        if (!System.IO.File.Exists(resolvedPath))
         {
             return NotFound(new { error = "File not found" });
         }
 
         try
         {
-            var entry = await _coverCache.GetOrCreateAsync(filePath, cancellationToken);
+            var entry = await _coverCache.GetOrCreateAsync(resolvedPath, cancellationToken);
             if (entry is null)
             {
                 return NotFound(new { error = "Cover not available" });
@@ -268,20 +271,20 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is required" });
         }
 
-        if (!IsPathSafe(filePath))
+        if (!TryResolveSafePath(filePath, out var resolvedPath))
         {
             _logger.LogWarning("Attempt to access file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return BadRequest(new { error = "File path is outside the allowed directory" });
         }
 
-        if (!System.IO.File.Exists(filePath))
+        if (!System.IO.File.Exists(resolvedPath))
         {
             return NotFound(new { error = "File not found" });
         }
 
         try
         {
-            var pages = await _readerService.GetPageNamesAsync(filePath);
+            var pages = await _readerService.GetPageNamesAsync(resolvedPath);
             return Ok(new { pages, count = pages.Count });
         }
         catch (Exception ex)
@@ -350,7 +353,7 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "File path is required" });
         }
 
-        if (!IsPathSafe(filePath))
+        if (!TryResolveSafePath(filePath, out var resolvedPath))
         {
             _logger.LogWarning("Attempt to mark file read outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return BadRequest(new { error = "File path is outside the allowed directory" });
@@ -359,7 +362,7 @@ public class ComicReaderController : ControllerBase
         try
         {
             await _fileStore.MarkFileReadAsync(filePath, true, cancellationToken);
-            await RecordUserProgressAsync(filePath, markComplete: true, page: null, cancellationToken);
+            await RecordUserProgressAsync(filePath, resolvedPath, markComplete: true, page: null, cancellationToken);
             _logger.LogDebug("Marked file as read: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return Ok();
         }
@@ -388,7 +391,7 @@ public class ComicReaderController : ControllerBase
             return BadRequest(new { error = "Page number must be 1 or greater" });
         }
 
-        if (!IsPathSafe(filePath))
+        if (!TryResolveSafePath(filePath, out var resolvedPath))
         {
             _logger.LogWarning("Attempt to save progress for file outside watched directory: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
             return BadRequest(new { error = "File path is outside the allowed directory" });
@@ -397,7 +400,7 @@ public class ComicReaderController : ControllerBase
         try
         {
             await _fileStore.SaveReadingProgressAsync(filePath, page, cancellationToken);
-            await RecordUserProgressAsync(filePath, markComplete: false, page: page, cancellationToken);
+            await RecordUserProgressAsync(filePath, resolvedPath, markComplete: false, page: page, cancellationToken);
             _logger.LogDebug("Saved reading progress for {FilePath}: page {Page}", LoggingHelper.SanitizePathForLog(filePath), page);
             return Ok();
         }
@@ -440,11 +443,13 @@ public class ComicReaderController : ControllerBase
 
     /// <summary>
     /// Records durable per-user reading progress for the authenticated user.
-    /// ContentId follows the reader convention of using the file path. This
-    /// powers the per-user "Continue Reading" overview row and is best-effort:
-    /// failures here never fail the originating request.
+    /// ContentId follows the reader convention of using the requested file
+    /// path; the page count is read from the validated physical
+    /// <paramref name="resolvedPath"/>. This powers the per-user
+    /// "Continue Reading" overview row and is best-effort: failures here never
+    /// fail the originating request.
     /// </summary>
-    private async Task RecordUserProgressAsync(string filePath, bool markComplete, int? page, CancellationToken cancellationToken)
+    private async Task RecordUserProgressAsync(string filePath, string resolvedPath, bool markComplete, int? page, CancellationToken cancellationToken)
     {
         var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(userId))
@@ -454,7 +459,7 @@ public class ComicReaderController : ControllerBase
 
         try
         {
-            var totalPages = await _readerService.GetPageCountAsync(filePath);
+            var totalPages = await _readerService.GetPageCountAsync(resolvedPath);
             if (totalPages <= 0)
             {
                 return;

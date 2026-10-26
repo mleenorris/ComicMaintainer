@@ -1,8 +1,10 @@
 using System.Security.Claims;
 using ComicMaintainer.Core.Configuration;
 using ComicMaintainer.Core.Interfaces;
+using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Reader.Interfaces;
 using ComicMaintainer.Core.Reader.Models;
+using ComicMaintainer.Core.Utilities;
 using ComicMaintainer.Tests.Helpers;
 using ComicMaintainer.WebApi.Controllers;
 using Microsoft.AspNetCore.Http;
@@ -123,6 +125,153 @@ public sealed class ComicReaderControllerCoverageTests : IDisposable
 
         AssertError<BadRequestObjectResult>(result.Result, OutsideError);
         _reader.Verify(r => r.GetPageCountAsync(It.IsAny<string>()), Times.Never);
+    }
+
+    private static readonly string[] PathEndpoints =
+        ["info", "page", "cover", "pages", "adjacent", "mark-read", "save-progress", "get-progress"];
+
+    public static TheoryData<string> Endpoints()
+    {
+        var data = new TheoryData<string>();
+        foreach (var endpoint in PathEndpoints)
+        {
+            data.Add(endpoint);
+        }
+        return data;
+    }
+
+    public static TheoryData<string, string> UnsafePathCases()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var endpoint in PathEndpoints)
+        {
+            foreach (var kind in new[] { "sibling-prefix", "other-case", "file-link", "directory-link" })
+            {
+                // A differently-cased directory is only a distinct directory on a case-sensitive file system.
+                if (kind != "other-case" || OperatingSystem.IsLinux())
+                {
+                    data.Add(endpoint, kind);
+                }
+            }
+        }
+        return data;
+    }
+
+    private async Task<object?> InvokeAsync(string endpoint, string filePath, ClaimsPrincipal? user = null)
+    {
+        var controller = CreateController(user);
+        return endpoint switch
+        {
+            "info" => (await controller.GetComicInfo(filePath)).Result,
+            "page" => await controller.GetPage(filePath, 1),
+            "cover" => await controller.GetCover(filePath, _cts.Token),
+            "pages" => (await controller.GetPages(filePath)).Result,
+            "adjacent" => (await controller.GetAdjacentFile(filePath, "next")).Result,
+            "mark-read" => await controller.MarkAsRead(filePath, _cts.Token),
+            "save-progress" => await controller.SaveProgress(filePath, 3, _cts.Token),
+            "get-progress" => (await controller.GetProgress(filePath, _cts.Token)).Result,
+            _ => throw new ArgumentOutOfRangeException(nameof(endpoint), endpoint, null),
+        };
+    }
+
+    // An existing archive whose path passes a plain string-prefix check against
+    // the watched directory (<root>/comics) without being inside it.
+    private string CreateUnsafePath(string kind)
+    {
+        var privateDir = Path.Combine(_root, kind == "other-case" ? "COMICS" : "comics-private");
+        Directory.CreateDirectory(privateDir);
+        var secret = Path.Combine(privateDir, "secret.cbz");
+        File.WriteAllBytes(secret, new byte[] { 0x50, 0x4B, 0x05, 0x06 });
+
+        switch (kind)
+        {
+            case "file-link":
+                var fileLink = Path.Combine(_watchDir, "Saga", "leak.cbz");
+                File.CreateSymbolicLink(fileLink, secret);
+                return fileLink;
+            case "directory-link":
+                var directoryLink = Path.Combine(_watchDir, "linked");
+                Directory.CreateSymbolicLink(directoryLink, privateDir);
+                return Path.Combine(directoryLink, "secret.cbz");
+            default:
+                return secret;
+        }
+    }
+
+    private void SetupServicesFor(string physicalPath, string libraryPath)
+    {
+        _reader.Setup(r => r.GetPageCountAsync(physicalPath)).ReturnsAsync(24);
+        _reader.Setup(r => r.GetPageAsync(physicalPath, 1)).ReturnsAsync((new byte[] { 0xFF, 0xD8 }, "image/jpeg"));
+        _reader.Setup(r => r.GetPageNamesAsync(physicalPath)).ReturnsAsync(new List<string> { "001.jpg" });
+        _coverCache.Setup(c => c.GetOrCreateAsync(physicalPath, _cts.Token))
+            .ReturnsAsync(new FileCoverCacheEntry(new byte[] { 1 }, "image/jpeg", DateTimeOffset.UnixEpoch, "orig"));
+        _library.Setup(l => l.GetAdjacentIssueAsync(libraryPath, "next", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AdjacentIssueResult { Found = true, HasAdjacent = false });
+        _fileStore.Setup(f => f.GetReadingProgressAsync(libraryPath, _cts.Token)).ReturnsAsync(7);
+    }
+
+    [Theory]
+    [MemberData(nameof(UnsafePathCases))]
+    public async Task PathEndpoints_RejectPathsThatOnlyLookInsideTheWatchedDirectory(string endpoint, string kind)
+    {
+        var path = CreateUnsafePath(kind);
+
+        var result = await InvokeAsync(endpoint, path, UserWithId("user-1"));
+
+        AssertError<BadRequestObjectResult>(result, OutsideError);
+        _reader.VerifyNoOtherCalls();
+        _coverCache.VerifyNoOtherCalls();
+        _fileStore.VerifyNoOtherCalls();
+        _library.VerifyNoOtherCalls();
+        _progress.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [MemberData(nameof(Endpoints))]
+    public async Task PathEndpoints_AcceptNestedPathsInsideTheWatchedDirectory(string endpoint)
+    {
+        var nested = Path.Combine(_watchDir, "Image", "Saga (2012)", "Saga 002.cbz");
+        Directory.CreateDirectory(Path.GetDirectoryName(nested)!);
+        File.WriteAllBytes(nested, new byte[] { 0x50, 0x4B, 0x05, 0x06 });
+        SetupServicesFor(LibraryPathValidator.ResolveRealPath(nested), nested);
+
+        var result = await InvokeAsync(endpoint, nested);
+
+        Assert.True(result is OkResult or OkObjectResult or FileContentResult, $"{endpoint}: {result}");
+    }
+
+    [Fact]
+    public async Task PathEndpoints_ReadALinkedArchiveThroughItsPhysicalPathButKeepTheRequestedPathForRecords()
+    {
+        // A link that stays inside the watched directory is allowed; archive
+        // access goes to the validated physical file, while library records
+        // keep using the path the client asked for.
+        var alias = Path.Combine(_watchDir, "alias.cbz");
+        File.CreateSymbolicLink(alias, _file);
+        var physical = LibraryPathValidator.ResolveRealPath(_file);
+        SetupServicesFor(physical, alias);
+        var saved = TrackSavedProgress();
+        var user = UserWithId("user-1");
+
+        var info = JObject.FromObject(Assert.IsType<OkObjectResult>(await InvokeAsync("info", alias)).Value!);
+        Assert.Equal("alias.cbz", info["fileName"]!.ToString());
+        Assert.Equal(alias, info["filePath"]!.ToString());
+        Assert.Equal(24, info["pageCount"]!.Value<int>());
+        Assert.Equal(new byte[] { 0xFF, 0xD8 }, Assert.IsType<FileContentResult>(await InvokeAsync("page", alias)).FileContents);
+        Assert.Equal(new byte[] { 1 }, Assert.IsType<FileContentResult>(await InvokeAsync("cover", alias)).FileContents);
+        Assert.IsType<OkObjectResult>(await InvokeAsync("pages", alias));
+        Assert.IsType<OkObjectResult>(await InvokeAsync("adjacent", alias));
+        Assert.IsType<OkResult>(await InvokeAsync("mark-read", alias, user));
+        Assert.IsType<OkResult>(await InvokeAsync("save-progress", alias, user));
+        Assert.IsType<OkObjectResult>(await InvokeAsync("get-progress", alias));
+
+        _reader.Verify(r => r.GetPageNamesAsync(physical), Times.Once);
+        _reader.Verify(r => r.GetPageCountAsync(physical), Times.Exactly(3));
+        _fileStore.Verify(f => f.MarkFileReadAsync(alias, true, _cts.Token), Times.Once);
+        _fileStore.Verify(f => f.SaveReadingProgressAsync(alias, 3, _cts.Token), Times.Once);
+        Assert.Equal(2, saved.Count);
+        Assert.All(saved, progress => Assert.Equal(alias, progress.ContentId));
+        _progress.Verify(p => p.GetProgressAsync("user-1", alias, _cts.Token), Times.Exactly(2));
     }
 
     // ---- GetComicInfo -------------------------------------------------------------------

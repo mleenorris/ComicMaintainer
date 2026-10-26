@@ -376,7 +376,8 @@ public class MetadataController : ControllerBase
                 })
             });
         }
-        catch (Exception ex)
+        // A cancelled request (client gone, or timed out: the middleware answers 504) isn't a search error.
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogError(ex, LoggingHelper.WithWebsitePrefix("Error searching external metadata for {Query}"), LoggingHelper.SanitizeForLog(query));
             return StatusCode(500, "Error searching external metadata");

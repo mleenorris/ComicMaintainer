@@ -505,6 +505,28 @@ public sealed class MetadataControllerCoverageTests : IDisposable
         Assert500(result.Result, "Error searching external metadata");
     }
 
+    [Fact]
+    public async Task Search_CallerCancelled_LetsTheCancellationThrough()
+    {
+        _cts.Cancel();
+        _external.Setup(e => e.SearchSeriesAsync("Batman", 10, _cts.Token))
+            .ThrowsAsync(new OperationCanceledException(_cts.Token));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => CreateController().Search("Batman", 10, _cts.Token));
+    }
+
+    [Fact]
+    public async Task Search_CancellationTheCallerDidNotAskFor_Returns500()
+    {
+        _external.Setup(e => e.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("timed out"));
+
+        var result = await CreateController().Search("Batman", 10, _cts.Token);
+
+        Assert500(result.Result, "Error searching external metadata");
+    }
+
     // ---- GetSeries ----------------------------------------------------------------------
 
     [Fact]

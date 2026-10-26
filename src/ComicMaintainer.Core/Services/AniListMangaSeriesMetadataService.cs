@@ -171,6 +171,11 @@ public class AniListMangaSeriesMetadataService : IExternalSeriesMetadataService
             _health.RecordSuccess();
             return results;
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // The caller gave up: neither "no match" nor a provider failure.
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "AniList manga lookup failed for {SeriesName}", LoggingHelper.SanitizeForLog(seriesName));

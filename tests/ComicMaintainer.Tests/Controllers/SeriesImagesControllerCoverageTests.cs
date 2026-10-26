@@ -444,6 +444,30 @@ public sealed class SeriesImagesControllerCoverageTests : IDisposable
         Assert.Equal("Error searching provider image candidates", obj.Value);
     }
 
+    [Fact]
+    public async Task SearchCandidates_CallerCancelled_LetsTheCancellationThrough()
+    {
+        _cts.Cancel();
+        _external.Setup(e => e.SearchSeriesAsync("Batman", 10, _cts.Token))
+            .ThrowsAsync(new OperationCanceledException(_cts.Token));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => CreateController().SearchCandidates("Batman", 10, _cts.Token));
+    }
+
+    [Fact]
+    public async Task SearchCandidates_CancellationTheCallerDidNotAskFor_Returns500()
+    {
+        _external.Setup(e => e.SearchSeriesAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("timed out"));
+
+        var result = await CreateController().SearchCandidates("Batman", 10, _cts.Token);
+
+        var obj = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(500, obj.StatusCode);
+        Assert.Equal("Error searching provider image candidates", obj.Value);
+    }
+
     // ---- ApplyFromProvider --------------------------------------------------------------
 
     [Fact]

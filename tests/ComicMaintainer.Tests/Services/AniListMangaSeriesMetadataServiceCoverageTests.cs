@@ -132,6 +132,48 @@ public sealed class AniListMangaSeriesMetadataServiceCoverageTests : IDisposable
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LookupAndSearch_CallerCancelled_RethrowWithoutLoggingOrRecordingAFailure(bool lookup)
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var service = CreateServiceWhoseClientThrows(new OperationCanceledException(cts.Token));
+        Func<Task> call = lookup
+            ? () => service.LookupSeriesAsync("Attack on Titan", cts.Token)
+            : () => service.SearchSeriesAsync("Attack on Titan", cancellationToken: cts.Token);
+
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(call);
+
+        Assert.Equal(cts.Token, cancelled.CancellationToken);
+        Assert.Empty(_logger.Entries);
+        _cache.Set(ProbeCacheKey, (true, "Reachable"));
+        var health = await service.CheckHealthAsync();
+        Assert.Equal(0, health.FailureCount);
+        Assert.Null(health.LastError);
+        _factory.Verify(f => f.CreateClient(It.IsAny<string>()), Times.Once());
+    }
+
+    [Fact]
+    public async Task SearchSeriesAsync_RequestTimesOut_ReturnsEmptyLogsAndRecordsTheFailure()
+    {
+        // A cancellation the caller didn't ask for, which is how HttpClient reports its timeout.
+        var timeout = new TaskCanceledException("timed out", new TimeoutException());
+        var service = CreateServiceWhoseClientThrows(timeout);
+
+        Assert.Empty(await service.SearchSeriesAsync("Attack on Titan"));
+
+        var warning = Assert.Single(_logger.Entries);
+        Assert.Equal(LogLevel.Warning, warning.Level);
+        Assert.Equal("AniList manga lookup failed for Attack on Titan", warning.Message);
+        Assert.Same(timeout, warning.Exception);
+        _cache.Set(ProbeCacheKey, (true, "Reachable"));
+        var health = await service.CheckHealthAsync();
+        Assert.Equal(1, health.FailureCount);
+        Assert.Equal("timed out", health.LastError);
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("   ")]
     public async Task CheckHealthAsync_MissingBaseUrl_ReportsNotConfiguredWithoutProbing(string baseUrl)
@@ -251,7 +293,8 @@ public sealed class AniListMangaSeriesMetadataServiceCoverageTests : IDisposable
     }
 
     // Real request 2 of 2. The test cancels its token as soon as the invoker
-    // announces the back-off, so the production delay ends immediately.
+    // announces the back-off, so the production delay ends immediately and the
+    // caller's cancellation surfaces.
     [Fact]
     public async Task CheckHealthAsync_DuringA429BackOffWindow_ReportsDegraded()
     {
@@ -271,14 +314,8 @@ public sealed class AniListMangaSeriesMetadataServiceCoverageTests : IDisposable
         });
         var service = CreateService(handler);
         var before = DateTime.UtcNow;
-        try
-        {
-            await service.SearchSeriesAsync("Attack on Titan", cancellationToken: cts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            // Either surfacing or swallowing the caller's cancellation is acceptable here.
-        }
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.SearchSeriesAsync("Attack on Titan", cancellationToken: cts.Token));
         _cache.Set(ProbeCacheKey, (true, "Reachable"));
 
         var health = await service.CheckHealthAsync();
@@ -291,6 +328,9 @@ public sealed class AniListMangaSeriesMetadataServiceCoverageTests : IDisposable
         Assert.Equal("Degraded - rate limited", health.StatusMessage);
         Assert.NotNull(health.RateLimitedUntilUtc);
         Assert.InRange(health.RateLimitedUntilUtc.Value, before.AddSeconds(119), DateTime.UtcNow.AddSeconds(121));
+        // The 429 counts as a failure; the cancelled back-off doesn't.
+        Assert.Equal(1, health.FailureCount);
+        Assert.Equal("HTTP 429 from AniListManga", health.LastError);
     }
 
     private sealed class StubHandler : HttpMessageHandler

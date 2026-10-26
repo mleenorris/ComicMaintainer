@@ -96,20 +96,16 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
             }
         };
 
-    private static async Task SearchIgnoringCancellationAsync(
+    /// <summary>
+    /// Runs a search that <see cref="CancelOnBackOff"/> cancels during the 429
+    /// back-off: the caller's cancellation surfaces instead of a "no match".
+    /// </summary>
+    private static Task SearchCancelledDuringTheBackOffAsync(
         MangaDexSeriesMetadataService service,
         string query,
         CancellationToken cancellationToken)
-    {
-        try
-        {
-            await service.SearchSeriesAsync(query, cancellationToken: cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            // Either surfacing or swallowing the caller's cancellation is acceptable here.
-        }
-    }
+        => Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.SearchSeriesAsync(query, cancellationToken: cancellationToken));
 
     [Fact]
     public void ProviderName_IsMangaDex()
@@ -207,6 +203,51 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
         Assert.Equal(LogLevel.Warning, warning.Level);
         Assert.Equal("MangaDex lookup failed for Solo Leveling", warning.Message);
         Assert.IsAssignableFrom<System.Text.Json.JsonException>(warning.Exception);
+        _cache.Set(ProbeCacheKey, (true, "Reachable"));
+        var health = await service.CheckHealthAsync();
+        Assert.Equal(1, health.FailureCount);
+        Assert.Equal(warning.Exception.Message, health.LastError);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LookupAndSearch_CallerCancelsMidRequest_RethrowWithoutLoggingOrRecordingAFailure(bool lookup)
+    {
+        using var cts = new CancellationTokenSource();
+        var handler = new StubHandler(_ =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+        var service = CreateService(handler);
+        Func<Task> call = lookup
+            ? () => service.LookupSeriesAsync("Solo Leveling", cts.Token)
+            : () => service.SearchSeriesAsync("Solo Leveling", cancellationToken: cts.Token);
+
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(call);
+
+        Assert.Equal(cts.Token, cancelled.CancellationToken);
+        Assert.Single(handler.Requests);
+        Assert.Empty(_logger.Entries);
+        _cache.Set(ProbeCacheKey, (true, "Reachable"));
+        var health = await service.CheckHealthAsync();
+        Assert.Equal(0, health.FailureCount);
+        Assert.Null(health.LastError);
+    }
+
+    [Fact]
+    public async Task SearchSeriesAsync_RequestTimesOut_ReturnsEmptyLogsAndRecordsTheFailure()
+    {
+        // A cancellation the caller didn't ask for, which is how HttpClient reports its timeout.
+        var service = CreateService(new StubHandler(_ => throw new TaskCanceledException("timed out")));
+
+        Assert.Empty(await service.SearchSeriesAsync("Solo Leveling"));
+
+        var warning = Assert.Single(_logger.Entries);
+        Assert.Equal(LogLevel.Warning, warning.Level);
+        Assert.Equal("MangaDex lookup failed for Solo Leveling", warning.Message);
+        Assert.IsType<TaskCanceledException>(warning.Exception);
         _cache.Set(ProbeCacheKey, (true, "Reachable"));
         var health = await service.CheckHealthAsync();
         Assert.Equal(1, health.FailureCount);
@@ -316,7 +357,7 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
         var handler = new StubHandler(_ => TooManyRequests(retryAfterCase));
         var service = CreateService(handler);
 
-        await SearchIgnoringCancellationAsync(service, "Solo Leveling", cts.Token);
+        await SearchCancelledDuringTheBackOffAsync(service, "Solo Leveling", cts.Token);
 
         var backOff = Assert.Single(_logger.Entries, e => e.Message.Contains(BackOffMessage, StringComparison.Ordinal));
         Assert.Equal(LogLevel.Warning, backOff.Level);
@@ -334,7 +375,7 @@ public sealed class MangaDexSeriesMetadataServiceCoverageTests : IDisposable
         var handler = new StubHandler(_ => TooManyRequests("delta-3600"));
         var service = CreateService(handler);
         var before = DateTime.UtcNow;
-        await SearchIgnoringCancellationAsync(service, "Solo Leveling", cts.Token);
+        await SearchCancelledDuringTheBackOffAsync(service, "Solo Leveling", cts.Token);
         _cache.Set(ProbeCacheKey, (true, "Reachable"));
 
         var health = await service.CheckHealthAsync();

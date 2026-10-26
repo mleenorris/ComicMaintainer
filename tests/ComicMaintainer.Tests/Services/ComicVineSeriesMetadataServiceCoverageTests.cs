@@ -203,6 +203,51 @@ public sealed class ComicVineSeriesMetadataServiceCoverageTests : IDisposable
         Assert.IsType<HttpRequestException>(warning.Exception);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LookupAndSearch_CallerCancelsMidRequest_RethrowWithoutLoggingOrRecordingAFailure(bool lookup)
+    {
+        using var cts = new CancellationTokenSource();
+        var handler = new StubHandler(_ =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+        var service = CreateService(handler);
+        Func<Task> call = lookup
+            ? () => service.LookupSeriesAsync("Batman", cts.Token)
+            : () => service.SearchSeriesAsync("Batman", cancellationToken: cts.Token);
+
+        var cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(call);
+
+        Assert.Equal(cts.Token, cancelled.CancellationToken);
+        Assert.Single(handler.Requests);
+        Assert.Empty(_logger.Entries);
+        _cache.Set(ProbeCacheKey, (true, "Reachable"));
+        var health = await service.CheckHealthAsync();
+        Assert.Equal(0, health.FailureCount);
+        Assert.Null(health.LastError);
+    }
+
+    [Fact]
+    public async Task SearchSeriesAsync_RequestTimesOut_ReturnsEmptyLogsAndRecordsTheFailure()
+    {
+        // A cancellation the caller didn't ask for, which is how HttpClient reports its timeout.
+        var service = CreateService(new StubHandler(_ => throw new TaskCanceledException("timed out")));
+
+        Assert.Empty(await service.SearchSeriesAsync("Batman"));
+
+        var warning = Assert.Single(_logger.Entries);
+        Assert.Equal(LogLevel.Warning, warning.Level);
+        Assert.Equal("ComicVine lookup failed for Batman", warning.Message);
+        Assert.IsType<TaskCanceledException>(warning.Exception);
+        _cache.Set(ProbeCacheKey, (true, "Reachable"));
+        var health = await service.CheckHealthAsync();
+        Assert.Equal(1, health.FailureCount);
+        Assert.Equal(warning.Exception.Message, health.LastError);
+    }
+
     [Fact]
     public async Task CheckHealthAsync_ReusesTheCachedProbeResult()
     {

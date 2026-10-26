@@ -2647,6 +2647,96 @@ public class FilesControllerTests
     }
 
     [Fact]
+    public async Task GetCombinableFolders_CancelledReconciliation_DoesNotCacheIncompleteGroups()
+    {
+        var options = new DbContextOptionsBuilder<ComicMaintainerDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+
+        var files = new List<ComicFile>
+        {
+            new()
+            {
+                FilePath = "/library/folderA/Series-001.cbz",
+                FileName = "Series-001.cbz",
+                Directory = "/library/folderA",
+                LastModified = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Series A" }
+            },
+            new()
+            {
+                FilePath = "/library/folderB/Series-002.cbz",
+                FileName = "Series-002.cbz",
+                Directory = "/library/folderB",
+                LastModified = new DateTime(2026, 4, 2, 0, 0, 0, DateTimeKind.Utc),
+                Metadata = new ComicMetadata { Series = "Series B" }
+            }
+        };
+
+        var fileStore = new Mock<IFileStoreService>();
+        fileStore.Setup(fs => fs.GetAllFilesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(files);
+        fileStore.As<IChangeVersionSource>().SetupGet(v => v.ChangeVersion).Returns(1);
+
+        var mockCache = new Mock<ISeriesMetadataCacheService>();
+        mockCache.Setup(c => c.GetAllAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<SeriesMetadataCacheRecord>());
+        mockCache.As<IChangeVersionSource>().SetupGet(v => v.ChangeVersion).Returns(1);
+
+        using var cts = new CancellationTokenSource();
+        var seriesGroups = new List<SeriesFoldersResult>
+        {
+            new()
+            {
+                Id = "merged-series",
+                Title = "Merged Series",
+                Folders = new List<SeriesFolderDto>
+                {
+                    new() { Directory = "/library/folderA", FileCount = 1, TotalSize = 0 },
+                    new() { Directory = "/library/folderB", FileCount = 1, TotalSize = 0 }
+                }
+            }
+        };
+        _mockSeriesLibrary.Setup(s => s.GetAllSeriesFolderGroupsAsync(
+                It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns<string?, CancellationToken>((_, token) =>
+            {
+                if (token.CanBeCanceled)
+                {
+                    cts.Cancel();
+                    token.ThrowIfCancellationRequested();
+                }
+                return Task.FromResult<IReadOnlyList<SeriesFoldersResult>>(seriesGroups);
+            });
+
+        using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(
+            new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+        var controller = new FilesController(
+            fileStore.Object,
+            _mockProcessor.Object,
+            _mockHistoryService.Object,
+            _mockSeriesLibrary.Object,
+            _mockLogger.Object,
+            _mockSettings.Object,
+            new TestDbContextFactory(options),
+            null,
+            mockCache.Object,
+            memoryCache: memoryCache);
+
+        await controller.GetCombinableFolders(cts.Token);
+
+        var result = await controller.GetCombinableFolders();
+
+        var okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var groupsProperty = okResult.Value!.GetType().GetProperty("groups");
+        Assert.NotNull(groupsProperty);
+        var groups = Assert.IsAssignableFrom<IEnumerable<FilesController.CombinableFolderGroupDto>>(
+            groupsProperty!.GetValue(okResult.Value));
+        var group = Assert.Single(groups);
+        Assert.StartsWith("series:", group.GroupKey);
+    }
+
+    [Fact]
     public async Task GetCombinableFolders_SuggestsParentheticalOfficialSuffix()
     {
         // Regression for issue 2: "Tomb Raider King" and "Tomb Raider King (Official)"

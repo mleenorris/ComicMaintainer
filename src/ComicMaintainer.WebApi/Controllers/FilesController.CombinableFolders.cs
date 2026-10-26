@@ -270,7 +270,7 @@ public partial class FilesController
             seriesGroups = await _seriesLibrary.GetAllSeriesFolderGroupsAsync(filter: null, cancellationToken)
                 ?? Array.Empty<SeriesFoldersResult>();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogDebug(ex, "Failed to load series-library folder groups for combinable-folder reconciliation");
             return;

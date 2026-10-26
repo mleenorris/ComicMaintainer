@@ -11,8 +11,10 @@ const { deferred } = require('./support/app');
 const {
     makeFolder,
     makeFile,
+    encodeFolder,
     folderFilesMatcher,
     bootFilesView,
+    callsTo,
     folderFileCalls
 } = require('./support/library-helpers');
 
@@ -36,6 +38,19 @@ function library(...names) {
     const files = {};
     for (const name of names) files[name] = [makeFile(`${name}/${name} #001.cbz`), makeFile(`${name}/${name} #002.cbz`)];
     return { folders: names.map(name => makeFolder(name)), files };
+}
+
+// The library root's files: its path is empty, so it has a URL of its own.
+const ROOT_FILES = '/api/files/folders/files';
+
+/** library(...names) listed after the library root, which holds "Root Issue.cbz". */
+function libraryWithRoot(...names) {
+    const { folders, files } = library(...names);
+    return {
+        folders: [makeFolder('', { file_count: 1 }), ...folders],
+        files,
+        routes: { [`GET ${ROOT_FILES}`]: { path: '', files: [makeFile('Root Issue.cbz')] } }
+    };
 }
 
 test('a folder opens and closes from its arrow or its name, loading its files once', async () => {
@@ -142,6 +157,31 @@ test('expand all retries folders that failed to load', async () => {
 
     assert.deepEqual(folderFileCalls(page).map(call => call.folder), ['Batman', 'Saga', 'Saga']);
     assert.deepEqual(rowsIn(page, 'Saga'), ['Saga #001.cbz', 'Saga #002.cbz']);
+});
+
+test('the library root has no header to close it by, so it is open from the start and stays open', async () => {
+    const page = await bootFilesView(libraryWithRoot('Batman'));
+
+    assert.equal(section(page, '').querySelector('.directory-header'), null);
+    assert.deepEqual(rowsIn(page, ''), ['Root Issue.cbz']);
+    assert.equal(isCollapsed(page, 'Batman'), true);
+    assert.equal(callsTo(page, ROOT_FILES).length, 1);
+    assert.equal(toggleAllLabel(page), '▶', 'the open root does not count as an open folder');
+
+    page.click('#toggleAllBtn');
+    await page.settle();
+    assert.deepEqual(rowsIn(page, 'Batman'), ['Batman #001.cbz', 'Batman #002.cbz']);
+    assert.deepEqual(rowsIn(page, ''), ['Root Issue.cbz']);
+    assert.deepEqual(folderFileCalls(page).map(call => call.path), [`/api/files/folders/${encodeFolder('Batman')}/files`]);
+    assert.equal(callsTo(page, ROOT_FILES).length, 1, 'expand all does not fetch the loaded root again');
+    assert.equal(toggleAllLabel(page), '▼');
+
+    page.click('#toggleAllBtn');
+    await page.settle();
+    assert.equal(isCollapsed(page, 'Batman'), true);
+    assert.equal(isCollapsed(page, ''), false, 'collapse all leaves the root open');
+    assert.deepEqual(rowsIn(page, ''), ['Root Issue.cbz']);
+    assert.equal(toggleAllLabel(page), '▶');
 });
 
 // ── Selection ─────────────────────────────────────────────────────────────
@@ -283,6 +323,18 @@ test('a processed file reloads its folder if open, or drops its cached files if 
 
     await clickFolderToggle(page, 'Saga');
     assert.deepEqual(requested(), ['Batman', 'Saga', 'Batman', 'Saga'], 'the closed folder reloads when reopened');
+});
+
+test('a processed file at the library root reloads the root\'s files', async () => {
+    const page = await bootFilesView(libraryWithRoot('Batman'));
+    assert.equal(callsTo(page, ROOT_FILES).length, 1);
+
+    fileProcessed(page, 'Root Issue.cbz');
+    await page.settle();
+
+    assert.equal(callsTo(page, ROOT_FILES).length, 2);
+    assert.deepEqual(folderFileCalls(page), []);
+    assert.deepEqual(rowsIn(page, ''), ['Root Issue.cbz']);
 });
 
 test('selections of files gone from a reloaded folder are dropped; others are kept', async () => {

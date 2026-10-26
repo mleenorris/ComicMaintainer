@@ -533,8 +533,11 @@
             if (!force && existing && existing.status === 'loaded') return;
             if (existing && existing.status === 'loading') return existing.promise;
 
-            const encoded = encodeFolderPath(dir);
-            let url = apiUrl(`/api/files/folders/${encoded}/files`);
+            // The root folder's path is empty, and an empty path segment
+            // (folders//files) routes nowhere, so the root has its own URL.
+            let url = apiUrl(dir
+                ? `/api/files/folders/${encodeFolderPath(dir)}/files`
+                : '/api/files/folders/files');
             const params = [];
             if (searchQuery) params.push(`search=${encodeURIComponent(searchQuery)}`);
             if (filterMode !== 'all') params.push(`filter=${encodeURIComponent(filterMode)}`);
@@ -855,13 +858,15 @@
         }
 
         function collapseAllFolders() {
-            collapsedDirectories = new Set(folderList.map(f => f.path || ''));
+            // The root has no header to reopen it by, so it stays open.
+            collapsedDirectories = new Set(folderList.map(f => f.path || '').filter(dir => dir));
             allFoldersExpanded = false;
             renderFileList();
         }
 
         function updateToggleAllButton() {
-            const totalDirs = folderList.length;
+            // Only folders with a header can be collapsed; the root can't.
+            const totalDirs = folderList.filter(f => f.path).length;
             if (totalDirs > 0 && collapsedDirectories.size >= totalDirs) {
                 allFoldersExpanded = false;
             } else {

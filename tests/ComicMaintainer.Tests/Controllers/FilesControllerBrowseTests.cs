@@ -169,6 +169,36 @@ public sealed class FilesControllerBrowseTests
         AssertStatus(result.Result, 500, "Error retrieving folder files");
     }
 
+    // --------------------------------------------------------- GetRootFolderFiles
+
+    [Fact]
+    public async Task GetRootFolderFiles_QueriesTheRootFolderKeyWithTheGivenQuery()
+    {
+        var dtos = new List<FileDto>();
+        _fileStore
+            .Setup(f => f.GetFolderFilesAsync("", "unread", "bat", "date", "desc", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(dtos);
+
+        var result = await _controller.GetRootFolderFiles(filter: "unread", search: "bat", sort: "date", direction: "desc");
+
+        var ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal("", Prop(ok.Value, "path"));
+        Assert.Same(dtos, Prop(ok.Value, "files"));
+    }
+
+    [Fact]
+    public async Task GetRootFolderFiles_StoreThrows_Returns500()
+    {
+        _fileStore
+            .Setup(f => f.GetFolderFilesAsync("", It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IOException("db locked"));
+
+        var result = await _controller.GetRootFolderFiles();
+
+        AssertStatus(result.Result, 500, "Error retrieving folder files");
+    }
+
     // ------------------------------------------------------------- GetSeriesIssues
 
     [Fact]

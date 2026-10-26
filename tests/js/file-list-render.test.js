@@ -233,26 +233,61 @@ test('long file names are shortened in the middle, keeping the extension', async
     ]);
 });
 
-test('files at the library root show their path, and names are escaped', async () => {
+test('files at the library root are listed at once, under no folder header, and names are escaped', async () => {
     const tricky = 'Bob\'s <b>Comics & "Co" #1.cbz';
-    const page = await bootFilesView({ folders: [makeFolder('', { file_count: 1 })], files: { '': [makeFile(tricky)] } });
+    const page = await bootFilesView({
+        folders: [makeFolder('', { file_count: 1 })],
+        routes: { 'GET /api/files/folders/files': { path: '', files: [makeFile(tricky)] } }
+    });
 
-    // The root has no folder header; it opens with "expand all".
+    // The root has no header to open it by, so it is never collapsed. Its path
+    // is empty, and an empty segment (folders//files) routes nowhere, so its
+    // files come from the root's own URL.
     assert.equal(page.$('#fileList .directory-header'), null);
-    page.click('#toggleAllBtn');
-    await page.settle();
-
-    assert.equal(folderFileCalls(page).at(-1).path, '/api/files/folders//files');
+    assert.equal(page.$('#fileList .directory-content').classList.contains('collapsed'), false);
+    assert.equal(callsTo(page, '/api/files/folders/files').length, 1);
+    assert.deepEqual(folderFileCalls(page), []);
     const row = page.$('#fileList .file-item');
     assert.equal(row.querySelector('.file-name').title, tricky);
     assert.equal(row.querySelector('.file-path').textContent, tricky);
     assert.equal(row.querySelector('b'), null, 'markup in names is not interpreted');
     assert.equal(row.querySelector('.dropdown-menu').id, 'dropdown-Bob_s__b_Comics____Co___1_cbz');
+});
 
-    page.click('#toggleAllBtn');
+test('the library root\'s files follow the filter, even once loaded', async () => {
+    const page = await bootFilesView({
+        folders: [makeFolder('', { file_count: 2 })],
+        routes: {
+            'GET /api/files/folders/files': call => ({
+                path: '',
+                files: [makeFile('Done.cbz', { processed: true }), makeFile('Todo.cbz')]
+                    .filter(file => call.query.filter !== 'unmarked' || !file.processed)
+            })
+        }
+    });
+    assert.deepEqual(rowNames(page), ['Done.cbz', 'Todo.cbz']);
+
+    page.click('#headerFilterMenu [data-filter="unmarked"]');
     await page.settle();
-    assert.equal(page.$('#fileList .file-item'), null, '"collapse all" closes the root again');
-    assert.ok(page.$('#fileList .directory-content').classList.contains('collapsed'));
+
+    assert.deepEqual(callsTo(page, '/api/files/folders/files').at(-1).query, { filter: 'unmarked' });
+    assert.deepEqual(rowNames(page), ['Todo.cbz']);
+});
+
+test('the library root\'s files that fail to load offer a retry', async () => {
+    let failure = 500;
+    const page = await bootFilesView({
+        folders: [makeFolder('', { file_count: 1 })],
+        routes: { 'GET /api/files/folders/files': () => failure || { path: '', files: [makeFile('Root Issue.cbz')] } }
+    });
+    assert.match(page.$('#fileList .folder-error').textContent, /Failed to load files in this folder\./);
+
+    failure = null;
+    page.click('#fileList .folder-error button');
+    await page.settle();
+
+    assert.equal(callsTo(page, '/api/files/folders/files').length, 2);
+    assert.deepEqual(rowNames(page), ['Root Issue.cbz']);
 });
 
 test('folder names are escaped and URL-encoded for their files request', async () => {

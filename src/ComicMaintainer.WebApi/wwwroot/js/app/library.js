@@ -330,10 +330,15 @@
 
                 // Newly arrived folders should be collapsed by default, but
                 // preserve the user's explicit state for folders we've already
-                // expanded in this session.
+                // expanded in this session. The library root (path '') is the
+                // exception: it has no header to expand it by, so it is never
+                // collapsed and its files are always shown.
+                let rootArrived = false;
                 for (const f of newFolders) {
                     if (f && typeof f.path === 'string') {
-                        if (!folderFiles.has(f.path)) {
+                        if (!f.path) {
+                            rootArrived = true;
+                        } else if (!folderFiles.has(f.path)) {
                             collapsedDirectories.add(f.path);
                         }
                     }
@@ -345,6 +350,12 @@
                 // of its empty state.
                 folderLoading = false;
                 renderFileList();
+                // The root's files are on screen straight away, so fetch them
+                // for the current filter/search even when a list from an
+                // earlier one is cached.
+                if (rootArrived) {
+                    ensureFolderLoaded('', true).catch(() => {});
+                }
                 updateButtonVisibility();
                 ensureScrollObserver();
                 if (refresh) {

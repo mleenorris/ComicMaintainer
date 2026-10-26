@@ -192,6 +192,21 @@ public partial class FilesController
         }
     }
 
+    /// <summary>
+    /// Lists the files directly in the library root. The root folder's path is empty, and an empty
+    /// <c>{encodedPath}</c> segment (<c>folders//files</c>) matches no route, so the root is addressed
+    /// by leaving the segment out. Answers like <see cref="GetFolderFiles"/>.
+    /// </summary>
+    [LibraryETag]
+    [HttpGet("folders/files")]
+    public Task<ActionResult<object>> GetRootFolderFiles(
+        [FromQuery] string? filter = null,
+        [FromQuery] string? search = null,
+        [FromQuery] string? sort = "name",
+        [FromQuery] string? direction = "asc",
+        CancellationToken cancellationToken = default) =>
+        GetFolderFiles(string.Empty, filter, search, sort, direction, cancellationToken);
+
     [LibraryETag]
     [HttpGet("series/{seriesId}/issues")]
     public async Task<ActionResult<object>> GetSeriesIssues(

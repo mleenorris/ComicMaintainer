@@ -2677,20 +2677,24 @@
         function readPendingProgress() {
             try {
                 const raw = localStorage.getItem(PENDING_PROGRESS_KEY);
-                if (!raw) return {};
+                if (!raw) return new Map();
                 const parsed = JSON.parse(raw);
-                return (parsed && typeof parsed === 'object') ? parsed : {};
+                if (!parsed || typeof parsed !== 'object') return new Map();
+                if (Array.isArray(parsed)) {
+                    return new Map(parsed.filter(entry => Array.isArray(entry) && entry.length === 2));
+                }
+                return new Map(Object.entries(parsed));
             } catch (_e) {
-                return {};
+                return new Map();
             }
         }
 
         function writePendingProgress(pending) {
             try {
-                if (!pending || Object.keys(pending).length === 0) {
+                if (!pending || pending.size === 0) {
                     localStorage.removeItem(PENDING_PROGRESS_KEY);
                 } else {
-                    localStorage.setItem(PENDING_PROGRESS_KEY, JSON.stringify(pending));
+                    localStorage.setItem(PENDING_PROGRESS_KEY, JSON.stringify(Array.from(pending.entries())));
                 }
             } catch (error) {
                 console.log('Unable to persist pending reading progress:', error);
@@ -2703,19 +2707,19 @@
         function queuePendingProgress(filePath, pageNum) {
             if (!filePath || !pageNum) return;
             const pending = readPendingProgress();
-            pending[filePath] = { page: pageNum, updatedAt: Date.now() };
+            pending.set(filePath, { page: pageNum, updatedAt: Date.now() });
             writePendingProgress(pending);
         }
 
         function clearPendingProgress(filePath) {
             const pending = readPendingProgress();
-            if (!(filePath in pending)) return;
-            delete pending[filePath];
+            if (!pending.has(filePath)) return;
+            pending.delete(filePath);
             writePendingProgress(pending);
         }
 
         function getPendingProgress(filePath) {
-            const entry = readPendingProgress()[filePath];
+            const entry = readPendingProgress().get(filePath);
             return entry && entry.page ? entry.page : null;
         }
 
@@ -2748,13 +2752,13 @@
         async function flushPendingProgress() {
             if (flushingPendingProgress) return;
             const pending = readPendingProgress();
-            const filePaths = Object.keys(pending);
+            const filePaths = Array.from(pending.keys());
             if (filePaths.length === 0) return;
 
             flushingPendingProgress = true;
             try {
                 for (const filePath of filePaths) {
-                    const entry = pending[filePath];
+                    const entry = pending.get(filePath);
                     if (!entry || !entry.page) {
                         clearPendingProgress(filePath);
                         continue;
@@ -2769,7 +2773,7 @@
                     }
                     // Only drop the entry if a newer page was not queued while
                     // this request was in flight.
-                    const current = readPendingProgress()[filePath];
+                    const current = readPendingProgress().get(filePath);
                     if (current && current.updatedAt === entry.updatedAt) {
                         clearPendingProgress(filePath);
                     }

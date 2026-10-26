@@ -3,35 +3,20 @@ using System.Text.RegularExpressions;
 namespace ComicMaintainer.Tests.Wwwroot;
 
 /// <summary>
-/// Guards the webcomic-mode comic-to-comic transition in <c>reader.html</c>.
+/// Guards the webcomic-mode comic-to-comic transition in the reader page
+/// (<c>reader.html</c>, whose code lives in <c>js/pages/reader.js</c>).
 /// The next issue must be stitched into the continuous stream *before* the
 /// reader reaches the end of the current one, so crossing the boundary costs
 /// no fetch and needs no scroll repositioning.
 /// </summary>
 public class ReaderWebcomicTransitionTests
 {
-    private static string ReaderHtml
-    {
-        get
-        {
-            var current = AppContext.BaseDirectory;
-            for (var i = 0; i < 10 && current != null; i++)
-            {
-                var candidate = Path.Combine(current, "src", "ComicMaintainer.WebApi", "wwwroot", "reader.html");
-                if (File.Exists(candidate))
-                {
-                    return File.ReadAllText(candidate);
-                }
-                current = Path.GetDirectoryName(current);
-            }
-            throw new FileNotFoundException("Could not locate reader.html relative to test binaries.");
-        }
-    }
+    private static string ReaderScript => WwwrootFiles.Read(WwwrootFiles.PageScripts["reader.html"]);
 
     [Fact]
     public void WebcomicScroll_StitchesNextIssueBeforeReachingTheEnd()
     {
-        var handler = ExtractFunction(ReaderHtml, "handleWebcomicScroll");
+        var handler = ExtractFunction(ReaderScript, "handleWebcomicScroll");
 
         // The stitch must be triggered from a stitch-ahead distance, not only
         // from the 200px "at the bottom" check, otherwise the reader waits for
@@ -43,8 +28,8 @@ public class ReaderWebcomicTransitionTests
     [Fact]
     public void StitchNextComic_DoesNotMoveTheViewport()
     {
-        var html = ReaderHtml;
-        var stitch = ExtractFunction(html, "stitchNextComic");
+        var script = ReaderScript;
+        var stitch = ExtractFunction(script, "stitchNextComic");
 
         // Content is appended below the reader, so any scroll assignment or
         // scrollIntoView would visibly jump the view at the boundary.
@@ -52,13 +37,13 @@ public class ReaderWebcomicTransitionTests
         Assert.DoesNotContain("scrollIntoView", stitch);
 
         // The superseded pin-the-view-to-the-new-comic transition must be gone.
-        Assert.DoesNotContain("pinScrollToComicStart", html);
+        Assert.DoesNotContain("pinScrollToComicStart", script);
     }
 
     [Fact]
     public void StitchNextComic_RegistersTheNewTailAndPreloadsItsOpeningPages()
     {
-        var stitch = ExtractFunction(ReaderHtml, "stitchNextComic");
+        var stitch = ExtractFunction(ReaderScript, "stitchNextComic");
 
         Assert.Contains("stitchedComicPaths.add(nextPath)", stitch);
         Assert.Contains("streamTailPath = nextPath", stitch);
@@ -75,7 +60,7 @@ public class ReaderWebcomicTransitionTests
     [Fact]
     public void EnsureNextComicStitched_WaitsForTheTailIssueToBeFullyRequested()
     {
-        var ensure = ExtractFunction(ReaderHtml, "ensureNextComicStitched");
+        var ensure = ExtractFunction(ReaderScript, "ensureNextComicStitched");
 
         // Appending the next issue while pages of the current one are still
         // missing would put it ahead of content the reader has not seen.
@@ -88,9 +73,9 @@ public class ReaderWebcomicTransitionTests
     [Fact]
     public void BottomCatchUp_RetriesMissingTailFinalPage()
     {
-        var handler = ExtractFunction(ReaderHtml, "handleWebcomicScroll");
-        var ensure = ExtractFunction(ReaderHtml, "ensureNextComicStitched");
-        var requestTail = ExtractFunction(ReaderHtml, "requestTailFinalPage");
+        var handler = ExtractFunction(ReaderScript, "handleWebcomicScroll");
+        var ensure = ExtractFunction(ReaderScript, "ensureNextComicStitched");
+        var requestTail = ExtractFunction(ReaderScript, "requestTailFinalPage");
 
         Assert.Contains("await requestTailFinalPage(tailPath)", ensure);
         Assert.Contains("loadWebcomicPageForNextComic(meta.totalPages, container, tailPath)", requestTail);
@@ -100,7 +85,7 @@ public class ReaderWebcomicTransitionTests
     [Fact]
     public void SetActiveComic_MarksThePrecedingIssueRead()
     {
-        var setActive = ExtractFunction(ReaderHtml, "setActiveComic");
+        var setActive = ExtractFunction(ReaderScript, "setActiveComic");
 
         // With pre-stitching, a finished issue no longer sits at the bottom of
         // the stream, so the bottom-of-stream check alone would never mark it.
@@ -115,7 +100,7 @@ public class ReaderWebcomicTransitionTests
     private static string ExtractFunction(string source, string name)
     {
         var start = source.IndexOf($"function {name}(", StringComparison.Ordinal);
-        Assert.True(start >= 0, $"Expected reader.html to declare {name}()");
+        Assert.True(start >= 0, $"Expected js/pages/reader.js to declare {name}()");
 
         var braceStart = source.IndexOf('{', start);
         Assert.True(braceStart > 0, $"Expected a body for {name}()");

@@ -274,7 +274,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void ReaderHtml_HasEmailCurrentComicAction()
     {
-        var html = Read("reader.html");
+        var html = WwwrootFiles.ReadPageWithScript("reader.html");
 
         Assert.Contains("id=\"emailComicBtn\"", html);
         Assert.Contains("openReaderEmailPrompt()", html);
@@ -293,7 +293,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void ReaderHtml_EmailPromptClosesOnEscapeAndBlocksChromeAutoHide()
     {
-        var html = Read("reader.html");
+        var html = WwwrootFiles.ReadPageWithScript("reader.html");
 
         // Escape must close the prompt rather than exit the reader, and the
         // chrome must not auto-hide while the prompt is open.
@@ -306,7 +306,7 @@ public class EmailDeliveryUiTests
     [Fact]
     public void ReaderHtml_HidesEmailActionForReadOnlyUsers()
     {
-        var html = Read("reader.html");
+        var html = WwwrootFiles.ReadPageWithScript("reader.html");
 
         Assert.Contains("applyReaderEmailVisibility", html);
         Assert.Contains("canModifyLibrary === false", html);

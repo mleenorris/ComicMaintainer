@@ -142,6 +142,12 @@ The SPA is split into ordered classic scripts under
 `index.html`, `APP_SCRIPTS` in `sw.js`, and `WwwrootFiles.AppScripts` in the
 C# tests.
 
+The standalone pages (`reader.html`, `login.html`, `setup.html`,
+`offline.html`) have no inline `<script>` blocks: each loads its own script,
+`js/pages/<page>.js`, as the last element of `<body>`. These are listed in
+`WwwrootFiles.PageScripts`; the ones for pages the service worker serves
+offline (`reader.js`, `offline.js`) are also in `PAGE_SCRIPTS` in `sw.js`.
+
 ### Run End-to-End Container Smoke Test
 
 The Docker-based smoke test verifies that the published image starts, serves

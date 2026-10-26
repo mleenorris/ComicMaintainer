@@ -119,7 +119,7 @@ public class FrontendAccessibilityTests
     [InlineData("setup.html")]
     public void StandalonePage_RevealsStatusElementBeforeWritingText(string fileName)
     {
-        var html = Read(fileName);
+        var script = WwwrootFiles.Read(WwwrootFiles.PageScripts[fileName]);
 
         // The elements are display:none until '.show' is added, which keeps
         // them out of the accessibility tree. The class must be added before
@@ -127,10 +127,10 @@ public class FrontendAccessibilityTests
         // is still hidden and may never be announced.
         Assert.Matches(
             new Regex(@"errorElement\.classList\.add\('show'\);\s*errorElement\.textContent\s*="),
-            html);
+            script);
         Assert.Matches(
             new Regex(@"successElement\.classList\.add\('show'\);\s*successElement\.textContent\s*="),
-            html);
+            script);
     }
 
     [Theory]

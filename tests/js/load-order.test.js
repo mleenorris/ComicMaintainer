@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const { WWWROOT, indexHtmlScripts, loadScripts } = require('./support/sandbox');
+const { WWWROOT, htmlScripts, indexHtmlScripts, loadScripts } = require('./support/sandbox');
 
 test('index.html loads shared.js first and main.js last', () => {
     const scripts = indexHtmlScripts();
@@ -13,13 +13,23 @@ test('index.html loads shared.js first and main.js last', () => {
     assert.equal(new Set(scripts).size, scripts.length);
 });
 
-test('every script under wwwroot/js is loaded by index.html', () => {
+test('every script under wwwroot/js is loaded by index.html or by its own page', () => {
     const jsRoot = path.join(WWWROOT, 'js');
     const onDisk = fs.readdirSync(jsRoot, { recursive: true })
         .filter(file => file.endsWith('.js'))
         .map(file => 'js/' + file.split(path.sep).join('/'))
         .sort();
-    assert.deepEqual(onDisk, [...indexHtmlScripts()].sort());
+    const isPageScript = file => file.startsWith('js/pages/');
+    assert.deepEqual(onDisk.filter(file => !isPageScript(file)), [...indexHtmlScripts()].sort());
+
+    // js/pages/<name>.js is the script of the standalone page <name>.html,
+    // which loads it last (after any shared helpers it relies on).
+    const pageScripts = onDisk.filter(isPageScript);
+    assert.ok(pageScripts.length > 0);
+    for (const script of pageScripts) {
+        const page = path.posix.basename(script, '.js') + '.html';
+        assert.equal(htmlScripts(page).at(-1), script, `${page} must load ${script} last`);
+    }
 });
 
 test('the app scripts load in order without touching later scripts', () => {

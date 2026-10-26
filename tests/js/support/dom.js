@@ -38,7 +38,10 @@ after(() => {
 // jsdom reports a cross-document navigation only as "not implemented", without
 // its target. Hooking its Location implementation (an internal module, hence
 // the guard) records every navigation in page.navigations so tests can assert
-// redirects such as `location.href = '/login.html'`.
+// redirects such as `location.href = '/login.html'`. The page stays on its
+// document: only same-document (fragment) navigations, which jsdom performs and
+// which fire hashchange, are passed on, so a redirect or reload does not leave
+// a spurious "not implemented" error in page.errors.
 const pagesByDocument = new WeakMap();
 (function recordNavigations() {
     try {
@@ -47,12 +50,17 @@ const pagesByDocument = new WeakMap();
         const { serializeURL } = require(require.resolve('whatwg-url', { paths: [jsdomDir] }));
         const { _locationObjectNavigate: navigate, reload } = LocationImpl.prototype;
         LocationImpl.prototype._locationObjectNavigate = function (url, flags = {}) {
-            pagesByDocument.get(this._relevantDocument)?.navigations.push({ url: serializeURL(url), replace: Boolean(flags.replacement) });
-            return navigate.call(this, url, flags);
+            const page = pagesByDocument.get(this._relevantDocument);
+            if (!page) return navigate.call(this, url, flags);
+            page.navigations.push({ url: serializeURL(url), replace: Boolean(flags.replacement) });
+            const sameDocument = url.fragment !== null && serializeURL(url, true) === serializeURL(this._url, true);
+            return sameDocument ? navigate.call(this, url, flags) : undefined;
         };
         LocationImpl.prototype.reload = function () {
-            pagesByDocument.get(this._relevantDocument)?.navigations.push({ url: serializeURL(this._url), reload: true });
-            return reload.call(this);
+            const page = pagesByDocument.get(this._relevantDocument);
+            if (!page) return reload.call(this);
+            page.navigations.push({ url: serializeURL(this._url), reload: true });
+            return undefined;
         };
     } catch {
         // Another jsdom layout: page.navigations simply stays empty.

@@ -130,9 +130,10 @@ internal static class WebApplicationExtensions
             // Content-Security-Policy.
             //
             // The web UI is entirely first-party: no CDN scripts, styles or fonts. It
-            // does however rely on inline <script>/<style> blocks and inline style
-            // attributes inside index.html/reader.html, so script-src and style-src
-            // must allow 'unsafe-inline' until the inline code is extracted. The
+            // does however rely on inline event-handler attributes (onclick=...), a
+            // couple of small inline <script> blocks in index.html, and inline
+            // <style> blocks and style attributes, so script-src and style-src must
+            // allow 'unsafe-inline' until those are removed as well. The
             // remaining directives still provide meaningful protection: injected
             // markup cannot load an attacker-hosted script, exfiltrate data to a
             // third-party origin, embed plugins, rewrite <base>, or post forms

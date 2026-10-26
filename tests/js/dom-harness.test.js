@@ -22,9 +22,33 @@ test('an unauthenticated visitor is sent to the login page', async () => {
     await page.settle();
 
     assert.deepEqual(page.navigations.map(n => n.url), ['http://localhost/login.html']);
+    // The redirect is recorded rather than attempted, so jsdom reports nothing.
+    assert.deepEqual(page.errors, []);
+    assert.equal(page.window.location.href, 'http://localhost/index.html');
     assert.equal(page.window.localStorage.getItem('username'), null);
     // Nothing past the auth check runs.
     assert.deepEqual(page.fetchCalls.filter(c => c.path !== '/api/auth/status' && c.path !== '/api/preferences'), []);
+});
+
+test('fragment navigations stay in the document and fire hashchange; reloads are recorded', async () => {
+    const page = loadPage({ markup: '<!DOCTYPE html><html><body></body></html>', url: 'http://localhost/page.html?q=1' });
+    await page.settle();
+    const hashes = [];
+    page.window.addEventListener('hashchange', () => hashes.push(page.window.location.hash));
+
+    page.window.location.hash = '#settings';
+    page.window.location.replace('/elsewhere.html');
+    page.window.location.reload();
+    await page.waitFor(() => hashes.length === 1);
+
+    assert.deepEqual(hashes, ['#settings']);
+    assert.equal(page.window.location.href, 'http://localhost/page.html?q=1#settings');
+    assert.deepEqual(page.navigations, [
+        { url: 'http://localhost/page.html?q=1#settings', replace: false },
+        { url: 'http://localhost/elsewhere.html', replace: true },
+        { url: 'http://localhost/page.html?q=1#settings', reload: true }
+    ]);
+    assert.deepEqual(page.errors, []);
 });
 
 test('the SPA boots against the real index.html with a valid session', async () => {

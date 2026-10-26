@@ -5,7 +5,8 @@ namespace ComicMaintainer.Tests.Integration;
 /// <summary>
 /// Integration tests for the Comic Reader functionality.
 /// These tests verify that the reader loads correctly and doesn't open new windows.
-/// Note: These are file-based tests that verify JavaScript content directly.
+/// Note: These are file-based tests that verify JavaScript content directly
+/// (the reader page's script lives in js/pages/reader.js).
 /// </summary>
 [Trait("Category", "Integration")]
 public class ReaderIntegrationTests
@@ -25,6 +26,12 @@ public class ReaderIntegrationTests
         }
     }
 
+    // The reader page: its markup followed by its page script
+    // (js/pages/reader.js), which holds all of the reader's JavaScript.
+    private string ReadReaderPage() =>
+        File.ReadAllText(Path.Combine(_wwwrootPath, "reader.html")) + "\n" +
+        File.ReadAllText(Path.Combine(_wwwrootPath, "js", "pages", "reader.js"));
+
     [Fact]
     public void ReaderHtml_FileExists()
     {
@@ -39,8 +46,7 @@ public class ReaderIntegrationTests
     public void ReaderHtml_ContainsExpectedElements()
     {
         // Arrange
-        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
-        var content = File.ReadAllText(readerPath);
+        var content = ReadReaderPage();
 
         // Assert
         Assert.Contains("Comic Reader", content);
@@ -53,8 +59,7 @@ public class ReaderIntegrationTests
     public void ReaderHtml_ContainsReadingModeToggle()
     {
         // Arrange
-        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
-        var content = File.ReadAllText(readerPath);
+        var content = ReadReaderPage();
 
         // Assert - Verify reading mode toggle exists
         Assert.Contains("toggleReadingMode", content);
@@ -69,8 +74,7 @@ public class ReaderIntegrationTests
     public void ReaderHtml_ContainsWebcomicModeSupport()
     {
         // Arrange
-        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
-        var content = File.ReadAllText(readerPath);
+        var content = ReadReaderPage();
 
         // Assert - Verify webcomic mode elements exist
         Assert.Contains("webcomic-mode", content);
@@ -82,8 +86,7 @@ public class ReaderIntegrationTests
     public void ReaderHtml_ContainsContinuousScrollLogic()
     {
         // Arrange
-        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
-        var content = File.ReadAllText(readerPath);
+        var content = ReadReaderPage();
 
         // Assert - Verify continuous scroll functions exist
         Assert.Contains("handleWebcomicScroll", content);
@@ -95,8 +98,7 @@ public class ReaderIntegrationTests
     public void ReaderHtml_ContainsMKeyShortcut()
     {
         // Arrange
-        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
-        var content = File.ReadAllText(readerPath);
+        var content = ReadReaderPage();
 
         // Assert - Verify M key toggle is documented and implemented
         Assert.Contains("Toggle Reading Mode", content);
@@ -187,8 +189,7 @@ public class ReaderIntegrationTests
     public void ReaderHtml_ContainsNavigationControls()
     {
         // Arrange
-        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
-        var content = File.ReadAllText(readerPath);
+        var content = ReadReaderPage();
 
         // Assert - Prev/Next buttons and a seek control are present.
         Assert.Contains("prevBtn", content);
@@ -204,8 +205,7 @@ public class ReaderIntegrationTests
     public void ReaderHtml_HasBackButton()
     {
         // Arrange
-        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
-        var content = File.ReadAllText(readerPath);
+        var content = ReadReaderPage();
 
         // Assert - Verify there's a back button to return to the main page
         Assert.Contains("goBack()", content);
@@ -216,8 +216,7 @@ public class ReaderIntegrationTests
     public void ReaderHtml_ContainsKeyboardShortcuts()
     {
         // Arrange
-        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
-        var content = File.ReadAllText(readerPath);
+        var content = ReadReaderPage();
 
         // Assert
         Assert.Contains("shortcuts-help", content);
@@ -230,8 +229,7 @@ public class ReaderIntegrationTests
     public void ReaderHtml_ContainsPageObserverForWebcomicMode()
     {
         // Arrange
-        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
-        var content = File.ReadAllText(readerPath);
+        var content = ReadReaderPage();
 
         // Assert - Verify page observer is set up to track visible pages in webcomic mode
         Assert.Contains("pageObserver", content);
@@ -243,8 +241,7 @@ public class ReaderIntegrationTests
     public void ReaderHtml_PreservesPageWhenSwitchingModes()
     {
         // Arrange
-        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
-        var content = File.ReadAllText(readerPath);
+        var content = ReadReaderPage();
 
         // Assert - Verify toggle function stores page before switching
         var toggleStart = content.IndexOf("async function toggleReadingMode()");
@@ -269,8 +266,7 @@ public class ReaderIntegrationTests
     public void ReaderHtml_WebcomicModeAcceptsStartPage()
     {
         // Arrange
-        var readerPath = Path.Combine(_wwwrootPath, "reader.html");
-        var content = File.ReadAllText(readerPath);
+        var content = ReadReaderPage();
 
         // Assert - Verify loadWebcomicMode accepts a startPage parameter
         Assert.Contains("async function loadWebcomicMode(startPage", content);

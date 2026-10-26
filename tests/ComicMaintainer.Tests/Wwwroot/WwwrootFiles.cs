@@ -40,6 +40,20 @@ internal static class WwwrootFiles
         "js/main.js",
     };
 
+    /// <summary>
+    /// The standalone pages' own scripts, keyed by the page that loads them.
+    /// Each page used to carry this code in an inline &lt;script&gt; block; it
+    /// lives in js/pages/ so it can be measured and tested like the app
+    /// scripts. A page script shares only its own page's global scope.
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string> PageScripts = new Dictionary<string, string>
+    {
+        ["login.html"] = "js/pages/login.js",
+        ["offline.html"] = "js/pages/offline.js",
+        ["reader.html"] = "js/pages/reader.js",
+        ["setup.html"] = "js/pages/setup.js",
+    };
+
     public static string WwwRoot
     {
         get
@@ -72,4 +86,11 @@ internal static class WwwrootFiles
     /// </summary>
     public static string ReadAppScripts() =>
         string.Join("\n", AppScripts.Select(Read));
+
+    /// <summary>
+    /// A standalone page's markup followed by its page script, for guards
+    /// that span both (e.g. a button in the markup and the handler it calls).
+    /// </summary>
+    public static string ReadPageWithScript(string page) =>
+        Read(page) + "\n" + Read(PageScripts[page]);
 }

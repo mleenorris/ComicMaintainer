@@ -81,8 +81,15 @@ from the page (`page.run(code)`) belong to the page's realm: compare them with
 
 Unrouted requests answer 404 and are listed in `page.unmatchedRequests`;
 `page.navigations`, `page.dialogs`, `page.eventSources` and
-`page.serviceWorkerRegistrations` record what the page did. Scripts run with
-`file:` URLs so Node's coverage attributes them to the files under `wwwroot`.
+`page.serviceWorkerRegistrations` record what the page did. Redirects and
+reloads are only recorded (the page stays on its document); fragment changes
+are applied and fire `hashchange`. Scripts run with `file:` URLs so Node's
+coverage attributes them to the files under `wwwroot`.
+
+The standalone pages (`reader.html`, `login.html`, `setup.html`,
+`offline.html`) keep no inline code: each loads its own classic script from
+`wwwroot/js/pages/`, so `loadPage({ html: 'reader.html', url: ... })` runs
+`js/shared.js` and `js/pages/reader.js` and measures them like the app scripts.
 
 ## Code Coverage
 

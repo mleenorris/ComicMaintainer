@@ -47,6 +47,14 @@ const APP_SCRIPTS = [
   '/js/main.js'
 ];
 
+// Page scripts of the other documents that must work offline: reader.html and
+// the offline.html fallback each load their own script from /js/pages/. They
+// are precached the same way as APP_SCRIPTS.
+const PAGE_SCRIPTS = [
+  '/js/pages/reader.js',
+  '/js/pages/offline.js'
+];
+
 // Raw app version (e.g. "2.0.341.0") as reported by /api/version; matches the
 // __APP_VERSION__ value the server injects into script URLs.
 let APP_VERSION = null;
@@ -391,14 +399,14 @@ async function offlineFallbackResponse() {
   );
 }
 
-// Precache the versioned app scripts. Best effort: without a known version
-// the URLs the page will request cannot be predicted, and a failed script
-// must not abort installation (cache.addAll would reject on any 404).
+// Precache the versioned app and page scripts. Best effort: without a known
+// version the URLs the pages will request cannot be predicted, and a failed
+// script must not abort installation (cache.addAll would reject on any 404).
 function precacheAppScripts(cache) {
   if (!APP_VERSION) {
     return Promise.resolve();
   }
-  return Promise.all(APP_SCRIPTS.map((script) =>
+  return Promise.all([...APP_SCRIPTS, ...PAGE_SCRIPTS].map((script) =>
     cache.add(`${script}?v=${APP_VERSION}`).catch((error) => {
       console.log('Service Worker: Failed to precache', script, error);
     })

@@ -21,11 +21,16 @@ function runWwwrootScript(script, context) {
     vm.runInContext(fs.readFileSync(file, 'utf8'), context, { filename: pathToFileURL(file).href });
 }
 
-/** Script paths (relative to wwwroot) index.html loads, in order. */
-function indexHtmlScripts() {
-    const html = fs.readFileSync(path.join(WWWROOT, 'index.html'), 'utf8');
+/** Script paths (relative to wwwroot) an HTML page loads, in order. */
+function htmlScripts(page) {
+    const html = fs.readFileSync(path.join(WWWROOT, page), 'utf8');
     return [...html.matchAll(/<script\s+src="\/(js\/[^"?]+\.js)\?v=__APP_VERSION__"\s*><\/script>/g)]
         .map(match => match[1]);
+}
+
+/** Script paths (relative to wwwroot) index.html loads, in order. */
+function indexHtmlScripts() {
+    return htmlScripts('index.html');
 }
 
 function createLocalStorage(initial = {}) {
@@ -115,4 +120,4 @@ function loadScripts(scripts, overrides = {}) {
     };
 }
 
-module.exports = { WWWROOT, indexHtmlScripts, loadScripts, createLocalStorage, runWwwrootScript };
+module.exports = { WWWROOT, htmlScripts, indexHtmlScripts, loadScripts, createLocalStorage, runWwwrootScript };

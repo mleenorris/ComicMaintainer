@@ -31,7 +31,8 @@ public class SettingsService : ISettingsService
         "SmtpPassword",
         "ComicVineApiKey",
         "ErrorReportingGitHubToken",
-        "SuwayomiPassword"
+        "SuwayomiPassword",
+        "GitHubToken"
     };
 
     public SettingsService(
@@ -151,7 +152,7 @@ public class SettingsService : ISettingsService
 
     public async Task UpdateGitHubTokenAsync(string? token, CancellationToken cancellationToken = default)
     {
-        await UpdateSettingAsync("GitHubToken", token, cancellationToken);
+        await UpdateSecretSettingAsync("GitHubToken", token, cancellationToken);
     }
 
     public async Task UpdateGitHubRepositoryAsync(string? repository, CancellationToken cancellationToken = default)

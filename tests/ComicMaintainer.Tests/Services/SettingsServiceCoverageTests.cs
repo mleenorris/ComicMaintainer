@@ -171,6 +171,30 @@ public sealed class SettingsServiceCoverageTests : IDisposable
         Assert.Contains("Updated setting ComicVineApiKey (cleared)", _logger.Messages);
     }
 
+    [Fact]
+    public async Task UpdateGitHubTokenAsync_PersistsTheTokenWithoutLoggingIt()
+    {
+        await _service.UpdateGitHubTokenAsync("ghp_secret_token_123");
+
+        Assert.Equal("ghp_secret_token_123", ReadSection()["GitHubToken"].GetString());
+        Assert.Contains("Updated setting GitHubToken (value hidden)", _logger.Messages);
+        Assert.DoesNotContain(_logger.Messages, m => m.Contains("ghp_secret_token_123", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public async Task UpdateGitHubTokenAsync_ReportsAClearedToken(string? cleared)
+    {
+        await _service.UpdateGitHubTokenAsync("ghp_secret_token_123");
+        await _service.UpdateGitHubTokenAsync(cleared);
+
+        var stored = ReadSection()["GitHubToken"];
+        Assert.Equal(cleared, stored.ValueKind == JsonValueKind.Null ? null : stored.GetString());
+        Assert.Contains("Updated setting GitHubToken (cleared)", _logger.Messages);
+        Assert.DoesNotContain(_logger.Messages, m => m.Contains("ghp_secret_token_123", StringComparison.Ordinal));
+    }
+
     [Theory]
     [InlineData("JA-Latn", "ja")]
     [InlineData(" en ", "en")]

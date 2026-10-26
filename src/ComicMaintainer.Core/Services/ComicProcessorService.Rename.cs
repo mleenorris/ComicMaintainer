@@ -97,6 +97,13 @@ public partial class ComicProcessorService
 
                 _logger.LogDebug("RenameFileAsync: Generating new filename for file: {FilePath}", LoggingHelper.SanitizePathForLog(filePath));
                 var newFilePath = GenerateFileName(metadata, filePath);
+                if (newFilePath == null)
+                {
+                    await _fileStore.MarkFileRenamedAsync(filePath, false, cancellationToken);
+                    await LogHistoryAsync(filePath, "Rename", false, FilenameGenerationFailedMessage, cancellationToken);
+                    return false;
+                }
+
                 _logger.LogDebug("RenameFileAsync: Generated filename: {NewFilePath} (Original: {OriginalFilePath})", 
                     LoggingHelper.SanitizePathForLog(newFilePath), LoggingHelper.SanitizePathForLog(filePath));
                 
@@ -187,7 +194,14 @@ public partial class ComicProcessorService
         }
     }
 
-    private string GenerateFileName(ComicMetadata metadata, string originalPath)
+    private const string FilenameGenerationFailedMessage = "Failed to generate new filename";
+
+    /// <summary>
+    /// Renders the target path for <paramref name="originalPath"/> from <paramref name="metadata"/>.
+    /// Returns null (after logging the error) when the filename cannot be generated; callers must
+    /// treat that as a rename failure, never as "already correctly named".
+    /// </summary>
+    private string? GenerateFileName(ComicMetadata metadata, string originalPath)
     {
         try
         {
@@ -231,7 +245,7 @@ public partial class ComicProcessorService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error generating filename");
-            return originalPath;
+            return null;
         }
     }
 

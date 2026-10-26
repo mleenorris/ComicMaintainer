@@ -968,18 +968,46 @@ public class ComicProcessorServiceCoverageTests : IDisposable
     }
 
     [Fact]
-    public async Task RenameFilesAsync_FilenameGenerationFails_LogsErrorAndLeavesFileInPlace()
+    public async Task RenameFilesAsync_FilenameGenerationFails_CountsAsFailedAndIsNotMarkedRenamed()
     {
         _settings.FilenameFormat = "{series}";
         _settings.IssueNumberPadding = int.MaxValue;
         var service = CreateService();
         var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
 
-        await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
+        var job = await RunJobAsync(service, s => s.RenameFilesAsync(new[] { path }));
+
+        Assert.Equal(1, job.FailedFiles);
+        Assert.True(_logger.Has(LogLevel.Error, "Error generating filename"));
+        Assert.True(File.Exists(path));
+        Assert.Single(Directory.GetFiles(Path.GetDirectoryName(path)!));
+        _fileStore.Verify(f => f.MarkFileRenamedAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.MarkFileRenamedAsync(path, true, It.IsAny<CancellationToken>()), Times.Never);
+        var rename = Assert.Single(_historyEntries, e => e.Action == "Rename");
+        Assert.False(rename.Success);
+        Assert.Equal("Failed to generate new filename", rename.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ProcessFileAsync_FilenameGenerationFails_RecordsRenameFailureAndIsNotFullyProcessed()
+    {
+        _settings.WatcherEnableNormalize = false;
+        _settings.FilenameFormat = "{series}";
+        _settings.IssueNumberPadding = int.MaxValue;
+        var service = CreateService();
+        var path = WriteCbz("Series/orig.cbz", Xml("Series", "5", "Chapter 5"));
+
+        await service.ProcessFileAsync(path);
 
         Assert.True(_logger.Has(LogLevel.Error, "Error generating filename"));
         Assert.True(File.Exists(path));
         Assert.Single(Directory.GetFiles(Path.GetDirectoryName(path)!));
+        _fileStore.Verify(f => f.MarkFileRenamedAsync(path, false, It.IsAny<CancellationToken>()), Times.Once);
+        _fileStore.Verify(f => f.MarkFileRenamedAsync(path, true, It.IsAny<CancellationToken>()), Times.Never);
+        var rename = Assert.Single(_historyEntries, e => e.Action == "Rename");
+        Assert.False(rename.Success);
+        Assert.Equal("Failed to generate new filename", rename.ErrorMessage);
+        Assert.Contains(_historyEntries, e => e.Action == "Process" && !e.Success);
     }
 
     [Theory]

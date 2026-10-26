@@ -55,7 +55,7 @@ test('opens the comic at its saved page with the header, footer and progress bar
 });
 
 test('a page queued while offline wins over the server copy until it has been replayed', async () => {
-    const queued = JSON.stringify({ [FILE]: { page: 7, updatedAt: 1 } });
+    const queued = JSON.stringify([[FILE, { page: 7, updatedAt: 1 }]]);
     // The server is still unreachable for writes, so the queue cannot drain.
     const stale = await openReader({
         progress: 2,
@@ -63,7 +63,7 @@ test('a page queued while offline wins over the server copy until it has been re
         routes: { 'POST /api/ComicReader/progress': 503 }
     });
     assert.equal(shownPage(stale).alt, 'Page 7');
-    assert.equal(JSON.parse(stale.window.localStorage.getItem('pendingReadingProgress'))[FILE].page, 7);
+    assert.equal(new Map(JSON.parse(stale.window.localStorage.getItem('pendingReadingProgress'))).get(FILE).page, 7);
 
     // Same when the saved position cannot be read at all.
     const offline = await openReader({

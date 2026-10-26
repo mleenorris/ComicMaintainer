@@ -3,6 +3,8 @@
 // Reading progress in the comic reader (js/pages/reader.js): every page change
 // is saved; a save that cannot reach the server is parked in localStorage and
 // replayed once the connection is back; finishing an issue marks it read once.
+// The queue is stored as [filePath, { page, updatedAt }] pairs; earlier
+// versions stored an object keyed by path, which is still read.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -12,7 +14,8 @@ const OTHER_FILE = '/comics/Other/Annual.cbz';
 const QUEUE_KEY = 'pendingReadingProgress';
 
 const storedQueue = page => page.window.localStorage.getItem(QUEUE_KEY);
-const queuedPages = page => Object.fromEntries(Object.entries(JSON.parse(storedQueue(page)) || {}).map(([file, entry]) => [file, entry.page]));
+const queuedEntries = page => JSON.parse(storedQueue(page)) || [];
+const queuedPages = page => Object.fromEntries(queuedEntries(page).map(([file, entry]) => [file, entry.page]));
 const logged = (page, type, first) => page.consoleMessages.filter(m => m.type === type && m.args[0] === first);
 const postsFor = (page, file) => progressPosts(page).filter(post => post.file === file).map(post => post.page);
 
@@ -35,7 +38,7 @@ test('progress that cannot be saved is queued, newest page per comic, until a sa
     });
 
     assert.deepEqual(queuedPages(page), { [FILE]: 3 });
-    assert.equal(typeof JSON.parse(storedQueue(page))[FILE].updatedAt, 'number');
+    assert.equal(typeof new Map(queuedEntries(page)).get(FILE).updatedAt, 'number');
     assert.equal(logged(page, 'log', 'Queueing reading progress until back online:')[0].args[1].message, 'Server returned 503');
 
     await turnTo(page, 'ArrowRight', 'Page 4');
@@ -63,7 +66,7 @@ test('a queue left by an earlier visit is replayed, stopping at the first save t
     let reachable = false;
     const page = await openReader({
         localStorage: {
-            [QUEUE_KEY]: JSON.stringify({ [OTHER_FILE]: { page: 5, updatedAt: 1 }, [NEXT_FILE]: { page: 2, updatedAt: 2 } })
+            [QUEUE_KEY]: JSON.stringify([[OTHER_FILE, { page: 5, updatedAt: 1 }], [NEXT_FILE, { page: 2, updatedAt: 2 }]])
         },
         routes: { 'POST /api/ComicReader/progress': call => (call.query.filePath === FILE || reachable ? 200 : 503) }
     });
@@ -87,7 +90,7 @@ test('returning to the tab replays the queue, but only while online', async () =
     let hidden = false;
     const page = await openReader({
         progress: 2,
-        localStorage: { [QUEUE_KEY]: JSON.stringify({ [OTHER_FILE]: { page: 5, updatedAt: 1 } }) },
+        localStorage: { [QUEUE_KEY]: JSON.stringify([[OTHER_FILE, { page: 5, updatedAt: 1 }]]) },
         beforeScripts: window => {
             Object.defineProperty(window.navigator, 'onLine', { configurable: true, get: () => online });
             Object.defineProperty(window.document, 'hidden', { configurable: true, get: () => hidden });
@@ -117,9 +120,11 @@ test('returning to the tab replays the queue, but only while online', async () =
     assert.deepEqual(postsFor(page, FILE), [2, 2]);
 });
 
-test('queue entries without a page are dropped without being sent', async () => {
+test('queue entries without a page, and items that are not [file, entry] pairs, are dropped without being sent', async () => {
     const page = await openReader({
-        localStorage: { [QUEUE_KEY]: JSON.stringify({ [OTHER_FILE]: { updatedAt: 1 }, [NEXT_FILE]: null }) }
+        localStorage: {
+            [QUEUE_KEY]: JSON.stringify([[OTHER_FILE, { updatedAt: 1 }], [NEXT_FILE, null], 'stray', [OTHER_FILE], [NEXT_FILE, { page: 3 }, 'extra']])
+        }
     });
 
     await page.waitFor(() => storedQueue(page) === null);
@@ -143,11 +148,40 @@ test('a damaged queue is ignored and replaced by the next one written', async ()
     }
 });
 
+test('reading progress safely queues and clears special property names', async () => {
+    // The path comes from the page URL, so it is only ever a key: a comic
+    // opened as ?file=__proto__ is queued and replayed like any other.
+    let server = 503;
+    const page = await openReader({
+        file: '__proto__',
+        series: { ['__proto__']: 10 },
+        progress: 4,
+        localStorage: { [QUEUE_KEY]: JSON.stringify([['constructor', { page: 7, updatedAt: 1 }]]) },
+        routes: { 'POST /api/ComicReader/progress': () => server }
+    });
+    assert.deepEqual(queuedEntries(page).map(([file, entry]) => [file, entry.page]), [['constructor', 7], ['__proto__', 4]]);
+
+    server = 200;
+    await turnTo(page, 'ArrowRight', 'Page 5');
+    await page.waitFor(() => storedQueue(page) === null);
+    assert.deepEqual(postsFor(page, '__proto__'), [4, 5]);
+    assert.deepEqual([...new Set(postsFor(page, 'constructor'))], [7]);
+});
+
+test('reading progress reads entries persisted by the previous object format', async () => {
+    const page = await openReader({
+        localStorage: { [QUEUE_KEY]: `{"__proto__":{"page":9,"updatedAt":1},${JSON.stringify(OTHER_FILE)}:{"page":3,"updatedAt":2}}` }
+    });
+
+    await page.waitFor(() => storedQueue(page) === null);
+    assert.deepEqual(progressPosts(page).filter(post => post.file !== FILE), [{ file: '__proto__', page: 9 }, { file: OTHER_FILE, page: 3 }]);
+});
+
 test('a page saved while the queue is being replayed is kept for the next replay', async () => {
     let releaseReplay;
     let server = 200;
     const page = await openReader({
-        localStorage: { [QUEUE_KEY]: JSON.stringify({ [FILE]: { page: 7, updatedAt: 1 } }) },
+        localStorage: { [QUEUE_KEY]: JSON.stringify([[FILE, { page: 7, updatedAt: 1 }]]) },
         routes: {
             'POST /api/ComicReader/progress': () => {
                 // The start-up replay is the first save; hold it.

@@ -210,10 +210,10 @@ public partial class FileStoreService
             status.UpdatedAt = DateTime.UtcNow;
 
             await SaveUserReadStatusAsync(dbContext, status, cancellationToken);
+            InvalidateUserReadPaths(userId);
             await SyncReadingProgressAsync(dbContext, userId, new[] { filePath }, read, DateTime.UtcNow, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            InvalidateUserReadPaths(userId);
             _logger.LogDebug(
                 "Updated read status for {FilePath} to {Status} for user {UserId}",
                 SanitizeForLogging(filePath), read, SanitizeForLogging(userId));

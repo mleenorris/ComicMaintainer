@@ -4,6 +4,7 @@ using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -1584,6 +1585,53 @@ public class FileStoreServiceTests
         var refreshedFile = Assert.Single(refreshedResult);
         Assert.True(refreshedFile.IsRead);
         memoryCache.Dispose();
+    }
+
+    [Fact]
+    public async Task MarkFileReadAsync_InvalidatesReadCacheWhenProgressSyncFails()
+    {
+        var filePath = Path.Combine(_testDirectory, "read-cache-progress-failure.cbz");
+        File.WriteAllText(filePath, "content");
+        var interceptor = new CancelAfterSaveInterceptor();
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<ComicMaintainerDbContext>(options =>
+            options.UseInMemoryDatabase($"TestDb_{Guid.NewGuid()}").AddInterceptors(interceptor));
+        using var provider = services.BuildServiceProvider();
+        using var memoryCache = new MemoryCache(new MemoryCacheOptions());
+        var service = new FileStoreService(
+            new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _testDirectory }),
+            new Mock<ILogger<FileStoreService>>().Object,
+            provider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>(),
+            memoryCache: memoryCache,
+            userContext: _userContext);
+        await service.AddFileAsync(filePath);
+        await service.GetFilteredFilesAsync("unread");
+        var versionBeforeMarkingRead = service.ChangeVersion;
+        using var cancellationTokenSource = new CancellationTokenSource();
+        interceptor.AfterNextSave = () => cancellationTokenSource.Cancel();
+
+        await service.MarkFileReadAsync(filePath, true, cancellationTokenSource.Token);
+
+        Assert.True(cancellationTokenSource.IsCancellationRequested);
+        Assert.True(service.ChangeVersion > versionBeforeMarkingRead);
+        var readFile = Assert.Single(await service.GetFilteredFilesAsync("read"));
+        Assert.True(readFile.IsRead);
+    }
+
+    private sealed class CancelAfterSaveInterceptor : SaveChangesInterceptor
+    {
+        public Action? AfterNextSave { get; set; }
+
+        public override ValueTask<int> SavedChangesAsync(
+            SaveChangesCompletedEventData eventData,
+            int result,
+            CancellationToken cancellationToken = default)
+        {
+            var callback = AfterNextSave;
+            AfterNextSave = null;
+            callback?.Invoke();
+            return ValueTask.FromResult(result);
+        }
     }
 
     private sealed class InterleavingMemoryCache(Action onFirstEntry) : IMemoryCache

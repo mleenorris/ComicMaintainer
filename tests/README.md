@@ -7,16 +7,32 @@ This directory contains unit tests for the ComicMaintainer project.
 ```
 tests/
 ├── ComicMaintainer.Tests/
-│   ├── Controllers/        # API Controller tests
-│   ├── Services/          # Service layer tests
-│   ├── Utilities/         # Utility class tests
+│   ├── Authentication/    # Authelia forward-auth handler
+│   ├── Authorization/     # Write-operation authorization convention
+│   ├── Controllers/       # API Controller tests
+│   ├── Data/              # EF Core context, factory and SQLite setup
+│   ├── ErrorReporting/    # Automated error report pipeline
+│   ├── Fuzz/              # Randomized-input tests of models and path helpers
+│   ├── HealthChecks/      # Health check implementations
+│   ├── Helpers/           # Shared test doubles
+│   ├── Hubs/              # SignalR progress hub
+│   ├── Infrastructure/    # Global exception handler
 │   ├── Integration/       # In-process API tests (WebApplicationFactory, Category=Integration)
+│   ├── Middleware/        # Request pipeline middleware and filters
+│   ├── Models/            # Model tests
+│   ├── Reader/            # Reading progress, sessions and preferences
+│   ├── Security/          # CORS and security headers
+│   ├── Services/          # Service layer tests
+│   ├── Startup/           # Service registration and startup wiring
+│   ├── Utilities/         # Utility class tests
 │   ├── Wwwroot/           # Static checks over the shipped web UI files
 │   └── xunit.runner.json  # xUnit configuration
 ├── js/                     # node:test tests for the web UI's JavaScript
 │   └── support/
 │       ├── sandbox.js     # Runs wwwroot scripts in a bare node:vm context
-│       └── dom.js         # Loads the real HTML pages in jsdom with browser stubs
+│       ├── dom.js         # Loads the real HTML pages in jsdom with browser stubs
+│       ├── app.js         # bootApp(): the signed-in SPA at a route
+│       └── *-helpers.js   # Per-area fixtures and helpers (core, email, jobs, library, reader, series, settings, sw)
 └── README.md
 ```
 
@@ -183,15 +199,15 @@ public void IsComicArchive_VariousExtensions_ReturnsCorrectResult(string fileNam
 ## Continuous Integration
 
 Tests are automatically run on:
-- Push to `main` or `develop` branches
-- Pull requests targeting `main` or `develop`
+- Push to `main`, `develop` or `dotnet` branches
+- Pull requests targeting `main`, `develop` or `dotnet`
 - Manual workflow dispatch
 
 There are two CI workflows that gate every PR:
 
 | Workflow | Job(s) | What it runs |
 |---|---|---|
-| `.github/workflows/test-dotnet.yml` | **Unit Tests** | `dotnet test --filter "Category!=Integration"` (fast) |
+| `.github/workflows/test-dotnet.yml` | **Unit Tests** | `npm run test:coverage` (JavaScript), then `dotnet test --filter "Category!=Integration"` with coverage |
 |  | **Integration Tests** | `dotnet test --filter "Category=Integration"` (in-process API tests) |
 | `.github/workflows/integration-tests-e2e.yml` | **Docker Container Smoke Test** | Builds `Dockerfile.dotnet`, starts the container, hits `/api/version`, and verifies the file watcher reacts to a fixture `.cbz` |
 
@@ -249,13 +265,21 @@ docker build -f Dockerfile.dotnet -t comicmaintainer:ci .
 
 ## Current Test Coverage
 
-As of the last update:
-- **Total Tests**: 146
-- **Controllers**: 30 tests (WatcherController: 6, JobsController: 3, FilesController: 21)
-- **Services**: 72 tests (ComicProcessor: 12, ComicArchive: 8, FileWatcher: 9, ComicFileProcessor: 32, Integration: 8)
-- **Utilities**: 31 tests (ComicFileExtensions: 18, LoggingHelper: 11)
-- **Models**: 11 tests (ComicInfo, ComicMetadata, ComicFile, ProcessingJob)
-- **Code Coverage**: 27.95%
+Measured with the full suites: .NET with coverlet and `coverlet.runsettings`,
+JavaScript with `npm run test:coverage`.
+
+| Suite | Tests | Lines | Branches |
+|---|---|---|---|
+| .NET (`ComicMaintainer.Core`, `ComicMaintainer.WebApi`) | 4,352 | 98.9% | 97.4% |
+| JavaScript (`wwwroot/**/*.js`) | 1,088 | 99.9% | 98.2% |
+
+The **Unit Tests** CI job collects .NET coverage from `Category!=Integration`
+only (4,295 tests: 98.7% lines, 97.3% branches); the OpenTelemetry wiring in
+`TelemetryExtensions` is covered by the integration tests.
+
+What remains uncovered is mostly defensive: cleanup `catch` blocks for
+file-system failures that cannot be provoked when tests run as root, retry
+paths behind database insert races, and element-exists guards in the web UI.
 
 ## Adding New Tests
 

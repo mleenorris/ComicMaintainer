@@ -175,6 +175,17 @@ public class SettingsControllerCoverageTests
         Assert.Equal(language, json.GetProperty("language").GetString());
     }
 
+    [Fact]
+    public void GetFilenameFormat_ReturnsTheCurrentFormatAndTheBuiltInDefault()
+    {
+        var json = OkJson(CreateController().GetFilenameFormat());
+
+        Assert.Equal("{series} #{issue}", json.GetProperty("format").GetString());
+        // "Reset Filename Format" in the settings page restores this value.
+        Assert.Equal("{series} - Chapter {issue}", json.GetProperty("default").GetString());
+        Assert.Equal(new AppSettings().FilenameFormat, json.GetProperty("default").GetString());
+    }
+
     // ---------------------------------------------------------------- boolean toggles
 
     public static TheoryData<string> Toggles => new()

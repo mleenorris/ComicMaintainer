@@ -1593,6 +1593,9 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
                 const data = await response.json();
+                if (!data.default) {
+                    throw new Error('No default format was returned');
+                }
                 
                 document.getElementById('filenameFormat').value = data.default;
                 showMessage('Reset to default format', 'info');

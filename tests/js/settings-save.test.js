@@ -445,11 +445,14 @@ test('Save Settings does nothing until the settings have loaded', async () => {
     assert.deepEqual(requestLog(page, since), []);
 });
 
-test('Reset Filename Format asks the server for the format', async () => {
+test('Reset Filename Format puts the default format the server reports into the input', async () => {
     const page = await bootSettings({
-        routes: { 'GET /api/settings/filename-format': { format: '{series} v{volume} #{issue}' } }
+        routes: {
+            'GET /api/settings/filename-format': { format: '{series} v{volume} #{issue}', default: '{series} - Chapter {issue}' }
+        }
     });
     const route = 'GET /api/settings/filename-format';
+    page.input('#filenameFormat', '{series} edited #{issue}');
 
     clearMessages(page);
     page.click('#resetFilenameFormatBtn');
@@ -457,9 +460,18 @@ test('Reset Filename Format asks the server for the format', async () => {
     assert.equal(callsTo(page, route).length, 1);
     assert.match(callsTo(page, route)[0].headers.authorization, /^Bearer /);
     assert.deepEqual(messages(page), [{ type: 'info', text: 'Reset to default format' }]);
-    // The input is set from `data.default`, a field GET /api/settings/filename-format
-    // does not return (it returns { format }) — a suspected bug, so the
-    // resulting input value is deliberately not asserted here.
+    // The built-in default, not the current format; it is saved with "Save Settings".
+    assert.equal(page.$('#filenameFormat').value, '{series} - Chapter {issue}');
+    assert.equal(page.$('#currentFormat').textContent, '{series} v{volume} #{issue}');
+    assert.equal(callsTo(page, 'POST /api/settings/filename-format').length, 0);
+
+    // A response without a default leaves the input alone.
+    page.input('#filenameFormat', '{series} edited #{issue}');
+    page.route(route, { format: '{series} v{volume} #{issue}' });
+    page.click('#resetFilenameFormatBtn');
+    await page.settle();
+    assert.deepEqual(lastMessage(page), { type: 'error', text: 'Failed to reset format: No default format was returned' });
+    assert.equal(page.$('#filenameFormat').value, '{series} edited #{issue}');
 
     page.route(route, respond(500, { error: 'boom' }));
     page.click('#resetFilenameFormatBtn');
@@ -477,7 +489,7 @@ test('Reset Filename Format asks the server for the format', async () => {
     await page.settle();
     assert.equal(messages(page).length, shown);
     assert.equal(page.navigations.at(-1).url, 'http://localhost/login.html');
-    assert.equal(callsTo(page, route).length, 4);
+    assert.equal(callsTo(page, route).length, 5);
 });
 
 test('Send Test Report reports what the server said', async () => {

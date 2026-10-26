@@ -122,7 +122,7 @@ public class SettingsController : ControllerBase
     [HttpGet("filename-format")]
     public ActionResult<object> GetFilenameFormat()
     {
-        return Ok(new { format = _appSettings.CurrentValue.FilenameFormat });
+        return Ok(new { format = _appSettings.CurrentValue.FilenameFormat, @default = AppSettings.DefaultFilenameFormat });
     }
 
     // RESTful endpoint: PUT /api/settings/filename-format

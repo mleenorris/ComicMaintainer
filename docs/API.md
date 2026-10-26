@@ -352,7 +352,8 @@ Cancel a running job.
 
 ### GET /api/settings/filename-format
 
-Get the current filename format template.
+Get the current filename format template and the built-in default (the
+format "Reset Filename Format" on the settings page restores).
 
 **Response:**
 ```json

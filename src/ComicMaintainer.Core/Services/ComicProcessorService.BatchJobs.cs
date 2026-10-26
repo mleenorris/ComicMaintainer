@@ -253,11 +253,16 @@ public partial class ComicProcessorService
         // Broadcast initial job status
         _ = BroadcastJobStatusAsync(job);
 
-        // Process files asynchronously using LongRunning for potentially long batch operations
+        // Process files asynchronously using LongRunning for potentially long batch operations.
+        // StartNew gets CancellationToken.None so the delegate always runs: if jobCts is already
+        // cancelled (e.g. the request was aborted), the delegate itself must end the job as
+        // Cancelled and release jobCts, rather than StartNew skipping it and leaving it Queued.
         _ = Task.Factory.StartNew(async () =>
         {
             try
             {
+                jobCts.Token.ThrowIfCancellationRequested();
+
                 _logger.LogDebug("{OperationName}: Job {JobId} starting execution", operationName, jobId);
                 lock (jobSyncLock)
                 {
@@ -366,7 +371,7 @@ public partial class ComicProcessorService
                 _jobCancellationTokens.TryRemove(jobId, out _);
                 jobCts.Dispose();
             }
-        }, jobCts.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+        }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 
         return Task.FromResult(jobId);
     }

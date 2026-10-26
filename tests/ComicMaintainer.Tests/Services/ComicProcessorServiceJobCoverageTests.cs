@@ -271,6 +271,42 @@ public class ComicProcessorServiceJobCoverageTests : IDisposable
     }
 
     [Fact]
+    public async Task RunCustomBatchJobAsync_CallerTokenAlreadyCancelled_EndsCancelledWithoutRunningAnything()
+    {
+        var service = CreateService();
+        using var callerCts = new CancellationTokenSource();
+        callerCts.Cancel();
+        var itemInvoked = false;
+        var postLoopInvoked = false;
+
+        var jobId = await service.RunCustomBatchJobAsync(
+            "CustomOp",
+            new[] { "only-item" },
+            (_, _) =>
+            {
+                itemInvoked = true;
+                return Task.FromResult(true);
+            },
+            "Custom failed",
+            _ =>
+            {
+                postLoopInvoked = true;
+                return Task.CompletedTask;
+            },
+            callerCts.Token);
+        var job = await WaitForJobAsync(service, jobId);
+
+        Assert.Equal(JobStatus.Cancelled, job.Status);
+        Assert.NotNull(job.EndTime);
+        Assert.Equal(0, job.ProcessedFiles + job.FailedFiles);
+        Assert.False(itemInvoked);
+        Assert.False(postLoopInvoked);
+        _broadcaster.Verify(
+            b => b.BroadcastJobUpdateAsync(jobId, "running", It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<int>()),
+            Times.Never);
+    }
+
+    [Fact]
     public async Task Dispose_WithRunningJob_CancelsItAndIsIdempotent()
     {
         var service = CreateService();

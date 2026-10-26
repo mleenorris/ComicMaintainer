@@ -13,12 +13,14 @@ using Moq;
 namespace ComicMaintainer.Tests.Services;
 
 /// <summary>
-/// Covers the destination-row race in <see cref="FileStoreService.UpdateFilePathAsync"/>.
+/// Covers the races in <see cref="FileStoreService.UpdateFilePathAsync"/> with concurrent
+/// writers (the FileSystemWatcher) that insert the destination row or delete the source row.
 /// </summary>
 /// <remarks>
 /// These run against real SQLite rather than the in-memory provider on purpose: the
 /// behaviour under test is recovery from the unique index on <c>ComicFiles.FilePath</c>,
-/// which the in-memory provider does not enforce.
+/// which the in-memory provider does not enforce, and from statements that match no row
+/// once a concurrent writer has deleted it.
 /// </remarks>
 public class FileStoreServiceRenameRaceTests : IAsyncLifetime
 {
@@ -116,6 +118,122 @@ public class FileStoreServiceRenameRaceTests : IAsyncLifetime
 
         // The collision is an expected concurrency outcome, so it must not be logged as an
         // error (Error-level logs are what raise an automated error report).
+        _logger.Verify(
+            x => x.Log(
+                LogLevel.Error,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_OldPathRowDeletedDuringSave_RestoresRowAtNewPath()
+    {
+        // Regression (#834): the watcher can report a move as a Deleted event for the old
+        // path, and its RemoveFileAsync can delete the old-path row between the lookup and
+        // the save of the in-place rename. The rename then matched no row, which surfaced as
+        // a DbUpdateConcurrencyException logged at Error, left the moved file without a row
+        // (losing its processing state) and skipped the read-status move.
+        var createdAt = await TrackFileAndMoveItAsync();
+
+        _interceptor.BeforeNextSave = () => _service.RemoveFileAsync(OldPath);
+
+        // Act
+        await _service.UpdateFilePathAsync(OldPath, NewPath);
+
+        // The hook is one-shot, so a null value proves the race was actually injected.
+        Assert.Null(_interceptor.BeforeNextSave);
+        await AssertMovedWithStateAsync(createdAt);
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_OldPathRowDeletedThenNewPathRowInserted_MergesOntoInsertedRow()
+    {
+        // An unpaired move is reported as Deleted (old path) plus Created (new path), so the
+        // row restored at the new path can in turn collide with the stub row the Created
+        // handler inserts there. The state must then be merged onto that row instead.
+        var createdAt = await TrackFileAndMoveItAsync();
+
+        _interceptor.BeforeNextSave = async () =>
+        {
+            await _service.RemoveFileAsync(OldPath);
+            _interceptor.BeforeNextSave = InsertWatcherStubRowAsync;
+        };
+
+        // Act
+        await _service.UpdateFilePathAsync(OldPath, NewPath);
+
+        Assert.Null(_interceptor.BeforeNextSave);
+        await AssertMovedWithStateAsync(createdAt);
+    }
+
+    [Fact]
+    public async Task UpdateFilePathAsync_OldPathRowDeletedDuringMerge_KeepsMergedRow()
+    {
+        // With a stub row already at the new path, the old row's state is merged onto the
+        // stub and the old row deleted in the same save. If a concurrent writer deletes the
+        // old row first, that delete matches no row; it must not take the merge down with it.
+        var createdAt = await TrackFileAndMoveItAsync();
+        await InsertWatcherStubRowAsync();
+
+        _interceptor.BeforeNextSave = () => _service.RemoveFileAsync(OldPath);
+
+        // Act
+        await _service.UpdateFilePathAsync(OldPath, NewPath);
+
+        Assert.Null(_interceptor.BeforeNextSave);
+        await AssertMovedWithStateAsync(createdAt);
+    }
+
+    /// <summary>
+    /// Tracks the file at <see cref="OldPath"/> with processing state, edited metadata and a
+    /// read mark, then moves it to <see cref="NewPath"/> on disk the way the processor does
+    /// before updating the store. Returns the row's original creation stamp.
+    /// </summary>
+    private async Task<DateTime> TrackFileAndMoveItAsync()
+    {
+        await _service.AddFileAsync(OldPath);
+        await _service.MarkFileNormalizedAsync(OldPath, true);
+        await _service.MarkFileReadAsync(OldPath, true);
+        await _service.ApplyUserMetadataEditAsync(
+            OldPath,
+            new ComicMetadata { Series = "Monarch", Issue = "100" },
+            ComicMetadataFieldFlags.Series | ComicMetadataFieldFlags.Issue);
+
+        File.Move(OldPath, NewPath);
+
+        await using var db = await _factory.CreateDbContextAsync();
+        return (await db.ComicFiles.SingleAsync(e => e.FilePath == OldPath)).CreatedAt;
+    }
+
+    /// <summary>
+    /// Asserts that the file's row, processing state and read state all followed it to
+    /// <see cref="NewPath"/>, and that the race was not reported as an error.
+    /// </summary>
+    private async Task AssertMovedWithStateAsync(DateTime createdAt)
+    {
+        await using var db = await _factory.CreateDbContextAsync();
+
+        Assert.False(await db.ComicFiles.AnyAsync(e => e.FilePath == OldPath));
+        var row = Assert.Single(await db.ComicFiles.Where(e => e.FilePath == NewPath).ToListAsync());
+        Assert.True(row.IsNormalized);
+        Assert.Equal("Monarch", row.Metadata?.Series);
+        Assert.Equal(FileMetadataSource.UserEdit.ToString(), row.MetadataSource);
+        Assert.Equal(createdAt, row.CreatedAt);
+
+        Assert.False(await db.UserFileReadStatuses.AnyAsync(e => e.FilePath == OldPath));
+        Assert.True(await db.UserFileReadStatuses
+            .AnyAsync(e => e.FilePath == NewPath && e.UserId == "user-a" && e.IsRead));
+
+        // What the library shows: one entry, at the new path, still normalized and read.
+        var listed = Assert.Single(await _service.GetAllFilesAsync());
+        Assert.Equal(NewPath, listed.FilePath);
+        Assert.True(listed.IsNormalized);
+        Assert.True(listed.IsRead);
+
+        // Error-level logs are what raise an automated error report.
         _logger.Verify(
             x => x.Log(
                 LogLevel.Error,

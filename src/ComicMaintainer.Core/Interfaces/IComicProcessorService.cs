@@ -57,6 +57,8 @@ public interface IComicProcessorService
     /// without any embedded metadata. Returns true on success (including when
     /// the archive had no ComicInfo.xml to begin with — the file is rewritten
     /// either way so callers can treat it as a no-op for the metadata layer).
+    /// Returns false without touching the file when its path resolves outside
+    /// the watched and duplicate directories.
     /// </summary>
     Task<bool> RemoveMetadataAsync(string filePath, CancellationToken cancellationToken = default);
 

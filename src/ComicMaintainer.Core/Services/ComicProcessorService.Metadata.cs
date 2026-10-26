@@ -234,6 +234,18 @@ public partial class ComicProcessorService
     {
         try
         {
+            if (!TryResolveAllowedPath(filePath, out var resolvedPath))
+            {
+                _logger.LogWarning(
+                    "Cannot remove metadata: file is outside the allowed directories: {FilePath}",
+                    LoggingHelper.SanitizePathForLog(filePath));
+                return false;
+            }
+
+            // Operate on the validated physical path so a linked path component
+            // cannot redirect the rewrite to an archive outside the library.
+            filePath = resolvedPath;
+
             if (!File.Exists(filePath))
             {
                 _logger.LogWarning(

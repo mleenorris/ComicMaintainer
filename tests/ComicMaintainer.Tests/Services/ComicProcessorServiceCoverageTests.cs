@@ -449,6 +449,70 @@ public class ComicProcessorServiceCoverageTests : IDisposable
         Assert.Equal("this is not a comic archive", await File.ReadAllTextAsync(path));
     }
 
+    [Fact]
+    public async Task RemoveMetadataAsync_FileOutsideAllowedDirectories_IsRejectedAndLeftUntouched()
+    {
+        var service = CreateService();
+        var outside = WriteCbzAt(Path.Combine(_root, "outside", "book.cbz"), Xml("Outside", "1", "Chapter 1"));
+        var before = await File.ReadAllBytesAsync(outside);
+
+        var result = await service.RemoveMetadataAsync(outside);
+
+        Assert.False(result);
+        Assert.True(_logger.Has(LogLevel.Warning, "Cannot remove metadata: file is outside the allowed directories: {FilePath}"));
+        Assert.Equal(before, await File.ReadAllBytesAsync(outside));
+        _fileStore.Verify(
+            f => f.RefreshFileStatsAsync(It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task RemoveMetadataAsync_PathThroughLinkedDirectoryOutsideLibrary_IsRejectedAndLeftUntouched()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var service = CreateService();
+        var outsideDir = Path.Combine(_root, "outside");
+        var outside = WriteCbzAt(Path.Combine(outsideDir, "book.cbz"), Xml("Outside", "1", "Chapter 1"));
+        var before = await File.ReadAllBytesAsync(outside);
+        Directory.CreateSymbolicLink(Path.Combine(_library, "linked"), outsideDir);
+
+        var result = await service.RemoveMetadataAsync(Path.Combine(_library, "linked", "book.cbz"));
+
+        Assert.False(result);
+        Assert.True(_logger.Has(LogLevel.Warning, "Cannot remove metadata: file is outside the allowed directories: {FilePath}"));
+        Assert.Equal(before, await File.ReadAllBytesAsync(outside));
+    }
+
+    [Fact]
+    public async Task RemoveMetadataAsync_PathThroughLinkedDirectoryInsideLibrary_RewritesThePhysicalFile()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var service = CreateService();
+        var physical = WriteCbz("Series/book.cbz", Xml("Old", "1", "Chapter 1"));
+        var alias = Path.Combine(_library, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Combine(_library, "Series"));
+
+        var result = await service.RemoveMetadataAsync(Path.Combine(alias, "book.cbz"));
+
+        Assert.True(result);
+        Assert.Null(ReadComicInfo(physical));
+        Assert.Contains("page001.jpg", EntryNames(physical));
+        Assert.NotNull(new DirectoryInfo(alias).LinkTarget);
+        _fileStore.Verify(
+            f => f.RefreshFileStatsAsync(
+                It.Is<IEnumerable<string>>(paths => paths.Single() == physical),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     // -------------------------------------------------------------- processing
 
     [Fact]

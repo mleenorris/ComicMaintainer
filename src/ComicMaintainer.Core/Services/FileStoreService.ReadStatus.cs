@@ -9,7 +9,8 @@ namespace ComicMaintainer.Core.Services;
 
 public partial class FileStoreService
 {
-    private static string ReadPathsCacheKey(string userId) => $"FileStore.ReadPaths.{userId}";
+    private static string ReadPathsCacheKey(string userId, long changeVersion) =>
+        $"FileStore.ReadPaths.{userId}|{changeVersion}";
 
     /// <summary>
     /// Paths the given user has marked read. Cached because the in-memory file list
@@ -18,8 +19,10 @@ public partial class FileStoreService
     /// </summary>
     private async Task<HashSet<string>> GetUserReadPathsAsync(string userId, CancellationToken cancellationToken)
     {
+        var changeVersion = ChangeVersion;
+        var cacheKey = ReadPathsCacheKey(userId, changeVersion);
         if (_memoryCache != null &&
-            _memoryCache.TryGetValue(ReadPathsCacheKey(userId), out HashSet<string>? cached) &&
+            _memoryCache.TryGetValue(cacheKey, out HashSet<string>? cached) &&
             cached != null)
         {
             return cached;
@@ -33,7 +36,7 @@ public partial class FileStoreService
             .ToListAsync(cancellationToken);
 
         var set = new HashSet<string>(paths, StringComparer.Ordinal);
-        _memoryCache?.Set(ReadPathsCacheKey(userId), set, ReadPathsCacheTtl);
+        _memoryCache?.Set(cacheKey, set, ReadPathsCacheTtl);
         return set;
     }
 
@@ -43,7 +46,7 @@ public partial class FileStoreService
     /// </summary>
     private void InvalidateUserReadPaths(string userId)
     {
-        _memoryCache?.Remove(ReadPathsCacheKey(userId));
+        _memoryCache?.Remove(ReadPathsCacheKey(userId, ChangeVersion));
         MarkChanged();
     }
 

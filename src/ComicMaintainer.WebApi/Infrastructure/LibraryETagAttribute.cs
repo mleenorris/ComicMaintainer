@@ -32,6 +32,7 @@ namespace ComicMaintainer.WebApi.Infrastructure;
 [AttributeUsage(AttributeTargets.Method)]
 public sealed class LibraryETagAttribute : Attribute, IAsyncActionFilter
 {
+    private static readonly TimeSpan ValidatorFreshnessInterval = TimeSpan.FromMinutes(5);
     private static readonly string BuildVersion =
         typeof(LibraryETagAttribute).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
         ?? typeof(LibraryETagAttribute).Assembly.GetName().Version?.ToString()
@@ -95,9 +96,12 @@ public sealed class LibraryETagAttribute : Attribute, IAsyncActionFilter
         // Settings are compared by identity: IOptionsMonitor hands out a new
         // instance on every reload, so any settings change yields a new tag.
         var settingsIdentity = settings is null ? 0 : RuntimeHelpers.GetHashCode(settings);
+        var timeProvider = services.GetService(typeof(TimeProvider)) as TimeProvider ?? TimeProvider.System;
+        var validatorGeneration = timeProvider.GetUtcNow().UtcTicks / ValidatorFreshnessInterval.Ticks;
 
         var material = string.Join('\n',
             BuildVersion,
+            validatorGeneration.ToString(System.Globalization.CultureInfo.InvariantCulture),
             fileVersions.ChangeVersion.ToString(System.Globalization.CultureInfo.InvariantCulture),
             metadataVersions.ChangeVersion.ToString(System.Globalization.CultureInfo.InvariantCulture),
             settingsIdentity.ToString(System.Globalization.CultureInfo.InvariantCulture),

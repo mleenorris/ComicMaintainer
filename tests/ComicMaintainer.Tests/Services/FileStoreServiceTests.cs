@@ -4,6 +4,7 @@ using ComicMaintainer.Core.Data;
 using ComicMaintainer.Core.Models;
 using ComicMaintainer.Core.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -1556,5 +1557,54 @@ public class FileStoreServiceTests
 
         await _service.RemoveFileAsync(filePath);
         Assert.True(_service.ChangeVersion > v3);
+    }
+
+    [Fact]
+    public async Task GetUserReadPathsAsync_InFlightReadDoesNotPublishUnderNewVersion()
+    {
+        var filePath = Path.Combine(_testDirectory, "read-cache-race.cbz");
+        File.WriteAllText(filePath, "content");
+        FileStoreService? service = null;
+        var memoryCache = new InterleavingMemoryCache(() =>
+            service!.MarkFileReadAsync(filePath, true).GetAwaiter().GetResult());
+        var logger = new Mock<ILogger<FileStoreService>>().Object;
+        var factory = _serviceProvider.GetRequiredService<IDbContextFactory<ComicMaintainerDbContext>>();
+        service = new FileStoreService(
+            new TestOptionsMonitor<AppSettings>(new AppSettings { WatchedDirectory = _testDirectory }),
+            logger,
+            factory,
+            memoryCache: memoryCache,
+            userContext: _userContext);
+        await service.AddFileAsync(filePath);
+
+        var inFlightResult = await service.GetFilteredFilesAsync("unread");
+        var refreshedResult = await service.GetFilteredFilesAsync("read");
+
+        Assert.Single(inFlightResult);
+        var refreshedFile = Assert.Single(refreshedResult);
+        Assert.True(refreshedFile.IsRead);
+        memoryCache.Dispose();
+    }
+
+    private sealed class InterleavingMemoryCache(Action onFirstEntry) : IMemoryCache
+    {
+        private readonly MemoryCache _inner = new(new MemoryCacheOptions());
+        private int _pendingInterleaving = 1;
+
+        public ICacheEntry CreateEntry(object key)
+        {
+            if (Interlocked.Exchange(ref _pendingInterleaving, 0) == 1)
+            {
+                onFirstEntry();
+            }
+
+            return _inner.CreateEntry(key);
+        }
+
+        public void Dispose() => _inner.Dispose();
+
+        public void Remove(object key) => _inner.Remove(key);
+
+        public bool TryGetValue(object key, out object? value) => _inner.TryGetValue(key, out value);
     }
 }

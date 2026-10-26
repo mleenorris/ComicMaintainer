@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 
 namespace ComicMaintainer.Tests.Middleware;
@@ -20,6 +21,7 @@ public class LibraryETagAttributeTests
     private readonly TestUserContextAccessor _user = new("alice");
     private readonly Mock<IOptionsMonitor<AppSettings>> _settings = new();
     private AppSettings _appSettings = new();
+    private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 10, 26, 14, 0, 0, TimeSpan.Zero));
 
     public LibraryETagAttributeTests()
     {
@@ -41,6 +43,7 @@ public class LibraryETagAttributeTests
             .AddSingleton(metadata.Object)
             .AddSingleton(_settings.Object)
             .AddSingleton<IUserContextAccessor>(_user)
+            .AddSingleton<TimeProvider>(_timeProvider)
             .BuildServiceProvider();
     }
 
@@ -95,6 +98,20 @@ public class LibraryETagAttributeTests
 
         Assert.False(executed);
         Assert.Equal(StatusCodes.Status304NotModified, Assert.IsType<StatusCodeResult>(result).StatusCode);
+    }
+
+    [Fact]
+    public async Task ExpiredValidator_RunsActionAfterFreshnessWindow()
+    {
+        var services = BuildServices();
+        var (first, _, _) = await InvokeAsync(services);
+        var etag = first.Response.Headers.ETag.ToString();
+        _timeProvider.Advance(TimeSpan.FromMinutes(5));
+
+        var (second, _, executed) = await InvokeAsync(services, etag);
+
+        Assert.True(executed);
+        Assert.NotEqual(etag, second.Response.Headers.ETag.ToString());
     }
 
     [Fact]

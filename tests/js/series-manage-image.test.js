@@ -142,10 +142,14 @@ test('Upload Image opens the file picker and a chosen image becomes the series c
     await page.settle();
 
     const [put] = callsTo(page, UPLOAD, 'PUT');
+    assert.ok(put.body instanceof page.window.FormData, 'the image is sent as form data');
     const sent = put.body.get('file');
     assert.equal(sent.name, 'cover.webp');
     assert.equal(sent.type, 'image/webp');
     assert.equal(put.headers.authorization, bearer(page));
+    assert.ok(put.headers['x-client-session'], 'the other session headers are kept');
+    assert.equal('content-type' in put.headers, false,
+        'no Content-Type, so the browser sends multipart/form-data with its boundary');
     assert.deepEqual(lastMessage(page), { text: 'Series image updated', type: 'success' });
     assert.equal(imageStatus(page), `User-uploaded · ${localTime(page, '2024-07-01T09:30:00Z')}`);
     assert.equal(previewBlob(page).type, 'image/png');

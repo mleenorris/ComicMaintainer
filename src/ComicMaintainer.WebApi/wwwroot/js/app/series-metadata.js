@@ -515,9 +515,13 @@
             const formData = new FormData();
             formData.append('file', file);
             try {
+                // Let the browser set the multipart Content-Type (with
+                // boundary); getAuthHeaders() defaults it to JSON.
+                const headers = getAuthHeaders();
+                delete headers['Content-Type'];
                 const response = await fetch(apiUrl(`/api/series-images/${encodeURIComponent(seriesTitle)}`), {
                     method: 'PUT',
-                    headers: getAuthHeaders(),
+                    headers,
                     body: formData
                 });
                 if (!response.ok) {

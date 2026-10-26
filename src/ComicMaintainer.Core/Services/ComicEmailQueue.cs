@@ -15,15 +15,16 @@ public class ComicEmailQueue : IComicEmailQueue
     private readonly Func<IComicEmailService> _serviceFactory;
     private readonly ILogger<ComicEmailQueue> _logger;
 
-    private readonly Channel<int> _channel = Channel.CreateUnbounded<int>(new UnboundedChannelOptions
-    {
-        SingleReader = false,
-        SingleWriter = false
-    });
-
     private readonly object _lifecycleLock = new();
+
+    // Replaced on every stop, so deliveries queued while stopped wait for the next start.
+    private volatile Channel<int> _channel = CreateChannel();
+
+    // Set while the queue runs.
     private CancellationTokenSource? _stoppingCts;
-    private Task? _consumer;
+
+    // The latest consumer, which may still be draining after a stop.
+    private Task _consumer = Task.CompletedTask;
 
     /// <param name="serviceFactory">
     /// Resolves the delivery service lazily; the service itself enqueues work,
@@ -53,13 +54,18 @@ public class ComicEmailQueue : IComicEmailQueue
     {
         lock (_lifecycleLock)
         {
-            if (_consumer is not null)
+            if (_stoppingCts is not null)
             {
                 return Task.CompletedTask;
             }
 
-            _stoppingCts = new CancellationTokenSource();
-            _consumer = Task.Run(() => ConsumeAsync(_stoppingCts.Token), CancellationToken.None);
+            // Each run works on its own token source and channel, so a stop or
+            // restart replacing the fields cannot affect a run already going.
+            var stoppingCts = new CancellationTokenSource();
+            var reader = _channel.Reader;
+            var previous = _consumer;
+            _stoppingCts = stoppingCts;
+            _consumer = Task.Run(() => ConsumeAsync(previous, reader, stoppingCts.Token), CancellationToken.None);
         }
 
         return Task.CompletedTask;
@@ -67,49 +73,58 @@ public class ComicEmailQueue : IComicEmailQueue
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        Task? consumer;
-        CancellationTokenSource? stoppingCts;
+        Task consumer;
+        CancellationTokenSource stoppingCts;
+        Channel<int> channel;
         lock (_lifecycleLock)
         {
-            if (_consumer is null)
+            if (_stoppingCts is null)
             {
                 return;
             }
 
             consumer = _consumer;
             stoppingCts = _stoppingCts;
-            _consumer = null;
+            channel = _channel;
+            _stoppingCts = null;
+            _channel = CreateChannel();
         }
 
-        // Stop accepting new work but let the consumer finish what is already queued.
-        _channel.Writer.TryComplete();
-
-        using var registration = cancellationToken.Register(() => stoppingCts?.Cancel());
+        // Stop accepting new work for this run but let the consumer finish what is
+        // already queued.
+        channel.Writer.TryComplete();
 
         try
         {
-            await consumer;
-        }
-        catch (OperationCanceledException)
-        {
-            // Shutdown deadline fired before the queue drained; pending rows stay
-            // 'pending' in the database and are re-queued on the next send.
+            // If the shutdown deadline fires before the queue drained, cancel the
+            // consumer; the remaining rows stay 'pending' in the database.
+            using (cancellationToken.Register(() => stoppingCts.Cancel()))
+            {
+                await consumer;
+            }
         }
         finally
         {
-            stoppingCts?.Dispose();
-            lock (_lifecycleLock)
-            {
-                _stoppingCts = null;
-            }
+            stoppingCts.Dispose();
         }
     }
 
-    private async Task ConsumeAsync(CancellationToken cancellationToken)
+    private static Channel<int> CreateChannel() => Channel.CreateUnbounded<int>(new UnboundedChannelOptions
     {
+        SingleReader = false,
+        SingleWriter = false
+    });
+
+    private async Task ConsumeAsync(Task previous, ChannelReader<int> reader, CancellationToken cancellationToken)
+    {
+        // A restart can overlap the previous run still draining; wait for it so the
+        // mail server is never hit concurrently. If this run is stopped meanwhile,
+        // the read below ends it.
+        await previous.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
         try
         {
-            await foreach (var deliveryId in _channel.Reader.ReadAllAsync(cancellationToken))
+            await foreach (var deliveryId in reader.ReadAllAsync(cancellationToken))
             {
                 try
                 {

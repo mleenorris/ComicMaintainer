@@ -16,16 +16,16 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
     private readonly ISeriesArchiveCoverWriter _writer;
     private readonly ILogger<SeriesArchiveCoverWriteQueue> _logger;
 
-    private readonly Channel<CoverWriteRequest> _channel =
-        Channel.CreateUnbounded<CoverWriteRequest>(new UnboundedChannelOptions
-        {
-            SingleReader = true,
-            SingleWriter = false
-        });
-
     private readonly object _lifecycleLock = new();
+
+    // Replaced on every stop, so requests queued while stopped wait for the next start.
+    private volatile Channel<CoverWriteRequest> _channel = CreateChannel();
+
+    // Set while the queue runs.
     private CancellationTokenSource? _stoppingCts;
-    private Task? _consumer;
+
+    // The latest consumer, which may still be draining after a stop.
+    private Task _consumer = Task.CompletedTask;
 
     public SeriesArchiveCoverWriteQueue(
         ISeriesArchiveCoverWriter writer,
@@ -64,13 +64,18 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
     {
         lock (_lifecycleLock)
         {
-            if (_consumer is not null)
+            if (_stoppingCts is not null)
             {
                 return Task.CompletedTask;
             }
 
-            _stoppingCts = new CancellationTokenSource();
-            _consumer = Task.Run(() => ConsumeAsync(_stoppingCts.Token), CancellationToken.None);
+            // Each run works on its own token source and channel, so a stop or
+            // restart replacing the fields cannot affect a run already going.
+            var stoppingCts = new CancellationTokenSource();
+            var reader = _channel.Reader;
+            var previous = _consumer;
+            _stoppingCts = stoppingCts;
+            _consumer = Task.Run(() => ConsumeAsync(previous, reader, stoppingCts.Token), CancellationToken.None);
         }
 
         return Task.CompletedTask;
@@ -78,52 +83,60 @@ public class SeriesArchiveCoverWriteQueue : ISeriesArchiveCoverWriteQueue
 
     public async Task StopAsync(CancellationToken cancellationToken = default)
     {
-        Task? consumer;
-        CancellationTokenSource? stoppingCts;
+        Task consumer;
+        CancellationTokenSource stoppingCts;
+        Channel<CoverWriteRequest> channel;
         lock (_lifecycleLock)
         {
-            if (_consumer is null)
+            if (_stoppingCts is null)
             {
                 return;
             }
 
             consumer = _consumer;
             stoppingCts = _stoppingCts;
-            _consumer = null;
+            channel = _channel;
+            _stoppingCts = null;
+            _channel = CreateChannel();
         }
 
-        // Signal that no more work will be queued. The consumer keeps draining
-        // any already-queued items and then exits, so a graceful shutdown does
-        // not silently drop pending cover writes.
-        _channel.Writer.TryComplete();
-
-        // If the host's shutdown deadline elapses before the queue drains,
-        // cancel the consumer so shutdown is not blocked indefinitely.
-        using var registration = cancellationToken.Register(() => stoppingCts?.Cancel());
+        // Signal that no more work will be queued for this run. The consumer keeps
+        // draining any already-queued items and then exits, so a graceful shutdown
+        // does not silently drop pending cover writes.
+        channel.Writer.TryComplete();
 
         try
         {
-            await consumer;
-        }
-        catch (OperationCanceledException)
-        {
-            // Shutdown deadline fired before the consumer finished draining.
+            // If the host's shutdown deadline elapses before the queue drains,
+            // cancel the consumer so shutdown is not blocked indefinitely.
+            using (cancellationToken.Register(() => stoppingCts.Cancel()))
+            {
+                await consumer;
+            }
         }
         finally
         {
-            stoppingCts?.Dispose();
-            lock (_lifecycleLock)
-            {
-                _stoppingCts = null;
-            }
+            stoppingCts.Dispose();
         }
     }
 
-    private async Task ConsumeAsync(CancellationToken cancellationToken)
+    private static Channel<CoverWriteRequest> CreateChannel() =>
+        Channel.CreateUnbounded<CoverWriteRequest>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false
+        });
+
+    private async Task ConsumeAsync(Task previous, ChannelReader<CoverWriteRequest> reader, CancellationToken cancellationToken)
     {
+        // A restart can overlap the previous run still draining; wait for it so
+        // archive rewrites never overlap. If this run is stopped meanwhile, the
+        // read below ends it.
+        await previous.WaitAsync(cancellationToken).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+
         try
         {
-            await foreach (var request in _channel.Reader.ReadAllAsync(cancellationToken))
+            await foreach (var request in reader.ReadAllAsync(cancellationToken))
             {
                 await ProcessAsync(request, cancellationToken);
             }

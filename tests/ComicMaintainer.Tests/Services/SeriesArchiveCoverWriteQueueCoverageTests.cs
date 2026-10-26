@@ -166,6 +166,136 @@ public class SeriesArchiveCoverWriteQueueCoverageTests
         Assert.Same(sinkFailure, error);
     }
 
+    [Fact]
+    public async Task StartAsync_AfterStop_ProcessesWhatWasQueuedWhileStoppedAndAfterTheRestart()
+    {
+        var processed = new List<string>();
+        _writer
+            .Setup(w => w.WriteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, string, bool, CancellationToken>((key, _, _, _, _) => Record("write:" + key));
+        _writer
+            .Setup(w => w.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, CancellationToken>((key, _) => Record("remove:" + key));
+
+        var queue = CreateQueue();
+        await queue.StartAsync();
+        queue.EnqueueWrite("first-run", "/cache/a.png", "image/png");
+        await queue.StopAsync().WaitAsync(WaitLimit);
+
+        queue.EnqueueWrite("while-stopped", "/cache/b.png", "image/png");
+        await queue.StartAsync();
+        queue.EnqueueRemove("after-restart");
+
+        // A graceful stop drains everything queued for the run.
+        await queue.StopAsync().WaitAsync(WaitLimit);
+
+        Assert.Equal(new[] { "write:first-run", "write:while-stopped", "remove:after-restart" }, processed);
+
+        Task Record(string request)
+        {
+            lock (processed)
+            {
+                processed.Add(request);
+            }
+
+            return Task.CompletedTask;
+        }
+    }
+
+    [Fact]
+    public async Task StopAsync_OverlappingARestart_LeavesTheNewRunWorkingAndStoppable()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var firstFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var secondStarted = new TaskCompletionSource<(CancellationToken Token, bool FirstFinished)>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        _writer
+            .Setup(w => w.WriteAsync("first", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                firstStarted.TrySetResult();
+                await releaseFirst.Task;
+                firstFinished.TrySetResult();
+            });
+        _writer
+            .Setup(w => w.WriteAsync("second", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, string, bool, CancellationToken>(async (_, _, _, _, ct) =>
+            {
+                secondStarted.TrySetResult((ct, firstFinished.Task.IsCompleted));
+                await Task.Delay(Timeout.Infinite, ct);
+            });
+
+        var queue = CreateQueue();
+        await queue.StartAsync();
+        queue.EnqueueWrite("first", "/cache/first.png", "image/png");
+        await firstStarted.Task.WaitAsync(WaitLimit);
+
+        // The first stop waits for the write in progress; the queue is started
+        // again meanwhile and the new run gets a write of its own.
+        var firstStop = queue.StopAsync();
+        Assert.False(firstStop.IsCompleted);
+        await queue.StartAsync();
+        queue.EnqueueWrite("second", "/cache/second.png", "image/png");
+
+        releaseFirst.SetResult();
+        await firstStop.WaitAsync(WaitLimit);
+        var second = await secondStarted.Task.WaitAsync(WaitLimit);
+
+        // The new run waited for the previous one, so the rewrites never overlapped.
+        Assert.True(second.FirstFinished);
+        Assert.False(second.Token.IsCancellationRequested);
+
+        // Finishing the first stop must not have discarded the new run's token
+        // source: a stop with an expired deadline still cancels its write.
+        using var expired = new CancellationTokenSource();
+        expired.Cancel();
+        await queue.StopAsync(expired.Token).WaitAsync(WaitLimit);
+
+        Assert.True(second.Token.IsCancellationRequested);
+        _writer.Verify(
+            w => w.WriteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+        VerifyLog(LogLevel.Debug, "Failed to", null, Times.Never());
+        VerifyLog(LogLevel.Error, "terminated unexpectedly", null, Times.Never());
+    }
+
+    [Fact]
+    public async Task StopAsync_WithExpiredDeadline_DoesNotWaitForThePreviousRunAfterARestart()
+    {
+        var firstStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseFirst = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _writer
+            .Setup(w => w.WriteAsync("first", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                firstStarted.TrySetResult();
+                await releaseFirst.Task;
+            });
+
+        var queue = CreateQueue();
+        await queue.StartAsync();
+        queue.EnqueueWrite("first", "/cache/first.png", "image/png");
+        await firstStarted.Task.WaitAsync(WaitLimit);
+        var firstStop = queue.StopAsync();
+        await queue.StartAsync();
+        queue.EnqueueRemove("second");
+
+        // The new run is still waiting for the previous one; a stop whose deadline
+        // has passed gives up on it instead of waiting for that write.
+        using var expired = new CancellationTokenSource();
+        expired.Cancel();
+        await queue.StopAsync(expired.Token).WaitAsync(WaitLimit);
+        Assert.False(firstStop.IsCompleted);
+
+        releaseFirst.SetResult();
+        await firstStop.WaitAsync(WaitLimit);
+        _writer.Verify(
+            w => w.WriteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        _writer.Verify(w => w.RemoveAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private void VerifyLog(LogLevel level, string messageFragment, Exception? exception, Times times) =>
         _logger.Verify(
             l => l.Log(

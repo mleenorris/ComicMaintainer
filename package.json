@@ -1,7 +1,7 @@
 {
   "name": "comicmaintainer-js-tests",
   "private": true,
-  "description": "Dependency-free unit tests for the web UI's JavaScript (node:test + node:vm).",
+  "description": "Dependency-free unit tests for the web UI's and workflows' JavaScript (node:test + node:vm).",
   "scripts": {
     "test": "node --test \"tests/js/**/*.test.js\""
   },

@@ -120,9 +120,10 @@ dotnet test --verbosity normal
 
 ### Run JavaScript Unit Tests
 
-The web UI's helpers (templating/escaping, routing, shared fetch helpers) and
-the load order of the SPA's scripts are covered by dependency-free tests using
-Node's built-in `node:test` and `node:vm` (Node.js 22+, no `npm install`):
+The web UI's helpers (templating/escaping, routing, shared fetch helpers), the
+load order of the SPA's scripts, and the workflow scripts under `.github/scripts/`
+are covered by dependency-free tests using Node's built-in `node:test` and
+`node:vm` (Node.js 22+, no `npm install`):
 
 ```bash
 npm test

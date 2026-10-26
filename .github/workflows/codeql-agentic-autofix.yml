@@ -1,0 +1,88 @@
+name: CodeQL Agentic Autofix
+
+# Hands open CodeQL security alerts on the default branch to Copilot Agentic
+# Autofix. Copilot investigates each alert, validates a fix by re-running
+# CodeQL and opens a draft pull request for review.
+#
+# Runs after every successful CodeQL scan of the default branch, and on demand.
+# Alerts in pull requests get Copilot Autofix suggestions instead, which need
+# no workflow.
+#
+# Setup (see docs/COPILOT_AUTOFIX.md):
+#   1. Turn on Agentic Autofix in Settings → Advanced Security.
+#   2. Store a fine-grained personal access token with "Code scanning alerts:
+#      Read and write" on this repository as the CODEQL_AUTOFIX_TOKEN secret.
+#      Copilot only accepts assignments made with a user token, so
+#      GITHUB_TOKEN can't be used.
+# Until the secret exists, runs only report what they would assign.
+#
+# Each Copilot session consumes Code Security AI credits. The script assigns
+# one alert per rule and keeps at most max-in-flight rules (default 5) with
+# Copilot at a time.
+#
+# The script only reads its inputs from env and never uses data from the
+# triggering run, so workflow_run does not expose it to untrusted code.
+
+on:
+  workflow_run:
+    # Must match the name of .github/workflows/codeql-analysis.yml.
+    workflows: ["CodeQL Advanced Security Scanning"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      min-severity:
+        description: Lowest security severity to assign
+        type: choice
+        options: [critical, high, medium, low]
+        default: medium
+      max-in-flight:
+        description: Most rules Copilot may work on at once (0 pauses assignment)
+        type: number
+        default: 5
+      dry-run:
+        description: Only report which alerts would be assigned
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: codeql-agentic-autofix
+  cancel-in-progress: false
+
+jobs:
+  assign:
+    name: Assign alerts to Copilot
+    # After CodeQL scans the default branch (not pull requests), or on demand.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+       contains(fromJSON('["push", "schedule", "workflow_dispatch"]'), github.event.workflow_run.event))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Assign alerts to Copilot
+        uses: actions/github-script@v9
+        env:
+          CODEQL_AUTOFIX_TOKEN: ${{ secrets.CODEQL_AUTOFIX_TOKEN }}
+          CODEQL_WORKFLOW_PATH: .github/workflows/codeql-analysis.yml
+          # Empty on workflow_run, which makes the script use its defaults.
+          MIN_SEVERITY: ${{ inputs.min-severity }}
+          MAX_IN_FLIGHT: ${{ inputs.max-in-flight }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        with:
+          retries: 3
+          script: |
+            const autofix = require('./.github/scripts/codeql-agentic-autofix.js');
+            await autofix.run({ github, context, core, getOctokit });

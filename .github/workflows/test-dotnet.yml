@@ -27,7 +27,7 @@ jobs:
       with:
         node-version: 'lts/*'
 
-    # Dependency-free (node:test + node:vm) unit tests for the web UI scripts.
+    # Dependency-free (node:test + node:vm) unit tests for the web UI and workflow scripts.
     - name: Run JavaScript unit tests
       run: npm test
 

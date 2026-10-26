@@ -1589,7 +1589,7 @@ public class FileStoreServiceTests
     [Fact]
     public async Task MarkFileReadAsync_InvalidatesReadCacheWhenProgressSyncFails()
     {
-        var filePath = Path.Combine(_testDirectory, "read-cache-progress-failure.cbz");
+        var filePath = Path.Join(_testDirectory, "read-cache-progress-failure.cbz");
         File.WriteAllText(filePath, "content");
         var interceptor = new CancelAfterSaveInterceptor();
         var services = new ServiceCollection();
